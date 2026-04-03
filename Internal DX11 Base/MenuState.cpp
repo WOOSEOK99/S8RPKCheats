@@ -49,6 +49,7 @@ namespace DX11Base {
   uintptr_t g_capturedOfficerBase = 0;
   bool bAllowGameClick = false;
   bool bBlockClickInOfficerList = true;
+  bool bBlockClickInMemoryEditor = true;
   bool bIsMenuCollapsed = false;
   bool bAutoLoadMenu = false;
 

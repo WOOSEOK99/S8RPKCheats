@@ -58,6 +58,7 @@ namespace DX11Base {
   extern uintptr_t g_capturedOfficerBase;
   extern bool bAllowGameClick;          // 게임 화면 클릭 허용 여부
   extern bool bBlockClickInOfficerList; // 모든 장수 편집 리스트용 클릭 차단 여부
+  extern bool bBlockClickInMemoryEditor;   // 메모리 에디터용 클릭 차단 여부
   extern bool bIsMenuCollapsed;         // 메인 메뉴 접힘 여부
   extern bool bAutoLoadMenu;
 

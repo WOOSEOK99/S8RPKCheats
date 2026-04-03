@@ -122,7 +122,7 @@ namespace DX11Base
 			// ─────────────────────────────────────────────────────────
 
 			// 마우스 입력 차단 (메인 메뉴가 펼쳐져 있거나, 모든 장수 리스트에서 차단 옵션이 켜져 있거나, 메모리 에디터가 열려 있을 때)
-			bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) || DX11Base::bShowMemoryEditor;
+			bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) || (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor);
 			if (!DX11Base::bAllowGameClick && !DX11Base::bShowDebug && bHardBlock) {
 				switch (msg) {
 				case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:

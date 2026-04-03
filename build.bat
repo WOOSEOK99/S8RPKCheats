@@ -45,6 +45,14 @@ if "%MSBUILD%"=="" (
 echo MSBuild path: "%MSBUILD%"
 "%MSBUILD%" SAM8RPK_Ingame_Cheat.sln /p:Configuration=Release
 
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [Error] Build failed. Please check the logs above.
+    pause
+    exit /b %ERRORLEVEL%
+)
+
 echo.
-echo Build complete. Press any key to exit.
-pause
+echo Build successful! Closing in 1 second...
+timeout /t 1 > nul
+exit /b 0

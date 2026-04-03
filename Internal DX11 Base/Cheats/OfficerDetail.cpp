@@ -78,6 +78,7 @@ namespace DX11Base {
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
 
     ImGui::TableNextColumn();
@@ -207,7 +208,9 @@ namespace DX11Base {
 
   void RenderBasicTab(uintptr_t pBase, float scale, bool isCaptured) {
     if (ImGui::BeginTable("BasicStatTable", 2, ImGuiTableFlags_BordersInnerH)) {
-      // SetupTableHeaders(scale);
+      ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
+      ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthFixed, 160.0f * scale);
+
 
       if (isCaptured) {
         // [선택 무장 전용 오프셋]
@@ -399,7 +402,9 @@ namespace DX11Base {
 
   void RenderExpTab(uintptr_t pBase, float scale) {
     if (ImGui::BeginTable("ExpTable", 2, ImGuiTableFlags_BordersInnerH)) {
-      // SetupTableHeaders(scale);
+      ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
+      ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthFixed, 160.0f * scale);
+
 
       // --- [ 전법 ] ---
       ImGui::TableNextRow();

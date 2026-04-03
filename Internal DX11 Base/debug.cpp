@@ -57,7 +57,6 @@ namespace DX11Base {
       if (ImGui::InputScalar("##Addr", ImGuiDataType_U64, &hexEditorAddr, NULL, NULL, "%016llX", ImGuiInputTextFlags_CharsHexadecimal)) {
         // 주소 변경 시 로직이 필요하다면 여기에 추가
       }
-
       ImGui::SameLine();
       if (ImGui::Button(u8"붙여넣기")) {
         const char* clip = ImGui::GetClipboardText();
@@ -112,6 +111,31 @@ namespace DX11Base {
         }
         ImGui::SetClipboardText(clipboard.c_str());
       }
+      ImGui::SameLine();
+      ImGui::Checkbox(u8"클릭 차단", &bBlockClickInMemoryEditor);
+
+      // 변화 감지 기능 추가
+      static unsigned char s_refBuffer[4096];
+      static uintptr_t s_refAddr = 0;
+      static int s_refRows = 0;
+      static bool s_isRefCaptured = false;
+
+      ImGui::SameLine();
+      if (ImGui::Button(u8"현재 상태 기준 저장")) {
+          s_refAddr = hexEditorAddr;
+          s_refRows = hexEditorRows;
+          for (int i = 0; i < s_refRows * 16; i++) {
+              unsigned char v = 0;
+              if (SafeReadMemory(s_refAddr + i, &v)) s_refBuffer[i] = v;
+              else s_refBuffer[i] = 0;
+          }
+          s_isRefCaptured = true;
+          AddLog(u8"[메모리 에디터] 현재 상태를 변화 감지 기준으로 저장했습니다.");
+      }
+      if (s_isRefCaptured) {
+          ImGui::SameLine();
+          if (ImGui::Button(u8"기준 초기화")) s_isRefCaptured = false;
+      }
 
       ImGui::Separator();
 
@@ -150,10 +174,22 @@ namespace DX11Base {
               ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
               ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
               
+              // 변화 감지 시 빨간색 강조
+              bool isChanged = false;
+              if (s_isRefCaptured && s_refAddr == hexEditorAddr && (row * 16 + col) < (s_refRows * 16)) {
+                  if (val != s_refBuffer[row * 16 + col]) {
+                      isChanged = true;
+                      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.2f, 0.2f, 1.0f)); // 빨간색
+                  }
+              }
+
               if (ImGui::InputScalar("##v", ImGuiDataType_U8, &val, NULL, NULL, "%02X", ImGuiInputTextFlags_CharsHexadecimal)) {
                   SafeWriteMemory(cellAddr, val);
+                  if (s_isRefCaptured && s_refAddr == hexEditorAddr) s_refBuffer[row * 16 + col] = val; // 수동 수정 시 기준값도 업데이트
               }
               
+              if (isChanged) ImGui::PopStyleColor();
+
               ImGui::PopStyleColor();
               ImGui::PopStyleVar();
               ImGui::PopID();

@@ -5,8 +5,10 @@
 #include "MenuState.h"
 #include "OfficerData.h"
 #include "OfficerDetail.h"
-#include "pch.h"
 #include "showlog.h"
+#include "showcal.h"
+#include "CityData.h"
+#include "pch.h"
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -178,6 +180,9 @@ namespace DX11Base {
     unsigned char vtableByte = *(unsigned char *)(pBase + 0x10);
 
     if (ImGui::BeginTable("DetailInfoTable", 2, ImGuiTableFlags_BordersInnerH)) {
+      ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
+      ImGui::TableSetupColumn(u8"내용", ImGuiTableColumnFlags_WidthFixed, 350.0f * scale);
+
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0f, 0.5f, 0.7f, 0.2f));
@@ -188,8 +193,10 @@ namespace DX11Base {
 #ifdef ENABLE_DEBUG_LOG
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(u8"소속 세력 주소");
       ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)forceAddr);
       ImGui::SameLine();
       if (ImGui::SmallButton(u8"복사##ForceCopy")) {
@@ -207,8 +214,10 @@ namespace DX11Base {
       uintptr_t corpsAddr = *(uintptr_t *)(pBase + 0x20);
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(u8"소속 군단 주소");
       ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)corpsAddr);
       ImGui::SameLine();
       if (ImGui::SmallButton(u8"복사##CorpsCopy")) {
@@ -225,18 +234,23 @@ namespace DX11Base {
       }
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(u8"이름");
       ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), "%s", nameValue.c_str());
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(u8"무장 ID");
       ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextColored(ImVec4(1, 1, 0, 1), "%d", (int)currentID);
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(u8"무장 상태");
       ImGui::TableSetColumnIndex(1);
 
@@ -285,12 +299,13 @@ namespace DX11Base {
         break;
       }
 
+      ImGui::AlignTextToFramePadding();
       ImGui::TextColored(stateColor, "%s", stateStr);
 
-      if (vtableByte == 0x88) {
+      if (vtableByte == 0x88) { // 사망
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
-        if (ImGui::SmallButton(u8"부활")) {
+        if (ImGui::Button(u8"부활", ImVec2(0, 24 * scale))) {
           uintptr_t tempGameBase = DX11Base::GetGameBase();
           uintptr_t heroBase = 0;
           if (tempGameBase) {
@@ -317,11 +332,94 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), u8"※ 저장 후 불러오기를 해야 게임에 반영됩니다.");
           ImGui::EndTooltip();
         }
-        ImGui::PopStyleColor();
-      } else if (vtableByte == 0x68 || vtableByte == 0x78) {
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(100.0f * scale);
+        const char* current_city_name = g_CityList[s_selectedCityIdx].cityname;
+        if (ImGui::BeginCombo(u8"##CitySelector", current_city_name)) {
+          for (int n = 0; n < g_CityCount; n++) {
+            bool is_selected = (s_selectedCityIdx == n);
+            if (ImGui::Selectable(g_CityList[n].cityname, is_selected))
+              s_selectedCityIdx = n;
+            if (is_selected)
+              ImGui::SetItemDefaultFocus();
+          }
+          ImGui::EndCombo();
+        }
+
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
-        if (ImGui::SmallButton(u8"재야")) {
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.8f, 0.3f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
+        if (ImGui::Button(u8"선택도시로 부활", ImVec2(0, 24 * scale))) {
+           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+           uintptr_t p1 = 0, p2 = 0, cityArrayBase = 0;
+           if (exeBase) {
+             p1 = *(uintptr_t*)(exeBase + 0x34C8630);
+             if (p1 && p1 > 0x10000) {
+               p2 = *(uintptr_t*)(p1 + 0x0);
+               if (p2 && p2 > 0x10000) {
+                 cityArrayBase = *(uintptr_t*)(p2 + 0x0);
+               }
+             }
+           }
+           if (cityArrayBase && cityArrayBase > 0x10000) {
+             uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
+             *(uintptr_t *)(pBase + 0x20) = targetAddr;
+             ModifyStat(pBase, 0x10, 0x58, 1);
+             ModifyStat(pBase, 0x36, 255, 2);
+             ModifyStat(pBase, 0xEE, 200, 1);
+             AddLog(u8"[부활] %s 무장을 [%s] 도시로 부활시켰습니다!", 
+                    DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(), 
+                    g_CityList[s_selectedCityIdx].cityname);
+           }
+        }
+        ImGui::PopStyleColor(3); // Pop 2nd button style (3 colors)
+        ImGui::PopStyleColor(1); // Pop 1st button style (1 color)
+      } else if (vtableByte == 0x58) { // 재야 무장: 도시 이동 기능만 제공
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(100.0f * scale);
+        const char* current_city_name = g_CityList[s_selectedCityIdx].cityname;
+        if (ImGui::BeginCombo(u8"##CitySelectorRonin", current_city_name)) {
+          for (int n = 0; n < g_CityCount; n++) {
+            bool is_selected = (s_selectedCityIdx == n);
+            if (ImGui::Selectable(g_CityList[n].cityname, is_selected))
+              s_selectedCityIdx = n;
+            if (is_selected)
+              ImGui::SetItemDefaultFocus();
+          }
+          ImGui::EndCombo();
+        }
+
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.8f, 0.3f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
+        if (ImGui::Button(u8"선택도시로 이동", ImVec2(0, 24 * scale))) {
+           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+           uintptr_t p1 = 0, p2 = 0, cityArrayBase = 0;
+           if (exeBase) {
+             p1 = *(uintptr_t*)(exeBase + 0x34C8630);
+             if (p1 && p1 > 0x10000) {
+               p2 = *(uintptr_t*)(p1 + 0x0);
+               if (p2 && p2 > 0x10000) {
+                 cityArrayBase = *(uintptr_t*)(p2 + 0x0);
+               }
+             }
+           }
+           if (cityArrayBase && cityArrayBase > 0x10000) {
+             uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
+             *(uintptr_t *)(pBase + 0x20) = targetAddr;
+             AddLog(u8"[이동] %s 무장을 [%s] 도시로 이동시켰습니다!", 
+                    DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(), 
+                    g_CityList[s_selectedCityIdx].cityname);
+           }
+        }
+        ImGui::PopStyleColor(3);
+      } else if (vtableByte == 0x68 || vtableByte == 0x78) { // 미발견 무장: 재야로 변경 버튼 제공
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+        if (ImGui::Button(u8"재야", ImVec2(0, 24 * scale))) {
           ModifyStat(pBase, 0x10, 0x58, 1);
           AddLog(u8"[LIFE] 미발견 무장을 재야(0x58) 상태로 변경했습니다.");
         }
@@ -331,8 +429,9 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), u8"※ 저장 후 불러오기를 해야 게임에 반영됩니다.");
           ImGui::EndTooltip();
         }
-        ImGui::PopStyleColor();
+        ImGui::PopStyleColor(1);
       }
+
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -465,6 +564,12 @@ namespace DX11Base {
 #ifdef ENABLE_DEBUG_LOG
     ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1), u8"[ 선택 무장 실시간 정보 ]");
     ImGui::Text(u8"연결된 주소: %p", (void *)pBase);
+    ImGui::SameLine();
+    if (ImGui::SmallButton(u8"복사##AddrCopy")) {
+        char buf[32];
+        sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)pBase);
+        ImGui::SetClipboardText(buf);
+    }
     ImGui::Separator();
 #endif
 
