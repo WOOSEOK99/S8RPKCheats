@@ -9,6 +9,7 @@
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
+#include <cstdio>
 
 
 namespace DX11Base {
@@ -16,13 +17,178 @@ namespace DX11Base {
   bool bShowDebug = false;
   static bool bShowOffset = false;
 
+  // 메모리 에디터 상태 변수
+  bool bShowMemoryEditor = false;
+  static uintptr_t hexEditorAddr = 0;
+  static int hexEditorRows = 16;
+
+  // C2712 컴파일 오류 방지를 위한 안전한 메모리 쓰기 도우미 함수
+  static bool SafeWriteMemory(uintptr_t address, unsigned char val) {
+    bool success = false;
+    __try {
+      *(unsigned char*)address = val;
+      success = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      success = false;
+    }
+    return success;
+  }
+
+  static bool SafeReadMemory(uintptr_t address, unsigned char* out_val) {
+    bool success = false;
+    __try {
+      *out_val = *(unsigned char*)address;
+      success = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      success = false;
+    }
+    return success;
+  }
+
+  void renderMemoryEditorWindow(uintptr_t gameBase, uintptr_t p1) {
+    if (!bShowMemoryEditor) return;
+
+    ImGui::SetNextWindowSize(ImVec2(750, 400), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(u8"메모리 에디터", &bShowMemoryEditor)) {
+      
+      // 주소 입력 및 설정 섹션
+      ImGui::Text(u8"주소:"); ImGui::SameLine();
+      ImGui::SetNextItemWidth(140);
+      if (ImGui::InputScalar("##Addr", ImGuiDataType_U64, &hexEditorAddr, NULL, NULL, "%016llX", ImGuiInputTextFlags_CharsHexadecimal)) {
+        // 주소 변경 시 로직이 필요하다면 여기에 추가
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button(u8"붙여넣기")) {
+        const char* clip = ImGui::GetClipboardText();
+        if (clip) {
+          unsigned long long val = 0;
+          if (sscanf_s(clip, "%llx", &val) == 1) {
+            hexEditorAddr = (uintptr_t)val;
+          }
+        }
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button(u8"GameBase")) hexEditorAddr = gameBase;
+      ImGui::SameLine();
+      if (ImGui::Button(u8"p1 (Player)")) hexEditorAddr = p1;
+
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(80);
+      ImGui::InputInt(u8"행 수", &hexEditorRows);
+      if (hexEditorRows < 1) hexEditorRows = 1;
+      if (hexEditorRows > 256) hexEditorRows = 256;
+
+      ImGui::SameLine();
+      if (ImGui::Button(u8"클립보드 복사")) {
+        std::string clipboard;
+        for (int row = 0; row < hexEditorRows; row++) {
+          uintptr_t rowAddr = hexEditorAddr + (row * 16);
+          char line[256];
+          sprintf_s(line, sizeof(line), "%016llX: ", rowAddr);
+          clipboard += line;
+
+          char asciiStr[17];
+          asciiStr[16] = '\0';
+
+          for (int col = 0; col < 16; col++) {
+            uintptr_t cellAddr = rowAddr + col;
+            unsigned char val = 0;
+            bool readSuccess = SafeReadMemory(cellAddr, &val);
+
+            if (readSuccess) {
+              sprintf_s(line, sizeof(line), "%02X ", val);
+              asciiStr[col] = (val >= 32 && val <= 126) ? (char)val : '.';
+            } else {
+              sprintf_s(line, sizeof(line), "?? ");
+              asciiStr[col] = '?';
+            }
+            clipboard += line;
+          }
+          clipboard += "| ";
+          clipboard += asciiStr;
+          clipboard += "\n";
+        }
+        ImGui::SetClipboardText(clipboard.c_str());
+      }
+
+      ImGui::Separator();
+
+      // 메모리 그리드
+      static const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
+      if (ImGui::BeginTable("##MemoryGrid", 18, flags, ImVec2(0, ImGui::GetContentRegionAvail().y - 40))) {
+        ImGui::TableSetupColumn("Offset(h)", ImGuiTableColumnFlags_WidthFixed, 130);
+        for (int i = 0; i < 16; i++) {
+          char buf[4]; sprintf_s(buf, sizeof(buf), "%02X", i);
+          ImGui::TableSetupColumn(buf, ImGuiTableColumnFlags_WidthFixed, 25);
+        }
+        ImGui::TableSetupColumn("ASCII", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (int row = 0; row < hexEditorRows; row++) {
+          uintptr_t rowAddr = hexEditorAddr + (row * 16);
+          ImGui::TableNextRow();
+          
+          // Offset Column
+          ImGui::TableSetColumnIndex(0);
+          ImGui::Text("%016llX", rowAddr);
+
+          // Hex Columns
+          char ascii[17];
+          ascii[16] = '\0';
+
+          for (int col = 0; col < 16; col++) {
+            ImGui::TableSetColumnIndex(col + 1);
+            uintptr_t cellAddr = rowAddr + col;
+            unsigned char val = 0;
+            bool readSuccess = SafeReadMemory(cellAddr, &val);
+
+            if (readSuccess) {
+              ImGui::PushID(row * 16 + col);
+              ImGui::SetNextItemWidth(25);
+              ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+              ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+              
+              if (ImGui::InputScalar("##v", ImGuiDataType_U8, &val, NULL, NULL, "%02X", ImGuiInputTextFlags_CharsHexadecimal)) {
+                  SafeWriteMemory(cellAddr, val);
+              }
+              
+              ImGui::PopStyleColor();
+              ImGui::PopStyleVar();
+              ImGui::PopID();
+              
+              ascii[col] = (val >= 32 && val <= 126) ? (char)val : '.';
+            } else {
+              ImGui::TextDisabled("??");
+              ascii[col] = '?';
+            }
+          }
+
+          // ASCII Column
+          ImGui::TableSetColumnIndex(17);
+          ImGui::TextUnformatted(ascii);
+        }
+        ImGui::EndTable();
+      }
+
+      ImGui::Separator();
+      ImGui::End();
+    }
+  }
+
   void debuging(uintptr_t gameBase, uintptr_t p1) {
 #ifdef ENABLE_DEBUG_LOG
     ImGuiIO &io = ImGui::GetIO();
     float scale = io.FontGlobalScale;
 
-    ImGui::Separator();
     ImGui::Checkbox(u8"디버그 정보 보기", &bShowDebug);
+    ImGui::SameLine();
+    if (ImGui::Button(u8"메모리 에디터 열기")) {
+      bShowMemoryEditor = true;
+    }
+
+    renderMemoryEditorWindow(gameBase, p1);
 
     if (bShowDebug) {
 

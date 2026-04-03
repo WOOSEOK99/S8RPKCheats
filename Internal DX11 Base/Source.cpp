@@ -123,14 +123,10 @@ void HandleMessageCapture(LPMSG lpMsg) {
         }
     }
 
-    // 2. 타이핑 활성화: 키보드 메시지 강제 변환 (TranslateMessage)
-    //    이것을 호출해야 OS가 WM_CHAR(영문) 및 WM_IME_CHAR(한글) 메시지를 큐에 넣어줍니다.
-    if ((lpMsg->message >= WM_KEYFIRST && lpMsg->message <= WM_KEYLAST) || 
-        (lpMsg->message >= WM_IME_FIRST && lpMsg->message <= WM_IME_LAST)) {
-        if (io.WantCaptureKeyboard || io.WantTextInput) {
-            TranslateMessage(lpMsg);
-        }
-    }
+    // 2. 타이핑 활성화: 키보드 메시지 강제 변환 로직 제거
+    //    게임 자체 루프에서 TranslateMessage를 호출하므로, 
+    //    여기서 수동으로 호출하면 WM_CHAR가 두 번 발생하여 문자/숫자가 두 번씩 입력되는 버그가 발생합니다.
+    //    따라서 해당 부분을 삭제하여 게임의 기본 메시지 펌프에 맡깁니다.
 }
 
 BOOL WINAPI hkPeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg) {
@@ -154,9 +150,9 @@ BOOL WINAPI hkGetCursorPos(LPPOINT lpPoint) {
     BOOL result = oGetCursorPos(lpPoint); // 실제 좌표를 먼저 가져옴
 
     // 메뉴가 켜져 있고 "디버그 모드", "게임 화면 클릭 허용" 상태가 아닐 때 
-    // (메인 메뉴가 펼쳐져 있거나, 모든 장수 리스트에서 차단 옵션이 켜져 있을 때)
+    // (메인 메뉴 펼쳐짐, 또는 장수 리스트창 옵션 켜짐, 또는 메모리 에디터 활성화)
     // + 임구이가 마우스를 점유 중일 때만 게임 화면 밖으로 거짓말
-    bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList);
+    bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) || DX11Base::bShowMemoryEditor;
     if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext() && 
         ImGui::GetIO().WantCaptureMouse &&
         !DX11Base::bShowDebug && !DX11Base::bAllowGameClick && bHardBlock) {

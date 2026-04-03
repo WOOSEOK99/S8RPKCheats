@@ -15,7 +15,7 @@ namespace DX11Base
 {
 	// 모든 UI 창 중 하나라도 열려 있는지 확인하는 헬퍼 함수
 	bool IsAnyUIOpen() {
-		return (g_Engine && g_Engine->bShowMenu) || bShowOfficerDetail || bShowSelectedOfficerWin || bShowOfficerListWin;
+		return (g_Engine && g_Engine->bShowMenu) || bShowOfficerDetail || bShowSelectedOfficerWin || bShowOfficerListWin || bShowMemoryEditor;
 	}
 
 	Engine::Engine()
@@ -58,7 +58,11 @@ namespace DX11Base
 						ImmGetCompositionStringW(himc, GCS_RESULTSTR, buf, sizeof(buf));
 						ImGuiIO& io = ImGui::GetIO();
 						for (int i = 0; i < byteLen / (int)sizeof(wchar_t); i++) {
-							if (buf[i]) io.AddInputCharacterUTF16((unsigned short)buf[i]);
+							// ASCII(영문,숫자)는 WM_CHAR로도 처리되므로 중복 입력을 방지하기 위해 
+							// 한글(0x80 이상)인 경우에만 수동으로 추가합니다.
+							if (buf[i] && buf[i] >= 0x0080) {
+								io.AddInputCharacterUTF16((unsigned short)buf[i]);
+							}
 						}
 					}
 					ImmReleaseContext(hWnd, himc);
@@ -117,8 +121,8 @@ namespace DX11Base
 			}
 			// ─────────────────────────────────────────────────────────
 
-			// 마우스 입력 차단 (메인 메뉴가 펼쳐져 있거나, 모든 장수 리스트에서 차단 옵션이 켜져 있을 때)
-			bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList);
+			// 마우스 입력 차단 (메인 메뉴가 펼쳐져 있거나, 모든 장수 리스트에서 차단 옵션이 켜져 있거나, 메모리 에디터가 열려 있을 때)
+			bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) || DX11Base::bShowMemoryEditor;
 			if (!DX11Base::bAllowGameClick && !DX11Base::bShowDebug && bHardBlock) {
 				switch (msg) {
 				case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:

@@ -191,6 +191,12 @@ namespace DX11Base {
       ImGui::TextUnformatted(u8"소속 세력 주소");
       ImGui::TableSetColumnIndex(1);
       ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)forceAddr);
+      ImGui::SameLine();
+      if (ImGui::SmallButton(u8"복사##ForceCopy")) {
+        char buf[32];
+        sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)forceAddr);
+        ImGui::SetClipboardText(buf);
+      }
 #endif
 
       if (forceAddr > 0x10000) {
@@ -204,6 +210,12 @@ namespace DX11Base {
       ImGui::TextUnformatted(u8"소속 군단 주소");
       ImGui::TableSetColumnIndex(1);
       ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)corpsAddr);
+      ImGui::SameLine();
+      if (ImGui::SmallButton(u8"복사##CorpsCopy")) {
+        char buf[32];
+        sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)corpsAddr);
+        ImGui::SetClipboardText(buf);
+      }
 #endif
 
       unsigned short currentID = *(unsigned short *)(pBase + 0x08);
