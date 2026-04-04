@@ -89,7 +89,8 @@ namespace DX11Base {
                                     {"bRoadBlock", &bRoadBlock, &s_appRoadBlock, SetRoadBlock},
                                     {"bMonitorRonin", &bMonitorRonin, nullptr, nullptr},
                                     {"bAutoLoadMenu", &bAutoLoadMenu, nullptr, nullptr},
-                                    {"bZeroInfamy", &bZeroInfamy, nullptr, nullptr}};
+                                    {"bZeroInfamy", &bZeroInfamy, nullptr, nullptr},
+                                    {"bSpeedHack", &bSpeedHack, nullptr, nullptr}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];
@@ -105,10 +106,9 @@ namespace DX11Base {
     file << "{\n";
     for (size_t i = 0; i < (sizeof(g_Entries) / sizeof(g_Entries[0])); ++i) {
       file << "  \"" << g_Entries[i].key << "\": " << (*g_Entries[i].flag ? "true" : "false");
-      if (i < (sizeof(g_Entries) / sizeof(g_Entries[0])) - 1)
-        file << ",";
-      file << "\n";
+      file << ",\n";
     }
+    file << "  \"g_speedMultiplier\": " << g_speedMultiplier << "\n";
     file << "}";
     file.close();
   }
@@ -120,6 +120,16 @@ namespace DX11Base {
 
     std::string line;
     while (std::getline(file, line)) {
+      if (line.find("g_speedMultiplier") != std::string::npos) {
+        size_t colonPos = line.find(":");
+        if (colonPos != std::string::npos) {
+          try {
+            g_speedMultiplier = std::stof(line.substr(colonPos + 1));
+          } catch (...) {}
+        }
+        continue;
+      }
+
       for (auto &entry : g_Entries) {
         if (line.find(entry.key) != std::string::npos) {
           *entry.flag = (line.find("true") != std::string::npos);

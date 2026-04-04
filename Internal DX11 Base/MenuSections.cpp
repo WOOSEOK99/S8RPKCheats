@@ -377,12 +377,16 @@ namespace DX11Base {
       bool speedChanged = ImGui::Checkbox(u8"배속", &bSpeedHack);
       ImGui::PopStyleColor();
 
-      if (speedChanged)
+      if (speedChanged) {
           SpeedHack_Update();
+          SaveConfig();
+      }
 
       ImGui::SameLine();
       ImGui::SetNextItemWidth(180.0f * scale);
-      ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx");
+      if (ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx")) {
+          SaveConfig();
+      }
 
       if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
