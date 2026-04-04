@@ -6,6 +6,7 @@
 #include "Config.h"
 #include "debug.h"
 #include "MenuState.h"
+#include "Cheats/SpeedHack.h"
 
 #include <ShellScalingApi.h>
 #pragma comment(lib, "Shcore.lib")
@@ -238,6 +239,9 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
             MH_EnableHook(&PeekMessageA);
         }
     }
+
+    // 2026-04-04 배속 훈 설치
+    DX11Base::SpeedHack_Install();
 
     //	INITIALIZE BACKGROUND THREAD
     std::thread WCMUpdate(ClientBGThread);

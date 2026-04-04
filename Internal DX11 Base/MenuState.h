@@ -52,6 +52,8 @@ namespace DX11Base {
   extern bool bTechZero;
   extern bool bRoadBlock;
   extern bool bMonitorRonin;
+  extern bool bSpeedHack;        // 2026-04-04 배속
+  extern float g_speedMultiplier; // 2026-04-04 배속 배율 (0.1x ~ 5.0x)
 
   extern bool bShowSelectedOfficerWin;
   extern bool bShowOfficerListWin;

@@ -210,6 +210,7 @@
     <ClCompile Include="Cheats\Battleunitcapture.cpp" />
     <ClCompile Include="Cheats\Bigcityconvert.cpp" />
     <ClCompile Include="Cheats\RoninMonitor.cpp" />
+    <ClCompile Include="Cheats\SpeedHack.cpp" />
     <ClCompile Include="Cheats\Catapult.cpp" />
     <ClCompile Include="Cheats\Celestia.cpp" />
     <ClCompile Include="Cheats.cpp" />

@@ -7,6 +7,7 @@
 #include "Cheats/OfficerDetail.h"
 #include "Cheats/SelectOfficercapture.h"
 #include "Cheats/RoninMonitor.h"
+#include "Cheats/SpeedHack.h"
 #include "Cheats/Techpointcave.h"
 #include "Config.h"
 #include "Engine.h"
@@ -72,6 +73,9 @@ namespace DX11Base {
 
     // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
     RoninMonitor_Tick(p1);
+
+    // 2026-04-04 배속 상태 동기화
+    SpeedHack_Update();
   }
 
   void Menu::DrawMenu() {

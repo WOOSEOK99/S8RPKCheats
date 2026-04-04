@@ -18,6 +18,7 @@
 #include "Cheats/Techpointcave.h"
 #include "Cheats/Techzero.h"
 #include "Cheats/Terrainignore.h"
+#include "Cheats/SpeedHack.h"
 #include "Config.h"
 #include "MenuState.h"
 #include "pch.h"
@@ -368,6 +369,25 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
           SaveConfig();
+      }
+
+      // 2026-04-04 배속 콘트롤
+      ImGui::Separator();
+      ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
+      bool speedChanged = ImGui::Checkbox(u8"배속", &bSpeedHack);
+      ImGui::PopStyleColor();
+
+      if (speedChanged)
+          SpeedHack_Update();
+
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(180.0f * scale);
+      ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx");
+
+      if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"0.1 = 슬로우, 1.0 = 정상, 2.0 = 2배속, 최대 5배속");
+          ImGui::EndTooltip();
       }
     }
   } // namespace MenuSections

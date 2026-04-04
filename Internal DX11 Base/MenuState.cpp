@@ -44,6 +44,8 @@ namespace DX11Base {
   bool bTechZero = false;
   bool bRoadBlock = false;
   bool bMonitorRonin = false;
+  bool bSpeedHack = false;       // 2026-04-04 배속
+  float g_speedMultiplier = 2.0f; // 2026-04-04 기본 2배속
   bool bShowSelectedOfficerWin = false;
   bool bShowOfficerListWin = false;
   bool bOfficerCapture = false;
