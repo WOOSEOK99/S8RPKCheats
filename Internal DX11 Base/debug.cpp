@@ -225,8 +225,6 @@ namespace DX11Base {
       bShowMemoryEditor = true;
     }
     ImGui::SameLine();
-    ImGui::Checkbox(u8"실시간 월 감지", &bMonthCapture);
-    ImGui::SameLine();
     if (ImGui::Button(u8"로그 복사")) {
         ImGui::SetClipboardText(GetFullLogs().c_str());
         AddLog(u8"[Debug] 모든 로그가 클립보드에 복사되었습니다.");

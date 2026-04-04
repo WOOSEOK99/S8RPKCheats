@@ -150,6 +150,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BattleMonitor.h" />
+    <ClInclude Include="Cheats\BattleMapShuffle.h" />
     <ClInclude Include="Cheats\Battleunitcapture.h" />
     <ClInclude Include="Cheats\Bigcityconvert.h" />
     <ClInclude Include="Cheats\Catapult.h" />
@@ -205,9 +206,11 @@
     <ClInclude Include="Cheats\Techzero.h" />
     <ClInclude Include="Cheats\Roadblock.h" />
     <ClInclude Include="Cheats\MonthCapture.h" />
+    <ClInclude Include="Cheats\SystemMonth.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BattleMonitor.cpp" />
+    <ClCompile Include="Cheats\BattleMapShuffle.cpp" />
     <ClCompile Include="Cheats\Battleunitcapture.cpp" />
     <ClCompile Include="Cheats\Bigcityconvert.cpp" />
     <ClCompile Include="Cheats\RoninMonitor.cpp" />
@@ -263,6 +266,7 @@
     <ClCompile Include="Cheats\Techzero.cpp" />
     <ClCompile Include="Cheats\Roadblock.cpp" />
     <ClCompile Include="Cheats\MonthCapture.cpp" />
+    <ClCompile Include="Cheats\SystemMonth.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Hooking\minhook.def" />

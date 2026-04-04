@@ -35,6 +35,7 @@ namespace DX11Base {
   bool bCatapult = false;
   bool bCelestial = false;
   bool bBattleUnit = false;
+  bool bBattleMapShuffle = false;
 
   // 4. 기타 UI 상태 초기화 (DX11Base 네임스페이스)
   std::string currentLabelValue = ""; // (사용되지 않을 수도 있음)

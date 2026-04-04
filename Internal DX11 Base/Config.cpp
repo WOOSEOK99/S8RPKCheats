@@ -29,6 +29,7 @@
 #include "Cheats/Roadblock.h"
 #include "Cheats/Selfheal.h"
 #include "Cheats/Techpointcave.h"
+#include "Cheats/SystemMonth.h"
 #include "Cheats/Terrainignore.h"
 
 namespace DX11Base {
@@ -74,25 +75,26 @@ namespace DX11Base {
   static bool s_isReset = true;     // 리셋 완료 상태 기록
 
   static ConfigEntry g_Entries[] = {{"bInfiniteAP", u8"행동력 무한", &bInfiniteAP, nullptr, nullptr, false},
-                                    {"bFastJewel", u8"보옥 획득 가속", &bFastJewel, nullptr, nullptr, false},
+                                    {"bFastJewel", u8"보주교체 무제한", &bFastJewel, nullptr, nullptr, false},
                                     {"bBigCity", u8"대도시 전환", &bBigCity, &s_appBigCity, SetBigCityConvert, false},
-                                    {"bAttitudeHack", u8"회화 기분 초기화", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false},
+                                    {"bAttitudeHack", u8"견문시 민심최대", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false},
                                     {"bLoveCave", u8"경애/의형제 조건 완화", &bLoveCave, &s_appLoveNormal, ApplyLoveNormal, false},
                                     {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false},
                                     {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false},
                                     {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false},
                                     {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false},
-                                    {"bInfiniteTalk", u8"연회 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false},
-                                    {"bFastRelationship", u8"인간관계 수치 가속", &bFastRelationship, &s_appRelation, SetFastRelationship, false},
-                                    {"marriageApplied", u8"배우자 조건 완화", &marriageApplied, &s_appMarriage, SetMarriageCondition, false},
+                                    {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false},
+                                    {"bFastRelationship", u8"경애시 무조건 공명", &bFastRelationship, &s_appRelation, SetFastRelationship, false},
+                                    {"marriageApplied", u8"결혼 무제한", &marriageApplied, &s_appMarriage, SetMarriageCondition, false},
                                     {"bSelfHeal", u8"전쟁: 자가 회복", &bSelfHeal, &s_appSelfHeal, SetSelfHeal, true},
                                     {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true},
-                                    {"bTerrainIgnore", u8"전쟁: 지형 이동 무시", &bTerrainIgnore, &s_appTerrain, SetTerrainIgnore, true},
+                                    {"bTerrainIgnore", u8"전쟁: 격류낙석 지형 무시", &bTerrainIgnore, &s_appTerrain, SetTerrainIgnore, true},
                                     {"bDefBuilding", u8"전쟁: 방어건물 강화", &bDefBuilding, &s_appDefBuild, SetDefBuildingBoost, true},
                                     {"bDefAtk", u8"전쟁: 공격/방어 부스트", &bDefAtk, &s_appDefAtk, SetDefAtkBoost, true},
                                     {"bCatapult", u8"전쟁: 투석기 강화", &bCatapult, &s_appCatapult, SetCatapultCheat, true},
-                                    {"bCelestial", u8"전쟁: 제부 개방", &bCelestial, &s_appCelestial, SetCelestialMod, true},
+                                    {"bCelestial", u8"전쟁: 천계 강화", &bCelestial, &s_appCelestial, SetCelestialMod, true},
                                     {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false},
+                                    {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false},
                                     {"bRoadBlock", u8"전쟁: 진로 방해 무시", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
                                     {"bMonitorRonin", u8"낭인 상시 감시", &bMonitorRonin, nullptr, nullptr, false},
                                     {"bAutoLoadMenu", u8"시작 시 설정 로드", &bAutoLoadMenu, nullptr, nullptr, false},
@@ -193,6 +195,7 @@ namespace DX11Base {
     // 월 캡처 시작 (설정이 켜져 있을 때만)
     if (bMonthCapture && !s_appMonthCapture) {
         SetMonthCapture(true);
+        InstallSystemMonthHook(); // 신규 AOB 방식 시스템 월 후킹
         s_appMonthCapture = true;
     }
 

@@ -9,6 +9,7 @@
 #include "Cheats/RoninMonitor.h"
 #include "Cheats/SpeedHack.h"
 #include "Cheats/MonthCapture.h"
+#include "Cheats/SystemMonth.h"
 #include "Cheats/Techpointcave.h"
 #include "Config.h"
 #include "Engine.h"
@@ -87,13 +88,12 @@ namespace DX11Base {
         static uint8_t s_lastSysMonth = 0xFF;
         static uint8_t s_lastRealMonth = 0xFF;
 
-        uint8_t sysMonth = GetSystemMonthValue();
-        uint8_t realMonth = GetCurrentMonth();
+        uint8_t sysMonth = GetSystemMonthValue(); // 신규 AOB 방식
+        uint8_t realMonth = GetCurrentMonth(); // 기존 RealMonth 방식
 
         if (sysMonth != s_lastSysMonth || realMonth != s_lastRealMonth) {
-          // 리얼 월드가 아직 캡처되지 않았을 때(0)는 비교 로그를 찍지 않음
-          if (realMonth > 0) {
-            AddLog(u8"[Debug] 월 비교 - 시스템: %d월, 리얼: %d월", sysMonth, realMonth);
+          if (sysMonth > 0 || realMonth > 0) {
+            AddLog(u8"[Debug] 월 비교 - 시스템(AOB): %d, 리얼(Capture): %d", sysMonth, realMonth);
           }
           s_lastSysMonth = sysMonth;
           s_lastRealMonth = realMonth;
@@ -239,90 +239,55 @@ namespace DX11Base {
         ImGui::Columns(1);
       }
 
-      // 하단: 공용 설정
+      // 하단: 공용 설정 (배속 및 UI 배율 한 줄 통합)
+      ImGui::Separator();
       ImGui::Spacing();
-      ImGui::Separator(); // 가독성을 위한 구분선 추가
-      ImGui::Spacing();
+      
+      ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
+      if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {
+          SpeedHack_Update();
+          SaveConfig();
+      }
+      ImGui::PopStyleColor();
 
-      ImGui::Text(u8"UI 배율 설정");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(120.0f * scale);
+      if (ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx")) {
+          SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"0.1 = 슬로우, 1.0 = 정상, 2.0 = 2배속, 최대 5배속");
+          ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(0, 20.0f * scale);
+      ImGui::Text(u8"UI 배율");
+      ImGui::SameLine();
       float scaleBtnSize = 25.0f * scale;
       if (ImGui::Button("-##ScaleDown", ImVec2(scaleBtnSize, scaleBtnSize))) {
         io.FontGlobalScale = (std::max)(0.5f, io.FontGlobalScale - 0.1f);
       }
       ImGui::SameLine();
-      ImGui::SetNextItemWidth(120.0f * scale);
-      ImGui::SliderFloat(u8"##UIScale", &io.FontGlobalScale, 0.5f, 3.0f, "Scale: %.1f");
+      ImGui::SetNextItemWidth(90.0f * scale);
+      ImGui::SliderFloat(u8"##UIScale", &io.FontGlobalScale, 0.5f, 3.0f, "%.1f");
       ImGui::SameLine();
       if (ImGui::Button("+##ScaleUp", ImVec2(scaleBtnSize, scaleBtnSize))) {
         io.FontGlobalScale = (std::min)(3.0f, io.FontGlobalScale + 0.1f);
       }
 
-      ImGui::SameLine(0, 10.0f * scale);
-      if (ImGui::Checkbox(u8"시작시 자동로드", &DX11Base::bAutoLoadMenu)) {
+      ImGui::SameLine(0, 15.0f * scale);
+      if (ImGui::Checkbox(u8"자동로드", &DX11Base::bAutoLoadMenu)) {
         DX11Base::SaveConfig();
       }
-
-      if (p1 != 0) {
-        float spacing = 10.0f * scale; // 버튼 사이의 간격
-
-        // 1. 실제 버튼 크기 미리 계산
-        ImVec2 size0 = ImGui::CalcTextSize(u8"모든 무장 정보");
-        size0.x += 20 * scale;
-        size0.y = 25.0f * scale;
-
-        ImVec2 size1 = ImGui::CalcTextSize(u8"주인공 정보");
-        size1.x += 20 * scale;
-        size1.y = 25.0f * scale;
-
-        ImVec2 size2 = ImGui::CalcTextSize(u8"선택 무장 정보");
-        size2.x += 20 * scale;
-        size2.y = 25.0f * scale;
-
-        float totalWidth = size0.x + size1.x + size2.x + spacing * 2;
-
-        // 2. 우측 정렬을 위한 시작 위치 계산 (콘텐츠 가용 영역 기준)
-        float startX = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - totalWidth;
-        if (startX < ImGui::GetCursorPosX())
-          startX = ImGui::GetCursorPosX(); // 최소 왼쪽 정렬 유지
-
-        ImGui::SameLine(startX);
-
-        // [버튼 0: 모든 장수 목록]
-        if (ImGui::Button(u8"모든 무장 정보", size0)) {
-          DX11Base::bShowOfficerListWin = true;
-        }
-        ImGui::SameLine(0, spacing);
-
-        // [버튼 1: 기존 무장 상세]
-        if (ImGui::Button(u8"주인공 정보", size1)) {
-          bShowOfficerDetail = !bShowOfficerDetail;
-        }
-      }
-
-      if (p1 == 0) {
-        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), u8"주인공 정보가 아직 로드되지 않았습니다.");
-      }
-
-      // 항상 표시되는 버튼 (선택 무장 정보)
-      {
-        float spacing = 10.0f * scale;
-        ImVec2 sizeS = ImGui::CalcTextSize(u8"선택 무장 정보");
-        sizeS.x += 20 * scale;
-        sizeS.y = 25.0f * scale;
-
-        float startX = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - sizeS.x;
-        if (startX < ImGui::GetCursorPosX())
-          startX = ImGui::GetCursorPosX();
-
-        ImGui::SameLine(startX);
-        if (ImGui::Button(u8"선택 무장 정보", sizeS)) {
-          bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
-        }
-      }
-
-      // 디버깅 섹션 (맨 아래로 이동)
-      DX11Base::debuging(gameBase, p1);
     }
+
+    if (p1 == 0) {
+      ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), u8"주인공 정보가 아직 로드되지 않았습니다.");
+    }
+
+    // 디버깅 섹션 (맨 아래로 이동)
+    DX11Base::debuging(gameBase, p1);
 
     // 메인 창의 현재 좌표와 크기를 기록 (창이 접히더라도 GetWindowPos 등은 동작함)
     ImVec2 mPos = ImGui::GetWindowPos();

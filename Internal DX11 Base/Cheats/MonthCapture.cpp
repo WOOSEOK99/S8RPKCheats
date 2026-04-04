@@ -14,47 +14,6 @@ namespace DX11Base {
     bool bMonthCapture = true;       // 상설 기능화 (기본값 true)
     bool s_appMonthCapture = false;  // 현재 적용 여부
 
-    // ---------------------------------------------------------------------------
-    // GetSystemMonthValue: 기존의 5단계 포인터 체인 방식 (안전성 강화)
-    // ---------------------------------------------------------------------------
-    uint8_t GetSystemMonthValue() {
-        static uintptr_t exeBase = 0;
-        if (exeBase == 0) exeBase = (uintptr_t)GetModuleHandleA("SAN8RPK.exe");
-        if (!exeBase) return 0;
-
-        // 1단계: p1
-        uintptr_t p1_ptr = exeBase + 0x034C8630;
-        if (!IsValidPtr(p1_ptr, sizeof(uintptr_t))) return 0;
-        uintptr_t p1 = *(uintptr_t*)p1_ptr;
-        if (p1 < 0x10000) return 0;
-
-        // 2단계: [p1 + 0]
-        if (!IsValidPtr(p1 + 0, sizeof(uintptr_t))) return 0;
-        uintptr_t p2 = *(uintptr_t*)(p1 + 0);
-        if (p2 < 0x10000) return 0;
-
-        // 3단계: [p2 + 8]
-        if (!IsValidPtr(p2 + 8, sizeof(uintptr_t))) return 0;
-        uintptr_t p3 = *(uintptr_t*)(p2 + 8);
-        if (p3 < 0x10000) return 0;
-
-        // 4단계: [p3 + 0x10]
-        if (!IsValidPtr(p3 + 0x10, sizeof(uintptr_t))) return 0;
-        uintptr_t p4 = *(uintptr_t*)(p3 + 0x10);
-        if (p4 < 0x10000) return 0;
-
-        // 5단계: [p4 + 0]
-        if (!IsValidPtr(p4 + 0, sizeof(uintptr_t))) return 0;
-        uintptr_t p5 = *(uintptr_t*)(p4 + 0);
-        if (p5 < 0x10000) return 0;
-
-        // 최종: [p5 + 0x49EC94]
-        uintptr_t finalAddr = p5 + 0x49EC94;
-        if (!IsValidPtr(finalAddr, sizeof(uint8_t))) return 0;
-
-        return *(uint8_t*)finalAddr;
-    }
-
     // ───────────────────────────────────────────────
     //  사용자 제공 로직: 월 주소 실시간 캡처
     // ───────────────────────────────────────────────

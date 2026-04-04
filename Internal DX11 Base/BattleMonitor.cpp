@@ -13,7 +13,9 @@
 #include "Cheats/Techpointcave.h"
 #include "Cheats/Dongto.h"
 #include "Cheats/Roadblock.h"
-#include "Cheats/MonthCapture.h" // 2026-04-04 추가
+#include "Cheats/MonthCapture.h"
+#include "Cheats/SystemMonth.h"
+#include "Cheats/BattleMapShuffle.h"
 
 namespace DX11Base {
 
@@ -94,6 +96,10 @@ void MonitorTechStatus() {
             
             s_lastAppliedMonth = sm; // 처리 완료 기록
         }
+
+        // [2026-04-05] 전투맵 셔플 자동 제어 (평정 시에만 활성화)
+        UpdateBattleMapAuto(isCouncil);
+
     } else {
         if (s_lastAppliedMonth != 0) {
             s_lastAppliedMonth = 0;

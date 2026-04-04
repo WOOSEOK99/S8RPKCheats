@@ -19,6 +19,7 @@
 #include "Cheats/Techzero.h"
 #include "Cheats/Terrainignore.h"
 #include "Cheats/SpeedHack.h"
+#include "Cheats/BattleMapShuffle.h"
 #include "Config.h"
 #include "MenuState.h"
 #include "pch.h"
@@ -156,6 +157,25 @@ namespace DX11Base {
       DrawStatRow(u8"담력", 0x5BB8, 4, &v_Brave, 0, gameBase, scale);
       if (ImGui::Checkbox(u8"[보주] 보주 교체 무제한", &bFastJewel))
         SaveConfig();
+
+      // [ 무장 정보 ] 섹션 신규 추가 (사용자 요청)
+      ImGui::Spacing();
+      ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
+
+      float btnWidth = 138.0f * scale; // 컬럼 침범을 막기 위해 너비를 약간 축소
+      float btnHeight = 26.0f * scale;
+
+      if (ImGui::Button(u8"모든 무장 정보", ImVec2(btnWidth, btnHeight))) {
+        DX11Base::bShowOfficerListWin = true;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"주인공 정보", ImVec2(btnWidth, btnHeight))) {
+        bShowOfficerDetail = !bShowOfficerDetail;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"선택 무장 정보", ImVec2(btnWidth, btnHeight))) {
+        bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
+      }
     }
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
@@ -346,6 +366,17 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"수비측의 모든 건물의 공격력이 2배 증가합니다.");
         ImGui::EndTooltip();
       }
+
+      if (ImGui::Checkbox(u8"평정 시 전투맵 랜덤 셔플", &bBattleMapShuffle)) {
+          DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
+          SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(u8"매 분기 평정(Council) 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
+          ImGui::EndTooltip();
+      }
     }
 
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
@@ -369,29 +400,6 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
           SaveConfig();
-      }
-
-      // 2026-04-04 배속 콘트롤
-      ImGui::Separator();
-      ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
-      bool speedChanged = ImGui::Checkbox(u8"배속", &bSpeedHack);
-      ImGui::PopStyleColor();
-
-      if (speedChanged) {
-          SpeedHack_Update();
-          SaveConfig();
-      }
-
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(180.0f * scale);
-      if (ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx")) {
-          SaveConfig();
-      }
-
-      if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"0.1 = 슬로우, 1.0 = 정상, 2.0 = 2배속, 최대 5배속");
-          ImGui::EndTooltip();
       }
     }
   } // namespace MenuSections

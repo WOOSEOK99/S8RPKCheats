@@ -49,6 +49,8 @@ namespace DX11Base {
   extern bool bShowOfficerDetail;
   extern uintptr_t g_capturedOfficerBase;
 
+  extern bool bBattleUnit;
+  extern bool bBattleMapShuffle;
   extern bool bTechZero;
   extern bool bRoadBlock;
   extern bool bMonitorRonin;
