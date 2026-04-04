@@ -240,9 +240,6 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
         }
     }
 
-    // 2026-04-04 배속 훈 설치
-    DX11Base::SpeedHack_Install();
-
     //	INITIALIZE BACKGROUND THREAD
     std::thread WCMUpdate(ClientBGThread);
 

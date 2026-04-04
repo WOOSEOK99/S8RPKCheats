@@ -16,12 +16,25 @@ namespace DX11Base {
     // ───────────────────────────────────────────────
 
     bool IsValidPtr(uintptr_t addr, SIZE_T size) {
-        if (!addr)
+        if (!addr) return false;
+        
+        // 시작 주소 검사
+        MEMORY_BASIC_INFORMATION mbiStart{};
+        if (VirtualQuery((LPCVOID)addr, &mbiStart, sizeof(mbiStart)) != sizeof(mbiStart))
             return false;
-        MEMORY_BASIC_INFORMATION mbi{};
-        if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi))
+        if (mbiStart.State != MEM_COMMIT || (mbiStart.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
             return false;
-        return (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)));
+
+        // 범위가 한 페이지를 넘을 경우 끝 주소도 검사
+        if (size > 1) {
+            MEMORY_BASIC_INFORMATION mbiEnd{};
+            if (VirtualQuery((LPCVOID)(addr + size - 1), &mbiEnd, sizeof(mbiEnd)) != sizeof(mbiEnd))
+                return false;
+            if (mbiEnd.State != MEM_COMMIT || (mbiEnd.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+                return false;
+        }
+
+        return true;
     }
 
     uintptr_t ResolveRelAddr(uintptr_t instAddr, int opOffset, int instSize) {

@@ -3,9 +3,13 @@
 #include "MenuState.h"
 #include "pch.h"
 #include "showlog.h"
+#include "BattleMonitor.h"
+#include "Cheats/MonthCapture.h"
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 // 치트 기능 헤더들
@@ -39,9 +43,11 @@ namespace DX11Base {
 
   struct ConfigEntry {
     const char *key;
+    const char *displayName; // 로그 출력용 이름
     bool *flag;
     bool *appliedState; // 지연 적용 상태 추적용
     void (*applyFunc)(bool);
+    bool isWar;          // 전쟁 관련 기능 여부 (지연 활성화용)
   };
 
   // 적용 상태 플래그들
@@ -65,32 +71,33 @@ namespace DX11Base {
   static bool s_appBattleUnit = false;
   static bool s_appRoadBlock = false;
   static uint64_t s_firstP1Time = 0; // p1 감지 시점 기록용
+  static bool s_isReset = true;     // 리셋 완료 상태 기록
 
-  static ConfigEntry g_Entries[] = {{"bInfiniteAP", &bInfiniteAP, nullptr, nullptr},
-                                    {"bFastJewel", &bFastJewel, nullptr, nullptr},
-                                    {"bBigCity", &bBigCity, &s_appBigCity, SetBigCityConvert},
-                                    {"bAttitudeHack", &bAttitudeHack, &s_appAttitude, SetInstantAttitude},
-                                    {"bLoveCave", &bLoveCave, &s_appLoveNormal, ApplyLoveNormal},
-                                    {"bHateCave", &bHateCave, &s_appLoveHate, ApplyLoveHate},
-                                    {"bLoyalty", &bLoyalty, &s_appLoyalty, SetInstantLoyalty},
-                                    {"bResonance", &bResonance, &s_appResonance, SetInstantResonance},
-                                    {"bInfiniteGift", &bInfiniteGift, &s_appGift, SetInfiniteGift},
-                                    {"bInfiniteTalk", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk},
-                                    {"bFastRelationship", &bFastRelationship, &s_appRelation, SetFastRelationship},
-                                    {"marriageApplied", &marriageApplied, &s_appMarriage, SetMarriageCondition},
-                                    {"bSelfHeal", &bSelfHeal, &s_appSelfHeal, SetSelfHeal},
-                                    {"bDongto", &bDongto, &s_appDongto, SetDongto},
-                                    {"bTerrainIgnore", &bTerrainIgnore, &s_appTerrain, SetTerrainIgnore},
-                                    {"bDefBuilding", &bDefBuilding, &s_appDefBuild, SetDefBuildingBoost},
-                                    {"bDefAtk", &bDefAtk, &s_appDefAtk, SetDefAtkBoost},
-                                    {"bCatapult", &bCatapult, &s_appCatapult, SetCatapultCheat},
-                                    {"bCelestial", &bCelestial, &s_appCelestial, SetCelestialMod},
-                                    {"bBattleUnit", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture},
-                                    {"bRoadBlock", &bRoadBlock, &s_appRoadBlock, SetRoadBlock},
-                                    {"bMonitorRonin", &bMonitorRonin, nullptr, nullptr},
-                                    {"bAutoLoadMenu", &bAutoLoadMenu, nullptr, nullptr},
-                                    {"bZeroInfamy", &bZeroInfamy, nullptr, nullptr},
-                                    {"bSpeedHack", &bSpeedHack, nullptr, nullptr}};
+  static ConfigEntry g_Entries[] = {{"bInfiniteAP", u8"행동력 무한", &bInfiniteAP, nullptr, nullptr, false},
+                                    {"bFastJewel", u8"보옥 획득 가속", &bFastJewel, nullptr, nullptr, false},
+                                    {"bBigCity", u8"대도시 전환", &bBigCity, &s_appBigCity, SetBigCityConvert, false},
+                                    {"bAttitudeHack", u8"회화 기분 초기화", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false},
+                                    {"bLoveCave", u8"경애/의형제 조건 완화", &bLoveCave, &s_appLoveNormal, ApplyLoveNormal, false},
+                                    {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false},
+                                    {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false},
+                                    {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false},
+                                    {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false},
+                                    {"bInfiniteTalk", u8"연회 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false},
+                                    {"bFastRelationship", u8"인간관계 수치 가속", &bFastRelationship, &s_appRelation, SetFastRelationship, false},
+                                    {"marriageApplied", u8"배우자 조건 완화", &marriageApplied, &s_appMarriage, SetMarriageCondition, false},
+                                    {"bSelfHeal", u8"전쟁: 자가 회복", &bSelfHeal, &s_appSelfHeal, SetSelfHeal, true},
+                                    {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true},
+                                    {"bTerrainIgnore", u8"전쟁: 지형 이동 무시", &bTerrainIgnore, &s_appTerrain, SetTerrainIgnore, true},
+                                    {"bDefBuilding", u8"전쟁: 방어건물 강화", &bDefBuilding, &s_appDefBuild, SetDefBuildingBoost, true},
+                                    {"bDefAtk", u8"전쟁: 공격/방어 부스트", &bDefAtk, &s_appDefAtk, SetDefAtkBoost, true},
+                                    {"bCatapult", u8"전쟁: 투석기 강화", &bCatapult, &s_appCatapult, SetCatapultCheat, true},
+                                    {"bCelestial", u8"전쟁: 제부 개방", &bCelestial, &s_appCelestial, SetCelestialMod, true},
+                                    {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false},
+                                    {"bRoadBlock", u8"전쟁: 진로 방해 무시", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
+                                    {"bMonitorRonin", u8"낭인 상시 감시", &bMonitorRonin, nullptr, nullptr, false},
+                                    {"bAutoLoadMenu", u8"시작 시 설정 로드", &bAutoLoadMenu, nullptr, nullptr, false},
+                                    {"bZeroInfamy", u8"매턴 악명 0", &bZeroInfamy, nullptr, nullptr, false},
+                                    {"bSpeedHack", u8"배속 기능", &bSpeedHack, nullptr, nullptr, false}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];
@@ -142,50 +149,76 @@ namespace DX11Base {
   }
 
   void ResetAppliedStates() {
+    if (s_isReset) return; // 이미 리셋된 상태면 중복 실행 방지
+
     for (auto &entry : g_Entries) {
       if (entry.appliedState) {
         *entry.appliedState = false;
       }
     }
     s_firstP1Time = 0;
-    AddLog(u8"[Config] 모든 적용 상태 초기화 (메인 메뉴)");
+    SetMonthCapture(false);
+    s_appMonthCapture = false;
+    AddLog(u8"[Config] 모든 적용 상태 초기화");
+    s_isReset = true;
   }
 
   void ApplyStoredConfigs(uintptr_t p1, uintptr_t gameBase) {
+    static uint64_t s_lastLoop = 0;
+    uintptr_t now = GetTickCount64();
+
     // gameBase와 p1이 모두 유효할 때만 적용 시도
     if (gameBase == 0 || p1 == 0) {
       if (s_firstP1Time != 0)
-        ResetAppliedStates(); // 주소가 사라지면 리셋
+        ResetAppliedStates();
       return;
     }
 
+    // 1000ms마다 한 번만 루프 체크 (CPU 부하 최소화)
+    if (now - s_lastLoop < 1000) return;
+    s_lastLoop = now;
+
     // 처음 감지된 순간 시간 기록
     if (s_firstP1Time == 0) {
-      s_firstP1Time = GetTickCount64();
-      AddLog(u8"[Config] 무장 데이터 감지됨. 안정화를 위해 3초 대기...");
+      s_firstP1Time = now;
+      s_isReset = false; // 이제 데이터가 들어왔으므로 나중에 0이 되면 리셋 가능하게 함
+      AddLog(u8"[Config] 무장 데이터 감지됨. 안정화 대기 시작...");
       return;
     }
 
     // 안전 지연 시간 (3초) 체크: 로딩 중 성급한 접근 방지
-    if (GetTickCount64() - s_firstP1Time < 3000)
+    if (now - s_firstP1Time < 3000)
       return;
+
+    // 월 캡처 시작 (설정이 켜져 있을 때만)
+    if (bMonthCapture && !s_appMonthCapture) {
+        SetMonthCapture(true);
+        s_appMonthCapture = true;
+    }
 
     // 추가적인 안전장치: p1이 가리키는 메모리가 최소한의 유효성을 가지는지 확인
     if (!IsValidPtr(p1, 0x100))
       return;
 
-    // [추가 검증] 금(Gold)이나 다른 데이터가 0이 아닌 유의미한 상태인지 확인 (선택 사항)
-    // if (*(unsigned int*)(p1 + 0xE8) == 0) return;
-
+    // [안정화] 3초 대기 후 설정 적용 및 실시간 중지 처리
     for (auto &entry : g_Entries) {
-      if (*entry.flag && entry.appliedState && !*entry.appliedState) {
-        if (entry.applyFunc) {
+      if (entry.appliedState && entry.applyFunc) {
+        // [수정] 전쟁 관련 기능은 '전투 중이 아닐 때'만 지연 활성화함
+        if (entry.isWar && !IsInBattle()) {
+          continue; 
+        }
+
+        // 1. 켜기 (flag == true && appliedState == false)
+        if (*entry.flag && !*entry.appliedState) {
           *entry.appliedState = true;
           entry.applyFunc(true);
-          AddLog(u8"[Config] 자동 활성화: %s", entry.key);
-
-          // [핵심] 한꺼번에 수많은 스레드가 생성되는 것을 방지하기 위해 약간의 지연시간 추가
-          std::this_thread::sleep_for(std::chrono::milliseconds(200));
+          AddLog(u8"[Config] 자동 활성화: %s", entry.displayName);
+        }
+        // 2. 끄기 (flag == false && appliedState == true)
+        else if (!*entry.flag && *entry.appliedState) {
+          *entry.appliedState = false;
+          entry.applyFunc(false);
+          AddLog(u8"[Config] 실시간 중지: %s", entry.displayName);
         }
       }
     }

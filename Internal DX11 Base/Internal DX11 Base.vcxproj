@@ -204,6 +204,7 @@
     <ClInclude Include="Cheats\Techpointcave.h" />
     <ClInclude Include="Cheats\Techzero.h" />
     <ClInclude Include="Cheats\Roadblock.h" />
+    <ClInclude Include="Cheats\MonthCapture.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BattleMonitor.cpp" />
@@ -261,6 +262,7 @@
     <ClCompile Include="Cheats\Techpointcave.cpp" />
     <ClCompile Include="Cheats\Techzero.cpp" />
     <ClCompile Include="Cheats\Roadblock.cpp" />
+    <ClCompile Include="Cheats\MonthCapture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Hooking\minhook.def" />

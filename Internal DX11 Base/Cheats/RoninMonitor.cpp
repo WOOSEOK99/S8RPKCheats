@@ -23,6 +23,7 @@
 #include "CityData.h"        // g_CityList, g_CityCount
 #include "MenuState.h"       // bMonitorRonin
 #include "showlog.h"         // AddLog()
+#include "BattleMonitor.h"   // IsInBattle()
 #include "Framework/imgui.h"
 #include "pch.h"
 
@@ -110,10 +111,25 @@ void RoninMonitor_Tick(uintptr_t p1)
         return;
     }
 
-    // ② Config 3초 지연 미통과 시 대기
+    // p1 이 변경되었다면 (새 게임 시작 또는 세이브 로드), 내부 상태를 리셋하여 다시 주소를 확보하도록 합니다.
+    static uintptr_t s_lastP1 = 0;
+    if (p1 != s_lastP1) {
+        s_lastP1 = p1;
+        s_baseResolved = false;
+        s_arrayBase    = 0;
+        s_initialized  = false;
+        s_prevStatuses.clear();
+        s_notifications.clear();
+        AddLog(u8"[RoninMonitor] 주인공 포인터 변경 감지. 모니터링 상태 초기화.");
+    }
+
+    // ② 전투 중이면 모니터링 건너뛰기
+    if (IsInBattle()) return;
+
+    // ③ Config 3초 지연 미통과 시 대기
     if (!IsConfigReady()) return;
 
-    // ③ 주소 미확보 시 계산 시도
+    // ④ 주소 미확보 시 계산 시도
     if (!TryResolveBase(p1)) return;
 
     // ④ 2초 주기 체크
@@ -126,9 +142,20 @@ void RoninMonitor_Tick(uintptr_t p1)
     uintptr_t cityBase = GetCityArrayBase();
 
     // ⑥ 전수 조사
+    uintptr_t lastPage = 0;
+    bool lastPageValid = false;
+
     for (int i = 1; i <= 5102; i++) {
         uintptr_t addr = s_arrayBase + (uintptr_t)(i - 1) * 0x3D0;
-        if (!IsValidPtr(addr, 0x30)) continue;
+        
+        // 메모리 페이지(4KB) 단위로만 유효성 검사를 수행하여 5000번 호출되는 부하(프리징)를 방지
+        uintptr_t page = addr & ~0xFFFull;
+        if (page != lastPage) {
+            lastPage = page;
+            lastPageValid = IsValidPtr(page, 0x1000);
+        }
+        
+        if (!lastPageValid) continue;
 
         uint8_t status = *(uint8_t*)(addr + 0x10);
 
@@ -148,6 +175,11 @@ void RoninMonitor_Tick(uintptr_t p1)
                         if (idx >= 0 && idx < g_CityCount)
                             city = g_CityList[idx].cityname;
                     }
+                }
+
+                // 잘못된 메모리 판독으로 알림이 폭주하여 화면 렌더링(ImGui)이 멈추는 것을 방지
+                if (s_notifications.size() > 5) {
+                    s_notifications.erase(s_notifications.begin());
                 }
 
                 s_notifications.push_back({ name, city, 12.0f });

@@ -78,6 +78,15 @@ namespace DX11Base {
     ImGui::EndChild();
   }
 
+  std::string GetFullLogs() {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    std::string fullLog;
+    for (const auto& log : g_loveLogs) {
+      fullLog += log + "\n";
+    }
+    return fullLog;
+  }
+
   void SaveMemoryLog(uintptr_t p1) {
     if (p1 == 0)
       return;

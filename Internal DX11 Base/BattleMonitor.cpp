@@ -12,6 +12,8 @@
 #include "Cheats/Terrainignore.h"
 #include "Cheats/Techpointcave.h"
 #include "Cheats/Dongto.h"
+#include "Cheats/Roadblock.h"
+#include "Cheats/MonthCapture.h" // 2026-04-04 추가
 
 namespace DX11Base {
 
@@ -39,6 +41,7 @@ void MonitorBattleStatus() {
     if (addr1 != 0 || addr2 != 0) {
       // [전투 중] 주소가 포착됨
       s_lastSeenTime = currentTime;
+
 
       // 아직 리프레시를 안 했다면 실행
       if (!s_isWarModsApplied) {
@@ -70,37 +73,50 @@ void MonitorBattleStatus() {
 }
 
 void MonitorTechStatus() {
-
-    static bool s_isTechBoostApplied = false;
+    static uint8_t s_lastAppliedMonth = 0;
 
     // 방어 건물 강화가 켜져 있을 때만 작동
     if (bDefBuilding) {
-        // 1. 캡처 모드가 꺼져 있다면 활성화 (이미 켜져 있으면 무시됨)
-        SetTechPCapture(true);
+        // [2026-04-04] 월 비교를 통한 평정(Council) 자동 감지
+        uint8_t sm = GetSystemMonthValue();
+        uint8_t rm = GetCurrentMonth();
 
-        // 2. 캡처된 주소가 있는지 확인
-        uintptr_t techBase = g_capturedTechPAddr;
-        if (techBase != 0) {
-            // 주소가 유효하다면 자동 리프레시
-            if (IsValidPtr(techBase, 0x24B)) {
-                AddLog(u8"[자동화] 기술 포인트 기반 포착(%p) -> 방어 건물 강화 리프래시", (void*)techBase);
-                
-                // 껐다 켜서 확실하게 적용 (Refresh)
-                SetDefBuildingBoost(false);
-                SetDefBuildingBoost(true);
-                
-                s_isTechBoostApplied = true;
-            }
+        // 평정 조건: 시스템월(sm)이 3,6,9,12 이고 실제월(rm)이 4,7,10,1 인 경우
+        // 즉, rm이 sm보다 한 달 빠른 시점이 게임 내 '평정' 상태임
+        bool isCouncil = (sm > 0 && sm % 3 == 0) && (rm == (sm % 12) + 1);
 
-            // [핵심] 하트비트: 다시 포착할 수 있도록 전역 주소 초기화
-            g_capturedTechPAddr = 0;
+        if (isCouncil && s_lastAppliedMonth != sm) {
+            AddLog(u8"[자동화] 평정(Council) 감지 (Sys:%d, Real:%d) -> 방어 건물 자동 리프레시", sm, rm);
+            
+            // 껐다 켜서 확실하게 적용 (Refresh)
+            SetDefBuildingBoost(false);
+            SetDefBuildingBoost(true);
+            
+            s_lastAppliedMonth = sm; // 처리 완료 기록
         }
     } else {
-        if (s_isTechBoostApplied) {
-            SetTechPCapture(false);
-            s_isTechBoostApplied = false;
+        if (s_lastAppliedMonth != 0) {
+            s_lastAppliedMonth = 0;
         }
     }
+}
+
+// 전투 상태 반환 함수 추가 (외부 모듈에서 현재 전투중인지 판별할 때 사용)
+bool IsInBattle() {
+    float currentTime = (float)GetTickCount64() / 1000.0f;
+    static float s_lastKnownSeenTime = 0.0f;
+    
+    // Check global addr directly to update heartbeat if needed without MonitorBattleStatus side effects
+    if (DX11Base::g_battleUnitAddr1 != 0 || DX11Base::g_battleUnitAddr2 != 0) {
+        s_lastKnownSeenTime = currentTime;
+        return true;
+    }
+    
+    // Heartbeat timeout is 1.25s
+    if ((currentTime - s_lastKnownSeenTime) < 1.25f) {
+        return true;
+    }
+    return false;
 }
 
 } // namespace DX11Base

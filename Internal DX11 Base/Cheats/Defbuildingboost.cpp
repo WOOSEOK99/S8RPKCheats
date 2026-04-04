@@ -33,30 +33,19 @@ namespace DX11Base {
   };
 
   static const DefBuildingEntry k_defBuildingTable[] = {
-      // 사거리
+      // 사거리 (망루/투석기 재활성화)
       {0x20AD2, 4, 3}, // 도시
       {0x20AF2, 4, 3}, // 관문
       {0x20B32, 4, 3}, // 망루
       {0x20B52, 5, 4}, // 투석기
-      {0x20B72, 6, 5}, // 봉화대 전의 증가량
-      // 시야
+      // {0x20B72, 6, 5}, // 봉화대 (잠정 제외)
+      
+      // 시야 (망루/투석기 재활성화)
       {0x20ADC, 6, 5}, // 도시
       {0x20AFC, 4, 3}, // 관문
       {0x20B3C, 4, 3}, // 망루
       {0x20B5C, 5, 4}, // 투석기
-      {0x20B7C, 4, 3}, // 봉화대
-
-      // {0x20AD2, 4, 3}, // 도시
-      // {0x20AF2, 4, 3}, // 관문
-      // {0x20B32, 10, 3}, // 망루
-      // {0x20B52, 10, 4}, // 투석기
-      // {0x20B72, 6, 5}, // 봉화대 전의 증가량
-      // // 시야
-      // {0x20ADC, 6, 5}, // 도시
-      // {0x20AFC, 4, 3}, // 관문
-      // {0x20B3C, 10, 3}, // 망루
-      // {0x20B5C, 10, 4}, // 투석기
-      // {0x20B7C, 4, 3}, // 봉화대
+      // {0x20B7C, 4, 3}, // 봉화대 (잠정 제외)
   };
 
   uintptr_t ResolveDefBuildingPtr() {
@@ -64,23 +53,40 @@ namespace DX11Base {
     if (!exeBase)
       return 0;
 
-    uintptr_t p = *(uintptr_t *)(exeBase + 0x034C8630);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0xBB8);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0x0);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0x170);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0x10);
-    if (!IsValidPtr(p, 0x20BA0))
+    // 1단계: exeBase + 0x034C8630
+    uintptr_t p1_addr = exeBase + 0x034C8630;
+    if (!IsValidPtr(p1_addr, 8)) return 0;
+    uintptr_t p1 = *(uintptr_t *)p1_addr;
+    if (!IsValidPtr(p1, 8)) return 0;
+
+    // 2단계: p1 + 0xBB8
+    uintptr_t p2_addr = p1 + 0xBB8;
+    if (!IsValidPtr(p2_addr, 8)) return 0;
+    uintptr_t p2 = *(uintptr_t *)p2_addr;
+    if (!IsValidPtr(p2, 8)) return 0;
+
+    // 3단계: p2 + 0x0
+    uintptr_t p3_addr = p2 + 0x0;
+    if (!IsValidPtr(p3_addr, 8)) return 0;
+    uintptr_t p3 = *(uintptr_t *)p3_addr;
+    if (!IsValidPtr(p3, 8)) return 0;
+
+    // 4단계: p3 + 0x170
+    uintptr_t p4_addr = p3 + 0x170;
+    if (!IsValidPtr(p4_addr, 8)) return 0;
+    uintptr_t p4 = *(uintptr_t *)p4_addr;
+    if (!IsValidPtr(p4, 8)) return 0;
+
+    // 5단계: p4 + 0x10
+    uintptr_t p5_addr = p4 + 0x10;
+    if (!IsValidPtr(p5_addr, 8)) return 0;
+    uintptr_t p5 = *(uintptr_t *)p5_addr;
+
+    // 최종 데이터 영역(0x20BA0바이트 이상) 유효성 검사
+    if (!IsValidPtr(p5, 0x20BA0))
       return 0;
 
-    return p;
+    return p5;
   }
 
   void SetDefBuildingBoost(bool enable) {
@@ -91,14 +97,20 @@ namespace DX11Base {
     }
 
     DWORD old, tmp;
-    VirtualProtect((LPVOID)p, 0x20BA0, PAGE_READWRITE, &old);
+    // Defatkboost.cpp에서 검증된 방식(넓은 범위 한꺼번에 권한 변경)으로 롤백하여 프리징 해결 시도
+    if (VirtualProtect((LPVOID)p, 0x20BA0, PAGE_READWRITE, &old)) {
+      for (const auto &e : k_defBuildingTable) {
+        // 혹시 모를 범위 초과 방지 (Pyre Tower 등 확인되지 않은 오프셋 보호)
+        if (e.offset + sizeof(uint16_t) > 0x20BA0) continue;
 
-    for (const auto &e : k_defBuildingTable) {
-      *(uint16_t *)(p + e.offset) = enable ? e.enableVal : e.disableVal;
+        *(uint16_t *)(p + e.offset) = enable ? e.enableVal : e.disableVal;
+      }
+      VirtualProtect((LPVOID)p, 0x20BA0, old, &tmp);
+
+      g_defBuildingApplied = enable;
+      AddLog(u8"[방어건물강화] %s", enable ? u8"활성화" : u8"비활성화");
+    } else {
+      AddLog(u8"[방어건물강화] 메모리 보호 해제 실패 (error: %d)", GetLastError());
     }
-
-    VirtualProtect((LPVOID)p, 0x20BA0, old, &tmp);
-    g_defBuildingApplied = enable;
-    AddLog(u8"[방어건물강화] %s", enable ? u8"활성화" : u8"비활성화");
   }
 }

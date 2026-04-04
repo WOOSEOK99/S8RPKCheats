@@ -91,7 +91,7 @@ namespace DX11Base {
     if (!IsBadReadPtr((void *)target, 4)) {
       unsigned int header = *(unsigned int *)target;
       // 정상이라면 로그에 00260026 이 찍혀야 합니다.
-      AddLog(u8"[디버그] Target: %llX, Data: %08X", target, header);
+      // AddLog(u8"[디버그] Target: %llX, Data: %08X", target, header);
     }
     // --------------------------
 

@@ -8,6 +8,7 @@
 #include "Cheats/SelectOfficercapture.h"
 #include "Cheats/RoninMonitor.h"
 #include "Cheats/SpeedHack.h"
+#include "Cheats/MonthCapture.h"
 #include "Cheats/Techpointcave.h"
 #include "Config.h"
 #include "Engine.h"
@@ -76,6 +77,29 @@ namespace DX11Base {
 
     // 2026-04-04 배속 상태 동기화
     SpeedHack_Update();
+
+    // 2026-04-04 월 값 감지 로그 (500ms 주기로 완화하여 안정성 확보)
+    if (bMonthCapture) {
+      static uint64_t s_lastMonthCheck = 0;
+      if (GetTickCount64() - s_lastMonthCheck >= 500) {
+        s_lastMonthCheck = GetTickCount64();
+
+        static uint8_t s_lastSysMonth = 0xFF;
+        static uint8_t s_lastRealMonth = 0xFF;
+
+        uint8_t sysMonth = GetSystemMonthValue();
+        uint8_t realMonth = GetCurrentMonth();
+
+        if (sysMonth != s_lastSysMonth || realMonth != s_lastRealMonth) {
+          // 리얼 월드가 아직 캡처되지 않았을 때(0)는 비교 로그를 찍지 않음
+          if (realMonth > 0) {
+            AddLog(u8"[Debug] 월 비교 - 시스템: %d월, 리얼: %d월", sysMonth, realMonth);
+          }
+          s_lastSysMonth = sysMonth;
+          s_lastRealMonth = realMonth;
+        }
+      }
+    }
   }
 
   void Menu::DrawMenu() {
@@ -215,9 +239,12 @@ namespace DX11Base {
         ImGui::Columns(1);
       }
 
-      // 하단: UI 배율 설정
-      ImGui::Separator();
-      ImGui::TextDisabled(u8"UI 배율 설정");
+      // 하단: 공용 설정
+      ImGui::Spacing();
+      ImGui::Separator(); // 가독성을 위한 구분선 추가
+      ImGui::Spacing();
+
+      ImGui::Text(u8"UI 배율 설정");
       float scaleBtnSize = 25.0f * scale;
       if (ImGui::Button("-##ScaleDown", ImVec2(scaleBtnSize, scaleBtnSize))) {
         io.FontGlobalScale = (std::max)(0.5f, io.FontGlobalScale - 0.1f);

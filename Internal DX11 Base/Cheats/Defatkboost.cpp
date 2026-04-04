@@ -47,14 +47,17 @@ namespace DX11Base {
     }
 
     DWORD old, tmp;
-    VirtualProtect((LPVOID)p, 0x20BA0, PAGE_READWRITE, &old);
+    if (VirtualProtect((LPVOID)p, 0x20BA0, PAGE_READWRITE, &old)) {
+      for (const auto &e : k_defAtkTable) {
+        if (e.offset + sizeof(uint16_t) > 0x20BA0) continue;
+        *(uint16_t *)(p + e.offset) = enable ? e.enableVal : e.disableVal;
+      }
+      VirtualProtect((LPVOID)p, 0x20BA0, old, &tmp);
 
-    for (const auto &e : k_defAtkTable) {
-      *(uint16_t *)(p + e.offset) = enable ? e.enableVal : e.disableVal;
+      g_defAtkApplied = enable;
+      AddLog(u8"[방어건물공격력] %s", enable ? u8"활성화" : u8"비활성화");
+    } else {
+      AddLog(u8"[방어건물공격력] 메모리 보호 해제 실패 (error: %d)", GetLastError());
     }
-
-    VirtualProtect((LPVOID)p, 0x20BA0, old, &tmp);
-    g_defAtkApplied = enable;
-    AddLog(u8"[방어건물공격력] %s", enable ? u8"활성화" : u8"비활성화");
   }
 }
