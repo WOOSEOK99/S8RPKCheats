@@ -365,6 +365,10 @@ namespace DX11Base {
         DX11Base::SetRoadBlock(bRoadBlock);
         SaveConfig();
       }
+
+      if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
+          SaveConfig();
+      }
     }
   } // namespace MenuSections
 } // namespace DX11Base

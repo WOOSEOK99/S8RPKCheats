@@ -87,6 +87,7 @@ namespace DX11Base {
                                     {"bCelestial", &bCelestial, &s_appCelestial, SetCelestialMod},
                                     {"bBattleUnit", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture},
                                     {"bRoadBlock", &bRoadBlock, &s_appRoadBlock, SetRoadBlock},
+                                    {"bMonitorRonin", &bMonitorRonin, nullptr, nullptr},
                                     {"bAutoLoadMenu", &bAutoLoadMenu, nullptr, nullptr},
                                     {"bZeroInfamy", &bZeroInfamy, nullptr, nullptr}};
 
@@ -178,5 +179,10 @@ namespace DX11Base {
         }
       }
     }
+  }
+
+  bool IsConfigReady() {
+    if (s_firstP1Time == 0) return false;
+    return (GetTickCount64() - s_firstP1Time >= 3000);
   }
 } // namespace DX11Base

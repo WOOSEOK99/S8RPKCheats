@@ -4,6 +4,8 @@
 #include "Fonts.h"
 #include "debug.h"
 #include "MenuState.h"
+#include "Cheats/SelectOfficercapture.h"
+#include "Cheats/RoninMonitor.h"
 #include <imm.h>
 #pragma comment(lib, "imm32.lib")
 
@@ -374,6 +376,9 @@ namespace DX11Base
 		s_prevWantText = currWantText;
 
 		Menu::Render();
+
+		// 2026-04-04 재야장수 모니터링 알림상 렌더링 (RoninMonitor 모듈)
+		RoninMonitor_Draw();
 
 		ImGui::EndFrame();
 		ImGui::Render();

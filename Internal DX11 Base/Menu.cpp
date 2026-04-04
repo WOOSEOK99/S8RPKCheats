@@ -6,6 +6,7 @@
 #include "Cheats/Defbuildingboost.h"
 #include "Cheats/OfficerDetail.h"
 #include "Cheats/SelectOfficercapture.h"
+#include "Cheats/RoninMonitor.h"
 #include "Cheats/Techpointcave.h"
 #include "Config.h"
 #include "Engine.h"
@@ -65,10 +66,12 @@ namespace DX11Base {
     MonitorBattleStatus();
     MonitorTechStatus();
 
-    // [자동화] 저장된 설정들 지연 적용 (p1, gameBase 유효 시)
     uintptr_t gameBase = GetGameBase();
     uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;
     ApplyStoredConfigs(p1, gameBase);
+
+    // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
+    RoninMonitor_Tick(p1);
   }
 
   void Menu::DrawMenu() {

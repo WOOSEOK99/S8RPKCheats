@@ -43,6 +43,7 @@ namespace DX11Base {
 
   bool bTechZero = false;
   bool bRoadBlock = false;
+  bool bMonitorRonin = false;
   bool bShowSelectedOfficerWin = false;
   bool bShowOfficerListWin = false;
   bool bOfficerCapture = false;

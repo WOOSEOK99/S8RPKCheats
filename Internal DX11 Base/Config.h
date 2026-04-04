@@ -6,4 +6,5 @@ namespace DX11Base {
     void LoadConfig();
     void ResetAppliedStates();
     void ApplyStoredConfigs(uintptr_t p1, uintptr_t gameBase);
+    bool IsConfigReady();
 }

@@ -51,6 +51,7 @@ namespace DX11Base {
 
   extern bool bTechZero;
   extern bool bRoadBlock;
+  extern bool bMonitorRonin;
 
   extern bool bShowSelectedOfficerWin;
   extern bool bShowOfficerListWin;
