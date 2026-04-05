@@ -142,10 +142,10 @@ namespace DX11Base {
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 낙양, 장안, 허창, 업, 양양, 건업, 성도");
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"개발 : 9000");
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"상업 : 12000");
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"방어 : 9000");
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"기술 : 4000");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"개발 : 9000");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"상업 : 12000");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"방어 : 9000");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"기술 : 4000");
           ImGui::EndTooltip();
         }
 
@@ -160,8 +160,13 @@ namespace DX11Base {
           ::DX11Base::SetInstantAttitude(bAttitudeHack);
           SaveConfig();
         }
+
         if (ImGui::IsItemHovered())
-          ImGui::SetTooltip(u8"도시에서 견문을 1회만 해도 민심 수치가 100이 됩니다.");
+        {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"도시에서 견문을 1회만 해도 민심 수치가 100이 됩니다.");
+          ImGui::EndTooltip();
+        }
 
         EndSection();
 
@@ -187,9 +192,13 @@ namespace DX11Base {
         if (ImGui::Checkbox(u8"무한 전기 발생", &bInfTengi)) {
           SaveConfig();
         }
+
         if (ImGui::IsItemHovered()) {
-          ImGui::SetTooltip(u8"매 평정 마다 새로운 전기가 발생합니다.");
-          ImGui::SetTooltip(u8"이미 전기가 발생 중이었다면, 전기 발생이 끝난뒤부터 적용됩니다.");
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"매 평정 마다 새로운 전기가 발생합니다.");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
+                             u8"이미 전기가 발생 중이었다면, 전기 발생이 끝난뒤부터 적용됩니다.");
+          ImGui::EndTooltip();
         }
 
         ImGui::SameLine();
@@ -197,8 +206,11 @@ namespace DX11Base {
         if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
           SaveConfig();
         }
+
         if (ImGui::IsItemHovered()) {
-          ImGui::SetTooltip(u8"중지 성성이 발생하면 즉시 취소합니다.");
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"중지 성성이 발생하면 즉시 취소합니다.");
+          ImGui::EndTooltip();
         }
 
         ImGui::SameLine();
@@ -210,10 +222,13 @@ namespace DX11Base {
             DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
           }
         }
-        if (ImGui::IsItemHovered()) {
-          ImGui::SetTooltip(u8"작동 시 즉시 전기 발생을 취소합니다.");
-        }
 
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"작동 시 즉시 전기 발생을 취소합니다.");
+          ImGui::EndTooltip();
+        }
+        
         // 훅/캡처 상태를 로그로 출력 (상태 변경 시 1회만)
         {
           static uintptr_t s_lastHookAddr = 0;
@@ -433,9 +448,9 @@ namespace DX11Base {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 천계 능력 강화");
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 1 : 치료 효과 2000 / 광범위");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 2 : 치료 효과 3500 / 광범위");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 3 : 치료 효과 7000 / 광범위");
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"레벨 1 : 치료 효과 2000 / 광범위");
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"레벨 2 : 치료 효과 3500 / 광범위");
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"레벨 3 : 치료 효과 7000 / 광범위");
         ImGui::EndTooltip();
       }
 

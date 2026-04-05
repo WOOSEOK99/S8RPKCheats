@@ -47,10 +47,10 @@ namespace DX11Base {
         *(unsigned char *)(gameBase + 0x5C49) = 0;
     }
 
-    if (bSelectOfficerFirstInit) {
-      DX11Base::SetOfficerCapture(true); // 프로그램 실행 시 딱 한 번 Hook 설치
-      bSelectOfficerFirstInit = false;
-    }
+    // if (bSelectOfficerFirstInit) {
+    //   DX11Base::SetOfficerCapture(true); // 프로그램 실행 시 딱 한 번 Hook 설치
+    //   bSelectOfficerFirstInit = false;
+    // }
 
     if (bInfTengi) {
       uint8_t sm = GetSystemMonthValue();
@@ -142,13 +142,13 @@ namespace DX11Base {
     ImGuiIO &io = ImGui::GetIO();
     float scale = io.FontGlobalScale;
 
-    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 치트 (V0.4)###SAM8_CHEAT";
+    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 치트 (V0.5)###SAM8_CHEAT";
     ImGuiWindow *pMainWin = ImGui::FindWindowByName(s_windowTitleStr);
     bool bMenuCollapsedLastFrame = pMainWin ? pMainWin->Collapsed : false;
 
     // 상태에 따른 표시용 문자열과 ImGui 고유 ID 문자열 결정
-    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (V0.4)";
-    s_windowTitleStr = bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT" : u8"삼국지 8 리메이크 치트 (V0.4)###SAM8_CHEAT";
+    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (V0.5)";
+    s_windowTitleStr = bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT" : u8"삼국지 8 리메이크 치트 (V0.5)###SAM8_CHEAT";
 
     // AlwaysAutoResize를 접혔을 때만 제거 (이 플래그가 있으면 ImGui가 접기를 무시함)
     ImGuiWindowFlags Flags = bMenuCollapsedLastFrame ? (ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar)

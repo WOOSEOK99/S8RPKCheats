@@ -137,7 +137,9 @@ namespace DX11Base {
     ImGui::PopStyleColor();
 
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip(u8"클릭하여 레벨 순환 (0->1->2->3)");
+      ImGui::BeginTooltip();
+      ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"클릭하여 레벨 순환 (0->1->2->3)");
+      ImGui::EndTooltip();
     }
 
     ImGui::PopID();
