@@ -207,6 +207,7 @@
     <ClInclude Include="Cheats\Roadblock.h" />
     <ClInclude Include="Cheats\MonthCapture.h" />
     <ClInclude Include="Cheats\SystemMonth.h" />
+    <ClInclude Include="Cheats\TengiCave.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BattleMonitor.cpp" />
@@ -267,6 +268,7 @@
     <ClCompile Include="Cheats\Roadblock.cpp" />
     <ClCompile Include="Cheats\MonthCapture.cpp" />
     <ClCompile Include="Cheats\SystemMonth.cpp" />
+    <ClCompile Include="Cheats\TengiCave.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Hooking\minhook.def" />

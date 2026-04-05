@@ -45,6 +45,9 @@ namespace DX11Base {
   bool bTechZero = false;
   bool bRoadBlock = false;
   bool bMonitorRonin = false;
+  bool bInfTengi = false;         // 2026-04-05 무한 전기
+  bool bCancelCastleEvent = false;// 2026-04-05 중지 성성 취소
+  bool bCancelTengi = false;      // 2026-04-05 전기발생 취소
   bool bSpeedHack = false;       // 2026-04-04 배속
   float g_speedMultiplier = 2.0f; // 2026-04-04 기본 2배속
   bool bShowSelectedOfficerWin = false;

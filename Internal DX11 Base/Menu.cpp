@@ -4,13 +4,14 @@
 #include "Cheats.h"
 #include "Cheats/Battleunitcapture.h"
 #include "Cheats/Defbuildingboost.h"
-#include "Cheats/OfficerDetail.h"
-#include "Cheats/SelectOfficercapture.h"
-#include "Cheats/RoninMonitor.h"
-#include "Cheats/SpeedHack.h"
 #include "Cheats/MonthCapture.h"
+#include "Cheats/OfficerDetail.h"
+#include "Cheats/RoninMonitor.h"
+#include "Cheats/SelectOfficercapture.h"
+#include "Cheats/SpeedHack.h"
 #include "Cheats/SystemMonth.h"
 #include "Cheats/Techpointcave.h"
+#include "Cheats/TengiCave.h"
 #include "Config.h"
 #include "Engine.h"
 #include "Menu.h"
@@ -51,6 +52,41 @@ namespace DX11Base {
       bSelectOfficerFirstInit = false;
     }
 
+    if (bInfTengi) {
+      uint8_t sm = GetSystemMonthValue();
+      uint8_t rm = GetCurrentMonth();
+      static uint8_t s_lastTengiMonth = 0;
+
+      // 무한 전기 발생 (1, 4, 7, 10월)
+      if (sm == 1 || sm == 4 || sm == 7 || sm == 10) {
+        // 치트 엔진처럼 지속적으로 값을 고정시킵니다.
+        // SetTengi 에서는 포인터가 생성된 시점에 플래그를 1로 설정하여 크래시를 방지합니다.
+        if (DX11Base::GetCapturedTengiAddr() != 0) {
+          DX11Base::SetTengi(100);
+        }
+      }
+    }
+
+    // 중지 성성 취소 무조건 취소 모니터링 루프
+    if (bCancelCastleEvent) {
+      uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
+      if (captAddr != 0) {
+        uintptr_t addr80 = captAddr - 0x10;
+        uintptr_t addr90 = captAddr;
+        uintptr_t addrA0 = captAddr + 0x10;
+
+        // 포인터 유효성 검사
+        if (DX11Base::IsValidPtr(addr80, 2) && DX11Base::IsValidPtr(addr90, 1) && DX11Base::IsValidPtr(addrA0, 2)) {
+          if (*(uint8_t *)(addr80) == 0x90 && *(uint8_t *)(addr80 + 1) == 0xE0 && *(uint8_t *)(addr90) == 0xE0 &&
+              *(uint8_t *)(addrA0) == 0x28 && *(uint8_t *)(addrA0 + 1) == 0xCB) {
+
+            // 조건 일치시 전기 취소와 동일하게 완전히 초기화 (0x18, 0x08, 0x10 초기화)
+            DX11Base::CancelTengi();
+          }
+        }
+      }
+    }
+
     // 전쟁 자동화 (전쟁 관련 변수 중 하나라도 켜져 있으면 캡처 활성화)
     static bool s_autoCaptureStarted = false;
     bool isAnyWarModActive = bSelfHeal || bDongto || bTerrainIgnore || bDefAtk || bCatapult || bCelestial;
@@ -89,7 +125,7 @@ namespace DX11Base {
         static uint8_t s_lastRealMonth = 0xFF;
 
         uint8_t sysMonth = GetSystemMonthValue(); // 신규 AOB 방식
-        uint8_t realMonth = GetCurrentMonth(); // 기존 RealMonth 방식
+        uint8_t realMonth = GetCurrentMonth();    // 기존 RealMonth 방식
 
         if (sysMonth != s_lastSysMonth || realMonth != s_lastRealMonth) {
           if (sysMonth > 0 || realMonth > 0) {
@@ -218,7 +254,7 @@ namespace DX11Base {
         // 2열 레이아웃: 경계선 제거(false) 및 컬럼 너비 최적화
         ImGui::Columns(2, "MainLayout", false);
         static bool s_rescaledMain = false;    // 배율 변경 시 재조정 등을 위해 static 사용
-        ImGui::SetColumnWidth(0, 460 * scale); // 왼쪽 컬럼에 필요한 최소 공간 부여
+        ImGui::SetColumnWidth(0, 410 * scale); // 왼쪽 컬럼 너비 (실제 콘텐츠 폭에 맞게 최소화)
 
         // 왼쪽 컬럼: 내정 및 특수 기능
         MenuSections::DrawCivilianSection(p1, gameBase, scale);
@@ -242,23 +278,23 @@ namespace DX11Base {
       // 하단: 공용 설정 (배속 및 UI 배율 한 줄 통합)
       ImGui::Separator();
       ImGui::Spacing();
-      
+
       ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
       if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {
-          SpeedHack_Update();
-          SaveConfig();
+        SpeedHack_Update();
+        SaveConfig();
       }
       ImGui::PopStyleColor();
 
       ImGui::SameLine();
       ImGui::SetNextItemWidth(120.0f * scale);
       if (ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx")) {
-          SaveConfig();
+        SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"0.1 = 슬로우, 1.0 = 정상, 2.0 = 2배속, 최대 5배속");
-          ImGui::EndTooltip();
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"0.1 = 슬로우, 1.0 = 정상, 2.0 = 2배속, 최대 5배속");
+        ImGui::EndTooltip();
       }
 
       ImGui::SameLine(0, 20.0f * scale);

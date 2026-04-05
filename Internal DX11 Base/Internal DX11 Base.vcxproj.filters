@@ -191,6 +191,9 @@
     <ClInclude Include="Cheats\OfficerData.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\TengiCave.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -335,6 +338,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\OfficerData.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\TengiCave.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

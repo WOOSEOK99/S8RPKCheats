@@ -31,6 +31,7 @@
 #include "Cheats/Techpointcave.h"
 #include "Cheats/SystemMonth.h"
 #include "Cheats/Terrainignore.h"
+#include "Cheats/TengiCave.h"
 
 namespace DX11Base {
   extern HMODULE g_hModule;
@@ -99,7 +100,8 @@ namespace DX11Base {
                                     {"bMonitorRonin", u8"낭인 상시 감시", &bMonitorRonin, nullptr, nullptr, false},
                                     {"bAutoLoadMenu", u8"시작 시 설정 로드", &bAutoLoadMenu, nullptr, nullptr, false},
                                     {"bZeroInfamy", u8"매턴 악명 0", &bZeroInfamy, nullptr, nullptr, false},
-                                    {"bSpeedHack", u8"배속 기능", &bSpeedHack, nullptr, nullptr, false}};
+                                    {"bSpeedHack", u8"배속 기능", &bSpeedHack, nullptr, nullptr, false},
+                                    {"bCancelCastleEvent", u8"중지 성성 취소", &bCancelCastleEvent, nullptr, nullptr, false}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];
@@ -197,6 +199,13 @@ namespace DX11Base {
         SetMonthCapture(true);
         InstallSystemMonthHook(); // 신규 AOB 방식 시스템 월 후킹
         s_appMonthCapture = true;
+    }
+
+    // 전기 발생 캡처 (상시 활성화, 지연 로딩)
+    static bool s_appTengiCapture = false;
+    if (!s_appTengiCapture) {
+        SetTengiCapture(true);
+        s_appTengiCapture = true;
     }
 
     // 추가적인 안전장치: p1이 가리키는 메모리가 최소한의 유효성을 가지는지 확인

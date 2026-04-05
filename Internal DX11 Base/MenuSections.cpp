@@ -19,13 +19,13 @@
 #include "Cheats/SpeedHack.h"
 #include "Cheats/Techpointcave.h"
 #include "Cheats/Techzero.h"
+#include "Cheats/TengiCave.h"
 #include "Cheats/Terrainignore.h"
 #include "Config.h"
 #include "MenuState.h"
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
-
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -38,6 +38,29 @@ namespace DX11Base {
 
 namespace DX11Base {
   namespace MenuSections {
+
+    // ── 섹션 테두리 헬퍼 ──────────────────────────────────────────
+    // 사용법: BeginSection() → 위젯들 → EndSection(padding)
+    static void BeginSection() {
+      ImGui::Spacing();
+      ImGui::BeginGroup();
+      // 컬럼 너비 끝까지 채워서 테두리 오른쪽을 컬럼 경계에 맞춤
+      ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 0));
+    }
+
+    static void EndSection(float pad = 6.0f) {
+      ImGui::EndGroup();
+      ImVec2 min = ImGui::GetItemRectMin();
+      ImVec2 max = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddRect(ImVec2(min.x - pad, min.y - pad), ImVec2(max.x + pad, max.y + pad),
+                                          IM_COL32(255, 165, 0, 140), // 주황 계열 반투명
+                                          8.0f,                       // 둥근 반경
+                                          0,                          // flags
+                                          1.2f                        // 두께
+      );
+      ImGui::Spacing();
+    }
+    // ─────────────────────────────────────────────────────────────
 
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
                      float scale) {
@@ -99,6 +122,7 @@ namespace DX11Base {
 
     void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       if (p1) {
+        BeginSection();
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 자원 및 도시 활동 ]");
         DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
         DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
@@ -139,6 +163,9 @@ namespace DX11Base {
         if (ImGui::IsItemHovered())
           ImGui::SetTooltip(u8"도시에서 견문을 1회만 해도 민심 수치가 100이 됩니다.");
 
+        EndSection();
+
+        BeginSection();
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 명성치 편집 ]");
         DrawStatRow(u8"무명", 0x106, 2, &v_RepM, p1, gameBase, scale);
         DrawStatRow(u8"문명", 0x104, 2, &v_RepL, p1, gameBase, scale);
@@ -148,22 +175,85 @@ namespace DX11Base {
           SaveConfig();
         }
 
+        EndSection();
+
+        BeginSection();
         ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 및 진급 관련 ]");
         DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP, p1, gameBase, scale);
         DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
         DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
+
+        ImGui::Spacing();
+        if (ImGui::Checkbox(u8"무한 전기 발생", &bInfTengi)) {
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetTooltip(u8"매 평정 마다 새로운 전기가 발생합니다.");
+          ImGui::SetTooltip(u8"이미 전기가 발생 중이었다면, 전기 발생이 끝난뒤부터 적용됩니다.");
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetTooltip(u8"중지 성성이 발생하면 즉시 취소합니다.");
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button(u8"전기발생 취소")) {
+          // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)
+          if (DX11Base::GetCapturedTengiAddr() != 0) {
+            DX11Base::CancelTengi();
+            DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
+          }
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetTooltip(u8"작동 시 즉시 전기 발생을 취소합니다.");
+        }
+
+        // 훅/캡처 상태를 로그로 출력 (상태 변경 시 1회만)
+        {
+          static uintptr_t s_lastHookAddr = 0;
+          static uintptr_t s_lastCaptAddr = 0;
+          uintptr_t hookAddr = DX11Base::GetTengiHookAddr();
+          uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
+
+          if (hookAddr != s_lastHookAddr) {
+            if (hookAddr == 0) {
+              DX11Base::AddLog(u8"[전기] 훅 지점 탐색 중...");
+            } else {
+              DX11Base::AddLog(u8"[전기] 훅 지점 발견: %p (+0x%llX)", (void *)hookAddr,
+                               (unsigned long long)DX11Base::GetTengiHookOffset());
+            }
+            s_lastHookAddr = hookAddr;
+          }
+
+          if (captAddr != s_lastCaptAddr) {
+            if (captAddr == 0) {
+              DX11Base::AddLog(u8"[전기] 캡처 주소 초기화됨 (평정 진행 후 다시 캡처 필요)");
+            } else {
+              DX11Base::AddLog(u8"[전기] 캡처 주소 확보: %p", (void *)captAddr);
+            }
+            s_lastCaptAddr = captAddr;
+          }
+        }
+        EndSection(); // 평정 및 진급
       }
 
+      BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
       DrawStatRow(u8"담력", 0x5BB8, 4, &v_Brave, 0, gameBase, scale);
       if (ImGui::Checkbox(u8"[보주] 보주 교체 무제한", &bFastJewel))
         SaveConfig();
+      EndSection(); // 보주 설정
 
-      // [ 무장 정보 ] 섹션 신규 추가 (사용자 요청)
-      ImGui::Spacing();
+      BeginSection();
       ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
 
-      float btnWidth = 138.0f * scale; // 컬럼 침범을 막기 위해 너비를 약간 축소
+      float btnWidth = 105.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
       float btnHeight = 26.0f * scale;
 
       if (ImGui::Button(u8"모든 무장 정보", ImVec2(btnWidth, btnHeight))) {
@@ -177,9 +267,11 @@ namespace DX11Base {
       if (ImGui::Button(u8"선택 무장 정보", ImVec2(btnWidth, btnHeight))) {
         bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
       }
+      EndSection(); // 무장 정보
     }
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
+      BeginSection();
       ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 결혼/인연 관련 ]");
 
       bool wasRunning = ::DX11Base::g_initThreadRunning;
@@ -275,9 +367,11 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1, 0, 0, 1), u8"대신 타 세력의 경우 등용은 안되네요.");
         ImGui::EndTooltip();
       }
+      EndSection(); // 결혼/인연
     }
 
     void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale) {
+      BeginSection();
       ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 전쟁 관련 ]");
 
       if (ImGui::Checkbox(u8"[전법 강화] 치료", &bSelfHeal)) {
@@ -378,9 +472,11 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
         ImGui::EndTooltip();
       }
+      EndSection(); // 전쟁
     }
 
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
+      BeginSection();
       ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 시나리오 ]");
 
       if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
@@ -402,6 +498,9 @@ namespace DX11Base {
       if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
         SaveConfig();
       }
+
+      // (전기 관련 UI는 '평정 및 진급 관련' 섹션으로 이동됨)
+      EndSection(); // 시나리오
     }
   } // namespace MenuSections
 } // namespace DX11Base
