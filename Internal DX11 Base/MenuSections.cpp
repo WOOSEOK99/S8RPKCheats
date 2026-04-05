@@ -1,5 +1,6 @@
 #include "MenuSections.h"
 #include "Cheats.h"
+#include "Cheats/BattleMapShuffle.h"
 #include "Cheats/Battleunitcapture.h"
 #include "Cheats/Bigcityconvert.h"
 #include "Cheats/Catapult.h"
@@ -15,16 +16,16 @@
 #include "Cheats/Resonancecave.h"
 #include "Cheats/Roadblock.h"
 #include "Cheats/Selfheal.h"
+#include "Cheats/SpeedHack.h"
 #include "Cheats/Techpointcave.h"
 #include "Cheats/Techzero.h"
 #include "Cheats/Terrainignore.h"
-#include "Cheats/SpeedHack.h"
-#include "Cheats/BattleMapShuffle.h"
 #include "Config.h"
 #include "MenuState.h"
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
+
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -367,15 +368,15 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"평정 시 전투맵 랜덤 셔플", &bBattleMapShuffle)) {
-          DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
-          SaveConfig();
+      if (ImGui::Checkbox(u8"전투맵 랜덤(관문제외)", &bBattleMapShuffle)) {
+        DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
+        SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextUnformatted(u8"매 분기 평정(Council) 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
-          ImGui::EndTooltip();
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"매 분기 평정(Council) 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
+        ImGui::EndTooltip();
       }
     }
 
@@ -399,7 +400,7 @@ namespace DX11Base {
       }
 
       if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
-          SaveConfig();
+        SaveConfig();
       }
     }
   } // namespace MenuSections
