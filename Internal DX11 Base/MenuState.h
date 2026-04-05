@@ -56,6 +56,9 @@ namespace DX11Base {
   extern bool bMonitorRonin;
   extern bool bInfTengi;         // 2026-04-05 무한 전기
   extern bool bCancelCastleEvent;// 2026-04-05 중지 성성 취소
+  extern bool bSkillCondition;   // 만병 습득 조건 해제
+  extern bool bYumokCondition;   // 유목기병 습득 조건 해제
+  extern bool bSangbyeongCondition; // 상병 습득 조건 해제
   extern bool bSpeedHack;        // 2026-04-04 배속
   extern float g_speedMultiplier; // 2026-04-04 배속 배율 (0.1x ~ 5.0x)
 

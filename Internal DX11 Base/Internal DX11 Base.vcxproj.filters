@@ -194,6 +194,9 @@
     <ClInclude Include="Cheats\TengiCave.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\SkillCondition.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -341,6 +344,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\TengiCave.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\SkillCondition.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -16,6 +16,7 @@
 #include "Cheats/Resonancecave.h"
 #include "Cheats/Roadblock.h"
 #include "Cheats/Selfheal.h"
+#include "Cheats/SkillCondition.h"
 #include "Cheats/SpeedHack.h"
 #include "Cheats/Techpointcave.h"
 #include "Cheats/Techzero.h"
@@ -161,8 +162,7 @@ namespace DX11Base {
           SaveConfig();
         }
 
-        if (ImGui::IsItemHovered())
-        {
+        if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"도시에서 견문을 1회만 해도 민심 수치가 100이 됩니다.");
           ImGui::EndTooltip();
@@ -189,7 +189,7 @@ namespace DX11Base {
         DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
 
         ImGui::Spacing();
-        if (ImGui::Checkbox(u8"무한 전기 발생", &bInfTengi)) {
+        if (ImGui::Checkbox(u8"전기 발생 무제한", &bInfTengi)) {
           SaveConfig();
         }
 
@@ -201,7 +201,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::SameLine();
+        ImGui::SameLine(160.0f * scale);
 
         if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
           SaveConfig();
@@ -228,7 +228,48 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"작동 시 즉시 전기 발생을 취소합니다.");
           ImGui::EndTooltip();
         }
-        
+
+        ImGui::Spacing();
+
+        if (ImGui::Checkbox(u8"만병 습득 조건 해제", &bSkillCondition)) {
+          DX11Base::ApplySkillCondition(bSkillCondition);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"만병 특기를 조건 없이 즉시 습득 가능한 상태로 변경합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(160.0f * scale);
+
+        if (ImGui::Checkbox(u8"유목기병 습득 조건 해제", &bYumokCondition)) {
+          DX11Base::ApplyYumokCondition(bYumokCondition);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"유목기병 특기를 조건 없이 즉시 습득 가능한 상태로 변경합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::Spacing();
+
+        if (ImGui::Checkbox(u8"상병 습득 조건 해제", &bSangbyeongCondition)) {
+          DX11Base::ApplySangbyeongCondition(bSangbyeongCondition);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"상병 특기를 조건 없이 즉시 습득 가능한 상태로 변경합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::Spacing();
+
         // 훅/캡처 상태를 로그로 출력 (상태 변경 시 1회만)
         {
           static uintptr_t s_lastHookAddr = 0;
@@ -261,7 +302,7 @@ namespace DX11Base {
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
       DrawStatRow(u8"담력", 0x5BB8, 4, &v_Brave, 0, gameBase, scale);
-      if (ImGui::Checkbox(u8"[보주] 보주 교체 무제한", &bFastJewel))
+      if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel))
         SaveConfig();
       EndSection(); // 보주 설정
 
@@ -287,7 +328,7 @@ namespace DX11Base {
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       BeginSection();
-      ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 결혼/인연 관련 ]");
+      ImGui::TextColored(ImVec4(0.5f, 0.0f, 0.5f, 1.0f), u8"[ 결혼/인연 관련 ]");
 
       bool wasRunning = ::DX11Base::g_initThreadRunning;
 
@@ -387,7 +428,7 @@ namespace DX11Base {
 
     void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       BeginSection();
-      ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 전쟁 관련 ]");
+      ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.7f, 1.0f), u8"[ 전쟁 관련 ]");
 
       if (ImGui::Checkbox(u8"[전법 강화] 치료", &bSelfHeal)) {
         DX11Base::SetSelfHeal(bSelfHeal);
@@ -448,9 +489,9 @@ namespace DX11Base {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 천계 능력 강화");
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"레벨 1 : 치료 효과 2000 / 광범위");
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"레벨 2 : 치료 효과 3500 / 광범위");
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"레벨 3 : 치료 효과 7000 / 광범위");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"레벨 1 : 치료 효과 2000 / 광범위");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"레벨 2 : 치료 효과 3500 / 광범위");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"레벨 3 : 치료 효과 7000 / 광범위");
         ImGui::EndTooltip();
       }
 
@@ -483,8 +524,9 @@ namespace DX11Base {
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextUnformatted(u8"매 분기 평정(Council) 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"매 분기 평정 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
         ImGui::EndTooltip();
       }
       EndSection(); // 전쟁
@@ -492,7 +534,7 @@ namespace DX11Base {
 
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
       BeginSection();
-      ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 시나리오 ]");
+      ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.0f, 1.0f), u8"[ 시나리오 ]");
 
       if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
         DX11Base::SetTechZero(bTechZero);

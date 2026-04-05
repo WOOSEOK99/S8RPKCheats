@@ -32,6 +32,7 @@
 #include "Cheats/SystemMonth.h"
 #include "Cheats/Terrainignore.h"
 #include "Cheats/TengiCave.h"
+#include "Cheats/SkillCondition.h"
 
 namespace DX11Base {
   extern HMODULE g_hModule;
@@ -72,6 +73,9 @@ namespace DX11Base {
   static bool s_appCelestial = false;
   static bool s_appBattleUnit = false;
   static bool s_appRoadBlock = false;
+  static bool s_appSkillCond = false;
+  static bool s_appYumokCond = false;
+  static bool s_appSangbyeongCond = false;
   static uint64_t s_firstP1Time = 0; // p1 감지 시점 기록용
   static bool s_isReset = true;     // 리셋 완료 상태 기록
 
@@ -97,6 +101,9 @@ namespace DX11Base {
                                     {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false},
                                     {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false},
                                     {"bRoadBlock", u8"전쟁: 진로 방해 무시", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
+                                    {"bSkillCondition", u8"만병 습득 조건 해제", &bSkillCondition, &s_appSkillCond, ApplySkillCondition, false},
+                                    {"bYumokCondition", u8"유목기병 습득 조건 해제", &bYumokCondition, &s_appYumokCond, ApplyYumokCondition, false},
+                                    {"bSangbyeongCondition", u8"상병 습득 조건 해제", &bSangbyeongCondition, &s_appSangbyeongCond, ApplySangbyeongCondition, false},
                                     {"bMonitorRonin", u8"낭인 상시 감시", &bMonitorRonin, nullptr, nullptr, false},
                                     {"bAutoLoadMenu", u8"시작 시 설정 로드", &bAutoLoadMenu, nullptr, nullptr, false},
                                     {"bZeroInfamy", u8"매턴 악명 0", &bZeroInfamy, nullptr, nullptr, false},
