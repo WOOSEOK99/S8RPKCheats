@@ -1,6 +1,6 @@
 // =============================================================================
 // RoninMonitor.cpp  –  재야 장수 자동 감시 모듈 (독립형)
-// 2026-04-04
+// 2026-04-07
 //
 // [작동 방식]
 //   1. RoninMonitor_Tick(p1)을 Menu::Loops() 백그라운드 스레드에서 매 루프 호출.
@@ -9,299 +9,244 @@
 //        arrayBase = p1 - ((heroID - 1) * 0x3D0)
 //   3. 이후 2초마다 5102명 전수 조사하여 미발견→재야 전환을 감지합니다.
 //   4. RoninMonitor_Draw()를 Engine.cpp 렌더링 루프에서 호출해 알림창을 그립니다.
-//
-// [롤백 방법]
-//   - 이 파일(.h/.cpp) 삭제
-//   - Menu.cpp 호출 1줄, Engine.cpp 호출 1줄 주석 처리
-//   - SelectOfficercapture.cpp, Config.cpp 에 손댄 것이 없으므로 완전 복구됨.
 // =============================================================================
 
 #include "RoninMonitor.h"
-#include "BattleMonitor.h" // IsInBattle()
-#include "Cheats.h"        // GetGameBase(), IsValidPtr(), bMonitorRonin
-#include "CityData.h"      // g_CityList, g_CityCount
-#include "Config.h"        // IsConfigReady()
+#include "BattleMonitor.h"   // IsInBattle()
+#include "Cheats.h"          // GetGameBase(), IsValidPtr(), bMonitorRonin
+#include "Config.h"          // IsConfigReady()
+#include "OfficerData.h"     // g_officerNames
+#include "CityData.h"        // g_CityList, g_CityCount
+#include "MenuState.h"       // bMonitorRonin
+#include "showlog.h"         // AddLog()
 #include "Framework/imgui.h"
-#include "MenuState.h"   // bMonitorRonin
-#include "OfficerData.h" // g_officerNames
 #include "pch.h"
-#include "showlog.h" // AddLog()
 
+#include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <windows.h>
 
 namespace DX11Base {
 
-  // ---------------------------------------------------------------------------
-  // 내부 전용 상태 변수 (외부에서 직접 접근 불가)
-  // ---------------------------------------------------------------------------
-  namespace {
+namespace {
     struct RoninNotification {
-      std::string name;
-      std::string cityName;
-      float timeRemaining;
+        std::string name;
+        std::string cityName;
+        float       timeRemaining;
     };
 
-    static uintptr_t s_arrayBase = 0;
-    static bool s_baseResolved = false;
+    static uintptr_t                      s_arrayBase    = 0;
+    static bool                           s_baseResolved = false;
+    static bool                           s_initialized  = false;
+
+    // unordered_map 대신 고정 배열 – O(1) 접근, 할당 오버헤드 없음
+    static uint8_t                        s_prevStatuses[5103] = {};
+
+    // Tick(배경)과 Draw(UI)가 공유 – 짧은 잠금으로만 보호
+    static std::mutex                     s_notifMtx;
     static std::vector<RoninNotification> s_notifications;
-    static std::vector<RoninNotification> s_pendingQueue; // 대기열 추가
-    static float s_entryTimer = 0.0f;                     // 등장 간격 조절용 타이머
-  } // namespace
+}
 
-  static bool s_initialized = false;
-  static std::unordered_map<int, uint8_t> s_prevStatuses; // 외부 동기화를 위해 전역 영역으로 이동
+// 외부(수동 조작) 동기화
+void RoninMonitor_UpdatePrevStatus(int id, uint8_t st) {
+    if (id >= 1 && id <= 5102) s_prevStatuses[id] = st;
+}
 
-  // 외부(수동 조작)에서 상태 변경 시 알림 방지를 위한 수동 업데이트 함수
-  void RoninMonitor_UpdatePrevStatus(int officerID, uint8_t newStatus) {
-    s_prevStatuses[officerID] = newStatus;
-  }
+// ---------------------------------------------------------------------------
+static bool TryResolveBase(uintptr_t p1)
+{
+    if (s_baseResolved) return true;
+    if (!p1 || p1 < 0x10000 || !IsValidPtr(p1, 0x10)) return false;
 
-  // ---------------------------------------------------------------------------
-  // 헬퍼: 도시 배열 베이스 주소를 안전하게 획득
-  // ---------------------------------------------------------------------------
-  static uintptr_t GetCityArrayBase() {
-    uintptr_t gameBase = GetGameBase();
-    if (!gameBase)
-      return 0;
-
-    // gameBase + 0xE0 → p1(주인공) → p1+0x0 계열 포인터 체인에서 도시 배열 획득
-    // (이 오프셋은 다른 모듈에서 검증된 0x34C8630 경로를 사용)
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    if (!exeBase)
-      return 0;
-
-    uintptr_t pa = *(uintptr_t *)(exeBase + 0x34C8630);
-    if (!IsValidPtr(pa, 8))
-      return 0;
-    uintptr_t pb = *(uintptr_t *)(pa);
-    if (!IsValidPtr(pb, 8))
-      return 0;
-    uintptr_t cityBase = *(uintptr_t *)(pb);
-    return (cityBase > 0x10000) ? cityBase : 0;
-  }
-
-  // ---------------------------------------------------------------------------
-  // 주인공 포인터(p1)를 이용해 무장 배열 시작점을 딱 한 번 자동 계산
-  // ---------------------------------------------------------------------------
-  static bool TryResolveBase(uintptr_t p1) {
-    if (s_baseResolved)
-      return true;
-    if (!p1 || p1 < 0x10000)
-      return false;
-    if (!IsValidPtr(p1, 0x10))
-      return false;
-
-    unsigned short heroID = *(unsigned short *)(p1 + 0x08);
-    if (heroID == 0 || heroID > 5102)
-      return false;
+    unsigned short heroID = *(unsigned short*)(p1 + 0x08);
+    if (heroID == 0 || heroID > 5102) return false;
 
     uintptr_t candidate = p1 - (uintptr_t)(heroID - 1) * 0x3D0;
+    if (!IsValidPtr(candidate, 0x20)) return false;
 
-    // 간단한 유효성 검증: 1번 무장 주소가 읽히는지 확인
-    if (!IsValidPtr(candidate, 0x20))
-      return false;
-
-    s_arrayBase = candidate;
+    s_arrayBase    = candidate;
     s_baseResolved = true;
-    AddLog(u8"[RoninMonitor] 무장 배열 주소 자동 확보: 0x%llX (주인공 ID %d 기반)", (unsigned long long)s_arrayBase,
-           (int)heroID);
+    AddLog(u8"[RoninMonitor] 무장 배열 확보: 0x%llX (영웅 ID %d)",
+           (unsigned long long)s_arrayBase, (int)heroID);
     return true;
-  }
+}
 
-  // ---------------------------------------------------------------------------
-  // RoninMonitor_Tick  –  백그라운드 루프에서 호출 (Menu::Loops)
-  // ---------------------------------------------------------------------------
-  void RoninMonitor_Tick(uintptr_t p1) {
-    // ① 모니터링 옵션이 꺼져 있으면 상태 초기화 후 종료
+// ---------------------------------------------------------------------------
+// Tick – 백그라운드 스레드
+// ---------------------------------------------------------------------------
+void RoninMonitor_Tick(uintptr_t p1)
+{
     if (!bMonitorRonin) {
-      s_initialized = false;
-      s_baseResolved = false;
-      s_arrayBase = 0;
-      s_prevStatuses.clear();
-      s_notifications.clear();
-      s_pendingQueue.clear();
-      s_entryTimer = 0.0f;
-      return;
+        s_initialized = s_baseResolved = false;
+        s_arrayBase = 0;
+        memset(s_prevStatuses, 0, sizeof(s_prevStatuses));
+        { std::lock_guard<std::mutex> lk(s_notifMtx); s_notifications.clear(); }
+        return;
     }
 
-    // p1 이 변경되었다면 (새 게임 시작 또는 세이브 로드), 내부 상태를 리셋하여 다시 주소를 확보하도록 합니다.
-    static uintptr_t s_lastP1 = 0;
-    if (p1 != s_lastP1) {
-      s_lastP1 = p1;
-      s_baseResolved = false;
-      s_arrayBase = 0;
-      s_initialized = false;
-      s_prevStatuses.clear();
-      s_notifications.clear();
-      s_pendingQueue.clear();
-      s_entryTimer = 0.0f;
-      AddLog(u8"[RoninMonitor] 주인공 포인터 변경 감지. 모니터링 상태 초기화.");
+    if (IsInBattle()) return;
+    if (!IsConfigReady()) {
+        static bool s_warnedConfig = false;
+        if (!s_warnedConfig) { s_warnedConfig = true; AddLog(u8"[RoninMonitor] IsConfigReady=false, 대기 중..."); }
+        return;
+    }
+    if (!TryResolveBase(p1)) {
+        static bool s_warnedBase = false;
+        if (!s_warnedBase) { s_warnedBase = true; AddLog(u8"[RoninMonitor] TryResolveBase 실패 (p1=0x%llX)", (unsigned long long)p1); }
+        return;
     }
 
-    // ② 전투 중이면 모니터링 건너뛰기
-    if (IsInBattle())
-      return;
-
-    // ③ Config 3초 지연 미통과 시 대기
-    if (!IsConfigReady())
-      return;
-
-    // ④ 주소 미확보 시 계산 시도
-    if (!TryResolveBase(p1))
-      return;
-
-    // ④ 2초 주기 체크
-    static uint64_t s_lastCheck = 0;
+    static uint64_t s_last = 0;
     uint64_t now = GetTickCount64();
-    if (now - s_lastCheck < 2000)
-      return;
-    s_lastCheck = now;
+    if (now - s_last < 2000) return;
+    s_last = now;
+
+    AddLog(u8"[RoninMonitor] 스캔 시작...");
+
+    // 전수 조사 – 4KB 페이지 단위 유효성 체크 (~50회 vs 5102회)
+    std::vector<RoninNotification> found;
 
     // ⑤ 도시 배열 주소 획득
-    uintptr_t cityBase = GetCityArrayBase();
+    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+    uintptr_t cityBase = 0;
+    if (exeBase) {
+      uintptr_t p1 = *(uintptr_t*)(exeBase + 0x34C8630);
+      if (IsValidPtr(p1, 8)) {
+          uintptr_t p2 = *(uintptr_t*)(p1);
+          if (IsValidPtr(p2, 8)) {
+              cityBase = *(uintptr_t*)(p2);
+          }
+      }
+    }
 
-    // ⑥ 전수 조사
     uintptr_t lastPage = 0;
-    bool lastPageValid = false;
+    bool      pageOk   = false;
 
     for (int i = 1; i <= 5102; i++) {
-      uintptr_t addr = s_arrayBase + (uintptr_t)(i - 1) * 0x3D0;
-
-      // 메모리 페이지(4KB) 단위로만 유효성 검사를 수행하여 5000번 호출되는 부하(프리징)를 방지
-      uintptr_t page = addr & ~0xFFFull;
-      if (page != lastPage) {
-        lastPage = page;
-        lastPageValid = IsValidPtr(page, 0x1000);
-      }
-
-      if (!lastPageValid)
-        continue;
-
-      uint8_t status = *(uint8_t *)(addr + 0x10);
-
-      if (s_initialized) {
-        uint8_t prev = s_prevStatuses[i];
-        // 미발견(0x68, 0x78) → 재야(0x58) 전환 감지
-        if ((prev == 0x68 || prev == 0x78) && status == 0x58) {
-          std::string name = g_officerNames.count(i) ? g_officerNames[i] : u8"알 수 없는 무장";
-
-          std::string city = u8"알 수 없는 장소";
-          if (cityBase) {
-            uintptr_t cityPtr = *(uintptr_t *)(addr + 0x20);
-            if (cityPtr >= cityBase) {
-              int idx = (int)((cityPtr - cityBase) / 0x2A0);
-              if (idx >= 0 && idx < g_CityCount)
-                city = g_CityList[idx].cityname;
-            }
-          }
-
-          // 대기열에 추가 (화면 폭주 방지를 위해 큐에 쌓아둠)
-          s_pendingQueue.push_back({name, city, 12.0f});
-          AddLog(u8"[재야 대기열] %s → %s (현재 대기: %d명)", name.c_str(), city.c_str(), (int)s_pendingQueue.size());
+        uintptr_t addr = s_arrayBase + (uintptr_t)(i - 1) * 0x3D0;
+        uintptr_t page = addr & ~0xFFFull;
+        if (page != lastPage) { 
+            lastPage = page; 
+            pageOk = IsValidPtr(page, 0x1000); 
         }
-      }
-      s_prevStatuses[i] = status;
+        if (!pageOk) continue;
+
+        // 경계 교차 시 다음 페이지만 한 번 더 검사 (O(1) 최적화)
+        if ((addr + 0x60) > (page + 0xFFF)) {
+            if (!IsValidPtr(page + 0x1000, 0x1000)) continue;
+        }
+
+        uint8_t cur  = *(uint8_t*)(addr + 0x10);
+        uint8_t prev = s_prevStatuses[i];
+        s_prevStatuses[i] = cur;
+
+        // 어떤 상태에서든 재야(0x58)로 바뀌면 감지 (미발견, 사망, 재직 등 포함)
+        if (s_initialized && prev != 0x58 && cur == 0x58 && g_officerNames.count(i))
+        {
+            std::string city = u8"알 수 없는 장소";
+            if (cityBase > 0x10000) {
+                uintptr_t cityPtr = *(uintptr_t*)(addr + 0x20);
+                if (cityPtr >= cityBase) {
+                    int idx = (int)((cityPtr - cityBase) / 0x2A0);
+                    if (idx >= 0 && idx < g_CityCount) {
+                        city = g_CityList[idx].cityname;
+                    }
+                }
+            }
+
+            found.push_back({g_officerNames[i], city, 12.f});
+        }
     }
     s_initialized = true;
-  }
 
-  // ---------------------------------------------------------------------------
-  // RoninMonitor_Draw  –  렌더링 루프에서 호출 (Engine.cpp)
-  // ---------------------------------------------------------------------------
-  void RoninMonitor_Draw() {
-    if (!bMonitorRonin)
-      return;
+    // 알림 목록에 추가 + 로그 – 잠금 해제 후 AddLog (데드락 방지)
+    if (!found.empty()) {
+        {
+            std::lock_guard<std::mutex> lk(s_notifMtx);
+            for (auto& f : found)
+                if ((int)s_notifications.size() < 10)
+                    s_notifications.push_back(f);
+        }
+        for (auto& f : found)
+            AddLog(u8"[재야 감지] %s → %s", f.name.c_str(), f.cityName.c_str());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Draw – UI 스레드
+// ---------------------------------------------------------------------------
+void RoninMonitor_Draw()
+{
+    if (!bMonitorRonin) return;
 
     float dt = ImGui::GetIO().DeltaTime;
-
-    // ① 먼저 모든 알림의 타이머를 업데이트하고 만료된 항목 제거 (Style Push 전에 수행)
-    for (auto it = s_notifications.begin(); it != s_notifications.end();) {
-      it->timeRemaining -= dt;
-      if (it->timeRemaining <= 0.0f) {
-        it = s_notifications.erase(it);
-      } else {
-        ++it;
-      }
+    if (dt > 0.1f) dt = 0.1f; // 프리징 후 dt 스파이크로 알림 즉시 만료 방지
+    std::vector<RoninNotification> snap;
+    {
+        std::lock_guard<std::mutex> lk(s_notifMtx);
+        for (auto& n : s_notifications) n.timeRemaining -= dt;
+        s_notifications.erase(
+            std::remove_if(s_notifications.begin(), s_notifications.end(),
+                           [](const RoninNotification& n){ return n.timeRemaining <= 0.f; }),
+            s_notifications.end());
+        snap = s_notifications;
     }
 
-    if (s_notifications.empty() && s_pendingQueue.empty()) {
-      s_entryTimer = 0.0f;
-      return;
-    }
+    if (snap.empty()) return;
 
-    // ② 대기열 → 활성 목록 이동 (시간차 등장 로직)
-    s_entryTimer += dt;
-    if (s_notifications.size() < 10 && !s_pendingQueue.empty()) {
-      if (s_entryTimer >= 0.4f) { // 0.4초마다 한 명씩 추가
-        s_notifications.push_back(s_pendingQueue.front());
-        s_pendingQueue.erase(s_pendingQueue.begin());
-        s_entryTimer = 0.0f;
-      }
-    }
+    float  sc   = ImGui::GetIO().FontGlobalScale;
+    ImVec2 disp = ImGui::GetIO().DisplaySize;
 
-    if (s_notifications.empty())
-      return;
+    ImGui::SetNextWindowPos(ImVec2(disp.x - 20.f, disp.y * 0.12f),
+                            ImGuiCond_Always, ImVec2(1.f, 0.f));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.f, 0.f, 0.f, 0.98f));
+    ImGui::PushStyleColor(ImGuiCol_Border,   ImVec4(1.f, 0.84f, 0.f, 1.f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding,   8.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 3.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,    ImVec2(30.f, 20.f));
 
-    // --- [ 스타일 설정: 여기서부터 Push ] ---
-    float scale = ImGui::GetIO().FontGlobalScale;
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.98f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.84f, 0.0f, 1.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 3.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(30.0f * scale, 20.0f * scale));
+    constexpr ImGuiWindowFlags kF =
+        ImGuiWindowFlags_NoDecoration     | ImGuiWindowFlags_AlwaysAutoResize  |
+        ImGuiWindowFlags_NoSavedSettings  | ImGuiWindowFlags_NoFocusOnAppearing|
+        ImGuiWindowFlags_NoNav            | ImGuiWindowFlags_NoMove;
 
-    ImVec2 screen = ImGui::GetIO().DisplaySize;
-    ImGui::SetNextWindowPos(ImVec2(screen.x - 20.0f, screen.y * 0.12f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-
-    constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
-
-    if (ImGui::Begin("##RoninMonitorNotif", nullptr, kFlags)) {
-      ImGui::SetWindowFontScale(1.6f * scale);
-
-      // --- [ 타이틀: 한 번만 표시 ] ---
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.84f, 0.0f, 1.0f));
-      ImGui::Text(u8" 재야 장수 등장!!");
-      ImGui::PopStyleColor();
-      ImGui::Separator();
-
-      // --- [ 내부 목록 구성: 표 형식 ] ---
-      if (ImGui::BeginTable("##RoninTable", 2, ImGuiTableFlags_SizingFixedFit)) {
-        // 헤더 설정 (사용자가 요청한 이름 | 도시 형식)
-        ImGui::TableSetupColumn(u8"이름", ImGuiTableColumnFlags_WidthFixed, 140.0f * scale);
-        ImGui::TableSetupColumn(u8"도시", ImGuiTableColumnFlags_WidthFixed, 100.0f * scale);
-
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), u8"이름");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), u8"    도시");
-
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
+    if (ImGui::Begin("##RoninMonitorNotif", nullptr, kF)) {
+        ImGui::SetWindowFontScale(1.8f);
+        
+        // 헤더 1회 출력
         ImGui::Separator();
-        ImGui::TableSetColumnIndex(1);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 1.f, 0.6f, 1.f));
+        ImGui::Text(u8" [ 재야 장수 발견!! ]");
+        ImGui::PopStyleColor();
         ImGui::Separator();
 
-        // 데이터 행 출력
-        for (const auto &notif : s_notifications) {
-          ImGui::TableNextRow();
-          ImGui::TableSetColumnIndex(0);
-          ImGui::TextColored(ImVec4(0.3f, 1.0f, 1.0f, 1.0f), u8"%s", notif.name.c_str());
+        // 테이블 형태로 무장 목록 출력
+        if (ImGui::BeginTable("##RoninTable", 2, ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn(u8"이름", ImGuiTableColumnFlags_WidthFixed, 130.f * sc);
+            ImGui::TableSetupColumn(u8"도시", ImGuiTableColumnFlags_WidthFixed, 90.f * sc);
+            
+            // 테이블 헤더 (이름        도시)
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.f), u8"이름");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.f), u8"도시");
 
-          ImGui::TableSetColumnIndex(1);
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.6f, 1.0f), u8"    %s", notif.cityName.c_str());
+            // 데이터 행
+            for (auto& n : snap) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextColored(ImVec4(0.3f, 1.f, 1.f, 1.f), u8"%s", n.name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextColored(ImVec4(1.f, 1.f, 0.6f, 1.f), u8"%s", n.cityName.c_str());
+            }
+            ImGui::EndTable();
         }
-        ImGui::EndTable();
-      }
     }
     ImGui::End();
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
-  }
+}
 
 } // namespace DX11Base

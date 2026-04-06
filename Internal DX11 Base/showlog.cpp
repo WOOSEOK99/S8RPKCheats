@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-
 #include <chrono>
 #include <fstream>
 #include <iomanip>
@@ -44,16 +43,16 @@ namespace DX11Base {
     float scale = ImGui::GetIO().FontGlobalScale;
 
     // 2. 제목 출력
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f)); // 노란색
-    ImGui::Text(u8"실행 로그");
-    ImGui::PopStyleColor();
+    // ImGui::Spacing();
+    // ImGui::Separator();
+    // ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f)); // 노란색
+    // ImGui::Text(u8"실행 로그");
+    // ImGui::PopStyleColor();
 
     // 3. 로그 창 너비와 높이 결정
     // 너비 0은 현재 사용 가능한 가로 폭 전체를 채웁니다 (정렬된 버튼 라인에 맞춰짐)
     // 높이는 배율에 맞게 조절 (기본 150 * scale 정도면 적당합니다)
-    float logWindowHeight = 150.0f * scale;
+    float logWindowHeight = 300.0f * scale;
 
     ImGui::BeginChild("LoveLogWindow", ImVec2(0, logWindowHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -81,7 +80,7 @@ namespace DX11Base {
   std::string GetFullLogs() {
     std::lock_guard<std::mutex> lock(g_logMutex);
     std::string fullLog;
-    for (const auto& log : g_loveLogs) {
+    for (const auto &log : g_loveLogs) {
       fullLog += log + "\n";
     }
     return fullLog;

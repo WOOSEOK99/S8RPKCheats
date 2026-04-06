@@ -191,6 +191,7 @@ namespace DX11Base {
       RosterStats s = SafeReadRosterStats(targetBase);
       if (s.valid && s.id_08 == targetID) {
         patchFunc(targetBase);
+        break; // [최적화] 대상을 찾았으면 남은 5000여 번의 루프를 종료합니다.
       }
     }
   }
@@ -343,7 +344,11 @@ namespace DX11Base {
           }
           if (heroBase && heroBase > 0x10000) {
             uintptr_t heroCorpsVal = *(uintptr_t *)(heroBase + 0x20);
-            *(uintptr_t *)(pBase + 0x20) = heroCorpsVal;
+            DWORD oldP;
+            if (VirtualProtect((LPVOID)(pBase + 0x20), 8, PAGE_READWRITE, &oldP)) {
+              *(uintptr_t *)(pBase + 0x20) = heroCorpsVal;
+              VirtualProtect((LPVOID)(pBase + 0x20), 8, oldP, &oldP);
+            }
           }
 
           // [패치] 현재 가로챈 객체(UI용)와 마스터 배열 내의 원본을 동시에 수정
@@ -352,6 +357,16 @@ namespace DX11Base {
             ModifyStat(base, 0x36, 255, 2);  // 몰년: 수명 연장
             ModifyStat(base, 0xEE, 200, 1);  // 행동력
             ModifyStat(base, 0x374, 0, 4);   // 사망 플래그 제거
+            if (heroBase && heroBase > 0x10000) {
+              uintptr_t heroCorpsVal = *(uintptr_t *)(heroBase + 0x20);
+              if (heroCorpsVal) {
+                DWORD oldP;
+                if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP)) {
+                  *(uintptr_t *)(base + 0x20) = heroCorpsVal;
+                  VirtualProtect((LPVOID)(base + 0x20), 8, oldP, &oldP);
+                }
+              }
+            }
           };
 
           PatchStatus(pBase);
@@ -401,7 +416,11 @@ namespace DX11Base {
           }
           if (cityArrayBase && cityArrayBase > 0x10000) {
             uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
-            *(uintptr_t *)(pBase + 0x20) = targetAddr;
+            DWORD oldP;
+            if (VirtualProtect((LPVOID)(pBase + 0x20), 8, PAGE_READWRITE, &oldP)) {
+              *(uintptr_t *)(pBase + 0x20) = targetAddr;
+              VirtualProtect((LPVOID)(pBase + 0x20), 8, oldP, &oldP);
+            }
 
             // [패치] 현재 가로챈 객체(UI용)와 마스터 배열 내의 원본을 동시에 수정
             auto PatchStatus = [&](uintptr_t base) {
@@ -409,7 +428,11 @@ namespace DX11Base {
               ModifyStat(base, 0x36, 255, 2);           // 몰년: 수명 연장
               ModifyStat(base, 0xEE, 200, 1);           // 행동력
               ModifyStat(base, 0x374, 0, 4);            // 사망 플래그 제거
-              *(uintptr_t *)(base + 0x20) = targetAddr; // 소속 군단 주소 (도시 주소)
+              DWORD oldP2;
+              if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP2)) {
+                *(uintptr_t *)(base + 0x20) = targetAddr;
+                VirtualProtect((LPVOID)(base + 0x20), 8, oldP2, &oldP2);
+              }
             };
 
             PatchStatus(pBase);
@@ -475,7 +498,9 @@ namespace DX11Base {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
         if (ImGui::Button(u8"재야", ImVec2(0, 24 * scale))) {
           unsigned short pBaseID = *(unsigned short *)(pBase + 0x08);
-          auto patchRonin = [&](uintptr_t base) { ModifyStat(base, 0x10, 0x58, 1); };
+          auto patchRonin = [&](uintptr_t base) { 
+            ModifyStat(base, 0x10, 0x58, 1); 
+          };
           patchRonin(pBase);
           PatchMasterData(pBaseID, patchRonin);
           s_triggerReselection = true;
@@ -666,7 +691,6 @@ namespace DX11Base {
               unsigned char vByte = *(unsigned char *)(targetBase + 0x10);
               if (vByte == 0x68 || vByte == 0x78) {
                 ModifyStatFast(targetBase + 0x10, 0x58, 1);
-                RoninMonitor_UpdatePrevStatus(currentID, 0x58); // 모니터 알림 방지 동기화
                 count++;
               }
             }
@@ -693,7 +717,6 @@ namespace DX11Base {
                 unsigned short currentID = *(unsigned short *)(targetBase + 0x08);
                 if (s_selectedOfficerIDs.count(currentID)) {
                   ModifyStatFast(targetBase + 0x10, 0x58, 1);
-                  RoninMonitor_UpdatePrevStatus(currentID, 0x58); // 모니터 알림 방지 동기화
                   count++;
                 }
               }
