@@ -6,8 +6,8 @@
 #include "MenuState.h"
 #include "OfficerData.h"
 #include "OfficerDetail.h"
-#include "pch.h"
 #include "RoninMonitor.h" // 알림 동기화용 추가
+#include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
 #include <filesystem>
@@ -20,6 +20,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <windows.h>
+
 
 namespace DX11Base {
   extern HMODULE g_hModule;
@@ -45,8 +46,8 @@ namespace DX11Base {
   // --- [목록 필터 및 전역 상태 공유용] ---
   static uintptr_t s_stableArrayBase = 0;
   static uintptr_t s_lastCapturedByUI = 0;
-  static int s_currentFilter = -1;          // -1: 전부, 0x18: 일반, 0x28: 태수, 0x58: 재야, 0x68: 미발견, 0x88: 사망
-  static bool s_triggerReselection = false; // [UX] 무장 상태 변경 시 자동으로 다음 무장 선택 여부
+  static int s_currentFilter = -1; // -1: 전부, 0x18: 일반, 0x28: 태수, 0x58: 재야, 0x68: 미발견, 0x88: 사망, 0x98: NCP
+  static bool s_triggerReselection = false;            // [UX] 무장 상태 변경 시 자동으로 다음 무장 선택 여부
   static std::unordered_set<int> s_selectedOfficerIDs; // 다중 선택용 보관함
   static std::vector<int> s_filteredIndices;           // 현재 필터링된 무장 인덱스들
 
@@ -309,6 +310,10 @@ namespace DX11Base {
       case 0xC8:
         stateStr = u8"군주";
         stateColor = ImVec4(1.0f, 0.0f, 1.0f, 1.0f);
+        break;
+      case 0x98:
+        stateStr = u8"NPC";
+        stateColor = ImVec4(0.7f, 0.7f, 1.0f, 1.0f); // 연보라색 계열
         break;
       default:
         static char fallbackStr[32];
@@ -903,7 +908,7 @@ namespace DX11Base {
       // 필터 버튼 오른쪽 정렬
       {
         const char *filterLabels[] = {u8"군사", u8"일반",   u8"태수", u8"도독", u8"군주",
-                                      u8"재야", u8"미발견", u8"사망", u8"전부"};
+                                      u8"재야", u8"미발견", u8"사망", u8"NPC",  u8"전부"};
         float spacing = ImGui::GetStyle().ItemSpacing.x;
         float fp = ImGui::GetStyle().FramePadding.x;
         float totalW = 0.0f;
@@ -946,6 +951,8 @@ namespace DX11Base {
       DrawFilterButton(u8"미발견", 0x68);
       ImGui::SameLine();
       DrawFilterButton(u8"사망", 0x88);
+      ImGui::SameLine();
+      DrawFilterButton(u8"NPC", 0x98);
       ImGui::SameLine();
       DrawFilterButton(u8"전부", -1);
 
@@ -1021,14 +1028,14 @@ namespace DX11Base {
       // Left Split Pane 너비를 380에서 280으로 축소하여 콤팩트하게 만듭니다.
       ImGui::BeginChild("OfficerListPane", ImVec2(280 * scale, 0), true);
 
-      // 행 높이를 더 촘촘하고 정확하게 조절합니다. (목록이 벌어지는 현상 방지)
-      const float ROW_HEIGHT = ImGui::GetTextLineHeightWithSpacing() + 3.0f;
+      // 행 높이를 별도로 하드코딩하지 않아 클리퍼(Clipper) 스크롤 끝이 잘리지 않게 합니다.
+      const float APPROX_HEIGHT = ImGui::GetTextLineHeightWithSpacing() + 3.0f;
 
       if (ImGui::BeginTable("OfficerListTable", 3,
                             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0, 0))) {
         // 검색 성공 직후: 대략적인 위치로 먼저 이동 (클리퍼가 해당 아이템을 감지할 수 있게 함)
         if (s_scrollToIndex >= 0 && s_scrollToIndex < s_filteredIndices.size()) {
-          ImGui::SetScrollY(s_scrollToIndex * ROW_HEIGHT);
+          ImGui::SetScrollY(s_scrollToIndex * APPROX_HEIGHT);
           g_capturedOfficerBase = arrayBase + (s_filteredIndices[s_scrollToIndex] * 0x3D0);
           s_lastCapturedByUI = g_capturedOfficerBase;
         }
@@ -1040,15 +1047,14 @@ namespace DX11Base {
         ImGui::TableHeadersRow();
 
         ImGuiListClipper clipper;
-        clipper.Begin((int)s_filteredIndices.size(), ROW_HEIGHT); // 고정 높이 전달
+        clipper.Begin((int)s_filteredIndices.size()); // 첫 행을 기반으로 높이 자동 측정
         while (clipper.Step()) {
           for (int row_idx = clipper.DisplayStart; row_idx < clipper.DisplayEnd; row_idx++) {
             int original_idx = s_filteredIndices[row_idx];
             uintptr_t targetBase = arrayBase + (original_idx * 0x3D0);
             int currentID = original_idx + 1; // 1번 장수부터 시작하므로 index에 +1
 
-            // 테이블 행의 높이를 클리퍼 가상 높이와 일치시킵니다.
-            ImGui::TableNextRow(ImGuiTableRowFlags_None, ROW_HEIGHT);
+            ImGui::TableNextRow();            // 강제 제한 풀기
             ImGui::AlignTextToFramePadding(); // 수직 중앙 정렬
 
             if (targetBase > 0x10000) {
@@ -1106,10 +1112,11 @@ namespace DX11Base {
                   s_lastCapturedByUI = targetBase;
                 }
 
-                // [추가] 키보드 방향키 이동 시에도 상세 정보 업데이트
+                // [추가] 키보드 방향키 이동 시에도 상세 정보 업데이트 및 스크롤 추적
                 if (ImGui::IsItemFocused() && g_capturedOfficerBase != targetBase) {
                   g_capturedOfficerBase = targetBase;
                   s_lastCapturedByUI = targetBase;
+                  ImGui::SetScrollHereY(0.5f); // 키보드 네비게이션 시 화면 중앙으로 정렬
                 }
 
                 ImGui::PopID();
