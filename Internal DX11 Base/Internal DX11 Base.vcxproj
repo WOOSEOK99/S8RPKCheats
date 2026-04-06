@@ -209,6 +209,7 @@
     <ClInclude Include="Cheats\SystemMonth.h" />
     <ClInclude Include="Cheats\TengiCave.h" />
     <ClInclude Include="Cheats\SkillCondition.h" />
+    <ClInclude Include="Cheats\FactionLordBonus.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BattleMonitor.cpp" />
@@ -271,6 +272,7 @@
     <ClCompile Include="Cheats\SystemMonth.cpp" />
     <ClCompile Include="Cheats\TengiCave.cpp" />
     <ClCompile Include="Cheats\SkillCondition.cpp" />
+    <ClCompile Include="Cheats\FactionLordBonus.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Hooking\minhook.def" />

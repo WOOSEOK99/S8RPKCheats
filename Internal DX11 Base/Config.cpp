@@ -10,9 +10,11 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 // 치트 기능 헤더들
+#include "Cheats/FactionLordBonus.h"
 #include "Cheats/Battleunitcapture.h"
 #include "Cheats/Bigcityconvert.h"
 #include "Cheats/Catapult.h"
@@ -76,6 +78,7 @@ namespace DX11Base {
   static bool s_appSkillCond = false;
   static bool s_appYumokCond = false;
   static bool s_appSangbyeongCond = false;
+  static bool s_appFactionLordBonus = false;
   static uint64_t s_firstP1Time = 0; // p1 감지 시점 기록용
   static bool s_isReset = true;     // 리셋 완료 상태 기록
 
@@ -104,11 +107,15 @@ namespace DX11Base {
                                     {"bSkillCondition", u8"만병 습득 조건 해제", &bSkillCondition, &s_appSkillCond, ApplySkillCondition, false},
                                     {"bYumokCondition", u8"유목기병 습득 조건 해제", &bYumokCondition, &s_appYumokCond, ApplyYumokCondition, false},
                                     {"bSangbyeongCondition", u8"상병 습득 조건 해제", &bSangbyeongCondition, &s_appSangbyeongCond, ApplySangbyeongCondition, false},
+                                    {"bFactionLordBonus", u8"세력 군주 보너스 자동 배정", &bFactionLordBonus, &s_appFactionLordBonus, SetFactionLordBonus, false},
                                     {"bMonitorRonin", u8"낭인 상시 감시", &bMonitorRonin, nullptr, nullptr, false},
                                     {"bAutoLoadMenu", u8"시작 시 설정 로드", &bAutoLoadMenu, nullptr, nullptr, false},
                                     {"bZeroInfamy", u8"매턴 악명 0", &bZeroInfamy, nullptr, nullptr, false},
                                     {"bSpeedHack", u8"배속 기능", &bSpeedHack, nullptr, nullptr, false},
-                                    {"bCancelCastleEvent", u8"중지 성성 취소", &bCancelCastleEvent, nullptr, nullptr, false}};
+                                    {"bCancelCastleEvent", u8"중지 성성 취소", &bCancelCastleEvent, nullptr, nullptr, false},
+                                    {"bShowWidgetTengi", u8"위젯: 전기발생 취소", &bShowWidgetTengi, nullptr, nullptr, false},
+                                    {"bShowWidgetHero", u8"위젯: 주인공", &bShowWidgetHero, nullptr, nullptr, false},
+                                    {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];

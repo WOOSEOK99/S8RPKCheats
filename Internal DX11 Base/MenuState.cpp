@@ -50,6 +50,7 @@ namespace DX11Base {
   bool bSkillCondition = false;   // 만병 습득 조건 해제
   bool bYumokCondition = false;   // 유목기병 습득 조건 해제
   bool bSangbyeongCondition = false; // 상병 습득 조건 해제
+  bool bFactionLordBonus = false; // 세력 군주 보너스 자동 배정
   bool bCancelTengi = false;      // 2026-04-05 전기발생 취소
   bool bSpeedHack = false;       // 2026-04-04 배속
   float g_speedMultiplier = 2.0f; // 2026-04-04 기본 2배속
@@ -62,6 +63,14 @@ namespace DX11Base {
   bool bBlockClickInMemoryEditor = true;
   bool bIsMenuCollapsed = false;
   bool bAutoLoadMenu = false;
+
+  bool bShowWidgetTengi = false;
+  bool bShowWidgetHero = false;
+  bool bShowWidgetAllOfficers = false;
+
+  bool bForceCenterOfficerDetail = false;
+  bool bForceCenterSelectedOfficer = false;
+  bool bForceCenterOfficerList = false;
 
   // 기타 특수 토글
   bool bZeroInfamy = false;

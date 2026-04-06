@@ -1,13 +1,16 @@
 #include "OfficerDetail.h"
 #include "Cheats.h"
+#include "OfficerData.h"
 #include "SelectOfficercapture.h"
 #include "pch.h"
+#include "Framework/imgui.h"
 #include "showlog.h"
 
 extern ImGuiWindowFlags Flags;
 
 namespace DX11Base {
   bool bShowOfficerDetail = false;
+  extern bool bForceCenterOfficerDetail;
 
   // --- [변수 선언부] ---
   static int v_Lead = 0, v_War = 0, v_Intel = 0, v_Pol = 0, v_Cha = 0;
@@ -35,6 +38,9 @@ namespace DX11Base {
 
   // 주인공(Main) 무장 명성/행동력 변수
   static int v_AP = 0, v_Token = 0, v_Loyalty = 0, v_StrPoint = 0;
+
+  // 주인공 외형/특징 변수
+  static int v_OfficerID = 0, v_ModelNo = 0, v_ModelColor = 0, v_Appear = 0, v_Birth = 0, v_Death = 0;
 
   // uintptr_t는 64비트 주소를 담는 표준 타입입니다.
   uintptr_t v_Talent1 = 0;
@@ -67,7 +73,34 @@ namespace DX11Base {
 
   // --- [공용 헬퍼 함수 1: 수치 행 그리기] ---
   void RenderStatRow(uintptr_t p1, const char *label, uintptr_t offset, int size, int *inputVal, float scale) {
-    if (p1 > 0x10000) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+ 
+    ImGui::TableNextColumn();
+    ImGui::PushID(label);
+    
+    // 1. [-] 버튼
+    if (ImGui::Button("-", ImVec2(25 * scale, 25 * scale))) {
+      (*inputVal)--;
+      DX11Base::ModifyStat(p1, offset, *inputVal, size);
+    }
+    ImGui::SameLine();
+ 
+    // 2. 직접 입력 가능한 수치 박스 (InputInt)
+    ImGui::SetNextItemWidth(70 * scale);
+    // EnterReturnsTrue를 제거하여 자판 입력 시 즉시 변수에 반영되도록 함 (숫자만 입력 가능하도록 플래그 추가)
+    ImGui::InputInt("##val", inputVal, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+    
+    // 포커스를 잃거나 Enter를 쳤을 때(Deactivated) 수정한 내역이 있다면 저장
+    bool justFinished = ImGui::IsItemDeactivatedAfterEdit();
+    if (justFinished) {
+      DX11Base::ModifyStat(p1, offset, *inputVal, size);
+    }
+    
+    // [중요] 사용자가 입력 중(포커스 상태)이거나, 막 입력이 끝난 프레임에는 메모리 값을 덮어씌우지 않음
+    if (!ImGui::IsItemActive() && !justFinished && p1 > 0x10000) {
       if (size == 1)
         *inputVal = (int)(*(unsigned char *)(p1 + offset));
       else if (size == 2)
@@ -75,26 +108,7 @@ namespace DX11Base {
       else
         *inputVal = (int)(*(unsigned int *)(p1 + offset));
     }
-
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-
-    ImGui::TableNextColumn();
-    ImGui::PushID(label);
-    if (ImGui::Button("-", ImVec2(25 * scale, 25 * scale))) {
-      (*inputVal)--;
-      DX11Base::ModifyStat(p1, offset, *inputVal, size);
-    }
-    ImGui::SameLine();
-
-    char valBuf[32];
-    snprintf(valBuf, sizeof(valBuf), "%d##val", *inputVal);
-    if (ImGui::Button(valBuf, ImVec2(70 * scale, 25 * scale))) {
-      pSelectedVar = inputVal;
-      currentLabel = std::string(label) + u8" 입력기";
-    }
+  
     ImGui::SameLine();
 
     if (ImGui::Button("+", ImVec2(25 * scale, 25 * scale))) {
@@ -111,16 +125,27 @@ namespace DX11Base {
 
     ImGui::PushID(label);
 
-    // 레벨에 따른 색상 정의
-    ImVec4 color;
-    if (*val == 0)
-      color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); // Grey
-    else if (*val == 1)
-      color = ImVec4(0.4f, 0.8f, 0.4f, 1.0f); // Green
-    else if (*val == 2)
-      color = ImVec4(0.2f, 1.0f, 0.2f, 1.0f); // Bright Green
-    else
-      color = ImVec4(1.0f, 0.8f, 0.2f, 1.0f); // Gold/Yellow
+    // 레벨에 따른 색상 정의 (0:기본, 1:파랑, 2:초록, 3:주황)
+    bool hasCustomColor = false;
+    if (*val == 1) {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.8f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.5f, 1.0f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.3f, 0.6f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // 흰색 글씨
+      hasCustomColor = true;
+    } else if (*val == 2) {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.6f, 0.1f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.8f, 0.2f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.4f, 0.0f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // 흰색 글씨
+      hasCustomColor = true;
+    } else if (*val == 3) {
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.4f, 0.0f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.6f, 0.0f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.6f, 0.3f, 0.0f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // 흰색 글씨
+      hasCustomColor = true;
+    }
 
     ImGui::TextUnformatted(label);
     ImGui::SameLine(0, 3);
@@ -128,13 +153,15 @@ namespace DX11Base {
     char btnLabel[16];
     snprintf(btnLabel, sizeof(btnLabel), "%d##btn", *val);
 
-    ImGui::PushStyleColor(ImGuiCol_Text, color);
     // 버튼 크기를 체크박스 정도로 키움 (25x25)
     if (ImGui::Button(btnLabel, ImVec2(25 * scale, 25 * scale))) {
       *val = (*val + 1) % 4; // 0, 1, 2, 3 순환
       DX11Base::ModifyStat(p1, offset, *val, 1);
     }
-    ImGui::PopStyleColor();
+
+    if (hasCustomColor) {
+      ImGui::PopStyleColor(4);
+    }
 
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
@@ -213,7 +240,6 @@ namespace DX11Base {
       ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
       ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthFixed, 160.0f * scale);
 
-
       if (isCaptured) {
         // [선택 무장 전용 오프셋]
         ImGui::TableNextRow();
@@ -284,8 +310,25 @@ namespace DX11Base {
         ImGui::Selectable(u8" [ 기타 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
         ImGui::PopStyleColor(2);
 
-        RenderStatRow(pBase, u8"행동력", 0xEE, 1, &v_Action, scale);
         RenderStatRow(pBase, u8"공적", 0x100, 2, &v_Contr, scale);
+        RenderStatRow(pBase, u8"충성", 0xEC, 1, &v_Loyalty, scale);
+        RenderStatRow(pBase, u8"전략포인트", 0xED, 1, &v_StrPoint, scale);
+        RenderStatRow(pBase, u8"행동력", 0xEE, 1, &v_Action, scale);
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.1f, 0.6f, 0.1f, 0.25f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+        ImGui::Selectable(u8" [ 외형 & 특징 ]", true,
+                          ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
+        ImGui::PopStyleColor(2);
+
+        RenderStatRow(pBase, u8"얼굴 번호", 0x2E, 2, &v_OfficerID, scale);
+        RenderStatRow(pBase, u8"모델 번호", 0xA5, 1, &v_ModelNo, scale);
+        RenderStatRow(pBase, u8"모델 색상", 0xA6, 1, &v_ModelColor, scale);
+        RenderStatRow(pBase, u8"등장년도", 0x32, 2, &v_Appear, scale);
+        RenderStatRow(pBase, u8"생년", 0x34, 2, &v_Birth, scale);
+        RenderStatRow(pBase, u8"몰년(수명)", 0x36, 2, &v_Death, scale);
       }
       ImGui::EndTable();
     }
@@ -407,7 +450,6 @@ namespace DX11Base {
       ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
       ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthFixed, 160.0f * scale);
 
-
       // --- [ 전법 ] ---
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -439,61 +481,59 @@ namespace DX11Base {
       RenderStatRow(pBase, u8"지모소양", 0xCC, 1, &v_Exp_Intel, scale);
       RenderStatRow(pBase, u8"병과소양", 0xCD, 1, &v_Exp_War, scale);
       RenderStatRow(pBase, u8"군사소양", 0xCE, 1, &v_Exp_Mil, scale);
-
       ImGui::EndTable();
     }
   }
 
   void DrawOfficerDetailWindow(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
-    if (!bShowOfficerDetail || p1 == 0)
+    if (!bShowOfficerDetail)
       return;
 
-    ImGui::SetNextWindowPos(ImVec2(mPos.x + mSize.x + 10.0f * scale, mPos.y), ImGuiCond_Appearing);
+    if (bForceCenterOfficerDetail) {
+      ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
+      ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+      bForceCenterOfficerDetail = false;
+    } else {
+      ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
+      ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    }
     ImGui::SetNextWindowSize(ImVec2(580 * scale, 750 * scale), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin(u8"주인공 무장 상세 편집###OffDetailWin", &bShowOfficerDetail, Flags)) {
-      ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1), u8"[ 주인공 실시간 정보 ]");
-      ImGui::Text(u8"인식된 무장 ID: %d", *(unsigned short *)(p1 + 0x08));
-
-      uintptr_t forceAddr = *(uintptr_t *)(p1 + 0x18);
-      if (forceAddr > 0x10000) {
-        ImGui::TextUnformatted(u8"세력 색상:");
-        ImGui::SameLine();
-
-        v_ForceColor = (int)(*(unsigned char *)(forceAddr + 0x09));
-
-        ImGui::PushID("MainForceColorBtn");
-        if (ImGui::Button("-", ImVec2(25 * scale, 25 * scale))) {
-          v_ForceColor--;
-          if (v_ForceColor < 1)
-            v_ForceColor = 1;
-          ModifyStat(forceAddr, 0x09, v_ForceColor, 1);
+      if (p1 == 0) {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"캡처된 주인공 데이터가 없습니다.");
+        ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");
+        ImGui::Spacing();
+        if (ImGui::Button(u8"닫기")) {
+          bShowOfficerDetail = false;
         }
-        ImGui::SameLine();
-
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%d##val", v_ForceColor);
-        if (ImGui::Button(buf, ImVec2(60 * scale, 25 * scale))) {
-          pSelectedVar = &v_ForceColor;
-          currentLabel = u8"세력 색상 입력기";
-        }
-        ImGui::SameLine();
-
-        if (ImGui::Button("+", ImVec2(25 * scale, 25 * scale))) {
-          v_ForceColor++;
-          if (v_ForceColor > 114)
-            v_ForceColor = 114;
-          ModifyStat(forceAddr, 0x09, v_ForceColor, 1);
-        }
-        ImGui::PopID();
+        ImGui::End();
+        return;
       }
-      ImGui::Separator();
+
+      unsigned short currentID = *(unsigned short *)(p1 + 0x08);
+      std::string nameValue = u8"주인공";
+      if (g_officerNames.count(currentID)) {
+        nameValue = g_officerNames[currentID];
+      }
 
       if (ImGui::BeginTabBar("OfficerTabs")) {
-        if (ImGui::BeginTabItem(u8"기본/명성")) {
-          RenderBasicTab(p1, scale, false);
+
+        if (ImGui::BeginTabItem(u8"상세 정보")) {
+          // if (currentTabIdx != 0) {
+          //   ImGui::SetWindowSize(ImVec2(0, 0));
+          //   currentTabIdx = 0;
+          // }
+          DrawOfficerHeader(p1, scale);
+          DrawOfficerTalents(p1, scale);
           ImGui::EndTabItem();
         }
+
+        if (ImGui::BeginTabItem(u8"능력/상태")) {
+          RenderBasicTab(p1, scale, true);
+          ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem(u8"기능")) {
           RenderResearchTab(p1, scale);
           ImGui::EndTabItem();

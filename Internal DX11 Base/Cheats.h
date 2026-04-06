@@ -17,6 +17,7 @@ namespace DX11Base {
   void ModifyStat(uintptr_t targetBase, uintptr_t offset, int value, int size);
     bool InstallHeroHook();
     void MaximizeHeroStats();
+    void SetFactionLordBonus(bool enable);
 
     extern uintptr_t g_HeroAddr;
     extern bool g_isHeroHookInstalled;

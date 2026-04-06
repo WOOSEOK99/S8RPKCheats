@@ -8,6 +8,7 @@
 #include "Cheats/Defatkboost.h"
 #include "Cheats/Defbuildingboost.h"
 #include "Cheats/Dongto.h"
+#include "Cheats/FactionLordBonus.h"
 #include "Cheats/Fastrelationship.h"
 #include "Cheats/Infinitegift.h"
 #include "Cheats/Infinitetalk.h"
@@ -23,6 +24,7 @@
 #include "Cheats/TengiCave.h"
 #include "Cheats/Terrainignore.h"
 #include "Config.h"
+#include "Framework/imgui.h"
 #include "MenuState.h"
 #include "pch.h"
 #include "showcal.h"
@@ -61,6 +63,7 @@ namespace DX11Base {
       );
       ImGui::Spacing();
     }
+    //
     // ─────────────────────────────────────────────────────────────
 
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
@@ -89,34 +92,48 @@ namespace DX11Base {
       ImGui::SameLine(100.0f * scale);
 
       ImGui::PushID(label);
-      if (ImGui::Button("-", ImVec2(25 * scale, 25 * scale)))
+      // 1. [-] 버튼
+      if (ImGui::Button("-", ImVec2(25 * scale, 25 * scale))) {
         (*inputVal)--;
-      ImGui::SameLine();
-
-      char valBuf[32];
-      snprintf(valBuf, sizeof(valBuf), "%d##val", *inputVal);
-      if (ImGui::Button(valBuf, ImVec2(70 * scale, 25 * scale))) {
-        pSelectedVar = inputVal;
-        currentLabel = std::string(label) + u8" 입력기";
-      }
-      ImGui::SameLine();
-
-      if (ImGui::Button("+", ImVec2(25 * scale, 25 * scale)))
-        (*inputVal)++;
-      ImGui::SameLine();
-
-      // 적용 버튼에 현재 값 포함 (사용자 요청: 좀 더 깔끔하게)
-      char applyBuf[64];
-      if (valid)
-        snprintf(applyBuf, sizeof(applyBuf), u8"적용 (현재: %u)", current);
-      else
-        snprintf(applyBuf, sizeof(applyBuf), u8"적용 (연결 끊김)");
-
-      if (ImGui::Button(applyBuf, ImVec2(145 * scale, 25 * scale))) {
         if (useP1 && p1)
           DX11Base::ModifyStat(p1, offset, *inputVal, size);
         else if (!useP1 && gameBase)
           *(unsigned int *)(gameBase + offset) = (unsigned int)*inputVal;
+      }
+      ImGui::SameLine();
+
+      // 2. 직접 입력 가능한 수치 박스 (InputInt)
+      ImGui::SetNextItemWidth(70 * scale);
+      // EnterReturnsTrue를 제거하여 자판 입력 시 즉시 변수에 반영되도록 함 (숫자만 입력 가능하도록 플래그 추가)
+      ImGui::InputInt("##val", inputVal, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+
+      // 포커스를 잃거나 Enter를 쳤을 때(Deactivated) 수정한 내역이 있다면 저장
+      bool justFinished = ImGui::IsItemDeactivatedAfterEdit();
+      if (justFinished) {
+        if (useP1 && p1)
+          DX11Base::ModifyStat(p1, offset, *inputVal, size);
+        else if (!useP1 && gameBase)
+          DX11Base::ModifyStat(gameBase, offset, *inputVal, size);
+      }
+
+      // [중요] 사용자가 입력 중(포커스 상태)이거나, 막 입력이 끝난 프레임에는 메모리 값을 덮어씌우지 않음
+      if (!ImGui::IsItemActive() && !justFinished && targetAddr > 0x10000) {
+        if (size == 1)
+          *inputVal = (int)(*(unsigned char *)(targetAddr + offset));
+        else if (size == 2)
+          *inputVal = (int)(*(unsigned short *)(targetAddr + offset));
+        else
+          *inputVal = (int)(*(unsigned int *)(targetAddr + offset));
+      }
+      ImGui::SameLine();
+
+      // 3. [+] 버튼
+      if (ImGui::Button("+", ImVec2(25 * scale, 25 * scale))) {
+        (*inputVal)++;
+        if (useP1 && p1)
+          DX11Base::ModifyStat(p1, offset, *inputVal, size);
+        else if (!useP1 && gameBase)
+          DX11Base::ModifyStat(gameBase, offset, *inputVal, size);
       }
       ImGui::PopID();
     }
@@ -188,7 +205,8 @@ namespace DX11Base {
         DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
         DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
 
-        ImGui::Spacing();
+        ImGui::Spacing(); // 위아래 여백
+
         if (ImGui::Checkbox(u8"전기 발생 무제한", &bInfTengi)) {
           SaveConfig();
         }
@@ -203,34 +221,6 @@ namespace DX11Base {
 
         ImGui::SameLine(160.0f * scale);
 
-        if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
-          SaveConfig();
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"중지 성성이 발생하면 즉시 취소합니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::SameLine();
-
-        if (ImGui::Button(u8"전기발생 취소")) {
-          // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)
-          if (DX11Base::GetCapturedTengiAddr() != 0) {
-            DX11Base::CancelTengi();
-            DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
-          }
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"작동 시 즉시 전기 발생을 취소합니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::Spacing();
-
         if (ImGui::Checkbox(u8"만병 습득 조건 해제", &bSkillCondition)) {
           DX11Base::ApplySkillCondition(bSkillCondition);
           SaveConfig();
@@ -242,21 +232,17 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::SameLine(160.0f * scale);
-
-        if (ImGui::Checkbox(u8"유목기병 습득 조건 해제", &bYumokCondition)) {
-          DX11Base::ApplyYumokCondition(bYumokCondition);
+        if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
           SaveConfig();
         }
 
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"유목기병 특기를 조건 없이 즉시 습득 가능한 상태로 변경합니다.");
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"중지 성성이 발생하면 즉시 취소합니다.");
           ImGui::EndTooltip();
         }
 
-        ImGui::Spacing();
-
+        ImGui::SameLine(160.0f * scale);
         if (ImGui::Checkbox(u8"상병 습득 조건 해제", &bSangbyeongCondition)) {
           DX11Base::ApplySangbyeongCondition(bSangbyeongCondition);
           SaveConfig();
@@ -268,7 +254,35 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::Spacing();
+        float btnWidth = 120.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
+        float btnHeight = 26.0f * scale;
+        float spacing = 10.0f * scale; // 버튼 사이의 여백
+
+        if (ImGui::Button(u8"전기발생 취소", ImVec2(btnWidth, btnHeight))) {
+          // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)
+          if (DX11Base::GetCapturedTengiAddr() != 0) {
+            DX11Base::CancelTengi();
+            DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
+          }
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"전기 발생을 즉시 취소합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(160.0f * scale);
+        if (ImGui::Checkbox(u8"유목기병 습득 조건 해제", &bYumokCondition)) {
+          DX11Base::ApplyYumokCondition(bYumokCondition);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"유목기병 특기를 조건 없이 즉시 습득 가능한 상태로 변경합니다.");
+          ImGui::EndTooltip();
+        }
 
         // 훅/캡처 상태를 로그로 출력 (상태 변경 시 1회만)
         {
@@ -300,35 +314,45 @@ namespace DX11Base {
       }
 
       BeginSection();
-      ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
-      DrawStatRow(u8"담력", 0x5BB8, 4, &v_Brave, 0, gameBase, scale);
-      if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel))
-        SaveConfig();
+
+      if (p1 != 0) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
+        DrawStatRow(u8"담력", 0x5BB8, 4, &v_Brave, 0, gameBase, scale);
+        if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel))
+          SaveConfig();
+      }
+
       EndSection(); // 보주 설정
 
       BeginSection();
-      ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
+      if (p1 != 0) {
 
-      float btnWidth = 105.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
-      float btnHeight = 26.0f * scale;
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
 
-      if (ImGui::Button(u8"모든 무장 정보", ImVec2(btnWidth, btnHeight))) {
-        DX11Base::bShowOfficerListWin = true;
+        float btnWidth = 80.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
+        float btnHeight = 26.0f * scale;
+        float spacing = 20.0f * scale; // 버튼 사이의 여백
+
+        if (ImGui::Button(u8"주인공", ImVec2(btnWidth, btnHeight))) {
+          bShowOfficerDetail = !bShowOfficerDetail;
+        }
+
+        ImGui::SameLine(0, spacing); // 이전 항목 끝에서 spacing만큼 띄움
+        if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
+          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+        }
+        ImGui::SameLine(0, spacing);
+        if (ImGui::Button(u8"선택 무장", ImVec2(btnWidth, btnHeight))) {
+          bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
+        }
       }
-      ImGui::SameLine();
-      if (ImGui::Button(u8"주인공 정보", ImVec2(btnWidth, btnHeight))) {
-        bShowOfficerDetail = !bShowOfficerDetail;
-      }
-      ImGui::SameLine();
-      if (ImGui::Button(u8"선택 무장 정보", ImVec2(btnWidth, btnHeight))) {
-        bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
-      }
+
       EndSection(); // 무장 정보
     }
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       BeginSection();
-      ImGui::TextColored(ImVec4(0.5f, 0.0f, 0.5f, 1.0f), u8"[ 결혼/인연 관련 ]");
+      ImGui::TextColored(ImVec4(0.82f, 0.7f, 0.55f, 1.0f), u8"[ 결혼/인연 관련 ]");
 
       bool wasRunning = ::DX11Base::g_initThreadRunning;
 
@@ -556,8 +580,45 @@ namespace DX11Base {
         SaveConfig();
       }
 
+      if (ImGui::Checkbox(u8"세력 군주 보너스 자동 배정", &bFactionLordBonus)) {
+        DX11Base::SetFactionLordBonus(bFactionLordBonus);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"관직 보너스");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"황제 : 모든 능력치 +5, 병력 +5000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"왕 : 모든 능력치 +4, 병력 +3000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"공 : 모든 능력치 +3, 병력 +2000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"주목 : 모든 능력치 +2, 병력 +1000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"그냥 군주 : 모든 능력치 +1");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"지역별 왕이나 공의 차이는 없음");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"군주 관작 중 승상, 대장군은 주목과 동격");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"방랑군 두령은 보너스를 적용받지 않음");
+
+        ImGui::EndTooltip();
+      }
+
       // (전기 관련 UI는 '평정 및 진급 관련' 섹션으로 이동됨)
       EndSection(); // 시나리오
+
+      BeginSection();
+      ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
+      if (ImGui::Checkbox(u8"전기취소##WIDGET", &DX11Base::bShowWidgetTengi)) {
+        SaveConfig();
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Checkbox(u8"주인공##WIDGET", &DX11Base::bShowWidgetHero)) {
+        SaveConfig();
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Checkbox(u8"모든무장##WIDGET", &DX11Base::bShowWidgetAllOfficers)) {
+        SaveConfig();
+      }
+      EndSection(); // 위젯
     }
   } // namespace MenuSections
 } // namespace DX11Base

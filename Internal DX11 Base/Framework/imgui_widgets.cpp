@@ -1,4 +1,4 @@
-﻿// dear imgui, v1.91.0 WIP
+// dear imgui, v1.91.0 WIP
 // (widgets code)
 
 /*
@@ -726,7 +726,17 @@ bool ImGui::ButtonEx(const char* label, const ImVec2& size_arg, ImGuiButtonFlags
 
     if (g.LogEnabled)
         LogSetNextTextDecoration("[", "]");
+
+    // [커스텀] 호버/활성화 상태일 때 텍스트 색상을 다크 브론즈로 변경 (기본 텍스트 색상과 대비)
+    // 비활성(Disabled) 상태일 때는 변경하지 않도록 하여 헤더 등의 가독성을 유지함.
+    bool push_color = (hovered || held) && !(g.CurrentItemFlags & ImGuiItemFlags_Disabled);
+    if (push_color)
+        PushStyleColor(ImGuiCol_Text, IM_COL32(51, 38, 12, 255));
+
     RenderTextClipped(bb.Min + style.FramePadding, bb.Max - style.FramePadding, label, NULL, &label_size, style.ButtonTextAlign, &bb);
+
+    if (push_color)
+        PopStyleColor();
 
     // Automatically close popups
     //if (pressed && !(flags & ImGuiButtonFlags_DontClosePopups) && (window->Flags & ImGuiWindowFlags_Popup))
@@ -6909,7 +6919,16 @@ bool ImGui::Selectable(const char* label, bool selected, ImGuiSelectableFlags fl
             PopColumnsBackground();
     }
 
+    // [커스텀] 호버/선택 상태일 때 텍스트 색상을 다크 브론즈로 변경 (기본 텍스트 색상과 대비)
+    // 비활성(Disabled) 상태일 때는 변경하지 않도록 하여 카테고리 헤더 등의 가독성을 유지함.
+    bool push_color = (hovered || selected || held) && !disabled_item && !disabled_global;
+    if (push_color)
+        PushStyleColor(ImGuiCol_Text, IM_COL32(51, 38, 12, 255));
+
     RenderTextClipped(text_min, text_max, label, NULL, &label_size, style.SelectableTextAlign, &bb);
+
+    if (push_color)
+        PopStyleColor();
 
     // Automatically close popups
     if (pressed && (window->Flags & ImGuiWindowFlags_Popup) && !(flags & ImGuiSelectableFlags_DontClosePopups) && !(g.LastItemData.InFlags & ImGuiItemFlags_SelectableDontClosePopup))
@@ -9052,11 +9071,20 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
     if (tab_bar->Flags & ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)
         flags |= ImGuiTabItemFlags_NoCloseWithMiddleMouseButton;
 
+    // [커스텀] 호버/선택 상태일 때 텍스트 색상을 다크 브론즈로 변경 (기본 텍스트 색상과 대비)
+    // 비활성(Disabled) 상태일 때는 변경하지 않음.
+    bool push_color = (hovered || tab_contents_visible || held) && !(g.CurrentItemFlags & ImGuiItemFlags_Disabled);
+    if (push_color)
+        PushStyleColor(ImGuiCol_Text, IM_COL32(51, 38, 12, 255));
+
     // Render tab label, process close button
     const ImGuiID close_button_id = p_open ? GetIDWithSeed("#CLOSE", NULL, id) : 0;
     bool just_closed;
     bool text_clipped;
     TabItemLabelAndCloseButton(display_draw_list, bb, tab_just_unsaved ? (flags & ~ImGuiTabItemFlags_UnsavedDocument) : flags, tab_bar->FramePadding, label, id, close_button_id, tab_contents_visible, &just_closed, &text_clipped);
+    
+    if (push_color)
+        PopStyleColor();
     if (just_closed && p_open != NULL)
     {
         *p_open = false;

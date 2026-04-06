@@ -1,14 +1,14 @@
 #include "SelectOfficercapture.h"
 #include "Cheats.h"
+#include "CityData.h"
 #include "InstantLoveCave.h"
 #include "MemoryUtils.h"
 #include "MenuState.h"
 #include "OfficerData.h"
 #include "OfficerDetail.h"
-#include "showlog.h"
-#include "showcal.h"
-#include "CityData.h"
 #include "pch.h"
+#include "showcal.h"
+#include "showlog.h"
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -24,6 +24,10 @@ namespace DX11Base {
 
   void AddLog(const char *fmt, ...);
   extern uintptr_t g_HeroAddr;
+  extern bool bForceCenterSelectedOfficer;
+  extern bool bForceCenterOfficerList;
+  extern bool bShowSelectedOfficerWin;
+  extern bool bShowOfficerListWin;
 
   // --- [선택 무장용 상태 변수] ---
   static int v_OfficerID = 0, v_CG = 0, v_ModelNo = 0, v_ModelColor = 0, v_Birth = 0, v_Appear = 0, v_Death = 0,
@@ -175,7 +179,7 @@ namespace DX11Base {
 
   // --- [ UI Helper Functions ] ---
 
-  static void DrawOfficerHeader(uintptr_t pBase, float scale) {
+  void DrawOfficerHeader(uintptr_t pBase, float scale) {
     uintptr_t forceAddr = *(uintptr_t *)(pBase + 0x18);
     unsigned char vtableByte = *(unsigned char *)(pBase + 0x10);
 
@@ -186,7 +190,7 @@ namespace DX11Base {
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0f, 0.5f, 0.7f, 0.2f));
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.9f, 1.0f, 1.0f));
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
       ImGui::Selectable(u8" [ 무장 정보 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
       ImGui::PopStyleColor(2);
 
@@ -335,7 +339,7 @@ namespace DX11Base {
 
         ImGui::SameLine();
         ImGui::SetNextItemWidth(100.0f * scale);
-        const char* current_city_name = g_CityList[s_selectedCityIdx].cityname;
+        const char *current_city_name = g_CityList[s_selectedCityIdx].cityname;
         if (ImGui::BeginCombo(u8"##CitySelector", current_city_name)) {
           for (int n = 0; n < g_CityCount; n++) {
             bool is_selected = (s_selectedCityIdx == n);
@@ -352,34 +356,34 @@ namespace DX11Base {
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.8f, 0.3f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
         if (ImGui::Button(u8"선택도시로 부활", ImVec2(0, 24 * scale))) {
-           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-           uintptr_t p1 = 0, p2 = 0, cityArrayBase = 0;
-           if (exeBase) {
-             p1 = *(uintptr_t*)(exeBase + 0x34C8630);
-             if (p1 && p1 > 0x10000) {
-               p2 = *(uintptr_t*)(p1 + 0x0);
-               if (p2 && p2 > 0x10000) {
-                 cityArrayBase = *(uintptr_t*)(p2 + 0x0);
-               }
-             }
-           }
-           if (cityArrayBase && cityArrayBase > 0x10000) {
-             uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
-             *(uintptr_t *)(pBase + 0x20) = targetAddr;
-             ModifyStat(pBase, 0x10, 0x58, 1);
-             ModifyStat(pBase, 0x36, 255, 2);
-             ModifyStat(pBase, 0xEE, 200, 1);
-             AddLog(u8"[부활] %s 무장을 [%s] 도시로 부활시켰습니다!", 
-                    DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(), 
-                    g_CityList[s_selectedCityIdx].cityname);
-           }
+          uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+          uintptr_t p1 = 0, p2 = 0, cityArrayBase = 0;
+          if (exeBase) {
+            p1 = *(uintptr_t *)(exeBase + 0x34C8630);
+            if (p1 && p1 > 0x10000) {
+              p2 = *(uintptr_t *)(p1 + 0x0);
+              if (p2 && p2 > 0x10000) {
+                cityArrayBase = *(uintptr_t *)(p2 + 0x0);
+              }
+            }
+          }
+          if (cityArrayBase && cityArrayBase > 0x10000) {
+            uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
+            *(uintptr_t *)(pBase + 0x20) = targetAddr;
+            ModifyStat(pBase, 0x10, 0x58, 1);
+            ModifyStat(pBase, 0x36, 255, 2);
+            ModifyStat(pBase, 0xEE, 200, 1);
+            AddLog(u8"[부활] %s 무장을 [%s] 도시로 부활시켰습니다!",
+                   DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(),
+                   g_CityList[s_selectedCityIdx].cityname);
+          }
         }
-        ImGui::PopStyleColor(3); // Pop 2nd button style (3 colors)
-        ImGui::PopStyleColor(1); // Pop 1st button style (1 color)
+        ImGui::PopStyleColor(3);       // Pop 2nd button style (3 colors)
+        ImGui::PopStyleColor(1);       // Pop 1st button style (1 color)
       } else if (vtableByte == 0x58) { // 재야 무장: 도시 이동 기능만 제공
         ImGui::SameLine();
         ImGui::SetNextItemWidth(100.0f * scale);
-        const char* current_city_name = g_CityList[s_selectedCityIdx].cityname;
+        const char *current_city_name = g_CityList[s_selectedCityIdx].cityname;
         if (ImGui::BeginCombo(u8"##CitySelectorRonin", current_city_name)) {
           for (int n = 0; n < g_CityCount; n++) {
             bool is_selected = (s_selectedCityIdx == n);
@@ -396,24 +400,24 @@ namespace DX11Base {
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.8f, 0.3f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.4f, 0.1f, 1.0f));
         if (ImGui::Button(u8"선택도시로 이동", ImVec2(0, 24 * scale))) {
-           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-           uintptr_t p1 = 0, p2 = 0, cityArrayBase = 0;
-           if (exeBase) {
-             p1 = *(uintptr_t*)(exeBase + 0x34C8630);
-             if (p1 && p1 > 0x10000) {
-               p2 = *(uintptr_t*)(p1 + 0x0);
-               if (p2 && p2 > 0x10000) {
-                 cityArrayBase = *(uintptr_t*)(p2 + 0x0);
-               }
-             }
-           }
-           if (cityArrayBase && cityArrayBase > 0x10000) {
-             uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
-             *(uintptr_t *)(pBase + 0x20) = targetAddr;
-             AddLog(u8"[이동] %s 무장을 [%s] 도시로 이동시켰습니다!", 
-                    DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(), 
-                    g_CityList[s_selectedCityIdx].cityname);
-           }
+          uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+          uintptr_t p1 = 0, p2 = 0, cityArrayBase = 0;
+          if (exeBase) {
+            p1 = *(uintptr_t *)(exeBase + 0x34C8630);
+            if (p1 && p1 > 0x10000) {
+              p2 = *(uintptr_t *)(p1 + 0x0);
+              if (p2 && p2 > 0x10000) {
+                cityArrayBase = *(uintptr_t *)(p2 + 0x0);
+              }
+            }
+          }
+          if (cityArrayBase && cityArrayBase > 0x10000) {
+            uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
+            *(uintptr_t *)(pBase + 0x20) = targetAddr;
+            AddLog(u8"[이동] %s 무장을 [%s] 도시로 이동시켰습니다!",
+                   DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(),
+                   g_CityList[s_selectedCityIdx].cityname);
+          }
         }
         ImGui::PopStyleColor(3);
       } else if (vtableByte == 0x68 || vtableByte == 0x78) { // 미발견 무장: 재야로 변경 버튼 제공
@@ -431,7 +435,6 @@ namespace DX11Base {
         }
         ImGui::PopStyleColor(1);
       }
-
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -452,7 +455,7 @@ namespace DX11Base {
     }
   }
 
-  static void DrawOfficerTalents(uintptr_t pBase, float scale) {
+  void DrawOfficerTalents(uintptr_t pBase, float scale) {
     if (ImGui::BeginTable("TraitHeaderTable", 1)) {
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -532,13 +535,31 @@ namespace DX11Base {
     if (asChild) {
       ImGui::BeginChild("SelectedOfficerChild", ImVec2(0, 0), true);
     } else {
-      ImGui::SetNextWindowPos(ImVec2(mPos.x + mSize.x + 10.0f * scale, mPos.y), ImGuiCond_Appearing);
+      if (bForceCenterSelectedOfficer) {
+        ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
+        ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        bForceCenterSelectedOfficer = false;
+      } else {
+        ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+      }
       if (!ImGui::Begin(u8"선택 무장 상세 편집###SelectedOfficerWin", &bShowSelectedOfficerWin)) {
         ImGui::End();
         return;
       }
     }
 
+    if (g_capturedOfficerBase == 0) {
+      ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"캡처된 데이터가 없습니다.");
+      ImGui::BulletText(u8"게임에서 상세 정보를 열거나, 리스트에서 선택하세요.");
+      if (asChild)
+        ImGui::EndChild();
+      else
+        ImGui::End();
+      return;
+    }
+
+    uintptr_t pBase = g_capturedOfficerBase;
     if (!asChild) {
       if (!g_officerApplied) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), u8"실시간 추적 준비 중...");
@@ -550,25 +571,14 @@ namespace DX11Base {
       ImGui::Separator();
     }
 
-    if (g_capturedOfficerBase == 0) {
-      ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"캡처된 데이터가 없습니다.");
-      ImGui::BulletText(u8"왼쪽 리스트에서 무장을 선택하거나, 게임에서 상세 정보를 여세요.");
-      if (asChild)
-        ImGui::EndChild();
-      else
-        ImGui::End();
-      return;
-    }
-
-    uintptr_t pBase = g_capturedOfficerBase;
 #ifdef ENABLE_DEBUG_LOG
     ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1), u8"[ 선택 무장 실시간 정보 ]");
     ImGui::Text(u8"연결된 주소: %p", (void *)pBase);
     ImGui::SameLine();
     if (ImGui::SmallButton(u8"복사##AddrCopy")) {
-        char buf[32];
-        sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)pBase);
-        ImGui::SetClipboardText(buf);
+      char buf[32];
+      sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)pBase);
+      ImGui::SetClipboardText(buf);
     }
     ImGui::Separator();
 #endif
@@ -634,7 +644,7 @@ namespace DX11Base {
           currentTabIdx = 0;
         }
         DrawOfficerHeader(pBase, scale);
-        RenderBasicTab(pBase, scale, true);
+        // RenderBasicTab(pBase, scale, true);
         DrawOfficerTalents(pBase, scale);
         ImGui::EndTabItem();
       }
@@ -723,20 +733,18 @@ namespace DX11Base {
   }
 
   void DrawOfficerListWindow(uintptr_t p1, float scale) {
-    LoadOfficerNames();
-
-    if (!bShowOfficerListWin || !p1)
+    if (!bShowOfficerListWin)
       return;
 
-    static char s_searchBuf[64] = "";
-    static int s_scrollToIndex = -1;
-    bool doSearch = false;
+    LoadOfficerNames();
 
-    // 장수 선택이 바뀌면 창 크기를 내용에 맞게 재조정 (Auto-Resize 유도)
-    static uintptr_t lastListBase = 0;
-    if (g_capturedOfficerBase != lastListBase) {
-      ImGui::SetWindowSize(u8"모든 무장 편집 리스트 (5102명)###OfficerListWin", ImVec2(0, 0));
-      lastListBase = g_capturedOfficerBase;
+    if (bForceCenterOfficerList) {
+      ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
+      ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+      bForceCenterOfficerList = false;
+    } else {
+      ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
+      ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     }
 
     // 최소 세로 길이를 700으로 상향하여 상세 정보가 스크롤 없이 시원하게 보이게 합니다.
@@ -744,6 +752,28 @@ namespace DX11Base {
 
     if (ImGui::Begin(u8"모든 무장 편집 리스트 (5102명)###OfficerListWin", &bShowOfficerListWin,
                      ImGuiWindowFlags_AlwaysAutoResize)) {
+      if (!p1) {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"무장 배열 데이터를 찾을 수 없습니다.");
+        ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");
+        ImGui::Spacing();
+        if (ImGui::Button(u8"닫기")) {
+          bShowOfficerListWin = false;
+        }
+        ImGui::End();
+        return;
+      }
+
+      static char s_searchBuf[64] = "";
+      static int s_scrollToIndex = -1;
+      bool doSearch = false;
+
+      // 장수 선택이 바뀌면 창 크기를 내용에 맞게 재조정 (Auto-Resize 유도)
+      static uintptr_t lastListBase = 0;
+      if (g_capturedOfficerBase != lastListBase) {
+        ImGui::SetWindowSize(u8"모든 무장 편집 리스트 (5102명)###OfficerListWin", ImVec2(0, 0));
+        lastListBase = g_capturedOfficerBase;
+      }
+
       // UI에서 넘겨준 p1은 배열에 속하지 않은 임시 주소(temp copy)일 수 있습니다. (예: GetGameBase() + 0xE0)
       // 따라서 p1에서 주인공의 ID만 추출하고, 배열의 원본 주소를 찾을 때는 훅(Hook)으로 잡은 g_capturedOfficerBase를
       // 기준점으로 사용합니다.

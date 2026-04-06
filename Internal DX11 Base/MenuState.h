@@ -59,6 +59,7 @@ namespace DX11Base {
   extern bool bSkillCondition;   // 만병 습득 조건 해제
   extern bool bYumokCondition;   // 유목기병 습득 조건 해제
   extern bool bSangbyeongCondition; // 상병 습득 조건 해제
+  extern bool bFactionLordBonus; // 세력 군주 보너스 자동 배정
   extern bool bSpeedHack;        // 2026-04-04 배속
   extern float g_speedMultiplier; // 2026-04-04 배속 배율 (0.1x ~ 5.0x)
 
@@ -72,6 +73,14 @@ namespace DX11Base {
   extern bool bBlockClickInMemoryEditor;   // 메모리 에디터용 클릭 차단 여부
   extern bool bIsMenuCollapsed;         // 메인 메뉴 접힘 여부
   extern bool bAutoLoadMenu;
+
+  extern bool bShowWidgetTengi;         // 위젯: 전기발생 취소 표시 여부
+  extern bool bShowWidgetHero;          // 위젯: 주인공 표시 여부
+  extern bool bShowWidgetAllOfficers;   // 위젯: 모든무장 표시 여부
+
+  extern bool bForceCenterOfficerDetail;    // 창 강제 중앙 배치 요청 (주인공)
+  extern bool bForceCenterSelectedOfficer;  // 창 강제 중앙 배치 요청 (선택무장)
+  extern bool bForceCenterOfficerList;      // 창 강제 중앙 배치 요청 (리스트)
 
   extern bool bToggleMenuCollapseRequest; // 틸트 키로 접기/펴기 요청
 

@@ -10,5 +10,6 @@ namespace DX11Base {
   void DrawSelectedOfficerWindow(ImVec2 mPos, ImVec2 mSize, float scale, bool asChild = false);
 
   void DrawOfficerListWindow(uintptr_t p1, float scale);
-
+  void DrawOfficerTalents(uintptr_t pBase, float scale);
+  void DrawOfficerHeader(uintptr_t pBase, float scale);
 } // namespace DX11Base

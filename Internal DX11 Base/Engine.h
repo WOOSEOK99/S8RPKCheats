@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "helper.h"
 
 namespace DX11Base 
@@ -68,6 +68,7 @@ namespace DX11Base
 		ID3D11DeviceContext* m_DeviceContext{};
 		ID3D11RenderTargetView* m_RenderTargetView{};
 		IDXGISwapChain* m_pSwapChain{};
+		float m_DpiScale{ 1.0f };
 
 
 	private:
