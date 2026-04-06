@@ -20,4 +20,7 @@ namespace DX11Base {
     // Engine.cpp 렌더링 루프에서 호출: 알림창 그리기 (ImGui)
     void RoninMonitor_Draw();
 
+    // 외부(치트 메뉴 등)에서 수동으로 상태 변경 시 알림 중복 방지를 위한 동기화
+    void RoninMonitor_UpdatePrevStatus(int officerID, uint8_t newStatus);
+
 } // namespace DX11Base

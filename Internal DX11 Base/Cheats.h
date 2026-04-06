@@ -15,6 +15,7 @@ namespace DX11Base {
   // Set gold amount (safely)
   void SetGold(int amount);
   void ModifyStat(uintptr_t targetBase, uintptr_t offset, int value, int size);
+  void ModifyStatFast(uintptr_t targetAddr, int value, int size);
     bool InstallHeroHook();
     void MaximizeHeroStats();
     void SetFactionLordBonus(bool enable);

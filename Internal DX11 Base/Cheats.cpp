@@ -134,32 +134,31 @@ namespace DX11Base {
         return (s_gameBasePtrAddr != 0);
     }
 
-    // 첫 번째 인자로 수정할 대상의 베이스 주소를 받도록 변경
+    // 단일 항목 수정 (VirtualProtect 포함 - UI 버튼용)
     void ModifyStat(uintptr_t targetBase, uintptr_t offset, int value, int size) {
       if (!targetBase)
         return;
-
-      // 전달받은 베이스 주소에 오프셋을 더함 (마이너스 오프셋도 자동 계산됨)
       uintptr_t targetAddr = targetBase + offset;
-
-      // 메모리가 유효한지 확인
       if (IsValidPtr(targetAddr, size)) {
         DWORD oldProt;
-        // 쓰기 권한 부여
         if (VirtualProtect((LPVOID)targetAddr, size, PAGE_READWRITE, &oldProt)) {
-          if (size == 1)
-            *(unsigned char *)targetAddr = (unsigned char)value;
-          else if (size == 2)
-            *(short *)targetAddr = (short)value;
-          else if (size == 4)
-            *(int *)targetAddr = value;
-          else if (size == 8)
-            *(uint64_t *)targetAddr = (uint64_t)value;
-
-          // 원래 권한으로 복구
+          ModifyStatFast(targetAddr, value, size);
           VirtualProtect((LPVOID)targetAddr, size, oldProt, &oldProt);
         }
       }
+    }
+
+    // 초고속 수정 (VirtualProtect 제외 - 대량 처리 루프용)
+    // 호출 전에 호출자가 VirtualProtect로 전체 영역을 쓰기 가능하게 만들어야 함.
+    void ModifyStatFast(uintptr_t targetAddr, int value, int size) {
+      if (size == 1)
+        *(unsigned char *)targetAddr = (unsigned char)value;
+      else if (size == 2)
+        *(short *)targetAddr = (short)value;
+      else if (size == 4)
+        *(int *)targetAddr = value;
+      else if (size == 8)
+        *(uint64_t *)targetAddr = (uint64_t)value;
     }
 
     void MaximizeHeroStats() {

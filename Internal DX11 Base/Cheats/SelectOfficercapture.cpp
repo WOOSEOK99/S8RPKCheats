@@ -7,10 +7,12 @@
 #include "OfficerData.h"
 #include "OfficerDetail.h"
 #include "pch.h"
+#include "RoninMonitor.h" // 알림 동기화용 추가
 #include "showcal.h"
 #include "showlog.h"
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <psapi.h>
 #include <sstream>
@@ -43,7 +45,8 @@ namespace DX11Base {
   // --- [목록 필터 및 전역 상태 공유용] ---
   static uintptr_t s_stableArrayBase = 0;
   static uintptr_t s_lastCapturedByUI = 0;
-  static int s_currentFilter = -1;                     // -1: 전부
+  static int s_currentFilter = -1;          // -1: 전부, 0x18: 일반, 0x28: 태수, 0x58: 재야, 0x68: 미발견, 0x88: 사망
+  static bool s_triggerReselection = false; // [UX] 무장 상태 변경 시 자동으로 다음 무장 선택 여부
   static std::unordered_set<int> s_selectedOfficerIDs; // 다중 선택용 보관함
   static std::vector<int> s_filteredIndices;           // 현재 필터링된 무장 인덱스들
 
@@ -179,6 +182,18 @@ namespace DX11Base {
 
   // --- [ UI Helper Functions ] ---
 
+  static void PatchMasterData(unsigned short targetID, std::function<void(uintptr_t)> patchFunc) {
+    if (s_stableArrayBase < 0x10000)
+      return;
+    for (int i = 0; i < 5102; i++) {
+      uintptr_t targetBase = s_stableArrayBase + (i * 0x3D0);
+      RosterStats s = SafeReadRosterStats(targetBase);
+      if (s.valid && s.id_08 == targetID) {
+        patchFunc(targetBase);
+      }
+    }
+  }
+
   void DrawOfficerHeader(uintptr_t pBase, float scale) {
     uintptr_t forceAddr = *(uintptr_t *)(pBase + 0x18);
     unsigned char vtableByte = *(unsigned char *)(pBase + 0x10);
@@ -312,11 +327,11 @@ namespace DX11Base {
         if (ImGui::Button(u8"부활", ImVec2(0, 24 * scale))) {
           uintptr_t tempGameBase = DX11Base::GetGameBase();
           uintptr_t heroBase = 0;
+          unsigned short pBaseID = *(unsigned short *)(pBase + 0x08);
           if (tempGameBase) {
             uintptr_t tempHeroBase = *(uintptr_t *)(tempGameBase + 0xE0);
             if (tempHeroBase) {
               unsigned short heroID = *(unsigned short *)(tempHeroBase + 0x08);
-              unsigned short pBaseID = *(unsigned short *)(pBase + 0x08);
               uintptr_t realArrayBase = pBase - ((pBaseID - 1) * 0x3D0);
               heroBase = realArrayBase + ((heroID - 1) * 0x3D0);
             }
@@ -325,15 +340,26 @@ namespace DX11Base {
             uintptr_t heroCorpsVal = *(uintptr_t *)(heroBase + 0x20);
             *(uintptr_t *)(pBase + 0x20) = heroCorpsVal;
           }
-          ModifyStat(pBase, 0x10, 0x58, 1);
-          ModifyStat(pBase, 0x36, 255, 2);
-          ModifyStat(pBase, 0xEE, 200, 1);
-          AddLog(u8"[LIFE] 무장 부활 처리를 완료했습니다.");
+
+          // [패치] 현재 가로챈 객체(UI용)와 마스터 배열 내의 원본을 동시에 수정
+          auto PatchStatus = [&](uintptr_t base) {
+            ModifyStat(base, 0x10, 0x58, 1); // 상태: 재야(0x58)
+            ModifyStat(base, 0x36, 255, 2);  // 몰년: 수명 연장
+            ModifyStat(base, 0xEE, 200, 1);  // 행동력
+            ModifyStat(base, 0x374, 0, 4);   // 사망 플래그 제거
+          };
+
+          PatchStatus(pBase);
+          PatchMasterData(pBaseID, PatchStatus);
+          s_triggerReselection = true; // [UX] 리스트 갱신 후 첫 번째 장수 자동 선택 유도
+
+          AddLog(u8"[LIFE] %s 무장 부활 처리를 완료했습니다.", g_officerNames[pBaseID].c_str());
         }
+
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextUnformatted(u8"주인공과 같은도시로 사망한 무장을 부활시킵니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), u8"※ 저장 후 불러오기를 해야 게임에 반영됩니다.");
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"주인공과 같은도시로 사망한 무장을 부활시킵니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 저장 후 불러오기를 해야 게임에 반영됩니다.");
           ImGui::EndTooltip();
         }
 
@@ -358,6 +384,7 @@ namespace DX11Base {
         if (ImGui::Button(u8"선택도시로 부활", ImVec2(0, 24 * scale))) {
           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
           uintptr_t p1 = 0, p2 = 0, cityArrayBase = 0;
+          unsigned short pBaseID = *(unsigned short *)(pBase + 0x08);
           if (exeBase) {
             p1 = *(uintptr_t *)(exeBase + 0x34C8630);
             if (p1 && p1 > 0x10000) {
@@ -370,14 +397,32 @@ namespace DX11Base {
           if (cityArrayBase && cityArrayBase > 0x10000) {
             uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
             *(uintptr_t *)(pBase + 0x20) = targetAddr;
-            ModifyStat(pBase, 0x10, 0x58, 1);
-            ModifyStat(pBase, 0x36, 255, 2);
-            ModifyStat(pBase, 0xEE, 200, 1);
-            AddLog(u8"[부활] %s 무장을 [%s] 도시로 부활시켰습니다!",
-                   DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(),
+
+            // [패치] 현재 가로챈 객체(UI용)와 마스터 배열 내의 원본을 동시에 수정
+            auto PatchStatus = [&](uintptr_t base) {
+              ModifyStat(base, 0x10, 0x58, 1);          // 상태: 재야(0x58)
+              ModifyStat(base, 0x36, 255, 2);           // 몰년: 수명 연장
+              ModifyStat(base, 0xEE, 200, 1);           // 행동력
+              ModifyStat(base, 0x374, 0, 4);            // 사망 플래그 제거
+              *(uintptr_t *)(base + 0x20) = targetAddr; // 소속 군단 주소 (도시 주소)
+            };
+
+            PatchStatus(pBase);
+            PatchMasterData(pBaseID, PatchStatus);
+            s_triggerReselection = true;
+
+            AddLog(u8"[부활] %s 무장을 [%s] 도시로 부활시켰습니다!", DX11Base::g_officerNames[pBaseID].c_str(),
                    g_CityList[s_selectedCityIdx].cityname);
           }
         }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"선택한 도시로 사망한 무장을 부활시킵니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 저장 후 불러오기를 해야 게임에 반영됩니다.");
+          ImGui::EndTooltip();
+        }
+
         ImGui::PopStyleColor(3);       // Pop 2nd button style (3 colors)
         ImGui::PopStyleColor(1);       // Pop 1st button style (1 color)
       } else if (vtableByte == 0x58) { // 재야 무장: 도시 이동 기능만 제공
@@ -424,15 +469,22 @@ namespace DX11Base {
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
         if (ImGui::Button(u8"재야", ImVec2(0, 24 * scale))) {
-          ModifyStat(pBase, 0x10, 0x58, 1);
-          AddLog(u8"[LIFE] 미발견 무장을 재야(0x58) 상태로 변경했습니다.");
+          unsigned short pBaseID = *(unsigned short *)(pBase + 0x08);
+          auto patchRonin = [&](uintptr_t base) { ModifyStat(base, 0x10, 0x58, 1); };
+          patchRonin(pBase);
+          PatchMasterData(pBaseID, patchRonin);
+          s_triggerReselection = true;
+
+          AddLog(u8"[LIFE] %s 미발견 무장을 재야(0x58) 상태로 변경했습니다.", g_officerNames[pBaseID].c_str());
         }
+
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextUnformatted(u8"미발견 무장을 즉시 재야 상태로 변경합니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), u8"※ 저장 후 불러오기를 해야 게임에 반영됩니다.");
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"미발견 무장을 즉시 재야 상태로 변경합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 저장 후 불러오기를 해야 게임에 반영됩니다.");
           ImGui::EndTooltip();
         }
+
         ImGui::PopStyleColor(1);
       }
 
@@ -596,19 +648,24 @@ namespace DX11Base {
       float buttonWidth = (totalWidth - 8.0f * scale) / 2.0f;
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
 
+      // [최적화] 미발견 전부 재야: 일괄 메모리 보호 + 단일 루프 처리
       if (ImGui::Button(u8"미발견 전부 재야", ImVec2(buttonWidth, 30.0f * scale))) {
         int count = 0;
         if (s_stableArrayBase > 0x10000) {
-          for (int idx : s_filteredIndices) {
-            uintptr_t targetBase = s_stableArrayBase + (idx * 0x3D0);
-            RosterStats stats = SafeReadRosterStats(targetBase);
-            if (!stats.valid)
-              continue;
-            unsigned char vByte = *(unsigned char *)(targetBase + 0x10);
-            if (vByte == 0x68 || vByte == 0x78) {
-              ModifyStat(targetBase, 0x10, 0x58, 1);
-              count++;
+          DWORD old;
+          // 5102명 전체 영역(약 2MB)을 한 번만 권한 변경하여 수천 번의 시스템 호출 방지
+          if (VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, PAGE_READWRITE, &old)) {
+            for (int idx : s_filteredIndices) {
+              uintptr_t targetBase = s_stableArrayBase + (idx * 0x3D0);
+              unsigned short currentID = *(unsigned short *)(targetBase + 0x08);
+              unsigned char vByte = *(unsigned char *)(targetBase + 0x10);
+              if (vByte == 0x68 || vByte == 0x78) {
+                ModifyStatFast(targetBase + 0x10, 0x58, 1);
+                RoninMonitor_UpdatePrevStatus(currentID, 0x58); // 모니터 알림 방지 동기화
+                count++;
+              }
             }
+            VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, old, &old);
           }
         }
         if (count > 0)
@@ -616,20 +673,30 @@ namespace DX11Base {
       }
       ImGui::SameLine(0, 8.0f * scale);
 
+      // [최적화] 선택 무장 재야: O(N*M) -> O(N) 최적화 및 일괄 메모리 보호
       if (ImGui::Button(u8"선택 무장 재야", ImVec2(buttonWidth, 30.0f * scale))) {
         if (s_selectedOfficerIDs.empty())
           AddLog(u8"[WARN] 선택된 무장이 없습니다.");
         else {
           int count = 0;
-          for (int id : s_selectedOfficerIDs) {
-            uintptr_t targetBase = s_stableArrayBase + ((id - 1) * 0x3D0);
-            RosterStats stats = SafeReadRosterStats(targetBase);
-            if (stats.valid) {
-              ModifyStat(targetBase, 0x10, 0x58, 1);
-              count++;
+          if (s_stableArrayBase > 0x10000) {
+            DWORD old;
+            if (VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, PAGE_READWRITE, &old)) {
+              // 5102명 전체 리스트를 딱 한 번만 뒤지면서 선택된 ID인지 체크
+              for (int i = 0; i < 5102; i++) {
+                uintptr_t targetBase = s_stableArrayBase + (i * 0x3D0);
+                unsigned short currentID = *(unsigned short *)(targetBase + 0x08);
+                if (s_selectedOfficerIDs.count(currentID)) {
+                  ModifyStatFast(targetBase + 0x10, 0x58, 1);
+                  RoninMonitor_UpdatePrevStatus(currentID, 0x58); // 모니터 알림 방지 동기화
+                  count++;
+                }
+              }
+              VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, old, &old);
             }
           }
-          AddLog(u8"[LIFE] 선택한 %d명의 무장을 재야 상태로 변경했습니다.", count);
+          s_triggerReselection = true;
+          AddLog(u8"[LIFE] 선택한 %d명의 미발견 무장을 재야(0x58) 상태로 변경했습니다.", count);
           s_selectedOfficerIDs.clear();
         }
       }
@@ -921,16 +988,16 @@ namespace DX11Base {
 
       // [추가] 필터 변경 시 자동으로 첫 번째 장수 선택 (목록이 비어있으면 해제)
       static int s_lastFilterForSelection = -2;
-      if (s_lastFilterForSelection != s_currentFilter) {
+      if (s_lastFilterForSelection != s_currentFilter || s_triggerReselection) {
         if (!s_filteredIndices.empty()) {
           uintptr_t firstBase = arrayBase + (s_filteredIndices[0] * 0x3D0);
           g_capturedOfficerBase = firstBase;
           s_lastCapturedByUI = firstBase;
-        } else {
+        } else if (s_triggerReselection) {
           g_capturedOfficerBase = 0;
-          s_lastCapturedByUI = 0;
         }
         s_lastFilterForSelection = s_currentFilter;
+        s_triggerReselection = false;
       }
 
       if (doSearch && s_searchBuf[0] != '\0') {
