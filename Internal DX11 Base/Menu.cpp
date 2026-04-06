@@ -157,10 +157,10 @@ namespace DX11Base {
 
     // AlwaysAutoResize: 레이아웃이 복잡할 때 좌표 계산 오차가 발생할 수 있음
     // 펼쳐진 상태에서는 스크롤바는 끄되, 가로/세로 자동 조절은 켜둠 (NoScrollbar만으로 오프셋 해결 시도)
-    ImGuiWindowFlags Flags = bMenuCollapsedLastFrame
-                                 ? (ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar)
-                                 : (ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar |
-                                    ImGuiWindowFlags_NoScrollWithMouse);
+    ImGuiWindowFlags Flags =
+        bMenuCollapsedLastFrame
+            ? (ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar)
+            : (ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
     if (bMenuCollapsedLastFrame) {
       // 접혔을 때: 창 너비를 제목 글씨 크기에 딱 맞게 축소 (### 부분 제외하고 계산)
@@ -472,7 +472,7 @@ namespace DX11Base {
             DX11Base::bForceCenterOfficerDetail = true;
         });
       }
-      if (DX11Base::bShowWidgetTengi) {
+      if (DX11Base::bShowWidgetTengi && p1 != 0) {
         DrawBadge(u8"전기취소", u8"전기취소###WIDGET_TENGI", [&]() {
           if (DX11Base::GetCapturedTengiAddr() != 0) {
             DX11Base::CancelTengi();
