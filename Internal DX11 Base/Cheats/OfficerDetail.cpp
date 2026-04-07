@@ -2,6 +2,7 @@
 #include "Cheats.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
+#include "CityData.h"
 #include "pch.h"
 #include "Framework/imgui.h"
 #include "showlog.h"
@@ -499,7 +500,33 @@ namespace DX11Base {
     }
     ImGui::SetNextWindowSize(ImVec2(580 * scale, 750 * scale), ImGuiCond_FirstUseEver);
 
-    if (ImGui::Begin(u8"주인공 무장 상세 편집###OffDetailWin", &bShowOfficerDetail, Flags)) {
+    // [신규] 주인공 도시 정보 실시간 확보
+    std::string titleCity = u8"";
+    {
+      uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+      uintptr_t cityArrayBase = 0;
+      if (exeBase) {
+        uintptr_t pp1 = *(uintptr_t *)(exeBase + 0x34C8630);
+        if (pp1 && IsValidPtr(pp1, 8)) {
+          uintptr_t pp2 = *(uintptr_t *)(pp1);
+          if (pp2 && IsValidPtr(pp2, 8)) cityArrayBase = *(uintptr_t *)(pp2);
+        }
+      }
+      if (cityArrayBase > 0x10000 && p1 > 0x10000) {
+        uintptr_t cityPtr = *(uintptr_t *)(p1 + 0x20);
+        if (cityPtr >= cityArrayBase) {
+          int idx = (int)((cityPtr - cityArrayBase) / 0x2A0);
+          if (idx >= 0 && idx < g_CityCount) {
+            titleCity = " - [" + std::string(g_CityList[idx].cityname) + "]";
+          }
+        }
+      }
+    }
+
+    char titleBuf[128];
+    sprintf_s(titleBuf, u8"주인공 무장 상세 편집%s###OffDetailWin", titleCity.c_str());
+
+    if (ImGui::Begin(titleBuf, &bShowOfficerDetail, Flags)) {
       if (p1 == 0) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"캡처된 주인공 데이터가 없습니다.");
         ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");

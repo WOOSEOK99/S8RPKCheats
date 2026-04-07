@@ -63,8 +63,14 @@ static PPeekMessageA oPeekMessageA = NULL;
 
 SHORT WINAPI hkGetAsyncKeyState(int vKey) {
     if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
-        // VK_HANGUL(0x15), VK_RMENU(0xA5): 한/영 전환 관련 키는 항상 실제 값 반환
-        if (ImGui::GetIO().WantCaptureKeyboard && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
+        // [중요] 한글 입력기(IME)와 UI가 쉬프트/컨트롤/알트 상태를 정확히 인지해야 쌍자음 등이 가능합니다.
+        // 따라서 시스템 기능키들은 차단하지 않고 실제 값을 반환합니다.
+        bool isModifier = (vKey == VK_SHIFT || vKey == VK_LSHIFT || vKey == VK_RSHIFT ||
+                           vKey == VK_CONTROL || vKey == VK_LCONTROL || vKey == VK_RCONTROL ||
+                           vKey == VK_MENU || vKey == VK_LMENU || vKey == VK_RMENU);
+        
+        // 한/영(0x15), 백틱(VK_OEM_3) 및 모든 수정 키(Modifier)는 통과
+        if (ImGui::GetIO().WantCaptureKeyboard && !isModifier && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
             return 0;
         }
     }
@@ -73,8 +79,11 @@ SHORT WINAPI hkGetAsyncKeyState(int vKey) {
 
 SHORT WINAPI hkGetKeyState(int vKey) {
     if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
-        // VK_HANGUL(0x15), VK_RMENU(0xA5): 한/영 전환 관련 키는 항상 실제 값 반환
-        if (ImGui::GetIO().WantCaptureKeyboard && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
+        bool isModifier = (vKey == VK_SHIFT || vKey == VK_LSHIFT || vKey == VK_RSHIFT ||
+                           vKey == VK_CONTROL || vKey == VK_LCONTROL || vKey == VK_RCONTROL ||
+                           vKey == VK_MENU || vKey == VK_LMENU || vKey == VK_RMENU);
+
+        if (ImGui::GetIO().WantCaptureKeyboard && !isModifier && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
             return 0;
         }
     }
@@ -83,15 +92,34 @@ SHORT WINAPI hkGetKeyState(int vKey) {
 
 BOOL WINAPI hkGetKeyboardState(PBYTE lpKeyState) {
     BOOL result = oGetKeyboardState(lpKeyState);
-    if (result && DX11Base::g_Engine && DX11Base::g_Engine->bShowMenu && ImGui::GetCurrentContext()) {
+    if (result && DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
         if (ImGui::GetIO().WantCaptureKeyboard) {
+            // 보존할 키들의 상태를 수동으로 백업
             BYTE tilde  = lpKeyState[VK_OEM_3];
             BYTE hangul = lpKeyState[0x15]; 
-            BYTE ralt   = lpKeyState[0xA5]; // 오른쪽 Alt (한영)
+            BYTE ralt   = lpKeyState[0xA5];
+            BYTE shift  = lpKeyState[VK_SHIFT];
+            BYTE lshift = lpKeyState[VK_LSHIFT];
+            BYTE rshift = lpKeyState[VK_RSHIFT];
+            BYTE ctrl   = lpKeyState[VK_CONTROL];
+            BYTE lctrl  = lpKeyState[VK_LCONTROL];
+            BYTE rctrl  = lpKeyState[VK_RCONTROL];
+            BYTE alt    = lpKeyState[VK_MENU];
+            BYTE lalt   = lpKeyState[VK_LMENU];
+
+            // 전체를 0으로 밀어버리되, 위에서 백업한 키들만 복구 (시스템/IME용)
             memset(lpKeyState, 0, 256);
             lpKeyState[VK_OEM_3]  = tilde;
             lpKeyState[0x15]      = hangul; 
             lpKeyState[0xA5]      = ralt;
+            lpKeyState[VK_SHIFT]  = shift;
+            lpKeyState[VK_LSHIFT] = lshift;
+            lpKeyState[VK_RSHIFT] = rshift;
+            lpKeyState[VK_CONTROL]= ctrl;
+            lpKeyState[VK_LCONTROL]= lctrl;
+            lpKeyState[VK_RCONTROL]= rctrl;
+            lpKeyState[VK_MENU]   = alt;
+            lpKeyState[VK_LMENU]  = lalt;
         }
     }
     return result;

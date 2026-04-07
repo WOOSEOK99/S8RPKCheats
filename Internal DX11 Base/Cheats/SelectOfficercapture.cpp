@@ -21,7 +21,6 @@
 #include <unordered_set>
 #include <windows.h>
 
-
 namespace DX11Base {
   extern HMODULE g_hModule;
 
@@ -261,6 +260,36 @@ namespace DX11Base {
       ImGui::AlignTextToFramePadding();
       ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), "%s", nameValue.c_str());
 
+      // [신규] 거주 도시 표시
+      {
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        uintptr_t cityArrayBase = 0;
+        if (exeBase) {
+          uintptr_t p1 = *(uintptr_t *)(exeBase + 0x34C8630);
+          if (p1 && IsValidPtr(p1, 8)) {
+            uintptr_t p2 = *(uintptr_t *)(p1);
+            if (p2 && IsValidPtr(p2, 8)) cityArrayBase = *(uintptr_t *)(p2);
+          }
+        }
+        std::string cityName = u8"정보 없음";
+        if (cityArrayBase > 0x10000) {
+          uintptr_t cityPtr = *(uintptr_t *)(pBase + 0x20);
+          if (cityPtr >= cityArrayBase) {
+            int idx = (int)((cityPtr - cityArrayBase) / 0x2A0);
+            if (idx >= 0 && idx < g_CityCount) {
+              cityName = g_CityList[idx].cityname;
+            }
+          }
+        }
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(u8"거주 도시");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.6f, 1.0f), "%s", cityName.c_str()); // 노란색 계열
+      }
+
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::AlignTextToFramePadding();
@@ -331,49 +360,55 @@ namespace DX11Base {
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
         if (ImGui::Button(u8"부활", ImVec2(0, 24 * scale))) {
-          uintptr_t tempGameBase = DX11Base::GetGameBase();
-          uintptr_t heroBase = 0;
-          unsigned short pBaseID = *(unsigned short *)(pBase + 0x08);
-          if (tempGameBase) {
-            uintptr_t tempHeroBase = *(uintptr_t *)(tempGameBase + 0xE0);
-            if (tempHeroBase) {
-              unsigned short heroID = *(unsigned short *)(tempHeroBase + 0x08);
-              uintptr_t realArrayBase = pBase - ((pBaseID - 1) * 0x3D0);
-              heroBase = realArrayBase + ((heroID - 1) * 0x3D0);
-            }
-          }
-          if (heroBase && heroBase > 0x10000) {
-            uintptr_t heroCorpsVal = *(uintptr_t *)(heroBase + 0x20);
-            DWORD oldP;
-            if (VirtualProtect((LPVOID)(pBase + 0x20), 8, PAGE_READWRITE, &oldP)) {
-              *(uintptr_t *)(pBase + 0x20) = heroCorpsVal;
-              VirtualProtect((LPVOID)(pBase + 0x20), 8, oldP, &oldP);
+          uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+          uintptr_t cityArrayBase = 0;
+          if (exeBase) {
+            uintptr_t p1 = *(uintptr_t *)(exeBase + 0x34C8630);
+            if (p1 && IsValidPtr(p1, 8)) {
+              uintptr_t p2 = *(uintptr_t *)(p1);
+              if (p2 && IsValidPtr(p2, 8)) cityArrayBase = *(uintptr_t *)(p2);
             }
           }
 
-          // [패치] 현재 가로챈 객체(UI용)와 마스터 배열 내의 원본을 동시에 수정
-          auto PatchStatus = [&](uintptr_t base) {
-            ModifyStat(base, 0x10, 0x58, 1); // 상태: 재야(0x58)
-            ModifyStat(base, 0x36, 255, 2);  // 몰년: 수명 연장
-            ModifyStat(base, 0xEE, 200, 1);  // 행동력
-            ModifyStat(base, 0x374, 0, 4);   // 사망 플래그 제거
-            if (heroBase && heroBase > 0x10000) {
-              uintptr_t heroCorpsVal = *(uintptr_t *)(heroBase + 0x20);
-              if (heroCorpsVal) {
-                DWORD oldP;
-                if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP)) {
-                  *(uintptr_t *)(base + 0x20) = heroCorpsVal;
-                  VirtualProtect((LPVOID)(base + 0x20), 8, oldP, &oldP);
-                }
+          uint8_t heroCityIdx = 0;
+          uintptr_t targetCityPtr = 0;
+          uintptr_t tempHeroBase = 0;
+          uintptr_t tempGameBase = DX11Base::GetGameBase();
+          if (tempGameBase) {
+            tempHeroBase = *(uintptr_t *)(tempGameBase + 0xE0);
+            if (tempHeroBase && IsValidPtr(tempHeroBase, 0x100)) {
+              uintptr_t heroCityPtr = *(uintptr_t *)(tempHeroBase + 0x20);
+              if (cityArrayBase > 0x10000 && heroCityPtr >= cityArrayBase) {
+                heroCityIdx = (uint8_t)((heroCityPtr - cityArrayBase) / 0x2A0);
+                targetCityPtr = heroCityPtr;
+              }
+            }
+          }
+
+          // [진단 완료] cityArrayBase와 0x2A0 크기가 정확함을 확인했습니다. (49번=운남)
+
+
+        auto PatchStatus = [&](uintptr_t base) {
+            ModifyStat(base, 0x10, 0x58, 1);    // 상태: 재야(0x58)
+            ModifyStat(base, 0x36, 255, 2);     // 몰년 연장
+            ModifyStat(base, 0xEE, 200, 1);     // 행동력
+            ModifyStat(base, 0x374, 0, 4);      // 사망 플래그 제거
+
+
+            if (targetCityPtr) {
+              DWORD oldP;
+              if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP)) {
+                *(uintptr_t *)(base + 0x20) = targetCityPtr;
+                VirtualProtect((LPVOID)(base + 0x20), 8, oldP, &oldP);
               }
             }
           };
 
+          unsigned short officerID = *(unsigned short *)(pBase + 0x08);
           PatchStatus(pBase);
-          PatchMasterData(pBaseID, PatchStatus);
-          s_triggerReselection = true; // [UX] 리스트 갱신 후 첫 번째 장수 자동 선택 유도
-
-          AddLog(u8"[LIFE] %s 무장 부활 처리를 완료했습니다.", g_officerNames[pBaseID].c_str());
+          PatchMasterData(officerID, PatchStatus);
+          s_triggerReselection = true;
+          AddLog(u8"[LIFE] %s 무장을 주인공 도시(Index:%d)로 부활시켰습니다.", g_officerNames[officerID].c_str(), heroCityIdx);
         }
 
         if (ImGui::IsItemHovered()) {
@@ -424,10 +459,10 @@ namespace DX11Base {
 
             // [패치] 현재 가로챈 객체(UI용)와 마스터 배열 내의 원본을 동시에 수정
             auto PatchStatus = [&](uintptr_t base) {
-              ModifyStat(base, 0x10, 0x58, 1);          // 상태: 재야(0x58)
-              ModifyStat(base, 0x36, 255, 2);           // 몰년: 수명 연장
-              ModifyStat(base, 0xEE, 200, 1);           // 행동력
-              ModifyStat(base, 0x374, 0, 4);            // 사망 플래그 제거
+              ModifyStat(base, 0x10, 0x58, 1); // 상태: 재야(0x58)
+              ModifyStat(base, 0x36, 255, 2);  // 몰년: 수명 연장
+              ModifyStat(base, 0xEE, 200, 1);  // 행동력
+              ModifyStat(base, 0x374, 0, 4);   // 사망 플래그 제거
               DWORD oldP2;
               if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP2)) {
                 *(uintptr_t *)(base + 0x20) = targetAddr;
@@ -498,9 +533,7 @@ namespace DX11Base {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
         if (ImGui::Button(u8"재야", ImVec2(0, 24 * scale))) {
           unsigned short pBaseID = *(unsigned short *)(pBase + 0x08);
-          auto patchRonin = [&](uintptr_t base) { 
-            ModifyStat(base, 0x10, 0x58, 1); 
-          };
+          auto patchRonin = [&](uintptr_t base) { ModifyStat(base, 0x10, 0x58, 1); };
           patchRonin(pBase);
           PatchMasterData(pBaseID, patchRonin);
           s_triggerReselection = true;

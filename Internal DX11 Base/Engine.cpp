@@ -38,130 +38,65 @@ namespace DX11Base {
 
   LRESULT D3D11Window::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     bool bAnyUIOpen = IsAnyUIOpen();
-    bool bWantKbd = ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
-
-    // ─── IME 메시지 선처리 ───────────────────────────────────────────────
-    if (msg == WM_IME_SETCONTEXT) {
-      if (bAnyUIOpen) {
-        lParam |= ISC_SHOWUICOMPOSITIONWINDOW;
-        return DefWindowProc(hWnd, msg, TRUE, lParam);
-      }
-      return CallWindowProc(g_D3D11Window->m_OldWndProc, hWnd, msg, wParam, lParam);
-    }
-
-    if (msg == WM_IME_COMPOSITION) {
-      if (lParam & GCS_RESULTSTR) {
-        HIMC himc = ImmGetContext(hWnd);
-        if (himc) {
-          int byteLen = ImmGetCompositionStringW(himc, GCS_RESULTSTR, NULL, 0);
-          if (byteLen > 0 && byteLen < 256) {
-            wchar_t buf[64] = {};
-            ImmGetCompositionStringW(himc, GCS_RESULTSTR, buf, sizeof(buf));
-            ImGuiIO &io = ImGui::GetIO();
-            for (int i = 0; i < byteLen / (int)sizeof(wchar_t); i++) {
-              // ASCII(영문,숫자)는 WM_CHAR로도 처리되므로 중복 입력을 방지하기 위해
-              // 한글(0x80 이상)인 경우에만 수동으로 추가합니다.
-              if (buf[i] && buf[i] >= 0x0080) {
-                io.AddInputCharacterUTF16((unsigned short)buf[i]);
-              }
-            }
-          }
-          ImmReleaseContext(hWnd, himc);
-        }
-        return 0;
-      }
-      ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
-      return 0;
-    }
-
-    if (msg == WM_IME_CHAR)
-      return 0;
-
-    if ((msg >= 0x010D && msg <= 0x010F) || (msg >= 0x0281 && msg <= 0x0291))
-      return CallWindowProc(g_D3D11Window->m_OldWndProc, hWnd, msg, wParam, lParam);
-    // ────────────────────────────────────────────────────────────────────
-
-    // ─── 포커스 복구 시 IME 재연결 ──────────────────────────────────────
-    if (msg == WM_SETFOCUS || msg == WM_ACTIVATE) {
-      if (bAnyUIOpen) {
-        ImmAssociateContextEx(hWnd, NULL, IACE_DEFAULT);
-        SendMessage(hWnd, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUICOMPOSITIONWINDOW);
-      }
-    }
-    // ──────────────────────────────────────────────────────────────────
-
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
-      return true;
 
     if (bAnyUIOpen) {
-      // ─── 한/영 전환 키 직접 처리 (어떤 상황에서도 우선 처리) ───
+      // ─── 1. 한/영 전환 및 한자 키 특별 처리 ────────────────────────
       if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
-        if (wParam == 0x15 || wParam == 0xA5) {
+        if (wParam == 0x15 || wParam == 0xA5) { // 한/영 키
           HIMC hIMC = ImmGetContext(hWnd);
           if (hIMC) {
             DWORD dwConv, dwSent;
             if (ImmGetConversionStatus(hIMC, &dwConv, &dwSent)) {
-              if (dwConv & IME_CMODE_NATIVE)
-                dwConv = IME_CMODE_ALPHANUMERIC;
-              else
-                dwConv = IME_CMODE_NATIVE | IME_CMODE_ROMAN;
+              if (dwConv & IME_CMODE_NATIVE) dwConv = IME_CMODE_ALPHANUMERIC;
+              else dwConv = IME_CMODE_NATIVE | IME_CMODE_ROMAN;
               ImmSetConversionStatus(hIMC, dwConv, dwSent);
             }
             ImmReleaseContext(hWnd, hIMC);
           }
-          // [중요] 시스템(OS)도 이 키를 인식하여 내부 상태를 갱신하게 함
-          DefWindowProc(hWnd, msg, wParam, lParam);
-          return 0; // 게임에만 전달하지 않음
-        }
-      }
-      if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
-        if (wParam == 0x15 || wParam == 0xA5) {
           DefWindowProc(hWnd, msg, wParam, lParam);
           return 0;
         }
       }
-      // ─────────────────────────────────────────────────────────
 
-      // 마우스 입력 차단 (메인 메뉴가 펼쳐져 있거나, 주인공/선택 무장 편집창이 열려있거나, 모든 장수 리스트에서 차단 옵션이 켜져 있거나, 메모리 에디터가 열려 있을 때)
+      // ─── 2. 키보드 및 IME 메시지 처리 (ImGui + 시스템 통합) ──────
+      // WM_KEYFIRST(0x100) ~ WM_KEYLAST(0x10F) 및 WM_IME_SETCONTEXT(0x281) ~ WM_IME_KEYUP(0x291)
+      if ((msg >= 0x0100 && msg <= 0x010F) || (msg >= 0x0281 && msg <= 0x0291)) {
+        // ImGui가 먼저 메시지를 가로채 상태를 업데이트하게 함
+        ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
+
+        // [핵심] DefWindowProc를 반드시 호출해야 윈도우 OS의 한글 입력기(IME)가 
+        // 쉬프트 상태를 인지하고 조합창(미리보기)을 정상적으로 띄울 수 있습니다.
+        LRESULT res = DefWindowProc(hWnd, msg, wParam, lParam);
+
+        // 게임의 원래 WndProc으로는 전달하지 않고 여기서 즉시 반환하여 게임 입력을 차단합니다.
+        return res;
+      }
+
+      // ─── 3. 마우스 차단 로직 ────────────────────────────────────────
       bool bHardBlock = !DX11Base::bIsMenuCollapsed ||
                         DX11Base::bShowOfficerDetail ||
                         DX11Base::bShowSelectedOfficerWin ||
                         (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) ||
                         (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor);
       if (!DX11Base::bAllowGameClick && !DX11Base::bShowDebug && bHardBlock) {
-        switch (msg) {
-        case WM_LBUTTONDOWN:
-        case WM_LBUTTONUP:
-        case WM_LBUTTONDBLCLK:
-        case WM_RBUTTONDOWN:
-        case WM_RBUTTONUP:
-        case WM_RBUTTONDBLCLK:
-        case WM_MOUSEMOVE:
-        case WM_MOUSEWHEEL:
-          return 1;
+        if (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST || msg == WM_MOUSEWHEEL) {
+          // 마우스는 ImGui가 처리하면 여기서 차단 (게임 클릭 방지)
+          if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+            return 1;
+          return 1; 
         }
       }
 
-      // 키보드 차단 (입력 중일 때만 다른 키들 차단)
-      if (bWantKbd) {
-        switch (msg) {
-        case WM_KEYDOWN:
-        case WM_SYSKEYDOWN:
-          // 기타 IME 특수키는 통과
-          if (wParam == 0x19 || wParam == 0x17 || wParam == 0x1C || wParam == 0x1D)
-            return DefWindowProc(hWnd, msg, wParam, lParam);
-          return 1;
+      // 기타 UI가 열린 상태에서 ImGui가 처리하는 다른 메시지들
+      if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+        return 1;
+    }
 
-        case WM_KEYUP:
-        case WM_SYSKEYUP:
-          if (wParam == 0x19 || wParam == 0x17 || wParam == 0x1C || wParam == 0x1D)
-            return DefWindowProc(hWnd, msg, wParam, lParam);
-          return 1;
-
-        case WM_CHAR:
-        case WM_DEADCHAR:
-          return 0;
-        }
+    // 포커스 복구 시 IME 재연결
+    if (msg == WM_SETFOCUS || msg == WM_ACTIVATE) {
+      if (bAnyUIOpen) {
+        ImmAssociateContextEx(hWnd, NULL, IACE_DEFAULT);
+        SendMessage(hWnd, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUICOMPOSITIONWINDOW);
       }
     }
 

@@ -48,7 +48,9 @@ namespace DX11Base {
     void LoadOfficerNames();
     void LoadEffectDefinitions();
 
-    // String mapping functions
+    // String mapping and normalization functions
+    std::string AnsiToUtf8(const std::string& str);
+    std::string NormalizeUtf8(const std::string& str);
     const char* GetTalentName(uint16_t id);
     const char* GetOffsetLabel(int offset);
     std::string GetFormattedEffectDescription(const TalentEffect& effect);

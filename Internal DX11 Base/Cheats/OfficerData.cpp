@@ -5,8 +5,37 @@
 #include <iomanip>
 #include <sstream>
 #include <psapi.h>
+#include <iostream>
+#include <winnls.h>
 
 namespace DX11Base {
+
+    // Unicode Normalization Form C (NFC) 로 변환하는 유틸리티
+    std::string NormalizeUtf8(const std::string& str) {
+        if (str.empty()) return "";
+        
+        // UTF-8 -> Wide
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+        if (wlen <= 0) return str;
+        std::wstring wstr(wlen, 0);
+        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &wstr[0], wlen);
+
+        // Normalize to NFC
+        int nlen = NormalizeString(NormalizationC, wstr.c_str(), -1, NULL, 0);
+        if (nlen <= 0) return str;
+        std::wstring nstr(nlen, 0);
+        NormalizeString(NormalizationC, wstr.c_str(), -1, &nstr[0], nlen);
+
+        // Wide -> UTF-8
+        int u8len = WideCharToMultiByte(CP_UTF8, 0, nstr.c_str(), -1, NULL, 0, NULL, NULL);
+        if (u8len <= 0) return str;
+        std::string u8str(u8len, 0);
+        WideCharToMultiByte(CP_UTF8, 0, nstr.c_str(), -1, &u8str[0], u8len, NULL, NULL);
+        
+        size_t actualLen = strlen(u8str.c_str());
+        u8str.resize(actualLen);
+        return u8str;
+    }
 
     extern HMODULE g_hModule;
 
@@ -56,6 +85,47 @@ namespace DX11Base {
         }
     }
 
+    bool IsUtf8(const std::string& str) {
+        int i = 0;
+        int n = (int)str.length();
+        while (i < n) {
+            unsigned char c = (unsigned char)str[i];
+            if (c <= 0x7F) i++;
+            else if ((c & 0xE0) == 0xC0) {
+                if (i + 1 >= n || (str[i + 1] & 0xC0) != 0x80) return false;
+                i += 2;
+            }
+            else if ((c & 0xF0) == 0xE0) {
+                if (i + 2 >= n || (str[i + 1] & 0xC0) != 0x80 || (str[i + 2] & 0xC0) != 0x80) return false;
+                i += 3;
+            }
+            else if ((c & 0xF8) == 0xF0) {
+                if (i + 3 >= n || (str[i + 1] & 0xC0) != 0x80 || (str[i + 2] & 0xC0) != 0x80 || (str[i + 3] & 0xC0) != 0x80) return false;
+                i += 4;
+            }
+            else return false;
+        }
+        return true;
+    }
+
+    std::string AnsiToUtf8(const std::string& str) {
+        if (str.empty()) return "";
+        // [수정] 이미 UTF-8이면 변환하지 않음 (깨짐 방지)
+        if (IsUtf8(str)) return str;
+
+        int len = MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, NULL, 0);
+        if (len <= 0) return str;
+        std::wstring wstr(len, 0);
+        MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, &wstr[0], len);
+        int u8len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+        if (u8len <= 0) return str;
+        std::string u8str(u8len, 0);
+        WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &u8str[0], u8len, NULL, NULL);
+        size_t actualLen = strlen(u8str.c_str());
+        u8str.resize(actualLen);
+        return u8str;
+    }
+
     void LoadOfficerNames() {
         if (g_namesLoaded) return;
         g_namesLoaded = true;
@@ -97,14 +167,16 @@ namespace DX11Base {
                             }
                         }
                     }
-                    if (line.find("}") != std::string::npos) {
-                        if (currentId != -1 && !currentName.empty()) {
-                            if (!currentJa.empty()) g_officerNames[currentId] = currentName + u8"(" + currentJa + u8")";
-                            else g_officerNames[currentId] = currentName;
+                    if (line.find("}") != std::string::npos && currentId != -1) {
+                        if (!currentName.empty()) {
+                            std::string u8Name = NormalizeUtf8(AnsiToUtf8(currentName));
+                            std::string u8Ja = NormalizeUtf8(AnsiToUtf8(currentJa));
+                            if (!u8Ja.empty()) g_officerNames[currentId] = u8Name + u8"(" + u8Ja + u8")";
+                            else g_officerNames[currentId] = u8Name;
                         }
-                        currentId = -1; currentName = ""; currentJa = "";
                     }
                 }
+                file.close();
             }
         }
     }
