@@ -1,7 +1,10 @@
 #include "pch.h"
 #include "helper.h"
+#include <fstream>
+#include <chrono>
+#include <iomanip>
 
-// --- winmm.dll 완벽 프록시 익스포트 ---
+// --- winmm.dll 프록시 익스포트 연동 (시스템 winmm.dll로 포워딩) ---
 #pragma comment(linker, "/export:CloseDriver=C:\\Windows\\System32\\winmm.CloseDriver")
 #pragma comment(linker, "/export:DefDriverProc=C:\\Windows\\System32\\winmm.DefDriverProc")
 #pragma comment(linker, "/export:DriverCallback=C:\\Windows\\System32\\winmm.DriverCallback")
@@ -180,6 +183,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  dwCallReason, LPVOID lpReserved)
     if (dwCallReason == DLL_PROCESS_ATTACH)
     {
         DX11Base::g_hModule = hModule;
+
+        // --- 아주 초기 로딩 확인 로그 (데이터 포함) ---
+        std::ofstream logFile("S8RPK_cheat.log", std::ios::app);
+        if (logFile.is_open()) {
+            auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            struct tm tm_info;
+            localtime_s(&tm_info, &now);
+            logFile << "\n[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S") << "] [System] winmm.dll Proxy Loaded (DLL_PROCESS_ATTACH)" << std::endl;
+            logFile.close();
+        }
 
         DisableThreadLibraryCalls(hModule);
 

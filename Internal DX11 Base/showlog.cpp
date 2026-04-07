@@ -1,8 +1,5 @@
 #include "showlog.h"
-#include "Cheats.h"
-#include "Engine.h"
-#include "Menu.h"
-#include "pch.h"
+#include "Framework/imgui.h"
 #include <cstdarg>
 #include <string>
 #include <vector>
@@ -29,6 +26,16 @@ namespace DX11Base {
 
     std::lock_guard<std::mutex> lock(g_logMutex);
     g_loveLogs.push_back(buf);
+
+    // [추가] 파일 로그 기록
+    std::ofstream logFile("S8RPK_cheat.log", std::ios::app);
+    if (logFile.is_open()) {
+        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        struct tm tm_info;
+        localtime_s(&tm_info, &now);
+        logFile << "[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S") << "] " << buf << std::endl;
+        logFile.close();
+    }
 
     // 로그가 너무 많아지면 메모리 관리를 위해 앞부분 삭제 (선택 사항)
     if (g_loveLogs.size() > 50) {

@@ -96,7 +96,6 @@ namespace DX11Base {
       if (!bBattleUnit) {
         bBattleUnit = true;
         DX11Base::SetBattleUnitCapture(true);
-        AddLog(u8"[자동화] 전쟁 모드 감지 -> 유닛 캡처 자동 활성화");
       }
       s_autoCaptureStarted = true;
     } else if (!isAnyWarModActive && s_autoCaptureStarted) {
@@ -129,9 +128,6 @@ namespace DX11Base {
         uint8_t realMonth = GetCurrentMonth();    // 기존 RealMonth 방식
 
         if (sysMonth != s_lastSysMonth || realMonth != s_lastRealMonth) {
-          if (sysMonth > 0 || realMonth > 0) {
-            AddLog(u8"[Debug] 월 비교 - 시스템(AOB): %d, 리얼(Capture): %d", sysMonth, realMonth);
-          }
           s_lastSysMonth = sysMonth;
           s_lastRealMonth = realMonth;
         }
@@ -146,14 +142,14 @@ namespace DX11Base {
     UINT dpi = GetDpiForWindow(g_Engine->pGameWindow);
     float scale = (dpi == 0) ? 1.0f : (float)dpi / 96.0f;
 
-    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 치트 (V0.60)###SAM8_CHEAT";
+    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
     ImGuiWindow *pMainWin = ImGui::FindWindowByName(s_windowTitleStr);
     bool bMenuCollapsedLastFrame = pMainWin ? pMainWin->Collapsed : false;
 
     // 상태에 따른 표시용 문자열과 ImGui 고유 ID 문자열 결정
-    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (V0.60)";
-    s_windowTitleStr =
-        bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT" : u8"삼국지 8 리메이크 치트 (V0.60)###SAM8_CHEAT";
+    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")";
+    const char *finalTitle =
+        bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT" : u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
 
     // AlwaysAutoResize: 레이아웃이 복잡할 때 좌표 계산 오차가 발생할 수 있음
     // 펼쳐진 상태에서는 스크롤바는 끄되, 가로/세로 자동 조절은 켜둠 (NoScrollbar만으로 오프셋 해결 시도)
@@ -256,7 +252,7 @@ namespace DX11Base {
 
     // 펼쳐졌을 때만 bKeepOpen 포인터를 넘겨서 X 버튼을 표시함
     bool bKeepOpen = true;
-    bool bMenuExpanded = ImGui::Begin(s_windowTitleStr, bMenuCollapsedLastFrame ? NULL : &bKeepOpen, Flags);
+    bool bMenuExpanded = ImGui::Begin(finalTitle, bMenuCollapsedLastFrame ? NULL : &bKeepOpen, Flags);
 
     if (pushColorCount > 0)
       ImGui::PopStyleColor(pushColorCount);

@@ -139,26 +139,38 @@ namespace DX11Base {
       if (!targetBase)
         return;
       uintptr_t targetAddr = targetBase + offset;
-      if (IsValidPtr(targetAddr, size)) {
-        DWORD oldProt;
-        if (VirtualProtect((LPVOID)targetAddr, size, PAGE_READWRITE, &oldProt)) {
-          ModifyStatFast(targetAddr, value, size);
-          VirtualProtect((LPVOID)targetAddr, size, oldProt, &oldProt);
+      __try {
+        if (IsValidPtr(targetAddr, size)) {
+          DWORD oldProt;
+          if (VirtualProtect((LPVOID)targetAddr, size, PAGE_READWRITE, &oldProt)) {
+            ModifyStatFast(targetAddr, value, size);
+            VirtualProtect((LPVOID)targetAddr, size, oldProt, &oldProt);
+          } else {
+            AddLog(u8"[ERROR] VirtualProtect 실패 (Addr:%p, Size:%d)", (void *)targetAddr, size);
+          }
+        } else {
+          AddLog(u8"[ERROR] IsValidPtr 실패 (Addr:%p, Size:%d)", (void *)targetAddr, size);
         }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[CRITICAL] ModifyStat 예외 발생 (Addr:%p)", (void *)targetAddr);
       }
     }
 
     // 초고속 수정 (VirtualProtect 제외 - 대량 처리 루프용)
     // 호출 전에 호출자가 VirtualProtect로 전체 영역을 쓰기 가능하게 만들어야 함.
     void ModifyStatFast(uintptr_t targetAddr, int value, int size) {
-      if (size == 1)
-        *(unsigned char *)targetAddr = (unsigned char)value;
-      else if (size == 2)
-        *(short *)targetAddr = (short)value;
-      else if (size == 4)
-        *(int *)targetAddr = value;
-      else if (size == 8)
-        *(uint64_t *)targetAddr = (uint64_t)value;
+      __try {
+        if (size == 1)
+          *(unsigned char *)targetAddr = (unsigned char)value;
+        else if (size == 2)
+          *(short *)targetAddr = (short)value;
+        else if (size == 4)
+          *(int *)targetAddr = value;
+        else if (size == 8)
+          *(uint64_t *)targetAddr = (uint64_t)value;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        // 루프 내에서 대량 처리 시 로그가 너무 많아질 수 있으므로 로그는 생략하거나 카운트만 할 수도 있음
+      }
     }
 
     void MaximizeHeroStats() {

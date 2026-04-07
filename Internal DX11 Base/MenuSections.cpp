@@ -37,6 +37,7 @@ namespace DX11Base {
   extern bool g_loyaltyThreadRunning;
   extern bool marriageApplied;
   extern void ToggleMarriageCondition();
+  extern void SetMarriageCondition(bool enable);
 } // namespace DX11Base
 
 namespace DX11Base {
@@ -292,9 +293,7 @@ namespace DX11Base {
           uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
 
           if (hookAddr != s_lastHookAddr) {
-            if (hookAddr == 0) {
-              DX11Base::AddLog(u8"[전기] 훅 지점 탐색 중...");
-            } else {
+            if (hookAddr != 0) {
               DX11Base::AddLog(u8"[전기] 훅 지점 발견: %p (+0x%llX)", (void *)hookAddr,
                                (unsigned long long)DX11Base::GetTengiHookOffset());
             }
@@ -302,9 +301,7 @@ namespace DX11Base {
           }
 
           if (captAddr != s_lastCaptAddr) {
-            if (captAddr == 0) {
-              DX11Base::AddLog(u8"[전기] 캡처 주소 초기화됨 (평정 진행 후 다시 캡처 필요)");
-            } else {
+            if (captAddr != 0) {
               DX11Base::AddLog(u8"[전기] 캡처 주소 확보: %p", (void *)captAddr);
             }
             s_lastCaptAddr = captAddr;
@@ -366,6 +363,11 @@ namespace DX11Base {
             else
               bLoveCave = false;
             DX11Base::SetInstantLoveCave(false);
+
+            // [상호 배제] 인연 기능 켜지면 결혼 무제한 끄기
+            if (::DX11Base::marriageApplied) {
+              ::DX11Base::SetMarriageCondition(false);
+            }
           }
           DX11Base::SetInstantLoveCave(*var, mode);
           SaveConfig();
@@ -437,7 +439,15 @@ namespace DX11Base {
 
       bool tempMarriage = ::DX11Base::marriageApplied;
       if (ImGui::Checkbox(u8"[결혼] 결혼 무제한", &tempMarriage)) {
-        ::DX11Base::ToggleMarriageCondition();
+        // [상호 배제] 결혼 무제한 켜지면 인연 기능 끄기
+        if (tempMarriage) {
+          if (bLoveCave || bHateCave) {
+            bLoveCave = false;
+            bHateCave = false;
+            DX11Base::SetInstantLoveCave(false);
+          }
+        }
+        ::DX11Base::SetMarriageCondition(tempMarriage);
         SaveConfig();
       }
 

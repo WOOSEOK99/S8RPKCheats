@@ -6,6 +6,7 @@
 #include "MenuState.h"
 #include "debug.h"
 #include "pch.h"
+#include "showlog.h"
 #include <imm.h>
 #include <windowsx.h>
 
@@ -38,17 +39,26 @@ namespace DX11Base {
 
   LRESULT D3D11Window::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     bool bAnyUIOpen = IsAnyUIOpen();
+    bool bWantKbd = ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
 
     if (bAnyUIOpen) {
-      // ─── 1. 한/영 전환 및 한자 키 특별 처리 ────────────────────────
+      // 1. IME 전처리: 조합창(미리보기) 강제 표시 설정 
+      if (msg == WM_IME_SETCONTEXT) {
+        lParam |= ISC_SHOWUICOMPOSITIONWINDOW;
+        return DefWindowProc(hWnd, msg, TRUE, lParam);
+      }
+
+      // 2. 한/영 키 처리
       if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
-        if (wParam == 0x15 || wParam == 0xA5) { // 한/영 키
+        if (wParam == 0x15 || wParam == 0xA5) {
           HIMC hIMC = ImmGetContext(hWnd);
           if (hIMC) {
             DWORD dwConv, dwSent;
             if (ImmGetConversionStatus(hIMC, &dwConv, &dwSent)) {
-              if (dwConv & IME_CMODE_NATIVE) dwConv = IME_CMODE_ALPHANUMERIC;
-              else dwConv = IME_CMODE_NATIVE | IME_CMODE_ROMAN;
+              if (dwConv & IME_CMODE_NATIVE)
+                dwConv = IME_CMODE_ALPHANUMERIC;
+              else
+                dwConv = IME_CMODE_NATIVE | IME_CMODE_ROMAN;
               ImmSetConversionStatus(hIMC, dwConv, dwSent);
             }
             ImmReleaseContext(hWnd, hIMC);
@@ -58,47 +68,61 @@ namespace DX11Base {
         }
       }
 
-      // ─── 2. 키보드 및 IME 메시지 처리 (ImGui + 시스템 통합) ──────
-      // WM_KEYFIRST(0x100) ~ WM_KEYLAST(0x10F) 및 WM_IME_SETCONTEXT(0x281) ~ WM_IME_KEYUP(0x291)
-      if ((msg >= 0x0100 && msg <= 0x010F) || (msg >= 0x0281 && msg <= 0x0291)) {
-        // ImGui가 먼저 메시지를 가로채 상태를 업데이트하게 함
-        ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
-
-        // [핵심] DefWindowProc를 반드시 호출해야 윈도우 OS의 한글 입력기(IME)가 
-        // 쉬프트 상태를 인지하고 조합창(미리보기)을 정상적으로 띄울 수 있습니다.
-        LRESULT res = DefWindowProc(hWnd, msg, wParam, lParam);
-
-        // 게임의 원래 WndProc으로는 전달하지 않고 여기서 즉시 반환하여 게임 입력을 차단합니다.
-        return res;
+      // 3. IME 입력 완성 처리 (한글 씹힘 방지 + 미리보기 지원)
+      if (msg == WM_IME_COMPOSITION) {
+        if (lParam & GCS_RESULTSTR) {
+          HIMC himc = ImmGetContext(hWnd);
+          if (himc) {
+            int byteLen = ImmGetCompositionStringW(himc, GCS_RESULTSTR, NULL, 0);
+            if (byteLen > 0 && byteLen < 256) {
+              wchar_t buf[64] = {};
+              ImmGetCompositionStringW(himc, GCS_RESULTSTR, buf, sizeof(buf));
+              ImGuiIO &io = ImGui::GetIO();
+              for (int i = 0; i < byteLen / (int)sizeof(wchar_t); i++) {
+                if (buf[i] && buf[i] >= 0x0080) {
+                  io.AddInputCharacterUTF16((unsigned short)buf[i]);
+                }
+              }
+            }
+            ImmReleaseContext(hWnd, himc);
+          }
+        }
+        // [중요] DefWindowProc를 호출해야 OS 조합창(미리보기)이 뜹니다.
+        // ImGui_ImplWin32_WndProcHandler는 여기서 처리하지 않고 아래에서 통합 관리
+        return DefWindowProc(hWnd, msg, wParam, lParam);
       }
 
-      // ─── 3. 마우스 차단 로직 ────────────────────────────────────────
-      bool bHardBlock = !DX11Base::bIsMenuCollapsed ||
-                        DX11Base::bShowOfficerDetail ||
+      // 4. 중복 입력 방지: 이미 GCS_RESULTSTR에서 처리한 글자(WM_IME_CHAR, WM_CHAR)는 차단
+      if (msg == WM_IME_CHAR) return 0;
+      if (msg == WM_CHAR) {
+        if (wParam >= 0x0080) return 0; // 한글/특수문자는 위에서 처리됨
+      }
+
+      // 5. 기타 키보드 메시지 ImGui 전달 및 게임 차단
+      if ((msg >= 0x0100 && msg <= 0x010F) || (msg >= 0x0281 && msg <= 0x0291) || msg == WM_CHAR) {
+        ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
+        // IME/시스템 키는 DefWindowProc로 전달
+        return DefWindowProc(hWnd, msg, wParam, lParam);
+      }
+
+      // 6. 마우스 차단
+      bool bHardBlock = !DX11Base::bIsMenuCollapsed || DX11Base::bShowOfficerDetail ||
                         DX11Base::bShowSelectedOfficerWin ||
                         (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) ||
                         (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor);
       if (!DX11Base::bAllowGameClick && !DX11Base::bShowDebug && bHardBlock) {
-        if (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST || msg == WM_MOUSEWHEEL) {
-          // 마우스는 ImGui가 처리하면 여기서 차단 (게임 클릭 방지)
-          if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
-            return 1;
-          return 1; 
+        switch (msg) {
+        case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
+        case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
+        case WM_MOUSEMOVE: case WM_MOUSEWHEEL:
+          if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return 1;
+          return 1;
         }
       }
-
-      // 기타 UI가 열린 상태에서 ImGui가 처리하는 다른 메시지들
-      if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
-        return 1;
     }
 
-    // 포커스 복구 시 IME 재연결
-    if (msg == WM_SETFOCUS || msg == WM_ACTIVATE) {
-      if (bAnyUIOpen) {
-        ImmAssociateContextEx(hWnd, NULL, IACE_DEFAULT);
-        SendMessage(hWnd, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUICOMPOSITIONWINDOW);
-      }
-    }
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+      return true;
 
     if (g_D3D11Window && g_D3D11Window->m_OldWndProc)
       return CallWindowProc(g_D3D11Window->m_OldWndProc, hWnd, msg, wParam, lParam);
@@ -114,8 +138,10 @@ namespace DX11Base {
   HRESULT APIENTRY D3D11Window::SwapChain_ResizeBuffers_hook(IDXGISwapChain *p, UINT bufferCount, UINT Width,
                                                              UINT Height, DXGI_FORMAT fmt, UINT scFlags) {
     g_D3D11Window->m_pSwapChain = p;
-    g_D3D11Window->m_RenderTargetView->Release();
-    g_D3D11Window->m_RenderTargetView = nullptr;
+    if (g_D3D11Window->m_RenderTargetView) {
+      g_D3D11Window->m_RenderTargetView->Release();
+      g_D3D11Window->m_RenderTargetView = nullptr;
+    }
 
     HRESULT result = g_D3D11Window->IDXGISwapChain_ResizeBuffers_stub(p, bufferCount, Width, Height, fmt, scFlags);
 
@@ -292,7 +318,14 @@ namespace DX11Base {
       koFont.MergeMode = true;
       koFont.PixelSnapH = true;
       static const ImWchar ranges[] = {0x0020, 0x00FF, 0x2000, 0x2BFF, 0xAC00, 0xD7A3, 0};
-      io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\malgun.ttf", baseFontSize, &koFont, ranges);
+      
+      const char* fontPath = "C:\\Windows\\Fonts\\malgun.ttf";
+      if (GetFileAttributesA(fontPath) != INVALID_FILE_ATTRIBUTES) {
+          io.Fonts->AddFontFromFileTTF(fontPath, baseFontSize, &koFont, ranges);
+      } else {
+          // 폰트가 없을 경우 기본 폰트로 병합 시도 (실패 방지)
+          DX11Base::AddLog(u8"[Warn] 맑은 고딕 폰트를 찾을 수 없습니다: %s", fontPath);
+      }
       io.Fonts->Build();
 
       ID3D11Texture2D *BackBuffer;

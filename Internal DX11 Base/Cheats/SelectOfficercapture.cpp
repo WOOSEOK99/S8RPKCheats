@@ -184,16 +184,26 @@ namespace DX11Base {
   // --- [ UI Helper Functions ] ---
 
   static void PatchMasterData(unsigned short targetID, std::function<void(uintptr_t)> patchFunc) {
-    if (s_stableArrayBase < 0x10000)
+    if (s_stableArrayBase < 0x10000) {
+      AddLog(u8"[DEBUG] [PatchMasterData] s_stableArrayBase 유효하지 않음: %p", (void *)s_stableArrayBase);
       return;
+    }
+    AddLog(u8"[DEBUG] [PatchMasterData] 탐색 시작: ID %d (Base: %p)", (int)targetID, (void *)s_stableArrayBase);
+    int foundCount = 0;
     for (int i = 0; i < 5102; i++) {
       uintptr_t targetBase = s_stableArrayBase + (i * 0x3D0);
       RosterStats s = SafeReadRosterStats(targetBase);
       if (s.valid && s.id_08 == targetID) {
+        AddLog(u8"[DEBUG] [PatchMasterData] 대상 발견: Index %d, Base %p", i, (void *)targetBase);
         patchFunc(targetBase);
-        break; // [최적화] 대상을 찾았으면 남은 5000여 번의 루프를 종료합니다.
+        foundCount++;
+        break;
       }
     }
+    if (foundCount == 0) {
+      AddLog(u8"[DEBUG] [PatchMasterData] 실패: 마스터 배열에서 ID %d를 찾지 못함", (int)targetID);
+    }
+    AddLog(u8"[DEBUG] [PatchMasterData] 탐색 종료 (발견: %d)", foundCount);
   }
 
   void DrawOfficerHeader(uintptr_t pBase, float scale) {
@@ -389,19 +399,24 @@ namespace DX11Base {
 
 
         auto PatchStatus = [&](uintptr_t base) {
+            AddLog(u8"[DEBUG] [PatchStatus] 시작: Base %p", (void *)base);
             ModifyStat(base, 0x10, 0x58, 1);    // 상태: 재야(0x58)
             ModifyStat(base, 0x36, 255, 2);     // 몰년 연장
             ModifyStat(base, 0xEE, 200, 1);     // 행동력
             ModifyStat(base, 0x374, 0, 4);      // 사망 플래그 제거
 
-
             if (targetCityPtr) {
+              AddLog(u8"[DEBUG] [PatchStatus] 도시 패치 시도 (Addr:%p -> CityPtr:%p)", (void*)(base + 0x20), (void*)targetCityPtr);
               DWORD oldP;
               if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP)) {
                 *(uintptr_t *)(base + 0x20) = targetCityPtr;
                 VirtualProtect((LPVOID)(base + 0x20), 8, oldP, &oldP);
+                AddLog(u8"[DEBUG] [PatchStatus] 도시 패치 성공");
+              } else {
+                AddLog(u8"[ERROR] [PatchStatus] 도시 패치 실패 (VirtualProtect 에러)");
               }
             }
+            AddLog(u8"[DEBUG] [PatchStatus] 종료");
           };
 
           unsigned short officerID = *(unsigned short *)(pBase + 0x08);
@@ -459,15 +474,24 @@ namespace DX11Base {
 
             // [패치] 현재 가로챈 객체(UI용)와 마스터 배열 내의 원본을 동시에 수정
             auto PatchStatus = [&](uintptr_t base) {
+              AddLog(u8"[DEBUG] [PatchStatus(City)] 시작: Base %p", (void *)base);
               ModifyStat(base, 0x10, 0x58, 1); // 상태: 재야(0x58)
               ModifyStat(base, 0x36, 255, 2);  // 몰년: 수명 연장
               ModifyStat(base, 0xEE, 200, 1);  // 행동력
               ModifyStat(base, 0x374, 0, 4);   // 사망 플래그 제거
-              DWORD oldP2;
-              if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP2)) {
-                *(uintptr_t *)(base + 0x20) = targetAddr;
-                VirtualProtect((LPVOID)(base + 0x20), 8, oldP2, &oldP2);
+              
+              if (targetAddr) {
+                AddLog(u8"[DEBUG] [PatchStatus(City)] 도시 패치 시도 (Addr:%p -> CityPtr:%p)", (void*)(base + 0x20), (void*)targetAddr);
+                DWORD oldP2;
+                if (VirtualProtect((LPVOID)(base + 0x20), 8, PAGE_READWRITE, &oldP2)) {
+                  *(uintptr_t *)(base + 0x20) = targetAddr;
+                  VirtualProtect((LPVOID)(base + 0x20), 8, oldP2, &oldP2);
+                  AddLog(u8"[DEBUG] [PatchStatus(City)] 도시 패치 성공");
+                } else {
+                  AddLog(u8"[ERROR] [PatchStatus(City)] 도시 패치 실패 (VirtualProtect 에러)");
+                }
               }
+              AddLog(u8"[DEBUG] [PatchStatus(City)] 종료");
             };
 
             PatchStatus(pBase);
@@ -521,6 +545,7 @@ namespace DX11Base {
           }
           if (cityArrayBase && cityArrayBase > 0x10000) {
             uintptr_t targetAddr = cityArrayBase + (s_selectedCityIdx * 0x2A0);
+            AddLog(u8"[DEBUG] [Move] 이동 시도 (Base:%p, Target:%s)", (void*)pBase, g_CityList[s_selectedCityIdx].cityname);
             *(uintptr_t *)(pBase + 0x20) = targetAddr;
             AddLog(u8"[이동] %s 무장을 [%s] 도시로 이동시켰습니다!",
                    DX11Base::g_officerNames[*(unsigned short *)(pBase + 0x08)].c_str(),
