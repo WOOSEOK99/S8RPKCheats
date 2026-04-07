@@ -146,14 +146,14 @@ namespace DX11Base {
     UINT dpi = GetDpiForWindow(g_Engine->pGameWindow);
     float scale = (dpi == 0) ? 1.0f : (float)dpi / 96.0f;
 
-    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 치트 (V0.51)###SAM8_CHEAT";
+    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 치트 (V0.60)###SAM8_CHEAT";
     ImGuiWindow *pMainWin = ImGui::FindWindowByName(s_windowTitleStr);
     bool bMenuCollapsedLastFrame = pMainWin ? pMainWin->Collapsed : false;
 
     // 상태에 따른 표시용 문자열과 ImGui 고유 ID 문자열 결정
-    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (V0.51)";
+    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (V0.60)";
     s_windowTitleStr =
-        bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT" : u8"삼국지 8 리메이크 치트 (V0.51)###SAM8_CHEAT";
+        bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT" : u8"삼국지 8 리메이크 치트 (V0.60)###SAM8_CHEAT";
 
     // AlwaysAutoResize: 레이아웃이 복잡할 때 좌표 계산 오차가 발생할 수 있음
     // 펼쳐진 상태에서는 스크롤바는 끄되, 가로/세로 자동 조절은 켜둠 (NoScrollbar만으로 오프셋 해결 시도)
@@ -273,34 +273,34 @@ namespace DX11Base {
 
     // ─── [ 추가 ] 버전 클릭 시 디버그 모드 토글 (10초 내 10번 클릭) ───
     if (!bIsMenuCollapsed && bMenuExpanded) {
-        static int s_versionClickCount = 0;
-        static double s_lastVersionClickTime = 0.0;
-        
-        if (ImGui::IsMouseClicked(0)) {
-            ImVec2 mousePos = ImGui::GetMousePos();
-            ImVec2 winPos = ImGui::GetWindowPos();
-            float titleBarHeight = ImGui::GetFrameHeight();
+      static int s_versionClickCount = 0;
+      static double s_lastVersionClickTime = 0.0;
 
-            // 타이틀바 영역 내 클릭인지 확인 (X 버튼 영역 제외한 제목 부분 위주)
-            if (mousePos.x >= winPos.x && mousePos.x <= winPos.x + ImGui::GetWindowWidth() - 40.0f * scale &&
-                mousePos.y >= winPos.y && mousePos.y <= winPos.y + titleBarHeight) {
-                
-                double currentTime = ImGui::GetTime();
-                if (currentTime - s_lastVersionClickTime > 10.0) {
-                    s_versionClickCount = 0; // 10초 지나면 초기화
-                }
-                
-                s_versionClickCount++;
-                s_lastVersionClickTime = currentTime;
-                
-                if (s_versionClickCount >= 10) {
-                    bShowPasswordPopup = true; // 비밀번호 창 띄우기
-                    s_versionClickCount = 0;
-                    // 시각적 피드백 (로그)
-                    AddLog(u8"[시스템] 2차 인증이 필요합니다. 비밀번호를 입력해 주세요.");
-                }
-            }
+      if (ImGui::IsMouseClicked(0)) {
+        ImVec2 mousePos = ImGui::GetMousePos();
+        ImVec2 winPos = ImGui::GetWindowPos();
+        float titleBarHeight = ImGui::GetFrameHeight();
+
+        // 타이틀바 영역 내 클릭인지 확인 (X 버튼 영역 제외한 제목 부분 위주)
+        if (mousePos.x >= winPos.x && mousePos.x <= winPos.x + ImGui::GetWindowWidth() - 40.0f * scale &&
+            mousePos.y >= winPos.y && mousePos.y <= winPos.y + titleBarHeight) {
+
+          double currentTime = ImGui::GetTime();
+          if (currentTime - s_lastVersionClickTime > 10.0) {
+            s_versionClickCount = 0; // 10초 지나면 초기화
+          }
+
+          s_versionClickCount++;
+          s_lastVersionClickTime = currentTime;
+
+          if (s_versionClickCount >= 10) {
+            bShowPasswordPopup = true; // 비밀번호 창 띄우기
+            s_versionClickCount = 0;
+            // 시각적 피드백 (로그)
+            AddLog(u8"[시스템] 2차 인증이 필요합니다. 비밀번호를 입력해 주세요.");
+          }
         }
+      }
     }
 
     if (bMenuExpanded) {
@@ -537,9 +537,9 @@ namespace DX11Base {
       ImGui::Text(u8"개발자 도구 접근을 위해 비밀번호를 입력하세요:");
       ImGui::Spacing();
 
-      bool enterPressed = ImGui::InputText("##DebugPassword", passBuf, sizeof(passBuf), 
-                                          ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
-      
+      bool enterPressed = ImGui::InputText("##DebugPassword", passBuf, sizeof(passBuf),
+                                           ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
+
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::Spacing();
