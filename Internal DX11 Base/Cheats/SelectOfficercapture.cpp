@@ -625,6 +625,7 @@ namespace DX11Base {
   }
 
   void DrawSelectedOfficerWindow(ImVec2 mPos, ImVec2 mSize, float scale, bool asChild) {
+    LoadOfficerNames();
     LoadEffectDefinitions();
     static bool s_wasShowWin = false;
     if (!asChild) {
@@ -866,6 +867,7 @@ namespace DX11Base {
       return;
 
     LoadOfficerNames();
+    LoadEffectDefinitions();
 
     if (bForceCenterOfficerList) {
       ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);

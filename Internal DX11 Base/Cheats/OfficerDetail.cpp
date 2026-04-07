@@ -490,6 +490,10 @@ namespace DX11Base {
     if (!bShowOfficerDetail)
       return;
 
+    // 데이터 로딩 보장
+    LoadOfficerNames();
+    LoadEffectDefinitions();
+
     if (bForceCenterOfficerDetail) {
       ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
       ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
