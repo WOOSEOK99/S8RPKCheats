@@ -229,12 +229,12 @@ namespace DX11Base {
   }
 
   void debuging(uintptr_t gameBase, uintptr_t p1) {
-#ifdef ENABLE_DEBUG_LOG
+
     ImGuiIO &io = ImGui::GetIO();
     float scale = io.FontGlobalScale;
 
     // 메인 메뉴에 남겨둘 체크박스
-    ImGui::Checkbox(u8"디버그 정보 보기", &bShowDebug);
+    // ImGui::Checkbox(u8"디버그 정보 보기", &bShowDebug);
 
     if (bShowDebug) {
       // 별도의 "디버그 메뉴" 창 시작
@@ -301,8 +301,6 @@ namespace DX11Base {
 
     // 메모리 에디터는 항상 렌더링 시도 (내부에서 bShowMemoryEditor 체크함)
     renderMemoryEditorWindow(gameBase, p1);
-
-#endif
   }
 
 } // namespace DX11Base

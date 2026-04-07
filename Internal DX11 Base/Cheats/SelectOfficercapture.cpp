@@ -10,6 +10,7 @@
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
+#include "../debug.h"
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -210,43 +211,42 @@ namespace DX11Base {
       ImGui::Selectable(u8" [ 무장 정보 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
       ImGui::PopStyleColor(2);
 
-#ifdef ENABLE_DEBUG_LOG
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(u8"소속 세력 주소");
-      ImGui::TableSetColumnIndex(1);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)forceAddr);
-      ImGui::SameLine();
-      if (ImGui::SmallButton(u8"복사##ForceCopy")) {
-        char buf[32];
-        sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)forceAddr);
-        ImGui::SetClipboardText(buf);
+      if (bShowDebug) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(u8"소속 세력 주소");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)forceAddr);
+        ImGui::SameLine();
+        if (ImGui::SmallButton(u8"복사##ForceCopy")) {
+          char buf[32];
+          sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)forceAddr);
+          ImGui::SetClipboardText(buf);
+        }
       }
-#endif
 
       if (forceAddr > 0x10000) {
         RenderStatRow(forceAddr, u8"세력 색상", 0x09, 1, &v_ForceColor, scale);
       }
 
-#ifdef ENABLE_DEBUG_LOG
-      uintptr_t corpsAddr = *(uintptr_t *)(pBase + 0x20);
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(u8"소속 군단 주소");
-      ImGui::TableSetColumnIndex(1);
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)corpsAddr);
-      ImGui::SameLine();
-      if (ImGui::SmallButton(u8"복사##CorpsCopy")) {
-        char buf[32];
-        sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)corpsAddr);
-        ImGui::SetClipboardText(buf);
+      if (bShowDebug) {
+        uintptr_t corpsAddr = *(uintptr_t *)(pBase + 0x20);
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(u8"소속 군단 주소");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)corpsAddr);
+        ImGui::SameLine();
+        if (ImGui::SmallButton(u8"복사##CorpsCopy")) {
+          char buf[32];
+          sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)corpsAddr);
+          ImGui::SetClipboardText(buf);
+        }
       }
-#endif
-
       unsigned short currentID = *(unsigned short *)(pBase + 0x08);
       std::string nameValue = u8"???";
       if (g_officerNames.count(currentID)) {
@@ -686,8 +686,9 @@ namespace DX11Base {
       ImGui::Separator();
     }
 
-#ifdef ENABLE_DEBUG_LOG
-    ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1), u8"[ 선택 무장 실시간 정보 ]");
+    if (bShowDebug)
+{
+      ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1), u8"[ 선택 무장 실시간 정보 ]");
     ImGui::Text(u8"연결된 주소: %p", (void *)pBase);
     ImGui::SameLine();
     if (ImGui::SmallButton(u8"복사##AddrCopy")) {
@@ -696,7 +697,7 @@ namespace DX11Base {
       ImGui::SetClipboardText(buf);
     }
     ImGui::Separator();
-#endif
+  }
 
     static int currentTabIdx = 0;
     static uintptr_t lastCapturedBase = 0;
@@ -950,8 +951,9 @@ namespace DX11Base {
       else
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), u8"(0명)");
 
-#ifdef ENABLE_DEBUG_LOG
-      ImGui::SameLine();
+      if (bShowDebug)
+{
+        ImGui::SameLine();
       ImGui::Checkbox(u8"클릭 차단", &bBlockClickInOfficerList);
       ImGui::SameLine();
       if (ImGui::Button(u8"덤프")) {
@@ -959,7 +961,7 @@ namespace DX11Base {
           DumpOfficerData(g_capturedOfficerBase);
         }
       }
-#endif
+    }
 
       // 필터 버튼 오른쪽 정렬
       {

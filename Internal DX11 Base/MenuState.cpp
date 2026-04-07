@@ -79,4 +79,5 @@ namespace DX11Base {
   bool bSelectOfficerFirstInit = true;
 
   bool bToggleMenuCollapseRequest = false;
+  bool bShowPasswordPopup = false;
 } // namespace DX11Base

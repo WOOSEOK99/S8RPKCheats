@@ -271,6 +271,38 @@ namespace DX11Base {
     // 현재 메뉴 접힘 상태를 전역 변수에 저장 (FindWindowByName으로 알아낸 값이 가장 정확함)
     bIsMenuCollapsed = pMainWin ? pMainWin->Collapsed : false;
 
+    // ─── [ 추가 ] 버전 클릭 시 디버그 모드 토글 (10초 내 10번 클릭) ───
+    if (!bIsMenuCollapsed && bMenuExpanded) {
+        static int s_versionClickCount = 0;
+        static double s_lastVersionClickTime = 0.0;
+        
+        if (ImGui::IsMouseClicked(0)) {
+            ImVec2 mousePos = ImGui::GetMousePos();
+            ImVec2 winPos = ImGui::GetWindowPos();
+            float titleBarHeight = ImGui::GetFrameHeight();
+
+            // 타이틀바 영역 내 클릭인지 확인 (X 버튼 영역 제외한 제목 부분 위주)
+            if (mousePos.x >= winPos.x && mousePos.x <= winPos.x + ImGui::GetWindowWidth() - 40.0f * scale &&
+                mousePos.y >= winPos.y && mousePos.y <= winPos.y + titleBarHeight) {
+                
+                double currentTime = ImGui::GetTime();
+                if (currentTime - s_lastVersionClickTime > 10.0) {
+                    s_versionClickCount = 0; // 10초 지나면 초기화
+                }
+                
+                s_versionClickCount++;
+                s_lastVersionClickTime = currentTime;
+                
+                if (s_versionClickCount >= 10) {
+                    bShowPasswordPopup = true; // 비밀번호 창 띄우기
+                    s_versionClickCount = 0;
+                    // 시각적 피드백 (로그)
+                    AddLog(u8"[시스템] 2차 인증이 필요합니다. 비밀번호를 입력해 주세요.");
+                }
+            }
+        }
+    }
+
     if (bMenuExpanded) {
 
       if (gameBase) {
@@ -494,6 +526,41 @@ namespace DX11Base {
     if (pSelectedVar != nullptr) {
       ImGui::OpenPopup(currentLabel.c_str());
       ShowCalcPopup(currentLabel.c_str(), pSelectedVar);
+    }
+    // [추가] 디버그 비밀번호 인증 팝업
+    if (bShowPasswordPopup) {
+      ImGui::OpenPopup(u8"디버그 비밀번호 인증");
+    }
+
+    if (ImGui::BeginPopupModal(u8"디버그 비밀번호 인증", &bShowPasswordPopup, ImGuiWindowFlags_AlwaysAutoResize)) {
+      static char passBuf[64] = "";
+      ImGui::Text(u8"개발자 도구 접근을 위해 비밀번호를 입력하세요:");
+      ImGui::Spacing();
+
+      bool enterPressed = ImGui::InputText("##DebugPassword", passBuf, sizeof(passBuf), 
+                                          ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
+      
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      if (ImGui::Button(u8"확인", ImVec2(120 * scale, 0)) || enterPressed) {
+        if (strcmp(passBuf, "jws1234") == 0) {
+          bShowDebug = !bShowDebug;
+          bShowPasswordPopup = false;
+          memset(passBuf, 0, sizeof(passBuf));
+          AddLog(u8"[시스템] 인증 성공: 디버그 모드가 %s되었습니다.", bShowDebug ? u8"활성화" : u8"비활성화");
+        } else {
+          AddLog(u8"[시스템] 인증 실패: 비밀번호가 올바르지 않습니다.");
+        }
+      }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"취소", ImVec2(120 * scale, 0))) {
+        bShowPasswordPopup = false;
+        memset(passBuf, 0, sizeof(passBuf));
+      }
+
+      ImGui::EndPopup();
     }
   }
 } // namespace DX11Base

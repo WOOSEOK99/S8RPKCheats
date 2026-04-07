@@ -21,7 +21,6 @@ namespace DX11Base {
 
   // 로그 추가 함수
   void AddLog(const char *fmt, ...) {
-#ifdef ENABLE_DEBUG_LOG
     char buf[1024];
     va_list args;
     va_start(args, fmt);
@@ -35,7 +34,6 @@ namespace DX11Base {
     if (g_loveLogs.size() > 50) {
       g_loveLogs.erase(g_loveLogs.begin());
     }
-#endif
   }
 
   void showLoveLogs() {
