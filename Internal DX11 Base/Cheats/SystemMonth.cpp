@@ -81,7 +81,8 @@ namespace DX11Base {
                 memcpy(g_monthUIOriginal, (void*)g_monthUIHookAddr, 10);
                 if (InstallMonthUICave(g_monthUIHookAddr)) {
                     g_monthUIApplied = true;
-                    AddLog(u8"[SystemMonth] 신규 AOB 월 감시 후크 설치 완료.");
+                    AddLog(u8"[SystemMonth] 신규 AOB 월 감시 후크 설치 완료. (Hook: %p, Cave: %p)", 
+                           (void*)g_monthUIHookAddr, (void*)g_monthUICaveAddr);
                 }
             }
             g_monthUICaptureRunning = false;

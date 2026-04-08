@@ -55,6 +55,7 @@ namespace DX11Base {
   extern bool bTechZero;
   extern bool bRoadBlock;
   extern bool bMonitorRonin;
+  extern bool bAutoStatUp99;        // 능력치 99 -> 100 자동 보정
   extern bool bInfTengi;            // 2026-04-05 무한 전기
   extern bool bCancelCastleEvent;   // 2026-04-05 중지 성성 취소
   extern bool bSkillCondition;      // 만병 습득 조건 해제
@@ -77,6 +78,7 @@ namespace DX11Base {
   extern bool bShowWidgetTengi;       // 위젯: 전기발생 취소 표시 여부
   extern bool bShowWidgetHero;        // 위젯: 주인공 표시 여부
   extern bool bShowWidgetAllOfficers; // 위젯: 모든무장 표시 여부
+  extern bool bShowWidgetNotif;       // 위젯: 알림확인 표시 여부
 
   extern bool bForceCenterOfficerDetail;   // 창 강제 중앙 배치 요청 (주인공)
   extern bool bForceCenterSelectedOfficer; // 창 강제 중앙 배치 요청 (선택무장)
@@ -84,6 +86,7 @@ namespace DX11Base {
 
   extern bool bToggleMenuCollapseRequest; // 틸트 키로 접기/펴기 요청
   extern bool bShowPasswordPopup;         // 디버그 비밀번호 창 표시 여부
+  extern bool bShowNotificationLog;      // 알림 기록 창 표시 여부
 
   bool IsAnyUIOpen(); // 모든 UI 창 활성화 여부 확인 함수
 } // namespace DX11Base

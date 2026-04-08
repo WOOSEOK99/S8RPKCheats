@@ -1,7 +1,9 @@
+#include "pch.h"
 #include "TengiCave.h"
 #include "Cheats.h"
 #include "MemoryUtils.h"
-#include "pch.h"
+#include "MenuState.h"
+#include "NotificationManager.h"
 #include "showlog.h"
 #include <psapi.h>
 #include <string>
@@ -182,6 +184,23 @@ namespace DX11Base {
     if (IsValidPtr(g_tengiAddr + 0x10, 8)) {
       *(uint64_t *)(g_tengiAddr + 0x10) = 0;
     }
+  }
+
+  // --- [신규] 전기 주소 캡처 감시 및 알림 발생 ---
+  void TengiCave_Tick() {
+      static bool s_notifiedForThisSession = false;
+      
+      // 1. 주소가 캡처되었고 아직 알림을 주지 않았을 때
+      if (g_tengiAddr != 0 && !s_notifiedForThisSession) {
+          DX11Base::AddNotification(u8"전기 취소 활성화 됨");
+          DX11Base::AddLog(u8"[Tengi] 전기 주소 캡처 완료: 0x%llX", (unsigned long long)g_tengiAddr);
+          s_notifiedForThisSession = true;
+      }
+      
+      // 2. 주소가 0이 된 경우 (해제 등) 초기화하여 재캡처 시 다시 알림 발생 가능하게 함
+      if (g_tengiAddr == 0) {
+          s_notifiedForThisSession = false;
+      }
   }
 
 } // namespace DX11Base

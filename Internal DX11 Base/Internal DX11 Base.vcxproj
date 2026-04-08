@@ -210,6 +210,8 @@
     <ClInclude Include="Cheats\TengiCave.h" />
     <ClInclude Include="Cheats\SkillCondition.h" />
     <ClInclude Include="Cheats\FactionLordBonus.h" />
+    <ClInclude Include="Cheats\StatMonitor.h" />
+    <ClInclude Include="NotificationManager.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BattleMonitor.cpp" />
@@ -273,6 +275,8 @@
     <ClCompile Include="Cheats\TengiCave.cpp" />
     <ClCompile Include="Cheats\SkillCondition.cpp" />
     <ClCompile Include="Cheats\FactionLordBonus.cpp" />
+    <ClCompile Include="Cheats\StatMonitor.cpp" />
+    <ClCompile Include="NotificationManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Hooking\minhook.def" />

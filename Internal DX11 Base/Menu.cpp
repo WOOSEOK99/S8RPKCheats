@@ -20,14 +20,22 @@
 #include "debug.h"
 #include "showcal.h"
 #include "showlog.h"
+#include "NotificationManager.h"
 #include <functional>
 
 namespace DX11Base {
+
   // --- Menu 클래스 구현 ---
 
   void Menu::Render() {
+    UINT dpi = GetDpiForWindow(g_Engine->pGameWindow);
+    float scale = (dpi == 0) ? 1.0f : (float)dpi / 96.0f;
+
     if (g_Engine->bShowMenu)
       DrawMenu();
+
+    // 상단 마퀴 알림 (치트메뉴와 독립적으로 항상 실행)
+    DrawMarqueeNotifications(scale);
   }
 
   void Menu::Loops() {
@@ -115,6 +123,9 @@ namespace DX11Base {
     // 2026-04-04 배속 상태 동기화
     SpeedHack_Update();
 
+    // [추가] 전기 주소 캡처 감시 (알림 발생용)
+    DX11Base::TengiCave_Tick();
+
     // 2026-04-04 월 값 감지 로그 (500ms 주기로 완화하여 안정성 확보)
     if (bMonthCapture) {
       static uint64_t s_lastMonthCheck = 0;
@@ -148,8 +159,8 @@ namespace DX11Base {
 
     // 상태에 따른 표시용 문자열과 ImGui 고유 ID 문자열 결정
     const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")";
-    const char *finalTitle =
-        bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT" : u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
+    const char *finalTitle = bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT"
+                                                     : u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
 
     // AlwaysAutoResize: 레이아웃이 복잡할 때 좌표 계산 오차가 발생할 수 있음
     // 펼쳐진 상태에서는 스크롤바는 끄되, 가로/세로 자동 조절은 켜둠 (NoScrollbar만으로 오프셋 해결 시도)
@@ -164,7 +175,7 @@ namespace DX11Base {
       ImVec2 titleSize = ImGui::CalcTextSize(visibleTitle);
       ImGui::SetNextWindowSize(ImVec2(titleSize.x + 35.0f * scale, 0), ImGuiCond_Always);
     } else {
-      ImGui::SetNextWindowSize(ImVec2(650 * scale, 0), ImGuiCond_Always);
+      ImGui::SetNextWindowSize(ImVec2(700 * scale, 0), ImGuiCond_Always);
 
       // ImGui::SetNextWindowSizeConstraints(ImVec2(650 * scale, -1), ImVec2(650 * scale, -1));
     }
@@ -422,6 +433,10 @@ namespace DX11Base {
       ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImVec4(0.0f, 0.0f, 0.0f, 0.4f));
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.88f, 0.0f, 1.0f));
 
+      ImGuiWindowFlags badgeFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove |
+                                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBackground;
+
       auto DrawBadge = [&](const char *label, const char *id, std::function<void()> onClick) {
         ImVec2 labelSize = ImGui::CalcTextSize(label);
         float paddingX = 18.0f * scale; // 여백 약간 확대
@@ -433,10 +448,6 @@ namespace DX11Base {
         // 윈도우 크기를 실제 그릴 영역보다 약간 여유있게 설정 (클리핑 방지)
         ImGui::SetNextWindowPos(ImVec2(currentX - 1.0f, mPos.y - 1.0f), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(wWidth + 2.0f, wHeight + 2.0f), ImGuiCond_Always);
-
-        ImGuiWindowFlags badgeFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove |
-                                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBackground;
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
         if (ImGui::Begin(id, nullptr, badgeFlags)) {
@@ -485,7 +496,7 @@ namespace DX11Base {
         ImGui::PopStyleVar();
       };
 
-      // 사용자 요청 순서: 전기취소, 주인공, 모든무장 (오른쪽에서 왼쪽 방향으로 배치되므로 역순으로 체크)
+      // 사용자 요청 순서: 알림확인, 전기취소, 주인공, 모든무장 (오른쪽에서 왼쪽 방향으로 배치되므로 역순으로 체크)
       if (DX11Base::bShowWidgetAllOfficers && p1 != 0) {
         DrawBadge(u8"모든무장", u8"모든무장###WIDGET_ALL", [&]() {
           DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
@@ -500,13 +511,19 @@ namespace DX11Base {
             DX11Base::bForceCenterOfficerDetail = true;
         });
       }
-      if (DX11Base::bShowWidgetTengi && p1 != 0) {
+      if (DX11Base::bShowWidgetTengi && p1 != 0 && DX11Base::GetCapturedTengiAddr() != 0) {
         DrawBadge(u8"전기취소", u8"전기취소###WIDGET_TENGI", [&]() {
           if (DX11Base::GetCapturedTengiAddr() != 0) {
             DX11Base::CancelTengi();
             DX11Base::AddLog(u8"[위젯] 전기 취소 (플래그 적용)");
           }
         });
+      }
+
+      // [신규] 알림확인 배지
+      if (DX11Base::bShowWidgetNotif) {
+        DrawBadge(u8"알림확인", u8"알림확인###WIDGET_NOTIF_HIST",
+                  [&]() { DX11Base::bShowNotificationLog = !DX11Base::bShowNotificationLog; });
       }
 
       ImGui::PopStyleColor(3);
@@ -517,6 +534,7 @@ namespace DX11Base {
     DrawOfficerDetailWindow(p1, mPos, mSize, scale);
     DrawSelectedOfficerWindow(mPos, mSize, scale);
     DrawOfficerListWindow(p1, scale);
+    DrawNotificationHistoryWindow(scale);
 
     // [전역] 숫자 입력기 관리 (어떤 창에서 요청했든 상관없이 렌더링되게 함)
     if (pSelectedVar != nullptr) {

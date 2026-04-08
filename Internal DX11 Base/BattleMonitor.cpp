@@ -16,6 +16,7 @@
 #include "Cheats/MonthCapture.h"
 #include "Cheats/SystemMonth.h"
 #include "Cheats/BattleMapShuffle.h"
+#include "Cheats/StatMonitor.h"
 
 namespace DX11Base {
 
@@ -75,36 +76,37 @@ void MonitorBattleStatus() {
 }
 
 void MonitorTechStatus() {
-    static uint8_t s_lastAppliedMonth = 0;
+    static uint8_t s_lastAppliedMonth = 0xFF; // 초기값 0xFF (0월 감지 가능하도록)
 
-    // 방어 건물 강화가 켜져 있을 때만 작동
-    if (bDefBuilding) {
-        // [2026-04-04] 월 비교를 통한 평정(Council) 자동 감지
-        uint8_t sm = GetSystemMonthValue();
-        uint8_t rm = GetCurrentMonth();
+    // [2026-04-04] 월 비교를 통한 평정(Council) 자동 감지
+    uint8_t sm = GetSystemMonthValue();
+    uint8_t rm = GetCurrentMonth();
 
-        // 평정 조건: 시스템월(sm)이 3,6,9,12 이고 실제월(rm)이 4,7,10,1 인 경우
-        // 즉, rm이 sm보다 한 달 빠른 시점이 게임 내 '평정' 상태임
-        bool isCouncil = (sm > 0 && sm % 3 == 0) && (rm == (sm % 12) + 1);
+    // 평정 조건: 시스템월(sm)과 실제월(rm)의 차이 기반 감지
+    // sm=0(1월), 3(4월), 6(7월), 9(10월) 일 때 rm이 1, 4, 7, 10 이면 평정
+    bool isCouncil = (sm % 3 == 0) && (rm == (sm % 12) + 1);
 
-        if (isCouncil && s_lastAppliedMonth != sm) {
-            AddLog(u8"[자동화] 평정(Council) 감지 (Sys:%d, Real:%d) -> 방어 건물 자동 리프레시", sm, rm);
-            
-            // 껐다 켜서 확실하게 적용 (Refresh)
-            SetDefBuildingBoost(false);
-            SetDefBuildingBoost(true);
-            
-            s_lastAppliedMonth = sm; // 처리 완료 기록
+    if (isCouncil) {
+        if (s_lastAppliedMonth != sm) {
+            AddLog(u8"[자동화] 평정(Council) 감지됨 (Sys:%d, Real:%d)", sm, rm);
+
+            if (bDefBuilding) {
+                SetDefBuildingBoost(false);
+                SetDefBuildingBoost(true);
+            }
+
+            // 능력치 99 -> 100 자동 보정
+            UpdateOfficerStats99To100();
+
+            s_lastAppliedMonth = sm; 
         }
-
-        // [2026-04-05] 전투맵 셔플 자동 제어 (평정 시에만 활성화)
-        UpdateBattleMapAuto(isCouncil);
-
     } else {
-        if (s_lastAppliedMonth != 0) {
-            s_lastAppliedMonth = 0;
+        if (s_lastAppliedMonth != 0xFF) {
+            s_lastAppliedMonth = 0xFF; 
         }
     }
+
+    UpdateBattleMapAuto(isCouncil);
 }
 
 // 전투 상태 반환 함수 추가 (외부 모듈에서 현재 전투중인지 판별할 때 사용)

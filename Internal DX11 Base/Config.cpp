@@ -1,10 +1,11 @@
 #include "Config.h"
+#include "BattleMonitor.h"
 #include "Cheats.h"
+#include "Cheats/MonthCapture.h"
 #include "MenuState.h"
+#include "NotificationManager.h"
 #include "pch.h"
 #include "showlog.h"
-#include "BattleMonitor.h"
-#include "Cheats/MonthCapture.h"
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -13,8 +14,8 @@
 #include <unordered_map>
 #include <vector>
 
+
 // 치트 기능 헤더들
-#include "Cheats/FactionLordBonus.h"
 #include "Cheats/Battleunitcapture.h"
 #include "Cheats/Bigcityconvert.h"
 #include "Cheats/Catapult.h"
@@ -22,6 +23,7 @@
 #include "Cheats/Defatkboost.h"
 #include "Cheats/Defbuildingboost.h"
 #include "Cheats/Dongto.h"
+#include "Cheats/FactionLordBonus.h"
 #include "Cheats/Fastrelationship.h"
 #include "Cheats/Infinitegift.h"
 #include "Cheats/Infinitetalk.h"
@@ -30,11 +32,12 @@
 #include "Cheats/Resonancecave.h"
 #include "Cheats/Roadblock.h"
 #include "Cheats/Selfheal.h"
-#include "Cheats/Techpointcave.h"
-#include "Cheats/SystemMonth.h"
-#include "Cheats/Terrainignore.h"
-#include "Cheats/TengiCave.h"
 #include "Cheats/SkillCondition.h"
+#include "Cheats/SystemMonth.h"
+#include "Cheats/Techpointcave.h"
+#include "Cheats/TengiCave.h"
+#include "Cheats/Terrainignore.h"
+
 
 namespace DX11Base {
   extern HMODULE g_hModule;
@@ -52,7 +55,7 @@ namespace DX11Base {
     bool *flag;
     bool *appliedState; // 지연 적용 상태 추적용
     void (*applyFunc)(bool);
-    bool isWar;          // 전쟁 관련 기능 여부 (지연 활성화용)
+    bool isWar; // 전쟁 관련 기능 여부 (지연 활성화용)
   };
 
   // 적용 상태 플래그들
@@ -80,42 +83,47 @@ namespace DX11Base {
   static bool s_appSangbyeongCond = false;
   static bool s_appFactionLordBonus = false;
   static uint64_t s_firstP1Time = 0; // p1 감지 시점 기록용
-  static bool s_isReset = true;     // 리셋 완료 상태 기록
+  static bool s_isReset = true;      // 리셋 완료 상태 기록
 
-  static ConfigEntry g_Entries[] = {{"bInfiniteAP", u8"행동력 무한", &bInfiniteAP, nullptr, nullptr, false},
-                                    {"bFastJewel", u8"보주교체 무제한", &bFastJewel, nullptr, nullptr, false},
-                                    {"bBigCity", u8"대도시 전환", &bBigCity, &s_appBigCity, SetBigCityConvert, false},
-                                    {"bAttitudeHack", u8"견문시 민심최대", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false},
-                                    {"bLoveCave", u8"경애/의형제 조건 완화", &bLoveCave, &s_appLoveNormal, ApplyLoveNormal, false},
-                                    {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false},
-                                    {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false},
-                                    {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false},
-                                    {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false},
-                                    {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false},
-                                    {"bFastRelationship", u8"경애시 무조건 공명", &bFastRelationship, &s_appRelation, SetFastRelationship, false},
-                                    {"marriageApplied", u8"결혼 무제한", &marriageApplied, &s_appMarriage, SetMarriageCondition, false},
-                                    {"bSelfHeal", u8"전쟁: 자가 회복", &bSelfHeal, &s_appSelfHeal, SetSelfHeal, true},
-                                    {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true},
-                                    {"bTerrainIgnore", u8"전쟁: 격류낙석 지형 무시", &bTerrainIgnore, &s_appTerrain, SetTerrainIgnore, true},
-                                    {"bDefBuilding", u8"전쟁: 방어건물 강화", &bDefBuilding, &s_appDefBuild, SetDefBuildingBoost, true},
-                                    {"bDefAtk", u8"전쟁: 공격/방어 부스트", &bDefAtk, &s_appDefAtk, SetDefAtkBoost, true},
-                                    {"bCatapult", u8"전쟁: 투석기 강화", &bCatapult, &s_appCatapult, SetCatapultCheat, true},
-                                    {"bCelestial", u8"전쟁: 천계 강화", &bCelestial, &s_appCelestial, SetCelestialMod, true},
-                                    {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false},
-                                    {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false},
-                                    {"bRoadBlock", u8"전쟁: 진로 방해 무시", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
-                                    {"bSkillCondition", u8"만병 습득 조건 해제", &bSkillCondition, &s_appSkillCond, ApplySkillCondition, false},
-                                    {"bYumokCondition", u8"유목기병 습득 조건 해제", &bYumokCondition, &s_appYumokCond, ApplyYumokCondition, false},
-                                    {"bSangbyeongCondition", u8"상병 습득 조건 해제", &bSangbyeongCondition, &s_appSangbyeongCond, ApplySangbyeongCondition, false},
-                                    {"bFactionLordBonus", u8"세력 군주 보너스 자동 배정", &bFactionLordBonus, &s_appFactionLordBonus, SetFactionLordBonus, false},
-                                    {"bMonitorRonin", u8"낭인 상시 감시", &bMonitorRonin, nullptr, nullptr, false},
-                                    {"bAutoLoadMenu", u8"시작 시 설정 로드", &bAutoLoadMenu, nullptr, nullptr, false},
-                                    {"bZeroInfamy", u8"매턴 악명 0", &bZeroInfamy, nullptr, nullptr, false},
-                                    {"bSpeedHack", u8"배속 기능", &bSpeedHack, nullptr, nullptr, false},
-                                    {"bCancelCastleEvent", u8"중지 성성 취소", &bCancelCastleEvent, nullptr, nullptr, false},
-                                    {"bShowWidgetTengi", u8"위젯: 전기발생 취소", &bShowWidgetTengi, nullptr, nullptr, false},
-                                    {"bShowWidgetHero", u8"위젯: 주인공", &bShowWidgetHero, nullptr, nullptr, false},
-                                    {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false}};
+  static ConfigEntry g_Entries[] = {
+      {"bInfiniteAP", u8"행동력 무한", &bInfiniteAP, nullptr, nullptr, false},
+      {"bFastJewel", u8"보주교체 무제한", &bFastJewel, nullptr, nullptr, false},
+      {"bBigCity", u8"대도시 전환", &bBigCity, &s_appBigCity, SetBigCityConvert, false},
+      {"bAttitudeHack", u8"견문시 민심최대", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false},
+      {"bLoveCave", u8"경애/의형제 조건 완화", &bLoveCave, &s_appLoveNormal, ApplyLoveNormal, false},
+      {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false},
+      {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false},
+      {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false},
+      {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false},
+      {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false},
+      {"bFastRelationship", u8"경애시 무조건 공명", &bFastRelationship, &s_appRelation, SetFastRelationship, false},
+      {"marriageApplied", u8"결혼 무제한", &marriageApplied, &s_appMarriage, SetMarriageCondition, false},
+      {"bSelfHeal", u8"전쟁: 자가 회복", &bSelfHeal, &s_appSelfHeal, SetSelfHeal, true},
+      {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true},
+      {"bTerrainIgnore", u8"전쟁: 격류낙석 지형 무시", &bTerrainIgnore, &s_appTerrain, SetTerrainIgnore, true},
+      {"bDefBuilding", u8"전쟁: 방어건물 강화", &bDefBuilding, &s_appDefBuild, SetDefBuildingBoost, true},
+      {"bDefAtk", u8"전쟁: 공격/방어 부스트", &bDefAtk, &s_appDefAtk, SetDefAtkBoost, true},
+      {"bCatapult", u8"전쟁: 투석기 강화", &bCatapult, &s_appCatapult, SetCatapultCheat, true},
+      {"bCelestial", u8"전쟁: 천계 강화", &bCelestial, &s_appCelestial, SetCelestialMod, true},
+      {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false},
+      {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false},
+      {"bRoadBlock", u8"전쟁: 진로 방해 무시", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
+      {"bSkillCondition", u8"만병 습득 조건 해제", &bSkillCondition, &s_appSkillCond, ApplySkillCondition, false},
+      {"bYumokCondition", u8"유목기병 습득 조건 해제", &bYumokCondition, &s_appYumokCond, ApplyYumokCondition, false},
+      {"bSangbyeongCondition", u8"상병 습득 조건 해제", &bSangbyeongCondition, &s_appSangbyeongCond,
+       ApplySangbyeongCondition, false},
+      {"bFactionLordBonus", u8"세력 군주 보너스 자동 배정", &bFactionLordBonus, &s_appFactionLordBonus,
+       SetFactionLordBonus, false},
+      {"bMonitorRonin", u8"재야장수 감시", &bMonitorRonin, nullptr, nullptr, false},
+      {"bAutoStatUp99", u8"능력치 한계돌파", &bAutoStatUp99, nullptr, nullptr, false},
+      {"bAutoLoadMenu", u8"시작 시 설정 로드", &bAutoLoadMenu, nullptr, nullptr, false},
+      {"bZeroInfamy", u8"매턴 악명 0", &bZeroInfamy, nullptr, nullptr, false},
+      {"bSpeedHack", u8"배속 기능", &bSpeedHack, nullptr, nullptr, false},
+      {"bCancelCastleEvent", u8"중지 성성 취소", &bCancelCastleEvent, nullptr, nullptr, false},
+      {"bShowWidgetTengi", u8"위젯: 전기발생 취소", &bShowWidgetTengi, nullptr, nullptr, false},
+      {"bShowWidgetNotif", u8"위젯: 알림확인", &bShowWidgetNotif, nullptr, nullptr, false},
+      {"bShowWidgetHero", u8"위젯: 주인공", &bShowWidgetHero, nullptr, nullptr, false},
+      {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];
@@ -133,7 +141,8 @@ namespace DX11Base {
       file << "  \"" << g_Entries[i].key << "\": " << (*g_Entries[i].flag ? "true" : "false");
       file << ",\n";
     }
-    file << "  \"g_speedMultiplier\": " << g_speedMultiplier << "\n";
+    file << "  \"g_speedMultiplier\": " << g_speedMultiplier << ",\n";
+    file << "  \"g_notificationSpeed\": " << g_notificationSpeed << "\n";
     file << "}";
     file.close();
   }
@@ -150,7 +159,18 @@ namespace DX11Base {
         if (colonPos != std::string::npos) {
           try {
             g_speedMultiplier = std::stof(line.substr(colonPos + 1));
-          } catch (...) {}
+          } catch (...) {
+          }
+        }
+        continue;
+      }
+      if (line.find("g_notificationSpeed") != std::string::npos) {
+        size_t colonPos = line.find(":");
+        if (colonPos != std::string::npos) {
+          try {
+            g_notificationSpeed = std::stof(line.substr(colonPos + 1));
+          } catch (...) {
+          }
         }
         continue;
       }
@@ -167,7 +187,8 @@ namespace DX11Base {
   }
 
   void ResetAppliedStates() {
-    if (s_isReset) return; // 이미 리셋된 상태면 중복 실행 방지
+    if (s_isReset)
+      return; // 이미 리셋된 상태면 중복 실행 방지
 
     for (auto &entry : g_Entries) {
       if (entry.appliedState) {
@@ -193,7 +214,8 @@ namespace DX11Base {
     }
 
     // 1000ms마다 한 번만 루프 체크 (CPU 부하 최소화)
-    if (now - s_lastLoop < 1000) return;
+    if (now - s_lastLoop < 1000)
+      return;
     s_lastLoop = now;
 
     // 처음 감지된 순간 시간 기록
@@ -210,16 +232,16 @@ namespace DX11Base {
 
     // 월 캡처 시작 (설정이 켜져 있을 때만)
     if (bMonthCapture && !s_appMonthCapture) {
-        SetMonthCapture(true);
-        InstallSystemMonthHook(); // 신규 AOB 방식 시스템 월 후킹
-        s_appMonthCapture = true;
+      SetMonthCapture(true);
+      InstallSystemMonthHook(); // 신규 AOB 방식 시스템 월 후킹
+      s_appMonthCapture = true;
     }
 
     // 전기 발생 캡처 (상시 활성화, 지연 로딩)
     static bool s_appTengiCapture = false;
     if (!s_appTengiCapture) {
-        SetTengiCapture(true);
-        s_appTengiCapture = true;
+      SetTengiCapture(true);
+      s_appTengiCapture = true;
     }
 
     // 추가적인 안전장치: p1이 가리키는 메모리가 최소한의 유효성을 가지는지 확인
@@ -231,7 +253,7 @@ namespace DX11Base {
       if (entry.appliedState && entry.applyFunc) {
         // [수정] 전쟁 관련 기능은 '전투 중이 아닐 때'만 지연 활성화함
         if (entry.isWar && !IsInBattle()) {
-          continue; 
+          continue;
         }
 
         // 1. 켜기 (flag == true && appliedState == false)
@@ -251,7 +273,8 @@ namespace DX11Base {
   }
 
   bool IsConfigReady() {
-    if (s_firstP1Time == 0) return false;
+    if (s_firstP1Time == 0)
+      return false;
     return (GetTickCount64() - s_firstP1Time >= 3000);
   }
 } // namespace DX11Base

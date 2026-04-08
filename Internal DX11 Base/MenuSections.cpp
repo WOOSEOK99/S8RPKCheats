@@ -26,9 +26,11 @@
 #include "Config.h"
 #include "Framework/imgui.h"
 #include "MenuState.h"
+#include "NotificationManager.h"
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
+
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -217,6 +219,16 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"매 평정 마다 새로운 전기가 발생합니다.");
           ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
                              u8"이미 전기가 발생 중이었다면, 전기 발생이 끝난뒤부터 적용됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        if (ImGui::Checkbox(u8"능력치 한계돌파", &bAutoStatUp99)) {
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"평정 기간 진입 시, 모든 장수의 능력치 중 99인 항목을 100으로 올립니다.");
           ImGui::EndTooltip();
         }
 
@@ -630,7 +642,27 @@ namespace DX11Base {
       if (ImGui::Checkbox(u8"모든무장##WIDGET", &DX11Base::bShowWidgetAllOfficers)) {
         SaveConfig();
       }
+
+      ImGui::SameLine();
+      if (ImGui::Checkbox(u8"알림확인##WIDGET", &DX11Base::bShowWidgetNotif)) {
+        SaveConfig();
+      }
       EndSection(); // 위젯
+
+      BeginSection();
+      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 설정 ]");
+
+      ImGui::SetNextItemWidth(150.0f * scale);
+      if (ImGui::SliderFloat(u8"알림 속도", &DX11Base::g_notificationSpeed, 20.0f, 500.0f, "%.0f px/s")) {
+        SaveConfig();
+      }
+
+      ImGui::SameLine(0, 20.0f * scale);
+      if (ImGui::Button(u8"알림 비우기", ImVec2(100.0f * scale, 0))) {
+        g_notifications.clear();
+        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
+      }
+      EndSection(); // 알림
     }
   } // namespace MenuSections
 } // namespace DX11Base
