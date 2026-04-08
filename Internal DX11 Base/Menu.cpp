@@ -405,10 +405,10 @@ namespace DX11Base {
     // 디버깅 섹션 (맨 아래로 이동)
     DX11Base::debuging(gameBase, p1);
 
-    // 메인 창의 현재 좌표와 크기를 기록 (창이 접히더라도 GetWindowPos 등은 동작함)
-    ImVec2 mPos = ImGui::GetWindowPos();
+    // 메인 창의 현재 좌표와 크기를 기록 (창이 접히더라도 pMainWin 자료구조에서 직접 가져옴)
+    ImVec2 mPos = pMainWin ? pMainWin->Pos : ImGui::GetWindowPos();
+    ImVec2 mSize = pMainWin ? pMainWin->Size : ImGui::GetWindowSize();
     ImGui::End();
-    ImVec2 mSize = ImGui::GetWindowSize();
 
     // [수정] 접힘 상태일 때 추가 위젯(뱃지) 렌더링
     if (bIsMenuCollapsed) {

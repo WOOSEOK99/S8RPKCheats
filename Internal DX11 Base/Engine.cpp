@@ -162,13 +162,16 @@ namespace DX11Base {
 
   bool D3D11Window::HookD3D() {
     if (GetD3DContext()) {
+      AddLog(u8"[System] D3D11 VTable 가로채기 시작...");
       Hooking::CreateHook((void *)MethodsTable[IDXGI_PRESENT], &SwapChain_Present_hook,
                           (void **)&IDXGISwapChain_Present_stub);
       Hooking::CreateHook((void *)MethodsTable[IDXGI_RESIZE_BUFFERS], &SwapChain_ResizeBuffers_hook,
                           (void **)&IDXGISwapChain_ResizeBuffers_stub);
       bInit = true;
+      AddLog(u8"[Success] Direct3D 11 후킹 성공!");
       return true;
     }
+    AddLog(u8"[Error] D3D11 컨텍스트를 가져오지 못했습니다.");
     return false;
   }
 
@@ -340,8 +343,10 @@ namespace DX11Base {
       m_OldWndProc = (WNDPROC)SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)WndProc);
 
       bInitImGui = true;
+      AddLog(u8"[Success] ImGui 초기화 완료 (폰트 스케일: %.2f)", scale);
       return true;
     }
+    AddLog(u8"[Error] DXGISwapChain 장치 획득 실패.");
     return false;
   }
 
