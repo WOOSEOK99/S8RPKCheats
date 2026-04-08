@@ -27,7 +27,7 @@ namespace DX11Base {
         // ───────────────────────────────────────────────
     
         uintptr_t g_capturedTechPAddr      = 0;
-        bool      g_techPThreadRunning     = false;
+        std::atomic_bool g_techPThreadRunning{false};
     
         static uintptr_t g_techPHookAddr    = 0;
         static uint8_t   g_techPOriginal[7] = {};
@@ -66,9 +66,7 @@ namespace DX11Base {
     
             if (enable) {
                 if (g_techPApplied) return;
-                if (g_techPThreadRunning) return;
-    
-                g_techPThreadRunning = true;
+                if (g_techPThreadRunning.exchange(true)) return;
     
                 HANDLE hThread = CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
                     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
@@ -91,11 +89,12 @@ namespace DX11Base {
                     }
     
                     AddLog("[DEBUG] techPCave applied: %d", g_techPApplied);
-                    g_techPThreadRunning = false;
+                    g_techPThreadRunning.store(false);
                     return 0;
                 }, nullptr, 0, nullptr);
     
                 if (hThread) CloseHandle(hThread);
+                else g_techPThreadRunning.store(false);
     
             } else {
                 g_capturedTechPAddr = 0;
@@ -109,4 +108,4 @@ namespace DX11Base {
             }
         }
     
-    } // namespace DX11Base
+    } // namespace DX11Base

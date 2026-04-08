@@ -20,7 +20,7 @@ namespace DX11Base {
     // ───────────────────────────────────────────────
 
     static bool g_bigCityApplied       = false;
-    bool        g_bigCityThreadRunning = false;
+    std::atomic_bool g_bigCityThreadRunning{false};
 
     // 기술도시로 전환할 도시 타입 오프셋 (ResolveBigCityPtr 기준)
     static const uintptr_t k_bigCityOffsets[] = {
@@ -46,8 +46,7 @@ namespace DX11Base {
     }
 
     void SetBigCityConvert(bool enable) {
-        if (g_bigCityThreadRunning) return;
-        g_bigCityThreadRunning = true;
+        if (g_bigCityThreadRunning.exchange(true)) return;
 
         HANDLE hThread = CreateThread(nullptr, 0, [](LPVOID param) -> DWORD {
             bool enable = *(bool*)param;
@@ -56,7 +55,7 @@ namespace DX11Base {
             uintptr_t pCity = ResolveBigCityPtr();
             if (!pCity) {
                 AddLog(u8"[대도시전환] 포인터 해석 실패");
-                g_bigCityThreadRunning = false;
+                g_bigCityThreadRunning.store(false);
                 return 0;
             }
 
@@ -112,11 +111,12 @@ namespace DX11Base {
                 AddLog(u8"[대도시전환] 복구 완료");
             }
 
-            g_bigCityThreadRunning = false;
+            g_bigCityThreadRunning.store(false);
             return 0;
         }, new bool(enable), 0, nullptr);
 
         if (hThread) CloseHandle(hThread);
+        else g_bigCityThreadRunning.store(false);
     }
 
 } // namespace DX11Base

@@ -1,5 +1,7 @@
 #include "showlog.h"
 #include "Framework/imgui.h"
+#include "MenuState.h"
+#include "debug.h"
 #include <cstdarg>
 #include <string>
 #include <vector>
@@ -9,6 +11,7 @@
 #include <iomanip>
 
 namespace DX11Base {
+  extern bool bShowDebug;
 
   std::vector<std::string> g_loveLogs;
   std::mutex g_logMutex;
@@ -18,6 +21,9 @@ namespace DX11Base {
 
   // 로그 추가 함수
   void AddLog(const char *fmt, ...) {
+    if (!bShowDebug)
+      return;
+
     char buf[1024];
     va_list args;
     va_start(args, fmt);

@@ -19,6 +19,7 @@
 #include "Framework/imgui.h"
 #include "MenuState.h"   // bMonitorRonin
 #include "OfficerData.h" // g_officerNames
+#include "SystemMonth.h" // GetSystemMonthValue()
 #include "pch.h"
 #include "showlog.h" // AddLog()
 
@@ -40,6 +41,7 @@ namespace DX11Base {
     static uintptr_t s_cityBase = 0;
     static bool s_baseResolved = false;
     static bool s_initialized = false;
+    static uint8_t s_lastSystemMonth = 0xFF;
 
     // unordered_map 대신 고정 배열 – O(1) 접근, 할당 오버헤드 없음
     static uint8_t s_prevStatuses[5103] = {};
@@ -84,6 +86,7 @@ namespace DX11Base {
       s_initialized = s_baseResolved = false;
       s_arrayBase = 0;
       memset(s_prevStatuses, 0, sizeof(s_prevStatuses));
+      s_lastSystemMonth = 0xFF;
       {
         std::lock_guard<std::mutex> lk(s_notifMtx);
         s_notifications.clear();
@@ -110,11 +113,13 @@ namespace DX11Base {
       return;
     }
 
-    static uint64_t s_last = 0;
-    uint64_t now = GetTickCount64();
-    if (now - s_last < 2000)
+    // 월이 바뀔 때만 전수 조사 수행 (GetSystemMonthValue 기준)
+    uint8_t currentMonth = GetSystemMonthValue();
+    if (currentMonth == 0 || currentMonth > 12)
       return;
-    s_last = now;
+    if (s_lastSystemMonth == currentMonth)
+      return;
+    s_lastSystemMonth = currentMonth;
 
     // 전수 조사 – 4KB 페이지 단위 유효성 체크 (~50회 vs 5102회)
     std::vector<RoninNotification> found;

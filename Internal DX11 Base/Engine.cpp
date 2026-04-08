@@ -2,6 +2,8 @@
 #include "Cheats/RoninMonitor.h"
 #include "Fonts.h"
 #include "Framework/imgui.h"
+#include "Framework/imgui_impl_dx11.h"
+#include "Framework/imgui_impl_win32.h"
 #include "Menu.h"
 #include "MenuState.h"
 #include "debug.h"
@@ -29,13 +31,34 @@ namespace DX11Base {
   }
 
   Engine::~Engine() {
-    g_Hooking.release();
-    g_D3D11Window.release();
+    g_Hooking.reset();
+    g_D3D11Window.reset();
   }
 
   D3D11Window::D3D11Window() {}
 
-  D3D11Window::~D3D11Window() { bInit = false; }
+  D3D11Window::~D3D11Window() {
+    if (bInitImGui) {
+      ImGui_ImplDX11_Shutdown();
+      ImGui_ImplWin32_Shutdown();
+      ImGui::DestroyContext();
+      bInitImGui = false;
+    }
+
+    if (m_RenderTargetView) {
+      m_RenderTargetView->Release();
+      m_RenderTargetView = nullptr;
+    }
+    if (m_DeviceContext) {
+      m_DeviceContext->Release();
+      m_DeviceContext = nullptr;
+    }
+    if (m_Device) {
+      m_Device->Release();
+      m_Device = nullptr;
+    }
+    bInit = false;
+  }
 
   LRESULT D3D11Window::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     bool bAnyUIOpen = IsAnyUIOpen();
@@ -176,12 +199,20 @@ namespace DX11Base {
   }
 
   void D3D11Window::UnhookD3D() {
-    SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)m_OldWndProc);
-    Hooking::DisableHook((void *)MethodsTable[IDXGI_PRESENT]);
-    Hooking::DisableHook((void *)MethodsTable[IDXGI_RESIZE_BUFFERS]);
+    if (g_Engine && g_Engine->pGameWindow && m_OldWndProc) {
+      SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)m_OldWndProc);
+      m_OldWndProc = nullptr;
+    }
+    if (MethodsTable) {
+      Hooking::DisableHook((void *)MethodsTable[IDXGI_PRESENT]);
+      Hooking::DisableHook((void *)MethodsTable[IDXGI_RESIZE_BUFFERS]);
+    }
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
-    free(MethodsTable);
+    if (MethodsTable) {
+      free(MethodsTable);
+      MethodsTable = nullptr;
+    }
   }
 
   bool D3D11Window::GetD3DContext() {

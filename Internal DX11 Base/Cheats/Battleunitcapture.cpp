@@ -32,7 +32,7 @@ namespace DX11Base {
     static uint8_t g_battUnitOriginal[7] = {};
     static uintptr_t g_battUnitCaveAddr = 0;
     static bool g_battUnitApplied = false;
-    bool g_battUnitThreadRunning = false;
+    std::atomic_bool g_battUnitThreadRunning{false};
 
     static bool InstallBattUnitCave(uintptr_t hookAddr) {
         g_battUnitCaveAddr = AllocNear(hookAddr, 256);
@@ -222,10 +222,8 @@ namespace DX11Base {
         if (enable) {
             if (g_battUnitApplied)
                 return;
-            if (g_battUnitThreadRunning)
+            if (g_battUnitThreadRunning.exchange(true))
                 return;
-
-            g_battUnitThreadRunning = true;
 
             HANDLE hThread = CreateThread(
                 nullptr, 0,
@@ -251,13 +249,15 @@ namespace DX11Base {
                     }
 
                     AddLog("[DEBUG] battUnit cave applied: %d", g_battUnitApplied);
-                    g_battUnitThreadRunning = false;
+                    g_battUnitThreadRunning.store(false);
                     return 0;
                 },
                 nullptr, 0, nullptr);
 
             if (hThread)
                 CloseHandle(hThread);
+            else
+                g_battUnitThreadRunning.store(false);
 
         } else {
             // 유닛 주소 초기화

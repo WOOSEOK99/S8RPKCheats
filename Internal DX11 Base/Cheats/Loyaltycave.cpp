@@ -23,7 +23,7 @@ namespace DX11Base {
   static uint8_t g_loyaltyOriginal[7] = {};
   static uintptr_t g_loyaltyCaveAddr = 0;
   static bool g_loyaltyCaveApplied = false;
-  bool g_loyaltyThreadRunning = false;
+  std::atomic_bool g_loyaltyThreadRunning{false};
 
   static bool InstallLoyaltyCave(uintptr_t hookAddr) {
     g_loyaltyCaveAddr = AllocNear(hookAddr, 128);
@@ -71,10 +71,8 @@ namespace DX11Base {
     if (enable) {
       if (g_loyaltyCaveApplied)
         return;
-      if (g_loyaltyThreadRunning)
+      if (g_loyaltyThreadRunning.exchange(true))
         return;
-
-      g_loyaltyThreadRunning = true;
 
       HANDLE hThread = CreateThread(
           nullptr, 0,
@@ -95,13 +93,15 @@ namespace DX11Base {
                 g_loyaltyCaveApplied = true;
             }
 
-            g_loyaltyThreadRunning = false;
+            g_loyaltyThreadRunning.store(false);
             return 0;
           },
           nullptr, 0, nullptr);
 
       if (hThread)
         CloseHandle(hThread);
+      else
+        g_loyaltyThreadRunning.store(false);
 
     } else {
       if (g_loyaltyCaveApplied) {

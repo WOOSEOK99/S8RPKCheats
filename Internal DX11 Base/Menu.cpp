@@ -110,8 +110,18 @@ namespace DX11Base {
       s_autoCaptureStarted = false;
     }
 
-    MonitorBattleStatus();
-    MonitorTechStatus();
+    static uint64_t s_lastBattleMonitorTick = 0;
+    static uint64_t s_lastTechMonitorTick = 0;
+    uint64_t nowTick = GetTickCount64();
+
+    if (nowTick - s_lastBattleMonitorTick >= 100) {
+      s_lastBattleMonitorTick = nowTick;
+      MonitorBattleStatus();
+    }
+    if (nowTick - s_lastTechMonitorTick >= 500) {
+      s_lastTechMonitorTick = nowTick;
+      MonitorTechStatus();
+    }
 
     uintptr_t gameBase = GetGameBase();
     uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;

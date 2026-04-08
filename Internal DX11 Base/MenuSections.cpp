@@ -36,7 +36,6 @@ namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
   extern void SetInstantAttitude(bool enable);
   extern bool g_initThreadRunning;
-  extern bool g_loyaltyThreadRunning;
   extern bool marriageApplied;
   extern void ToggleMarriageCondition();
   extern void SetMarriageCondition(bool enable);
@@ -152,7 +151,7 @@ namespace DX11Base {
           SaveConfig();
 
         // --- 대도시 전환 추가 ---
-        bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning;
+        bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
         if (wasBigCityRunning)
           ImGui::BeginDisabled();
         if (ImGui::Checkbox(u8"[도시] 기술도시로 전환", &bBigCity)) {
@@ -420,7 +419,7 @@ namespace DX11Base {
         SaveConfig();
       }
 
-      if (::DX11Base::g_loyaltyThreadRunning)
+      if (::DX11Base::g_loyaltyThreadRunning.load())
         ImGui::BeginDisabled();
       if (ImGui::Checkbox(u8"[교류] 무장 충성도 100", &bLoyalty)) {
         DX11Base::SetInstantLoyalty(bLoyalty);
@@ -433,7 +432,7 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (::DX11Base::g_loyaltyThreadRunning) {
+      if (::DX11Base::g_loyaltyThreadRunning.load()) {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), u8"초기화 중...");
         ImGui::EndDisabled();
