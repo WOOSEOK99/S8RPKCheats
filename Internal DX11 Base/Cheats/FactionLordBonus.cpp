@@ -18,6 +18,7 @@ namespace DX11Base {
     static HANDLE g_factionLordBonusThread  = nullptr;
 
     static std::unordered_map<uintptr_t, bool> g_prevAssigned;
+    static bool g_titleNamesApplied = false;
 
     // 상수
     static const int      FACTION_COUNT = 120;
@@ -37,6 +38,8 @@ namespace DX11Base {
     static const uintptr_t OFF_JUMOK   = 0x4EC720;
     static const uintptr_t OFF_GUNJU   = 0x4EC738;
 
+    static const uintptr_t OFF_TITLE_NAME_PATCH = 0x197A774;
+
     static uintptr_t ResolveRoot() {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase) return 0;
@@ -55,6 +58,9 @@ namespace DX11Base {
         return p;
     }
 
+    // forward decls (used by title name patch helpers)
+    static void WriteBytes(uintptr_t addr, const uint8_t* data, size_t size);
+
     static void WriteBytes(uintptr_t addr, const uint8_t* data, size_t size) {
         if (!IsValidPtr(addr, size)) return;
         DWORD old, tmp;
@@ -71,16 +77,35 @@ namespace DX11Base {
         VirtualProtect((LPVOID)addr, 8, old, &tmp);
     }
 
+    static void ApplyTitleNames(uintptr_t root) {
+        // 스크립트의 writeBytes(root+197A774, ...) 동일
+        static const uint8_t kNames[48] = {
+            0x69,0xD6,0x1C,0xC8,0x00,0x00,0x00,0x00,
+            0x55,0xC6,0x00,0x00,0x00,0x00,0x00,0x00,
+            0xF5,0xAC,0x00,0x00,0x00,0x00,0x00,0x00,
+            0xFC,0xC8,0xA9,0xBA,0x00,0x00,0x00,0x00,
+            0x70,0xAD,0xFC,0xC8,0x00,0x00,0x00,0x00,
+            0x9C,0xCC,0xF5,0xAC,0xA5,0xC7,0x70,0xAD
+        };
+        WriteBytes(root + OFF_TITLE_NAME_PATCH, kNames, sizeof(kNames));
+    }
+
+    static void ClearTitleNames(uintptr_t root) {
+        static const uint8_t kZeros[48] = {};
+        WriteBytes(root + OFF_TITLE_NAME_PATCH, kZeros, sizeof(kZeros));
+    }
+
     static void ApplyBonusTable(uintptr_t root) {
         uintptr_t base   = root + OFF_EMPEROR;
         uintptr_t stride = 24;
 
         static const uint8_t patches[5][15] = {
-            {0x97,0x00,0x14,0x88,0x13,0x05,0x05,0x05,0x05,0x05,0x00,0x01,0x03,0x01,0x00},
-            {0x98,0x00,0x14,0xB8,0x0B,0x04,0x04,0x04,0x04,0x04,0x00,0x01,0x03,0x01,0x00},
-            {0x99,0x00,0x14,0xD0,0x07,0x03,0x03,0x03,0x03,0x03,0x00,0x01,0x03,0x01,0x00},
-            {0x9A,0x00,0x14,0xE8,0x03,0x02,0x02,0x02,0x02,0x02,0x00,0x01,0x03,0x01,0x00},
-            {0x9B,0x00,0x14,0x00,0x00,0x01,0x01,0x01,0x01,0x01,0x00,0x01,0x03,0x01,0x00},
+            // 치트엔진 스크립트 patches[] 동일 (OFF_EMPEROR 기준 +9에 15바이트)
+            {0x54,0x00,0x14,0x88,0x13,0x05,0x05,0x05,0x05,0x05,0x00,0x01,0x03,0x01,0x00},
+            {0x56,0x00,0x14,0xB8,0x0B,0x04,0x04,0x04,0x04,0x04,0x00,0x01,0x03,0x01,0x00},
+            {0x58,0x00,0x14,0xD0,0x07,0x03,0x03,0x03,0x03,0x03,0x00,0x01,0x03,0x01,0x00},
+            {0x5A,0x00,0x14,0xE8,0x03,0x02,0x02,0x02,0x02,0x02,0x00,0x01,0x03,0x01,0x00},
+            {0x5C,0x00,0x14,0x00,0x00,0x01,0x01,0x01,0x01,0x01,0x00,0x01,0x03,0x01,0x00},
         };
 
         for (int i = 0; i < 5; i++)
@@ -99,6 +124,12 @@ namespace DX11Base {
     static void RunOnce() {
         uintptr_t root = ResolveRoot();
         if (!root) return;
+
+        // 관작 이름 패치 1회 적용 (root가 준비된 시점)
+        if (!g_titleNamesApplied) {
+            ApplyTitleNames(root);
+            g_titleNamesApplied = true;
+        }
 
         // 1. 보너스 테이블 적용
         ApplyBonusTable(root);
@@ -191,6 +222,8 @@ namespace DX11Base {
 
         g_prevAssigned.clear();
         ClearBonusTable(root);
+        ClearTitleNames(root);
+        g_titleNamesApplied = false;
     }
 
     static DWORD WINAPI FactionLordBonusThread(LPVOID) {
@@ -213,6 +246,7 @@ namespace DX11Base {
 
             g_factionLordBonusEnabled = true;
             g_factionLordBonusRunning = true;
+            g_titleNamesApplied = false;
 
             g_factionLordBonusThread = CreateThread(nullptr, 0,
                 FactionLordBonusThread, nullptr, 0, nullptr);
@@ -236,6 +270,7 @@ namespace DX11Base {
 
             uintptr_t root = ResolveRoot();
             if (root) ClearAll(root);
+            else g_titleNamesApplied = false;
 
             AddLog(u8"[군주보너스] 비활성화");
         }

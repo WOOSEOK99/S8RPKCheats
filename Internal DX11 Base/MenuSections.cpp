@@ -19,6 +19,7 @@
 #include "Cheats/Selfheal.h"
 #include "Cheats/SkillCondition.h"
 #include "Cheats/SpeedHack.h"
+#include "Cheats/StartSetting.h"
 #include "Cheats/Techpointcave.h"
 #include "Cheats/Techzero.h"
 #include "Cheats/TengiCave.h"
@@ -621,6 +622,26 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
         SaveConfig();
+      }
+
+      if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
+        DX11Base::SetStartSetting(bStartSetting);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),  u8"시나리오 설정");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),  u8"체크시 새로운 시나리오 시작시 자동으로 적용이 됩니다.");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f),  u8"※ 시나리오 변경(수정) 내용 ※");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"관우진군 : 관우-조홍 원수 버그 수정");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"지장집결 : 제갈량의 기술력 (연노병, 투석기까지 개발)");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"범장집결 : 전예 재야 신분으로 주인공 선택 가능");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"삼의 삼국지 : 환씨 조앙군으로 이적");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"네 군주 마지막 전쟁 : 반동탁 연합 해산, 네군주 우호도 0");
+        ImGui::EndTooltip();
       }
 
       // (전기 관련 UI는 '평정 및 진급 관련' 섹션으로 이동됨)

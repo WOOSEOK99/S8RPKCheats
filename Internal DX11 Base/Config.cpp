@@ -33,6 +33,7 @@
 #include "Cheats/Roadblock.h"
 #include "Cheats/Selfheal.h"
 #include "Cheats/SkillCondition.h"
+#include "Cheats/StartSetting.h"
 #include "Cheats/SystemMonth.h"
 #include "Cheats/Techpointcave.h"
 #include "Cheats/TengiCave.h"
@@ -78,6 +79,7 @@ namespace DX11Base {
   static bool s_appCelestial = false;
   static bool s_appBattleUnit = false;
   static bool s_appRoadBlock = false;
+  static bool s_appStartSetting = false;
   static bool s_appSkillCond = false;
   static bool s_appYumokCond = false;
   static bool s_appSangbyeongCond = false;
@@ -108,6 +110,7 @@ namespace DX11Base {
       {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false},
       {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false},
       {"bRoadBlock", u8"전쟁: 진로 방해 무시", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
+      {"bStartSetting", u8"시나리오 수정", &bStartSetting, &s_appStartSetting, SetStartSetting, false},
       {"bSkillCondition", u8"만병 습득 조건 해제", &bSkillCondition, &s_appSkillCond, ApplySkillCondition, false},
       {"bYumokCondition", u8"유목기병 습득 조건 해제", &bYumokCondition, &s_appYumokCond, ApplyYumokCondition, false},
       {"bSangbyeongCondition", u8"상병 습득 조건 해제", &bSangbyeongCondition, &s_appSangbyeongCond,

@@ -44,6 +44,7 @@ namespace DX11Base {
 
   bool bTechZero = false;
   bool bRoadBlock = false;
+  bool bStartSetting = false;
   bool bMonitorRonin = false;
   bool bAutoStatUp99 = false;
   bool bInfTengi = false;         // 2026-04-05 무한 전기
