@@ -1041,39 +1041,52 @@ namespace DX11Base {
       ImGui::SameLine();
       DrawFilterButton(u8"전부", -1);
 
-      // 필터 리스트 갱신 로직
-      s_filteredIndices.clear();
-      s_filteredIndices.reserve(5102);
+      // 필터 리스트 갱신 로직 최적화 (1초 단위 캐싱 및 필터/검색 변경 시에만 갱신)
+      static float s_timeSinceLastUpdate = 0.0f;
+      static int s_lastFilterForCache = -2;
+      s_timeSinceLastUpdate += ImGui::GetIO().DeltaTime;
 
-      bool seenIDs[65536];
-      memset(seenIDs, 0, sizeof(seenIDs));
+      bool needsUpdate = false;
+      if (s_currentFilter != s_lastFilterForCache || doSearch || s_triggerReselection) {
+        needsUpdate = true;
+      } else if (s_timeSinceLastUpdate >= 1.0f) {
+        needsUpdate = true;
+      }
 
-      for (int i = 0; i < 5102; i++) {
-        uintptr_t targetBase = arrayBase + (i * 0x3D0);
+      if (needsUpdate) {
+        s_timeSinceLastUpdate = 0.0f;
+        s_lastFilterForCache = s_currentFilter;
 
-        // 메모리 접근 예외를 방지하기 위해 SafeReadRosterStats를 사용합니다.
-        RosterStats s = SafeReadRosterStats(targetBase);
-        if (!s.valid)
-          continue;
+        s_filteredIndices.clear();
+        s_filteredIndices.reserve(5102);
 
-        // 중복 데이터 방지 (배열 뒤쪽에 복사되는 임시 클론 찌꺼기를 필터링합니다)
-        if (seenIDs[s.id_08])
-          continue;
+        bool seenIDs[65536];
+        memset(seenIDs, 0, sizeof(seenIDs));
 
-        // 이름이 없는 더미("???") 데이터나 빈 문자열 이름은 렌더링 목록에서 완전히 제외합니다.
-        if (g_officerNames.count(s.id_08) == 0)
-          continue;
-        if (g_officerNames[s.id_08].empty() || g_officerNames[s.id_08] == u8"???")
-          continue;
+        for (int i = 0; i < 5102; i++) {
+          uintptr_t targetBase = arrayBase + (i * 0x3D0);
 
-        seenIDs[s.id_08] = true;
+          RosterStats s = SafeReadRosterStats(targetBase);
+          if (!s.valid)
+            continue;
 
-        if (s_currentFilter == -1) {
-          s_filteredIndices.push_back(i);
-        } else {
-          uint8_t status = *(uint8_t *)(targetBase + 0x10);
-          if (status == s_currentFilter || (s_currentFilter == 0x68 && status == 0x78)) {
+          if (seenIDs[s.id_08])
+            continue;
+
+          if (g_officerNames.count(s.id_08) == 0)
+            continue;
+          if (g_officerNames[s.id_08].empty() || g_officerNames[s.id_08] == u8"???")
+            continue;
+
+          seenIDs[s.id_08] = true;
+
+          if (s_currentFilter == -1) {
             s_filteredIndices.push_back(i);
+          } else {
+            uint8_t status = *(uint8_t *)(targetBase + 0x10);
+            if (status == s_currentFilter || (s_currentFilter == 0x68 && status == 0x78)) {
+              s_filteredIndices.push_back(i);
+            }
           }
         }
       }
