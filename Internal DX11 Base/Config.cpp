@@ -79,6 +79,7 @@ namespace DX11Base {
   static bool s_appCelestial = false;
   static bool s_appBattleUnit = false;
   static bool s_appRoadBlock = false;
+  static bool s_appRoadBlock2 = false;
   static bool s_appStartSetting = false;
   static bool s_appSkillCond = false;
   static bool s_appYumokCond = false;
@@ -109,7 +110,8 @@ namespace DX11Base {
       {"bCelestial", u8"전쟁: 천계 강화", &bCelestial, &s_appCelestial, SetCelestialMod, true},
       {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false},
       {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false},
-      {"bRoadBlock", u8"전쟁: 진로 방해 무시", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
+      {"bRoadBlock", u8"전쟁: 진로 방해 무시 (건녕↔교지)", &bRoadBlock, &s_appRoadBlock, SetRoadBlock, false},
+      {"bRoadBlock2", u8"전쟁: 진로 방해 무시 (교지↔회계)", &bRoadBlock2, &s_appRoadBlock2, SetRoadBlock2, false},
       {"bStartSetting", u8"시나리오 수정", &bStartSetting, &s_appStartSetting, SetStartSetting, false},
       {"bSkillCondition", u8"만병 습득 조건 해제", &bSkillCondition, &s_appSkillCond, ApplySkillCondition, false},
       {"bYumokCondition", u8"유목기병 습득 조건 해제", &bYumokCondition, &s_appYumokCond, ApplyYumokCondition, false},

@@ -44,6 +44,7 @@ namespace DX11Base {
 
   bool bTechZero = false;
   bool bRoadBlock = false;
+  bool bRoadBlock2 = false;
   bool bStartSetting = false;
   bool bMonitorRonin = false;
   bool bAutoStatUp99 = false;

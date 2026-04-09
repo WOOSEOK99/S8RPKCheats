@@ -148,8 +148,10 @@ namespace DX11Base {
         DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
         DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
         DrawStatRow(u8"우호의 증표", 0xF8, 2, &v_Token, 0, gameBase, scale);
-        if (ImGui::Checkbox(u8"[내정] 행동력 무한", &bInfiniteAP))
+        if (ImGui::Checkbox(u8"[내정] 행동력 무한", &bInfiniteAP)) {
+          NotifyFeatureToggle(u8"[내정] 행동력 무한", bInfiniteAP);
           SaveConfig();
+        }
 
         // --- 대도시 전환 추가 ---
         bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
@@ -157,6 +159,7 @@ namespace DX11Base {
           ImGui::BeginDisabled();
         if (ImGui::Checkbox(u8"[도시] 기술도시로 전환", &bBigCity)) {
           DX11Base::SetBigCityConvert(bBigCity);
+          NotifyFeatureToggle(u8"[도시] 기술도시로 전환", bBigCity);
           SaveConfig();
         }
 
@@ -179,6 +182,7 @@ namespace DX11Base {
 
         if (ImGui::Checkbox(u8"[도시] 견문 시 민심 최대", &bAttitudeHack)) {
           ::DX11Base::SetInstantAttitude(bAttitudeHack);
+          NotifyFeatureToggle(u8"[도시] 견문 시 민심 최대", bAttitudeHack);
           SaveConfig();
         }
 
@@ -197,6 +201,7 @@ namespace DX11Base {
         DrawStatRow(u8"악명", 0x108, 2, &v_RepI, p1, gameBase, scale);
 
         if (ImGui::Checkbox(u8"악명 항상 0 유지", &bZeroInfamy)) {
+          NotifyFeatureToggle(u8"악명 항상 0 유지", bZeroInfamy);
           SaveConfig();
         }
 
@@ -211,6 +216,7 @@ namespace DX11Base {
         ImGui::Spacing(); // 위아래 여백
 
         if (ImGui::Checkbox(u8"전기 발생 무제한", &bInfTengi)) {
+          NotifyFeatureToggle(u8"전기 발생 무제한", bInfTengi);
           SaveConfig();
         }
 
@@ -223,6 +229,7 @@ namespace DX11Base {
         }
 
         if (ImGui::Checkbox(u8"능력치 한계돌파", &bAutoStatUp99)) {
+          NotifyFeatureToggle(u8"능력치 한계돌파", bAutoStatUp99);
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
@@ -236,6 +243,7 @@ namespace DX11Base {
 
         if (ImGui::Checkbox(u8"만병 습득 조건 해제", &bSkillCondition)) {
           DX11Base::ApplySkillCondition(bSkillCondition);
+          NotifyFeatureToggle(u8"만병 습득 조건 해제", bSkillCondition);
           SaveConfig();
         }
 
@@ -246,6 +254,7 @@ namespace DX11Base {
         }
 
         if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
+          NotifyFeatureToggle(u8"중지 성성 취소", bCancelCastleEvent);
           SaveConfig();
         }
 
@@ -258,6 +267,7 @@ namespace DX11Base {
         ImGui::SameLine(160.0f * scale);
         if (ImGui::Checkbox(u8"상병 습득 조건 해제", &bSangbyeongCondition)) {
           DX11Base::ApplySangbyeongCondition(bSangbyeongCondition);
+          NotifyFeatureToggle(u8"상병 습득 조건 해제", bSangbyeongCondition);
           SaveConfig();
         }
 
@@ -288,6 +298,7 @@ namespace DX11Base {
         ImGui::SameLine(160.0f * scale);
         if (ImGui::Checkbox(u8"유목기병 습득 조건 해제", &bYumokCondition)) {
           DX11Base::ApplyYumokCondition(bYumokCondition);
+          NotifyFeatureToggle(u8"유목기병 습득 조건 해제", bYumokCondition);
           SaveConfig();
         }
 
@@ -327,8 +338,10 @@ namespace DX11Base {
       if (p1 != 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
         DrawStatRow(u8"담력", 0x5BB8, 4, &v_Brave, 0, gameBase, scale);
-        if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel))
+        if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
+          NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
           SaveConfig();
+        }
       }
 
       EndSection(); // 보주 설정
@@ -382,6 +395,7 @@ namespace DX11Base {
             }
           }
           DX11Base::SetInstantLoveCave(*var, mode);
+          NotifyFeatureToggle(label, *var);
           SaveConfig();
         }
         if (wasRunning && *var) {
@@ -399,6 +413,7 @@ namespace DX11Base {
         ImGui::BeginDisabled();
       if (ImGui::Checkbox(u8"[담화] 무조건 공명 발생", &bResonance)) {
         DX11Base::SetInstantResonance(bResonance);
+        NotifyFeatureToggle(u8"[담화] 무조건 공명 발생", bResonance);
         SaveConfig();
       }
 
@@ -417,6 +432,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[담화] 경애 시 무조건 공명", &bFastRelationship)) {
         DX11Base::SetFastRelationship(bFastRelationship);
+        NotifyFeatureToggle(u8"[담화] 경애 시 무조건 공명", bFastRelationship);
         SaveConfig();
       }
 
@@ -424,6 +440,7 @@ namespace DX11Base {
         ImGui::BeginDisabled();
       if (ImGui::Checkbox(u8"[교류] 무장 충성도 100", &bLoyalty)) {
         DX11Base::SetInstantLoyalty(bLoyalty);
+        NotifyFeatureToggle(u8"[교류] 무장 충성도 100", bLoyalty);
         SaveConfig();
       }
 
@@ -441,11 +458,13 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[교류] 선물 기증 무제한", &bInfiniteGift)) {
         DX11Base::SetInfiniteGift(bInfiniteGift);
+        NotifyFeatureToggle(u8"[교류] 선물 기증 무제한", bInfiniteGift);
         SaveConfig();
       }
 
       if (ImGui::Checkbox(u8"[교류] 담화 실행 무제한", &bInfiniteTalk)) {
         DX11Base::SetInfiniteTalk(bInfiniteTalk);
+        NotifyFeatureToggle(u8"[교류] 담화 실행 무제한", bInfiniteTalk);
         SaveConfig();
       }
 
@@ -460,6 +479,7 @@ namespace DX11Base {
           }
         }
         ::DX11Base::SetMarriageCondition(tempMarriage);
+        NotifyFeatureToggle(u8"[결혼] 결혼 무제한", tempMarriage);
         SaveConfig();
       }
 
@@ -478,6 +498,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[전법 강화] 치료", &bSelfHeal)) {
         DX11Base::SetSelfHeal(bSelfHeal);
+        NotifyFeatureToggle(u8"[전법 강화] 치료", bSelfHeal);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -492,6 +513,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[전법 강화] 동토", &bDongto)) {
         DX11Base::SetDongto(bDongto);
+        NotifyFeatureToggle(u8"[전법 강화] 동토", bDongto);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -506,6 +528,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[전법 강화] 격류/낙석", &bTerrainIgnore)) {
         DX11Base::SetTerrainIgnore(bTerrainIgnore);
+        NotifyFeatureToggle(u8"[전법 강화] 격류/낙석", bTerrainIgnore);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -517,6 +540,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[전법 강화] 투석 병기", &bCatapult)) {
         DX11Base::SetCatapultCheat(bCatapult);
+        NotifyFeatureToggle(u8"[전법 강화] 투석 병기", bCatapult);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -529,6 +553,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[전법 강화] 천계", &bCelestial)) {
         DX11Base::SetCelestialMod(bCelestial);
+        NotifyFeatureToggle(u8"[전법 강화] 천계", bCelestial);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -543,6 +568,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[수비] 방어 건물 사거리 강화", &bDefBuilding)) {
         DX11Base::SetDefBuildingBoost(bDefBuilding);
+        NotifyFeatureToggle(u8"[수비] 방어 건물 사거리 강화", bDefBuilding);
         SaveConfig();
       }
 
@@ -556,6 +582,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"[수비] 방어 건물 공격력 강화", &bDefAtk)) {
         DX11Base::SetDefAtkBoost(bDefAtk);
+        NotifyFeatureToggle(u8"[수비] 방어 건물 공격력 강화", bDefAtk);
         SaveConfig();
       }
 
@@ -567,6 +594,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"전투맵 랜덤(관문제외)", &bBattleMapShuffle)) {
         DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
+        NotifyFeatureToggle(u8"전투맵 랜덤(관문제외)", bBattleMapShuffle);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -579,6 +607,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"세력 군주 보너스 자동 배정", &bFactionLordBonus)) {
         DX11Base::SetFactionLordBonus(bFactionLordBonus);
+        NotifyFeatureToggle(u8"세력 군주 보너스 자동 배정", bFactionLordBonus);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -606,6 +635,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
         DX11Base::SetTechZero(bTechZero);
+        NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);
       }
 
       if (ImGui::IsItemHovered()) {
@@ -615,17 +645,26 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"교지-건녕 / 교지-회계 도로 차단", &bRoadBlock)) {
+      if (ImGui::Checkbox(u8"교지 <-> 건녕 도로 차단", &bRoadBlock)) {
         DX11Base::SetRoadBlock(bRoadBlock);
+        NotifyFeatureToggle(u8"교지 <-> 건녕 도로 차단", bRoadBlock);
+        SaveConfig();
+      }
+
+      if (ImGui::Checkbox(u8"교지 <-> 회계 도로 차단", &bRoadBlock2)) {
+        DX11Base::SetRoadBlock2(bRoadBlock2);
+        NotifyFeatureToggle(u8"교지 <-> 회계 도로 차단", bRoadBlock2);
         SaveConfig();
       }
 
       if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
+        NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
         SaveConfig();
       }
 
       if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
         DX11Base::SetStartSetting(bStartSetting);
+        NotifyFeatureToggle(u8"시나리오 수정", bStartSetting);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
@@ -650,21 +689,25 @@ namespace DX11Base {
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
       if (ImGui::Checkbox(u8"전기취소##WIDGET", &DX11Base::bShowWidgetTengi)) {
+        NotifyFeatureToggle(u8"위젯: 전기취소", DX11Base::bShowWidgetTengi);
         SaveConfig();
       }
 
       ImGui::SameLine();
       if (ImGui::Checkbox(u8"주인공##WIDGET", &DX11Base::bShowWidgetHero)) {
+        NotifyFeatureToggle(u8"위젯: 주인공", DX11Base::bShowWidgetHero);
         SaveConfig();
       }
 
       ImGui::SameLine();
       if (ImGui::Checkbox(u8"모든무장##WIDGET", &DX11Base::bShowWidgetAllOfficers)) {
+        NotifyFeatureToggle(u8"위젯: 모든 무장", DX11Base::bShowWidgetAllOfficers);
         SaveConfig();
       }
 
       ImGui::SameLine();
       if (ImGui::Checkbox(u8"알림확인##WIDGET", &DX11Base::bShowWidgetNotif)) {
+        NotifyFeatureToggle(u8"위젯: 알림확인", DX11Base::bShowWidgetNotif);
         SaveConfig();
       }
       EndSection(); // 위젯

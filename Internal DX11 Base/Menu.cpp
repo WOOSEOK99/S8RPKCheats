@@ -361,6 +361,7 @@ namespace DX11Base {
 
       ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
       if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {
+        NotifyFeatureToggle(u8"배속", bSpeedHack);
         SpeedHack_Update();
         SaveConfig();
       }
@@ -415,6 +416,7 @@ namespace DX11Base {
 
       ImGui::SameLine(0, 15.0f * scale);
       if (ImGui::Checkbox(u8"자동로드", &DX11Base::bAutoLoadMenu)) {
+        NotifyFeatureToggle(u8"자동로드", DX11Base::bAutoLoadMenu);
         DX11Base::SaveConfig();
       }
     }

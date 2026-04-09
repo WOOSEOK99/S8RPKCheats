@@ -56,6 +56,7 @@ namespace DX11Base {
   extern bool bBattleMapShuffle;
   extern bool bTechZero;
   extern bool bRoadBlock;
+  extern bool bRoadBlock2;
   extern bool bStartSetting;
   extern bool bMonitorRonin;
   extern bool bAutoStatUp99;        // 능력치 99 -> 100 자동 보정
