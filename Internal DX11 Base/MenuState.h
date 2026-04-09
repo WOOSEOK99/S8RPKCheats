@@ -95,5 +95,7 @@ namespace DX11Base {
   extern bool bShowPasswordPopup;         // 디버그 비밀번호 창 표시 여부
   extern bool bShowNotificationLog;       // 알림 기록 창 표시 여부
 
+  extern uintptr_t g_savedHeroAddr;       // [신규] 데모플레이 대비 주인공 주소 백업용
+
   bool IsAnyUIOpen(); // 모든 UI 창 활성화 여부 확인 함수
 } // namespace DX11Base

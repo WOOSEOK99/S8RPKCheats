@@ -87,4 +87,6 @@ namespace DX11Base {
 
   bool bToggleMenuCollapseRequest = false;
   bool bShowPasswordPopup = false;
+
+  uintptr_t g_savedHeroAddr = 0;
 } // namespace DX11Base

@@ -725,6 +725,52 @@ namespace DX11Base {
         SaveConfig();
       }
 
+      // [신규] 데모플레이 제어 버튼
+      float demoBtnWidth = 140.0f * scale;
+      // ImGui::Spacing();
+      // if (ImGui::Button(u8"데모플레이 시작", ImVec2(demoBtnWidth, 26.0f * scale))) {
+      //   uintptr_t gBase = DX11Base::GetGameBase();
+      //   uintptr_t p1_ptr = gBase + 0xE0;
+      //   if (DX11Base::IsValidPtr(p1_ptr, 8)) {
+      //     uintptr_t current_p1 = *(uintptr_t *)p1_ptr;
+      //     if (current_p1 > 0x10000) {
+      //       DX11Base::g_savedHeroAddr = current_p1;
+      //     }
+      //     DWORD oldP;
+      //     if (VirtualProtect((LPVOID)p1_ptr, 8, PAGE_READWRITE, &oldP)) {
+      //       *(uintptr_t *)p1_ptr = 0;
+      //       VirtualProtect((LPVOID)p1_ptr, 8, oldP, &oldP);
+      //       DX11Base::AddLog(u8"[데모] 데모 플레이 시작 (주인공 주소 NULL 처리)");
+      //     }
+      //   }
+      // }
+      // ImGui::SameLine();
+      if (ImGui::Button(u8"데모플레이 중지", ImVec2(demoBtnWidth, 26.0f * scale))) {
+        uintptr_t gBase = DX11Base::GetGameBase();
+        uintptr_t p1_ptr = gBase + 0xE0;
+        if (DX11Base::g_savedHeroAddr > 0x10000 && DX11Base::IsValidPtr(p1_ptr, 8)) {
+          DWORD oldP;
+          if (VirtualProtect((LPVOID)p1_ptr, 8, PAGE_READWRITE, &oldP)) {
+            *(uintptr_t *)p1_ptr = DX11Base::g_savedHeroAddr;
+            VirtualProtect((LPVOID)p1_ptr, 8, oldP, &oldP);
+            DX11Base::AddLog(u8"[데모] 데모 플레이 중지 (주인공 주소 복원 완료: %p)",
+                             (void *)DX11Base::g_savedHeroAddr);
+          }
+        } else if (DX11Base::g_savedHeroAddr <= 0x10000) {
+          DX11Base::AddLog(u8"[데모] 복원할 백업 주소가 없습니다.");
+        }
+      }
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),u8"[사용 방법]");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),u8"데모플레이 중 중지 버튼을 눌러 데모플레이를 중지합니다.");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),u8"저장을 한뒤에 불러오기를 하면 정상적으로 플레이가 가능합니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f),u8"[ 주의 사항 ]");
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f),u8"마우스 우측키를 눌러 일시 정지후에 중지 버튼을 누르면 까만화면으로 바뀝니다.");
+        ImGui::EndTooltip();
+      }
+
       // (전기 관련 UI는 '평정 및 진급 관련' 섹션으로 이동됨)
       EndSection(); // 시나리오
 

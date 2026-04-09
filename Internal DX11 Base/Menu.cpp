@@ -25,6 +25,10 @@
 
 namespace DX11Base {
 
+  // --- [데모 플레이 대응] p1 백업/복원 전역 상태 ---
+  // (MenuState.h에 정의된 g_savedHeroAddr 사용)
+  static bool s_autoRestoreP1 = false;    // p1 자동 복원 모드 On/Off
+
   // --- Menu 클래스 구현 ---
 
   void Menu::Render() {
@@ -125,6 +129,27 @@ namespace DX11Base {
 
     uintptr_t gameBase = GetGameBase();
     uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;
+
+    // --- [데모 플레이 대응] p1 자동 백업 및 복원 ---
+    if (p1 > 0x10000 && p1 != g_savedHeroAddr) { 
+      // 주인공 주소가 처음 잡히거나, 다른 주소로 변경된 경우에만 백업 갱신
+      if (IsValidPtr(p1, 0x100)) {
+        g_savedHeroAddr = p1;
+        AddLog(u8"[백업] 주인공 주소 저장 완료: %p", (void*)g_savedHeroAddr);
+      }
+    } else if (p1 == 0 && g_savedHeroAddr > 0x10000 && gameBase && s_autoRestoreP1) {
+      // 자동 복원 모드: p1이 null이 됐고 백업이 있으면 자동으로 복원
+      if (IsValidPtr(g_savedHeroAddr, 0x100)) {
+        DWORD oldP;
+        if (VirtualProtect((LPVOID)(gameBase + 0xE0), 8, PAGE_READWRITE, &oldP)) {
+          *(uintptr_t *)(gameBase + 0xE0) = g_savedHeroAddr;
+          VirtualProtect((LPVOID)(gameBase + 0xE0), 8, oldP, &oldP);
+          p1 = g_savedHeroAddr; // 이번 프레임부터 바로 사용
+          AddLog(u8"[복원] 주인공 주소 자동 복원 완료 (Base: %p)", (void *)g_savedHeroAddr);
+        }
+      }
+    }
+
     ApplyStoredConfigs(p1, gameBase);
 
     // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
@@ -423,6 +448,7 @@ namespace DX11Base {
 
     if (p1 == 0) {
       ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), u8"주인공 정보가 아직 로드되지 않았습니다.");
+      // (복원 버튼은 시나리오 섹션으로 이동됨)
     }
 
     // 디버깅 섹션 (맨 아래로 이동)
