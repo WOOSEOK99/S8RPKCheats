@@ -775,27 +775,31 @@ namespace DX11Base {
       EndSection(); // 시나리오
 
       BeginSection();
+
+      float btnWidth = 80.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
+      float btnHeight = 26.0f * scale;
+      float spacing = 20.0f * scale; // 버튼 사이의 여백
+
       if (p1 != 0) {
-
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
-
-        float btnWidth = 80.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
-        float btnHeight = 26.0f * scale;
-        float spacing = 20.0f * scale; // 버튼 사이의 여백
-
         if (ImGui::Button(u8"주인공", ImVec2(btnWidth, btnHeight))) {
           bShowOfficerDetail = !bShowOfficerDetail;
-        }
-
-        ImGui::SameLine(0, spacing); // 이전 항목 끝에서 spacing만큼 띄움
-        if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
-          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
         }
         ImGui::SameLine(0, spacing);
         if (ImGui::Button(u8"선택 무장", ImVec2(btnWidth, btnHeight))) {
           bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
         }
+        ImGui::SameLine(0, spacing); // p1이 있을 때만 같은 줄에 배치
+
+        if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
+          bShowOfficerListWin = !bShowOfficerListWin;
+        }
       }
+
+      // if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
+      //   DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+      // }
+
 
       EndSection(); // 무장 정보
       

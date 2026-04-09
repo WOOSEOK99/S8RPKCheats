@@ -5,8 +5,6 @@
 
 namespace DX11Base {
   extern uintptr_t g_capturedOfficerBase;
-  extern bool g_officerCaptureRunning;
-  void SetOfficerCapture(bool enable);
   void DrawSelectedOfficerWindow(ImVec2 mPos, ImVec2 mSize, float scale, bool asChild = false);
 
   void DrawOfficerListWindow(uintptr_t p1, float scale);

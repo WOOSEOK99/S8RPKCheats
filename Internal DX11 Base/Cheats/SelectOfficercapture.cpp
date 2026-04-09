@@ -42,12 +42,6 @@ namespace DX11Base {
              v_Loyalty = 0, v_StrPoint = 0, v_ForceID = 0, v_ForceColor = 0, v_ActionPoints = 0, v_VTableByte = 0,
              v_City = 0, v_AffCity = 0, v_StatusFlags = 0, v_DeathFlag = 0, v_Location = 0;
 
-  bool g_officerCaptureRunning = false;
-  static uintptr_t g_officerHookAddr = 0;
-  static uint8_t g_officerOriginal[8] = {};
-  static uintptr_t g_officerCaveAddr = 0;
-  static bool g_officerApplied = false;
-
   // --- [목록 필터 및 전역 상태 공유용] ---
   // --- [목록 필터 및 전역 상태 공유용] ---
   struct CachedOfficer {
@@ -88,131 +82,10 @@ namespace DX11Base {
   static bool g_showDumpPopup = false;
   static std::string g_dumpText = "";
 
-  // ───────────────────────────────────────────────
-  //  선택 무장 베이스 주소 캡처
-  //  원본: movzx r9d, byte ptr [r15+0xAB]  (8바이트)
-  //  r15 = 선택한 무장 구조체 베이스
-  // ───────────────────────────────────────────────
-
-  static bool InstallOfficerCave() {
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    uintptr_t hookAddr = 0;
-    uint8_t targetOffset = 0;
-    uint8_t opType = 0;
-
-    struct HookCandidate {
-      const char *pattern;
-      uint8_t offset;
-      uint8_t type;
-    } candidates[] = {
-        {"45 0F B6 8F A5 00 00 00", 0xA5, 1},
-        {"45 0F B6 8F AB 00 00 00", 0xAB, 1},
-        {"45 0F B6 8F AE 00 00 00", 0xAE, 1},
-    };
-
-    for (const auto &c : candidates) {
-      uintptr_t addr = DX11Base::FindPattern(exeBase, exeBase + 0x3000000, c.pattern);
-      if (addr) {
-        // 이미 후킹되어 있는지 체크 (E9 = JMP)
-        if (*(unsigned char *)addr == 0xE9) {
-          AddLog(u8"[CONFLICT] 지점 0x%X는 이미 타 프로그램이 사용 중입니다. 다음 후보 탐색...", c.offset);
-          continue;
-        }
-        hookAddr = addr;
-        targetOffset = c.offset;
-        opType = c.type;
-        break;
-      }
-    }
-
-    if (!hookAddr)
-      return false;
-
-    g_officerHookAddr = hookAddr;
-    memcpy(g_officerOriginal, (void *)hookAddr, 8);
-
-    g_officerCaveAddr = AllocNear(hookAddr, 1024);
-    if (!g_officerCaveAddr)
-      return false;
-
-    // 절대 주소를 사용하는 안전한 쉘코드 + 자동 해제 플래그 기입
-    unsigned char shellcode[] = {
-        0x50,                                                       // push rax
-        0x48, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rax, &g_capturedOfficerBase (Offset 3)
-        0x4C, 0x89, 0x38,                                           // mov [rax], r15
-        0x58,                                                       // pop rax
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,             // 가로챈 명령어 복원 (Offset 15)
-        0xFF, 0x25, 0x00, 0x00, 0x00, 0x00,                         // jmp [rip+0] (Offset 23)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00              // Target Addr (Offset 29)
-    };
-
-    // 1. 저장할 변수의 절대 주소 기입
-    *(uintptr_t *)(shellcode + 3) = (uintptr_t)&g_capturedOfficerBase;
-
-    // 2. 가로챈 명령어를 쉘코드에 복원
-    if (opType == 1) {
-      // movzx r9d, byte ptr [r15 + offset]
-      unsigned char instr[] = {0x45, 0x0F, 0xB6, 0x8F, 0x00, 0x00, 0x00, 0x00};
-      *(uint32_t *)(instr + 4) = (uint32_t)targetOffset;
-      memcpy(shellcode + 15, instr, 8);
-    } else if (opType == 2) {
-      // movzx r9d, word ptr [r15 + 0x2E]
-      unsigned char instr[] = {0x45, 0x0F, 0xB7, 0x8F, 0x2E, 0x00, 0x00, 0x00};
-      memcpy(shellcode + 15, instr, 8);
-    }
-
-    // 3. 복귀할 주소 기입
-    uintptr_t jumpBackAddr = hookAddr + 8;
-    *(uintptr_t *)(shellcode + 29) = jumpBackAddr;
-
-    memcpy((void *)g_officerCaveAddr, shellcode, sizeof(shellcode));
-
-    // 3. 훅 설치 (E9 점프)
-    return ApplyJmp(hookAddr, g_officerCaveAddr, 8);
-  }
-
-  void SetOfficerCapture(bool enable) {
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    if (!exeBase)
-      return;
-
-    if (enable) {
-      if (g_officerApplied)
-        return;
-      if (g_officerCaptureRunning)
-        return;
-
-      g_officerCaptureRunning = true;
-
-      HANDLE hThread = CreateThread(
-          nullptr, 0,
-          [](LPVOID) -> DWORD {
-            if (!g_officerApplied) {
-              if (InstallOfficerCave())
-                g_officerApplied = true;
-            }
-
-            AddLog("[DEBUG] officerCave applied: %d", g_officerApplied);
-            g_officerCaptureRunning = false;
-            return 0;
-          },
-          nullptr, 0, nullptr);
-
-      if (hThread)
-        CloseHandle(hThread);
-
-    } else {
-      g_capturedOfficerBase = 0;
-
-      if (g_officerApplied) {
-        RestoreBytes(g_officerHookAddr, g_officerOriginal, 8);
-        VirtualFree((LPVOID)g_officerCaveAddr, 0, MEM_RELEASE);
-        g_officerCaveAddr = 0;
-        g_officerApplied = false;
-        g_officerHookAddr = 0;
-      }
-    }
-  }
+  // NOTE:
+  // SetOfficerCapture/InstallOfficerCave 코드는 성능/안정성 점검을 위해
+  // active path에서 분리했습니다. 복구용 원본은
+  // `Cheats/legacy/OfficerCaptureCave_legacy.cpp`에 보관합니다.
 
   // --- [ UI Helper Functions ] ---
 
@@ -811,25 +684,8 @@ namespace DX11Base {
       LoadEffectDefinitions();
       s_lastMetaReloadMs = nowMs;
     }
-    static bool s_wasShowWin = false;
-    if (!asChild) {
-      if (!bShowSelectedOfficerWin) {
-        if (s_wasShowWin) {
-          if (g_officerApplied) {
-            RestoreBytes(g_officerHookAddr, g_officerOriginal, 8);
-            g_officerApplied = false;
-          }
-          bAllowGameClick = false;
-          AddLog(u8"[LIVE] 실시간 추적을 종료하고 훅을 해제했습니다.");
-          s_wasShowWin = false;
-        }
-        return;
-      }
-      s_wasShowWin = true;
-    }
-
-    if (!asChild && bShowSelectedOfficerWin && !g_officerApplied && !g_officerCaptureRunning) {
-      SetOfficerCapture(true);
+    if (!asChild && !bShowSelectedOfficerWin) {
+      return;
     }
 
     if (asChild) {
@@ -873,11 +729,7 @@ namespace DX11Base {
     }
     RefreshStableOfficerArrayBase(0);
     if (!asChild) {
-      if (!g_officerApplied) {
-        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), u8"실시간 추적 준비 중...");
-      } else {
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"● 실시간 추적 활성 상태 (정보 -> 무장 -> 클릭)");
-      }
+      ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1), u8"● 배열 기반 선택 편집 모드");
       ImGui::Spacing();
       ImGui::Checkbox(u8"게임 화면 클릭 허용 (무장 선택 시 필요)", &bAllowGameClick);
       ImGui::Separator();
@@ -1104,7 +956,16 @@ namespace DX11Base {
     // 리스트 창의 크기를 수동으로 조절 가능하게 하고, AlwaysAutoResize를 제거하여 레이아웃 부하를 없앱니다.
     if (ImGui::Begin(u8"모든 무장 편집 리스트###OfficerListWin", &bShowOfficerListWin, 
                      ImGuiWindowFlags_None)) {
-      if (!p1) {
+      uintptr_t preResolvedArrayBase = 0;
+      bool hasRosterArray = false;
+      {
+        uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+        if (exe && TryResolveOfficerRosterArrayBase(exe, &preResolvedArrayBase) && preResolvedArrayBase > 0x10000) {
+          hasRosterArray = true;
+        }
+      }
+
+      if (!p1 && !hasRosterArray) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"무장 배열 데이터를 찾을 수 없습니다.");
         ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");
         ImGui::Spacing();
@@ -1134,6 +995,9 @@ namespace DX11Base {
       static int s_cacheBuildCursor = 0;
       static bool s_cacheFirstChunkDone = false;
       static bool s_cacheSeenIDs[5103] = {};
+      static ULONGLONG s_lastFilterInputMs = 0;
+      static int s_prevObservedFilter = -2;
+      const ULONGLONG nowMsUi = GetTickCount64();
       // 목록 구축은 s_allOfficerCache에 증분 append 하고, 완료 시 1회 정렬한다.
       if (s_requestOfficerListRefresh) {
         s_forceOfficerListRefresh = true;
@@ -1162,6 +1026,10 @@ namespace DX11Base {
       // 배열 베이스는 매 프레임 재탐색하지 않고, 목록 갱신이 필요할 때만 갱신
       static uintptr_t s_cachedListArrayBase = 0;
       uintptr_t arrayBase = s_cachedListArrayBase;
+      if (arrayBase == 0 && hasRosterArray) {
+        arrayBase = preResolvedArrayBase;
+        s_cachedListArrayBase = preResolvedArrayBase;
+      }
 
       ImGui::SetNextItemWidth(100.0f * scale);
       if (ImGui::InputTextWithHint(u8"##search", u8"이름 or ID", s_searchBuf, sizeof(s_searchBuf),
@@ -1264,11 +1132,18 @@ namespace DX11Base {
       ImGui::SameLine();
       DrawFilterButton(u8"전부", -1);
 
+      if (s_prevObservedFilter != s_currentFilter) {
+        s_prevObservedFilter = s_currentFilter;
+        s_lastFilterInputMs = nowMsUi;
+      }
+
       // 필터 리스트: 주기적 폴링 없음 — 필터/검색/트리거 또는 「목록 새로고침」일 때만 메모리 재스캔
       bool needsUpdate = false;
-      if (!s_deferInitialBuild &&
-          (s_currentFilter != s_lastFilterForCache || doSearch || s_triggerReselection || s_forceOfficerListRefresh ||
-           s_cacheBuildInProgress)) {
+      const bool filterChanged = (s_currentFilter != s_lastFilterForCache);
+      const bool filterDebounceReady = (s_lastFilterInputMs == 0) || ((nowMsUi - s_lastFilterInputMs) >= 80);
+      const bool immediateReason = s_triggerReselection || s_forceOfficerListRefresh || s_cacheBuildInProgress;
+      const bool debouncedReason = filterChanged || s_pendingSearch || doSearch;
+      if (!s_deferInitialBuild && (immediateReason || (debouncedReason && filterDebounceReady))) {
         needsUpdate = true;
       }
 

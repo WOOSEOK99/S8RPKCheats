@@ -127,7 +127,7 @@ BOOL WINAPI hkGetKeyboardState(PBYTE lpKeyState) {
 
 // OS가 메시지를 가져갈 때 Raw Input만 제거하여 단축키 차단, 키 메시지는 강제 변환
 void HandleMessageCapture(LPMSG lpMsg) {
-    if (!DX11Base::g_Engine || !DX11Base::g_Engine->bShowMenu || !ImGui::GetCurrentContext()) return;
+    if (!DX11Base::g_Engine || !DX11Base::IsAnyUIOpen() || !ImGui::GetCurrentContext()) return;
     ImGuiIO& io = ImGui::GetIO();
 
     // 1. 단축키 방지: Raw Input 인터셉트
@@ -140,8 +140,20 @@ void HandleMessageCapture(LPMSG lpMsg) {
                 RAWINPUT* raw = (RAWINPUT*)buf;
                 if (raw->header.dwType == RIM_TYPEKEYBOARD) {
                     USHORT vkey = raw->data.keyboard.VKey;
-                    // 스페이스, 백스페이스만 차단 (게임 단축키 충돌 방지)
-                    // 한영키(0x15) 등 나머지는 건드리지 않음 → OS가 정상 처리
+                    bool isModifier = (vkey == VK_SHIFT || vkey == VK_LSHIFT || vkey == VK_RSHIFT ||
+                                       vkey == VK_CONTROL || vkey == VK_LCONTROL || vkey == VK_RCONTROL ||
+                                       vkey == VK_MENU || vkey == VK_LMENU || vkey == VK_RMENU);
+                    bool isImeKey = (vkey == 0x15 || vkey == 0xA5 || vkey == VK_PROCESSKEY);
+                    bool isMenuToggle = (vkey == VK_OEM_3);
+
+                    // 텍스트 입력 중에는 게임 단축키가 절대 먹지 않도록 거의 모든 키를 차단.
+                    // 단, IME/수정키/메뉴 토글 키는 시스템 처리에 맡긴다.
+                    if (io.WantTextInput && !isModifier && !isImeKey && !isMenuToggle) {
+                        lpMsg->message = WM_NULL;
+                        return;
+                    }
+
+                    // 텍스트 입력이 아니더라도, 기존처럼 스페이스/백스페이스는 차단 유지.
                     if (vkey == VK_SPACE || vkey == VK_BACK) {
                         lpMsg->message = WM_NULL; 
                         return;
