@@ -7,6 +7,8 @@
 #include <psapi.h>
 #include <iostream>
 #include <winnls.h>
+#include <algorithm>
+#include <map>
 
 namespace DX11Base {
 
@@ -179,6 +181,163 @@ namespace DX11Base {
                 file.close();
             }
         }
+    }
+
+    namespace {
+
+    struct CharJsonEntry {
+        int id = 0;
+        std::string name;
+        std::string ja;
+    };
+
+    std::string JsonEscapeQuoted(const std::string &s) {
+        std::string r;
+        r.reserve(s.size() + 16);
+        for (unsigned char c : s) {
+            switch (c) {
+            case '"':
+                r += "\\\"";
+                break;
+            case '\\':
+                r += "\\\\";
+                break;
+            case '\n':
+                r += "\\n";
+                break;
+            case '\r':
+                r += "\\r";
+                break;
+            case '\t':
+                r += "\\t";
+                break;
+            default:
+                r += static_cast<char>(c);
+                break;
+            }
+        }
+        return r;
+    }
+
+    bool ParseCharJsonFileToMap(const std::string &jsonPath, std::map<int, CharJsonEntry> &out) {
+        std::ifstream file(jsonPath);
+        if (!file.is_open())
+            return false;
+        std::string line;
+        int currentId = -1;
+        std::string currentName = "";
+        std::string currentJa = "";
+        while (std::getline(file, line)) {
+            if (line.find("{") != std::string::npos) {
+                currentId = -1;
+                currentName = "";
+                currentJa = "";
+            }
+            size_t idPos = line.find("\"id\"");
+            if (idPos != std::string::npos) {
+                size_t colon = line.find(":", idPos);
+                if (colon != std::string::npos) {
+                    try {
+                        currentId = std::stoi(line.substr(colon + 1));
+                    } catch (...) {
+                        currentId = -1;
+                    }
+                }
+            }
+            size_t namePos = line.find("\"name\"");
+            if (namePos != std::string::npos) {
+                size_t colon = line.find(":", namePos);
+                if (colon != std::string::npos) {
+                    size_t firstQuote = line.find("\"", colon);
+                    if (firstQuote != std::string::npos) {
+                        size_t secondQuote = line.find("\"", firstQuote + 1);
+                        if (secondQuote != std::string::npos)
+                            currentName = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+                    }
+                }
+            }
+            size_t jaPos = line.find("\"ja\"");
+            if (jaPos != std::string::npos) {
+                size_t colon = line.find(":", jaPos);
+                if (colon != std::string::npos) {
+                    size_t firstQuote = line.find("\"", colon);
+                    if (firstQuote != std::string::npos) {
+                        size_t secondQuote = line.find("\"", firstQuote + 1);
+                        if (secondQuote != std::string::npos)
+                            currentJa = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+                    }
+                }
+            }
+            if (line.find("}") != std::string::npos && currentId != -1) {
+                CharJsonEntry e;
+                e.id = currentId;
+                e.name = NormalizeUtf8(AnsiToUtf8(currentName));
+                e.ja = NormalizeUtf8(AnsiToUtf8(currentJa));
+                out[currentId] = std::move(e);
+            }
+        }
+        file.close();
+        return true;
+    }
+
+    bool WriteCharJsonMap(const std::string &jsonPath, const std::map<int, CharJsonEntry> &byId) {
+        std::ofstream o(jsonPath, std::ios::binary | std::ios::trunc);
+        if (!o.is_open())
+            return false;
+        o << "[\n";
+        size_t i = 0;
+        const size_t n = byId.size();
+        for (const auto &kv : byId) {
+            const CharJsonEntry &e = kv.second;
+            o << "  {\n";
+            o << "    \"id\": " << e.id << ",\n";
+            o << "    \"name\": \"" << JsonEscapeQuoted(e.name) << "\",\n";
+            o << "    \"ja\": \"" << JsonEscapeQuoted(e.ja) << "\"\n";
+            o << "  }";
+            if (++i < n)
+                o << ",";
+            o << "\n";
+        }
+        o << "]\n";
+        return true;
+    }
+
+    } // namespace
+
+    bool SaveOfficerNameToJson(int id, const std::string &nameUtf8) {
+        char path[MAX_PATH];
+        if (!GetModuleFileNameA(g_hModule, path, MAX_PATH))
+            return false;
+        std::string jsonPath = std::filesystem::path(path).parent_path().append("S8RPK_cheat_char.json").string();
+
+        std::map<int, CharJsonEntry> byId;
+        const bool parsed = ParseCharJsonFileToMap(jsonPath, byId);
+        if (!parsed && std::filesystem::exists(jsonPath))
+            return false;
+
+        std::string normalized = NormalizeUtf8(nameUtf8);
+        auto it = byId.find(id);
+        if (it == byId.end()) {
+            CharJsonEntry e;
+            e.id = id;
+            e.name = normalized;
+            e.ja = "";
+            byId[id] = std::move(e);
+        } else {
+            it->second.name = normalized;
+        }
+
+        if (!WriteCharJsonMap(jsonPath, byId))
+            return false;
+
+        auto it2 = byId.find(id);
+        if (it2 == byId.end() || it2->second.name.empty())
+            g_officerNames.erase(id);
+        else if (!it2->second.ja.empty())
+            g_officerNames[id] = it2->second.name + u8"(" + it2->second.ja + u8")";
+        else
+            g_officerNames[id] = it2->second.name;
+        return true;
     }
 
     void LoadEffectDefinitions() {

@@ -60,6 +60,7 @@ namespace DX11Base {
   bool bShowOfficerListWin = false;
   bool bOfficerCapture = false;
   uintptr_t g_capturedOfficerBase = 0;
+  uintptr_t g_officerInlineReadPtr = 0;
   bool bAllowGameClick = false;
   bool bBlockClickInOfficerList = true;
   bool bBlockClickInMemoryEditor = true;

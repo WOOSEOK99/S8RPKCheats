@@ -1,9 +1,11 @@
 #include "OfficerDetail.h"
 #include "Cheats.h"
+#include "MenuState.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
 #include "CityData.h"
 #include "pch.h"
+#include <cstring>
 #include "Framework/imgui.h"
 #include "showlog.h"
 
@@ -73,7 +75,19 @@ namespace DX11Base {
   }
 
   // --- [공용 헬퍼 함수 1: 수치 행 그리기] ---
+  static inline void SyncInlineReadBufFromWrite(uintptr_t pWrite) {
+    if (g_officerInlineReadPtr <= 0x10000 || g_officerInlineReadPtr == pWrite)
+      return;
+    if (pWrite != g_capturedOfficerBase)
+      return; // 스냅샷은 캡처된 무장 본문(0x3D0)에만 대응
+    if (!IsValidPtr(pWrite, 0x3D0))
+      return;
+    memcpy((void *)g_officerInlineReadPtr, (void *)pWrite, 0x3D0);
+  }
+
   void RenderStatRow(uintptr_t p1, const char *label, uintptr_t offset, int size, int *inputVal, float scale) {
+    const uintptr_t pR = (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) ? g_officerInlineReadPtr : p1;
+
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::AlignTextToFramePadding();
@@ -86,6 +100,7 @@ namespace DX11Base {
     if (ImGui::Button("-", ImVec2(25 * scale, 25 * scale))) {
       (*inputVal)--;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
+      SyncInlineReadBufFromWrite(p1);
     }
     ImGui::SameLine();
  
@@ -98,16 +113,17 @@ namespace DX11Base {
     bool justFinished = ImGui::IsItemDeactivatedAfterEdit();
     if (justFinished) {
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
+      SyncInlineReadBufFromWrite(p1);
     }
     
     // [중요] 사용자가 입력 중(포커스 상태)이거나, 막 입력이 끝난 프레임에는 메모리 값을 덮어씌우지 않음
-    if (!ImGui::IsItemActive() && !justFinished && p1 > 0x10000) {
+    if (!ImGui::IsItemActive() && !justFinished && pR > 0x10000) {
       if (size == 1)
-        *inputVal = (int)(*(unsigned char *)(p1 + offset));
+        *inputVal = (int)(*(unsigned char *)(pR + offset));
       else if (size == 2)
-        *inputVal = (int)(*(unsigned short *)(p1 + offset));
+        *inputVal = (int)(*(unsigned short *)(pR + offset));
       else
-        *inputVal = (int)(*(unsigned int *)(p1 + offset));
+        *inputVal = (int)(*(unsigned int *)(pR + offset));
     }
   
     ImGui::SameLine();
@@ -115,14 +131,16 @@ namespace DX11Base {
     if (ImGui::Button("+", ImVec2(25 * scale, 25 * scale))) {
       (*inputVal)++;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
+      SyncInlineReadBufFromWrite(p1);
     }
     ImGui::PopID();
   }
 
   // --- [공용 헬퍼 함수 2: 연구 트리용 콤팩트] ---
   void RenderCompactSkill(uintptr_t p1, const char *label, uintptr_t offset, int *val, float scale) {
-    if (p1 > 0x10000)
-      *val = (int)(*(unsigned char *)(p1 + offset));
+    const uintptr_t pR = (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) ? g_officerInlineReadPtr : p1;
+    if (pR > 0x10000)
+      *val = (int)(*(unsigned char *)(pR + offset));
 
     ImGui::PushID(label);
 
@@ -158,6 +176,7 @@ namespace DX11Base {
     if (ImGui::Button(btnLabel, ImVec2(25 * scale, 25 * scale))) {
       *val = (*val + 1) % 4; // 0, 1, 2, 3 순환
       DX11Base::ModifyStat(p1, offset, *val, 1);
+      SyncInlineReadBufFromWrite(p1);
     }
 
     if (hasCustomColor) {

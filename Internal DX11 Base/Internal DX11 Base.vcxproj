@@ -199,6 +199,7 @@
     <ClInclude Include="Cheats\Selfheal.h" />
     <ClInclude Include="Cheats\Dongto.h" />
     <ClInclude Include="Cheats\SelectOfficercapture.h" />
+    <ClInclude Include="Cheats\OfficerRosterResolve.h" />
     <ClInclude Include="showcal.h" />
     <ClInclude Include="showlog.h" />
     <ClInclude Include="Cheats\Terrainignore.h" />
@@ -264,6 +265,7 @@
     <ClCompile Include="Cheats\Selfheal.cpp" />
     <ClCompile Include="Cheats\Dongto.cpp" />
     <ClCompile Include="Cheats\SelectOfficercapture.cpp" />
+    <ClCompile Include="Cheats\OfficerRosterResolve.cpp" />
     <ClCompile Include="showcal.cpp" />
     <ClCompile Include="showlog.cpp" />
     <ClCompile Include="Source.cpp" />

@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.612"
+#define SAM8_CHEAT_VERSION "V0.7"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -49,6 +49,8 @@ namespace DX11Base {
   // bShowOfficerDetail은 OfficerDetail.cpp에 이미 정의되어 있으므로 extern으로만 선언
   extern bool bShowOfficerDetail;
   extern uintptr_t g_capturedOfficerBase;
+  // 선택 무장 상세 UI: 인라인 필드(0x3D0) 표시용 스냅샷 주소. 0이면 게임 메모리에서 직접 읽음.
+  extern uintptr_t g_officerInlineReadPtr;
 
   extern bool bBattleUnit;
   extern bool bBattleMapShuffle;

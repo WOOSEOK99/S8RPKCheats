@@ -11,5 +11,5 @@ namespace DX11Base {
 
   void DrawOfficerListWindow(uintptr_t p1, float scale);
   void DrawOfficerTalents(uintptr_t pBase, float scale);
-  void DrawOfficerHeader(uintptr_t pBase, float scale);
+  void DrawOfficerHeader(uintptr_t pGame, float scale, uintptr_t pViewSnap = 0);
 } // namespace DX11Base

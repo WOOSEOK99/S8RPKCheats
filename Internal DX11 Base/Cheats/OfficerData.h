@@ -47,6 +47,8 @@ namespace DX11Base {
     // Data loading functions
     void LoadOfficerNames();
     void LoadEffectDefinitions();
+    // S8RPK_cheat_char.json 에 id 항목 추가/이름 수정(UTF-8). 빈 문자열이면 맵에서 제거·JSON에는 name "" 로 기록.
+    bool SaveOfficerNameToJson(int id, const std::string& nameUtf8);
 
     // String mapping and normalization functions
     std::string AnsiToUtf8(const std::string& str);
