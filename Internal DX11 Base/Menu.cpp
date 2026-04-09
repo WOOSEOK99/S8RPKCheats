@@ -43,20 +43,22 @@ namespace DX11Base {
   }
 
   void Menu::Loops() {
+    uintptr_t gameBase = GetGameBase();
+    uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;
+
+    // 로딩 초기/주소 전환 구간에서는 직접 메모리 쓰기를 지연
+    const bool p1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
+    const bool gameBaseReady = (gameBase > 0x10000) && IsValidPtr(gameBase, 0x6000);
+
     // 무한 행동력
     if (bInfiniteAP) {
-      uintptr_t gameBase = GetGameBase();
-      if (gameBase) {
-        uintptr_t p1 = *(uintptr_t *)(gameBase + 0xE0);
-        if (p1)
-          *(unsigned char *)(p1 + 0xEE) = 200;
-      }
+      if (p1Ready && IsValidPtr(p1 + 0xEE, 1))
+        *(unsigned char *)(p1 + 0xEE) = 200;
     }
 
     // 보주 무한
     if (bFastJewel) {
-      uintptr_t gameBase = GetGameBase();
-      if (gameBase)
+      if (gameBaseReady && IsValidPtr(gameBase + 0x5C49, 1))
         *(unsigned char *)(gameBase + 0x5C49) = 0;
     }
 
@@ -127,8 +129,7 @@ namespace DX11Base {
       MonitorTechStatus();
     }
 
-    uintptr_t gameBase = GetGameBase();
-    uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;
+    // 주의: 아래 로직도 동일 프레임의 gameBase/p1을 재사용
 
     // --- [데모 플레이 대응] p1 자동 백업 및 복원 ---
     if (p1 > 0x10000 && p1 != g_savedHeroAddr) { 
