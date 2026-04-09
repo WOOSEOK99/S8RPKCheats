@@ -16,6 +16,7 @@
 
 
 // 치트 기능 헤더들
+#include "Cheats/BangmokCity.h"
 #include "Cheats/Battleunitcapture.h"
 #include "Cheats/Bigcityconvert.h"
 #include "Cheats/Catapult.h"
@@ -29,8 +30,10 @@
 #include "Cheats/Infinitetalk.h"
 #include "Cheats/InstantLoveCave.h"
 #include "Cheats/Loyaltycave.h"
+#include "Cheats/NonggyeongCity.h"
 #include "Cheats/Resonancecave.h"
 #include "Cheats/Roadblock.h"
+#include "Cheats/SangeopCity.h"
 #include "Cheats/Selfheal.h"
 #include "Cheats/SkillCondition.h"
 #include "Cheats/StartSetting.h"
@@ -61,6 +64,9 @@ namespace DX11Base {
 
   // 적용 상태 플래그들
   static bool s_appBigCity = false;
+  static bool s_appBangmokCity = false;
+  static bool s_appNonggyeongCity = false;
+  static bool s_appSangeopCity = false;
   static bool s_appAttitude = false;
   static bool s_appLoveNormal = false;
   static bool s_appLoveHate = false;
@@ -92,6 +98,9 @@ namespace DX11Base {
       {"bInfiniteAP", u8"행동력 무한", &bInfiniteAP, nullptr, nullptr, false},
       {"bFastJewel", u8"보주교체 무제한", &bFastJewel, nullptr, nullptr, false},
       {"bBigCity", u8"대도시 전환", &bBigCity, &s_appBigCity, SetBigCityConvert, false},
+      {"bBangmokCity", u8"방목도시 황폐화", &bBangmokCity, &s_appBangmokCity, SetBangmokCity, false},
+      {"bNonggyeongCity", u8"농경도시 버프", &bNonggyeongCity, &s_appNonggyeongCity, SetNonggyeongCity, false},
+      {"bSangeopCity", u8"상업도시 버프", &bSangeopCity, &s_appSangeopCity, SetSangeopCity, false},
       {"bAttitudeHack", u8"견문시 민심최대", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false},
       {"bLoveCave", u8"경애/의형제 조건 완화", &bLoveCave, &s_appLoveNormal, ApplyLoveNormal, false},
       {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false},

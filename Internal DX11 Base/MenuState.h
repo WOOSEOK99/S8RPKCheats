@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.7"
+#define SAM8_CHEAT_VERSION "V0.71"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -19,6 +19,9 @@ namespace DX11Base {
   extern bool bInfiniteAP;
   extern bool bFastJewel;
   extern bool bBigCity;
+  extern bool bBangmokCity;
+  extern bool bNonggyeongCity;
+  extern bool bSangeopCity;
   extern bool bAttitudeHack;
   extern bool bZeroInfamy;
   extern bool bSelectOfficerFirstInit;
@@ -90,7 +93,7 @@ namespace DX11Base {
 
   extern bool bToggleMenuCollapseRequest; // 틸트 키로 접기/펴기 요청
   extern bool bShowPasswordPopup;         // 디버그 비밀번호 창 표시 여부
-  extern bool bShowNotificationLog;      // 알림 기록 창 표시 여부
+  extern bool bShowNotificationLog;       // 알림 기록 창 표시 여부
 
   bool IsAnyUIOpen(); // 모든 UI 창 활성화 여부 확인 함수
 } // namespace DX11Base

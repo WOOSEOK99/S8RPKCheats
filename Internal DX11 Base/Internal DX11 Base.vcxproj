@@ -150,6 +150,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BattleMonitor.h" />
+    <ClInclude Include="Cheats\BangmokCity.h" />
     <ClInclude Include="Cheats\BattleMapShuffle.h" />
     <ClInclude Include="Cheats\Battleunitcapture.h" />
     <ClInclude Include="Cheats\Bigcityconvert.h" />
@@ -188,6 +189,8 @@
     <ClInclude Include="Cheats\Infinitetalk.h" />
     <ClInclude Include="Cheats\InstantLoveCave.h" />
     <ClInclude Include="Cheats\Loyaltycave.h" />
+    <ClInclude Include="Cheats\NonggyeongCity.h" />
+    <ClInclude Include="Cheats\SangeopCity.h" />
     <ClInclude Include="MemoryUtils.h" />
     <ClInclude Include="Menu.h" />
     <ClInclude Include="MenuState.h" />
@@ -217,6 +220,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BattleMonitor.cpp" />
+    <ClCompile Include="Cheats\BangmokCity.cpp" />
     <ClCompile Include="Cheats\BattleMapShuffle.cpp" />
     <ClCompile Include="Cheats\Battleunitcapture.cpp" />
     <ClCompile Include="Cheats\Bigcityconvert.cpp" />
@@ -249,6 +253,8 @@
     <ClCompile Include="Cheats\Infinitetalk.cpp" />
     <ClCompile Include="Cheats\InstantLoveCave.cpp" />
     <ClCompile Include="Cheats\Loyaltycave.cpp" />
+    <ClCompile Include="Cheats\NonggyeongCity.cpp" />
+    <ClCompile Include="Cheats\SangeopCity.cpp" />
     <ClCompile Include="MemoryUtils.cpp" />
     <ClCompile Include="Menu.cpp" />
     <ClCompile Include="MenuState.cpp" />

@@ -1,5 +1,6 @@
 #include "MenuSections.h"
 #include "Cheats.h"
+#include "Cheats/BangmokCity.h"
 #include "Cheats/BattleMapShuffle.h"
 #include "Cheats/Battleunitcapture.h"
 #include "Cheats/Bigcityconvert.h"
@@ -14,8 +15,10 @@
 #include "Cheats/Infinitetalk.h"
 #include "Cheats/InstantLoveCave.h"
 #include "Cheats/Loyaltycave.h"
+#include "Cheats/NonggyeongCity.h"
 #include "Cheats/Resonancecave.h"
 #include "Cheats/Roadblock.h"
+#include "Cheats/SangeopCity.h"
 #include "Cheats/Selfheal.h"
 #include "Cheats/SkillCondition.h"
 #include "Cheats/SpeedHack.h"
@@ -31,7 +34,6 @@
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
-
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -144,6 +146,7 @@ namespace DX11Base {
     void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       if (p1) {
         BeginSection();
+
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 자원 및 도시 활동 ]");
         DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
         DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
@@ -153,32 +156,7 @@ namespace DX11Base {
           SaveConfig();
         }
 
-        // --- 대도시 전환 추가 ---
-        bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
-        if (wasBigCityRunning)
-          ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"[도시] 기술도시로 전환", &bBigCity)) {
-          DX11Base::SetBigCityConvert(bBigCity);
-          NotifyFeatureToggle(u8"[도시] 기술도시로 전환", bBigCity);
-          SaveConfig();
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 낙양, 장안, 허창, 업, 양양, 건업, 성도");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"개발 : 9000");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"상업 : 12000");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"방어 : 9000");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"기술 : 4000");
-          ImGui::EndTooltip();
-        }
-
-        if (wasBigCityRunning) {
-          ImGui::SameLine();
-          ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), u8"처리 중...");
-          ImGui::EndDisabled();
-        }
-        // -----------------------
+        ImGui::SameLine(160.0f * scale);
 
         if (ImGui::Checkbox(u8"[도시] 견문 시 민심 최대", &bAttitudeHack)) {
           ::DX11Base::SetInstantAttitude(bAttitudeHack);
@@ -191,6 +169,87 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"도시에서 견문을 1회만 해도 민심 수치가 100이 됩니다.");
           ImGui::EndTooltip();
         }
+
+        ImGui::Separator();
+        // --- 대도시 전환 추가 ---
+        bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
+        if (wasBigCityRunning)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"[도시] 기술도시로 전환", &bBigCity)) {
+          DX11Base::SetBigCityConvert(bBigCity);
+          NotifyFeatureToggle(u8"[도시] 기술도시로 전환", bBigCity);
+          SaveConfig();
+        }
+        if (wasBigCityRunning)
+          ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 낙양, 장안, 허창, 업, 양양, 건업, 성도");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 기술도시로 변환 및 최대 수치 한도 보정");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(160.0f * scale);
+
+        bool wasBangmokRunning = DX11Base::g_bangmokThreadRunning.load();
+        if (wasBangmokRunning)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"[도시] 방목도시 황폐화", &bBangmokCity)) {
+          DX11Base::SetBangmokCity(bBangmokCity);
+          NotifyFeatureToggle(u8"[도시] 방목도시 황폐화", bBangmokCity);
+          SaveConfig();
+        }
+        if (wasBangmokRunning)
+          ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 오환, 강, 선비, 저, 남만 등 방목도시");
+          ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
+                             u8"내용 : 방목도시의 능력치를 저하시키고 최대 수치를 고정합니다.");
+          ImGui::EndTooltip();
+        }
+
+        bool wasNongRunning = DX11Base::g_nongCityThreadRunning.load();
+        if (wasNongRunning)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"[도시] 농경도시 버프", &bNonggyeongCity)) {
+          DX11Base::SetNonggyeongCity(bNonggyeongCity);
+          NotifyFeatureToggle(u8"[도시] 농경도시 버프", bNonggyeongCity);
+          SaveConfig();
+        }
+        if (wasNongRunning)
+          ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 남피, 평원, 북해, 제남, 하비, 소패, 계양 등");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 농경도시로 변환 및 농촌/상가 수치 한도 상향");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(160.0f * scale);
+
+        bool wasSagRunning = DX11Base::g_sagCityThreadRunning.load();
+        if (wasSagRunning)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"[도시] 상업도시 버프", &bSangeopCity)) {
+          DX11Base::SetSangeopCity(bSangeopCity);
+          NotifyFeatureToggle(u8"[도시] 상업도시 버프", bSangeopCity);
+          SaveConfig();
+        }
+        if (wasSagRunning)
+          ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 무희, 제남, 요동, 업, 성도, 건업 등 (기술도시 제외)");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
+          ImGui::EndTooltip();
+        }
+
+        // -----------------------
 
         EndSection();
 
@@ -225,17 +284,6 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"매 평정 마다 새로운 전기가 발생합니다.");
           ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
                              u8"이미 전기가 발생 중이었다면, 전기 발생이 끝난뒤부터 적용됩니다.");
-          ImGui::EndTooltip();
-        }
-
-        if (ImGui::Checkbox(u8"능력치 한계돌파", &bAutoStatUp99)) {
-          NotifyFeatureToggle(u8"능력치 한계돌파", bAutoStatUp99);
-          SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"평정 기간 진입 시, 모든 장수의 능력치 중 99인 항목을 100으로 올립니다.");
           ImGui::EndTooltip();
         }
 
@@ -308,6 +356,17 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
+        if (ImGui::Checkbox(u8"능력치 한계돌파", &bAutoStatUp99)) {
+          NotifyFeatureToggle(u8"능력치 한계돌파", bAutoStatUp99);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"평정 기간 진입 시, 모든 장수의 능력치 중 99인 항목을 100으로 올립니다.");
+          ImGui::EndTooltip();
+        }
+
         // 훅/캡처 상태를 로그로 출력 (상태 변경 시 1회만)
         {
           static uintptr_t s_lastHookAddr = 0;
@@ -345,31 +404,6 @@ namespace DX11Base {
       }
 
       EndSection(); // 보주 설정
-
-      BeginSection();
-      if (p1 != 0) {
-
-        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
-
-        float btnWidth = 80.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
-        float btnHeight = 26.0f * scale;
-        float spacing = 20.0f * scale; // 버튼 사이의 여백
-
-        if (ImGui::Button(u8"주인공", ImVec2(btnWidth, btnHeight))) {
-          bShowOfficerDetail = !bShowOfficerDetail;
-        }
-
-        ImGui::SameLine(0, spacing); // 이전 항목 끝에서 spacing만큼 띄움
-        if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
-          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
-        }
-        ImGui::SameLine(0, spacing);
-        if (ImGui::Button(u8"선택 무장", ImVec2(btnWidth, btnHeight))) {
-          bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
-        }
-      }
-
-      EndSection(); // 무장 정보
     }
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
@@ -398,15 +432,13 @@ namespace DX11Base {
           NotifyFeatureToggle(label, *var);
           SaveConfig();
         }
-        if (wasRunning && *var) {
-          ImGui::SameLine();
-          ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), u8"초기화 중...");
-        }
+
         if (wasRunning)
           ImGui::EndDisabled();
       };
 
       DrawLoveCheckbox(u8"[인연] 즉시 경애 맺기", &bLoveCave, LoveMode::Normal);
+      ImGui::SameLine(160.0f * scale);
       DrawLoveCheckbox(u8"[인연] 혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
 
       if (::DX11Base::g_resonanceThreadRunning)
@@ -425,14 +457,28 @@ namespace DX11Base {
       }
 
       if (::DX11Base::g_resonanceThreadRunning) {
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), u8"초기화 중...");
         ImGui::EndDisabled();
       }
+
+      ImGui::SameLine(160.0f * scale);
 
       if (ImGui::Checkbox(u8"[담화] 경애 시 무조건 공명", &bFastRelationship)) {
         DX11Base::SetFastRelationship(bFastRelationship);
         NotifyFeatureToggle(u8"[담화] 경애 시 무조건 공명", bFastRelationship);
+        SaveConfig();
+      }
+
+      if (ImGui::Checkbox(u8"[교류] 선물 기증 무제한", &bInfiniteGift)) {
+        DX11Base::SetInfiniteGift(bInfiniteGift);
+        NotifyFeatureToggle(u8"[교류] 선물 기증 무제한", bInfiniteGift);
+        SaveConfig();
+      }
+
+      ImGui::SameLine(160.0f * scale);
+
+      if (ImGui::Checkbox(u8"[교류] 담화 실행 무제한", &bInfiniteTalk)) {
+        DX11Base::SetInfiniteTalk(bInfiniteTalk);
+        NotifyFeatureToggle(u8"[교류] 담화 실행 무제한", bInfiniteTalk);
         SaveConfig();
       }
 
@@ -451,21 +497,7 @@ namespace DX11Base {
       }
 
       if (::DX11Base::g_loyaltyThreadRunning.load()) {
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), u8"초기화 중...");
         ImGui::EndDisabled();
-      }
-
-      if (ImGui::Checkbox(u8"[교류] 선물 기증 무제한", &bInfiniteGift)) {
-        DX11Base::SetInfiniteGift(bInfiniteGift);
-        NotifyFeatureToggle(u8"[교류] 선물 기증 무제한", bInfiniteGift);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"[교류] 담화 실행 무제한", &bInfiniteTalk)) {
-        DX11Base::SetInfiniteTalk(bInfiniteTalk);
-        NotifyFeatureToggle(u8"[교류] 담화 실행 무제한", bInfiniteTalk);
-        SaveConfig();
       }
 
       bool tempMarriage = ::DX11Base::marriageApplied;
@@ -511,6 +543,20 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::SameLine(160.0f * scale);
+
+      if (ImGui::Checkbox(u8"[전법 강화] 격류/낙석", &bTerrainIgnore)) {
+        DX11Base::SetTerrainIgnore(bTerrainIgnore);
+        NotifyFeatureToggle(u8"[전법 강화] 격류/낙석", bTerrainIgnore);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"발동 조건 : 비");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨별 데미지는 기존 데미지의 1/2");
+        ImGui::EndTooltip();
+      }
+
       if (ImGui::Checkbox(u8"[전법 강화] 동토", &bDongto)) {
         DX11Base::SetDongto(bDongto);
         NotifyFeatureToggle(u8"[전법 강화] 동토", bDongto);
@@ -526,17 +572,7 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"[전법 강화] 격류/낙석", &bTerrainIgnore)) {
-        DX11Base::SetTerrainIgnore(bTerrainIgnore);
-        NotifyFeatureToggle(u8"[전법 강화] 격류/낙석", bTerrainIgnore);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"발동 조건 : 비");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨별 데미지는 기존 데미지의 1/2");
-        ImGui::EndTooltip();
-      }
+      ImGui::SameLine(160.0f * scale);
 
       if (ImGui::Checkbox(u8"[전법 강화] 투석 병기", &bCatapult)) {
         DX11Base::SetCatapultCheat(bCatapult);
@@ -566,9 +602,9 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"[수비] 방어 건물 사거리 강화", &bDefBuilding)) {
+      if (ImGui::Checkbox(u8"방어 건물 사거리 강화", &bDefBuilding)) {
         DX11Base::SetDefBuildingBoost(bDefBuilding);
-        NotifyFeatureToggle(u8"[수비] 방어 건물 사거리 강화", bDefBuilding);
+        NotifyFeatureToggle(u8"방어 건물 사거리 강화", bDefBuilding);
         SaveConfig();
       }
 
@@ -580,9 +616,11 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"[수비] 방어 건물 공격력 강화", &bDefAtk)) {
+      ImGui::SameLine(160.0f * scale);
+
+      if (ImGui::Checkbox(u8"방어 건물 공격력 강화", &bDefAtk)) {
         DX11Base::SetDefAtkBoost(bDefAtk);
-        NotifyFeatureToggle(u8"[수비] 방어 건물 공격력 강화", bDefAtk);
+        NotifyFeatureToggle(u8"방어 건물 공격력 강화", bDefAtk);
         SaveConfig();
       }
 
@@ -633,6 +671,29 @@ namespace DX11Base {
       BeginSection();
       ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.0f, 1.0f), u8"[ 시나리오 ]");
 
+      if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
+        DX11Base::SetStartSetting(bStartSetting);
+        NotifyFeatureToggle(u8"시나리오 수정", bStartSetting);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"시나리오 설정");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), u8"체크시 새로운 시나리오 시작시 자동으로 적용이 됩니다.");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"※ 시나리오 변경(수정) 내용 ※");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"관우진군 : 관우-조홍 원수 버그 수정");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지장집결 : 제갈량의 기술력 (연노병, 투석기까지 개발)");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"범장집결 : 전예 재야 신분으로 주인공 선택 가능");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"삼의 삼국지 : 환씨 조앙군으로 이적");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"네 군주 마지막 전쟁 : 반동탁 연합 해산, 네군주 우호도 0");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(160.0f * scale);
+
       if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
         DX11Base::SetTechZero(bTechZero);
         NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);
@@ -651,6 +712,8 @@ namespace DX11Base {
         SaveConfig();
       }
 
+      ImGui::SameLine(160.0f * scale);
+
       if (ImGui::Checkbox(u8"교지 <-> 회계 도로 차단", &bRoadBlock2)) {
         DX11Base::SetRoadBlock2(bRoadBlock2);
         NotifyFeatureToggle(u8"교지 <-> 회계 도로 차단", bRoadBlock2);
@@ -662,30 +725,34 @@ namespace DX11Base {
         SaveConfig();
       }
 
-      if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
-        DX11Base::SetStartSetting(bStartSetting);
-        NotifyFeatureToggle(u8"시나리오 수정", bStartSetting);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),  u8"시나리오 설정");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),  u8"체크시 새로운 시나리오 시작시 자동으로 적용이 됩니다.");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f),  u8"※ 시나리오 변경(수정) 내용 ※");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"관우진군 : 관우-조홍 원수 버그 수정");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"지장집결 : 제갈량의 기술력 (연노병, 투석기까지 개발)");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"범장집결 : 전예 재야 신분으로 주인공 선택 가능");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"삼의 삼국지 : 환씨 조앙군으로 이적");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),  u8"네 군주 마지막 전쟁 : 반동탁 연합 해산, 네군주 우호도 0");
-        ImGui::EndTooltip();
-      }
-
       // (전기 관련 UI는 '평정 및 진급 관련' 섹션으로 이동됨)
       EndSection(); // 시나리오
 
+      BeginSection();
+      if (p1 != 0) {
+
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
+
+        float btnWidth = 80.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
+        float btnHeight = 26.0f * scale;
+        float spacing = 20.0f * scale; // 버튼 사이의 여백
+
+        if (ImGui::Button(u8"주인공", ImVec2(btnWidth, btnHeight))) {
+          bShowOfficerDetail = !bShowOfficerDetail;
+        }
+
+        ImGui::SameLine(0, spacing); // 이전 항목 끝에서 spacing만큼 띄움
+        if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
+          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+        }
+        ImGui::SameLine(0, spacing);
+        if (ImGui::Button(u8"선택 무장", ImVec2(btnWidth, btnHeight))) {
+          bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
+        }
+      }
+
+      EndSection(); // 무장 정보
+      
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
       if (ImGui::Checkbox(u8"전기취소##WIDGET", &DX11Base::bShowWidgetTengi)) {

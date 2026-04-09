@@ -185,7 +185,7 @@ namespace DX11Base {
       ImVec2 titleSize = ImGui::CalcTextSize(visibleTitle);
       ImGui::SetNextWindowSize(ImVec2(titleSize.x + 35.0f * scale, 0), ImGuiCond_Always);
     } else {
-      ImGui::SetNextWindowSize(ImVec2(700 * scale, 0), ImGuiCond_Always);
+      ImGui::SetNextWindowSize(ImVec2(720 * scale, 0), ImGuiCond_Always);
 
       // ImGui::SetNextWindowSizeConstraints(ImVec2(650 * scale, -1), ImVec2(650 * scale, -1));
     }
