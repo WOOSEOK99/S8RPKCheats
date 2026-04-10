@@ -531,6 +531,10 @@ namespace DX11Base {
       }
       ImGui::SameLine();
       ImGui::Checkbox(u8"클릭 차단", &bBlockClickInMemoryEditor);
+      ImGui::SameLine();
+      if (ImGui::Button(u8"메모장", ImVec2(90, 25))) {
+        bShowMemoryNotepadWin = !bShowMemoryNotepadWin;
+      }
 
       // --- 제어 버튼 (2행) ---
       ImGui::Spacing();

@@ -35,6 +35,7 @@
 #include "showcal.h"
 #include "showlog.h"
 #include "Cheats/DomesticsMult.h"
+#include "Cheats/SelectOfficercapture.h"
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -549,6 +550,18 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 대신 타 세력의 경우 등용은 안되네요.");
         ImGui::EndTooltip();
       }
+      
+      ImGui::Spacing();
+      if (ImGui::Button(u8"배우자 검색", ImVec2(120.0f * scale, 26.0f * scale))) {
+        DX11Base::bShowSpouseListWin = true;
+        DX11Base::StartSpouseScannerAsync();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"현재 주인공의 배우자 목록을 메모리에서 스캔하여 표시합니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 결과는 전용 창에 나타납니다. (몇 초 정도 소요 가능)");
+        ImGui::EndTooltip();
+      }
       EndSection(); // 결혼/인연
     }
 
@@ -806,10 +819,10 @@ namespace DX11Base {
 
       float btnWidth = 80.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
       float btnHeight = 26.0f * scale;
-      float spacing = 20.0f * scale; // 버튼 사이의 여백
+      float spacing = 10.0f * scale; // 버튼 사이의 여백
 
       if (p1 != 0) {
-        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 무장 정보 ]");
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 정보 ]");
         if (ImGui::Button(u8"주인공", ImVec2(btnWidth, btnHeight))) {
           bShowOfficerDetail = !bShowOfficerDetail;
         }
@@ -822,6 +835,14 @@ namespace DX11Base {
         if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
           bShowOfficerListWin = !bShowOfficerListWin;
         }
+        ImGui::SameLine(0, spacing);
+        if (ImGui::Button(u8"명품", ImVec2(btnWidth, btnHeight))) {
+          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
+        }
+        // ImGui::SameLine(0, spacing);
+        // if (ImGui::Button(u8"메모장", ImVec2(btnWidth, btnHeight))) {
+        //   bShowMemoryNotepadWin = !bShowMemoryNotepadWin;
+        // }
       }
 
       // if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {

@@ -29,6 +29,26 @@ namespace DX11Base {
   // (MenuState.h에 정의된 g_savedHeroAddr 사용)
   static bool s_autoRestoreP1 = false;    // p1 자동 복원 모드 On/Off
 
+  static void DrawMemoryNotepadWindow(float scale) {
+    if (!bShowMemoryNotepadWin) return;
+
+    static char s_noteBuf[32768] = {};
+    ImGui::SetNextWindowSize(ImVec2(720 * scale, 500 * scale), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(u8"메모장###MemoryNotepadWin", &bShowMemoryNotepadWin)) {
+      ImGui::TextDisabled(u8"Ctrl+C/Ctrl+V 가능 · 버튼으로 전체 복사/지우기");
+      if (ImGui::Button(u8"전체 복사", ImVec2(100 * scale, 0))) {
+        ImGui::SetClipboardText(s_noteBuf);
+      }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"지우기", ImVec2(80 * scale, 0))) {
+        s_noteBuf[0] = '\0';
+      }
+      ImGui::Separator();
+      ImGui::InputTextMultiline("##note", s_noteBuf, sizeof(s_noteBuf), ImVec2(-1, -1));
+    }
+    ImGui::End();
+  }
+
   // --- Menu 클래스 구현 ---
 
   void Menu::Render() {
@@ -573,6 +593,9 @@ namespace DX11Base {
     DrawOfficerDetailWindow(p1, mPos, mSize, scale);
     DrawSelectedOfficerWindow(mPos, mSize, scale);
     DrawOfficerListWindow(p1, scale);
+    DrawSpouseListWindow(scale);
+    DrawSpecialtyInfoWindow(scale);
+    DrawMemoryNotepadWindow(scale);
     DrawNotificationHistoryWindow(scale);
 
     // [전역] 숫자 입력기 관리 (어떤 창에서 요청했든 상관없이 렌더링되게 함)

@@ -65,6 +65,9 @@ namespace DX11Base {
   float g_speedMultiplier = 2.0f; // 2026-04-04 기본 2배속
   bool bShowSelectedOfficerWin = false;
   bool bShowOfficerListWin = false;
+  bool bShowSpouseListWin = false;
+  bool bShowSpecialtyInfoWin = false;
+  bool bShowMemoryNotepadWin = false;
   bool bOfficerCapture = false;
   uintptr_t g_capturedOfficerBase = 0;
   uintptr_t g_officerInlineReadPtr = 0;

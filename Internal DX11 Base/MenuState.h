@@ -77,6 +77,9 @@ namespace DX11Base {
 
   extern bool bShowSelectedOfficerWin;
   extern bool bShowOfficerListWin;
+  extern bool bShowSpouseListWin;
+  extern bool bShowSpecialtyInfoWin;
+  extern bool bShowMemoryNotepadWin;
   extern bool bOfficerCapture;
   extern uintptr_t g_capturedOfficerBase;
   extern bool bAllowGameClick;           // 게임 화면 클릭 허용 여부

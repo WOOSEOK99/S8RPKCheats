@@ -193,7 +193,7 @@ BOOL WINAPI hkGetCursorPos(LPPOINT lpPoint) {
     // 메뉴가 켜져 있고 "디버그 모드", "게임 화면 클릭 허용" 상태가 아닐 때 
     // (메인 메뉴 펼쳐짐, 또는 장수 리스트창 옵션 켜짐, 또는 메모리 에디터 활성화)
     // + 임구이가 마우스를 점유 중일 때만 게임 화면 밖으로 거짓말
-    bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) || (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor);
+    bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) || (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor) || DX11Base::bShowSpecialtyInfoWin;
     if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext() && 
         ImGui::GetIO().WantCaptureMouse &&
         !DX11Base::bShowDebug && !DX11Base::bAllowGameClick && bHardBlock) {

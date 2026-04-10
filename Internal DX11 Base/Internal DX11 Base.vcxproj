@@ -273,6 +273,7 @@
     <ClCompile Include="Cheats\Selfheal.cpp" />
     <ClCompile Include="Cheats\Dongto.cpp" />
     <ClCompile Include="Cheats\SelectOfficercapture.cpp" />
+    <ClCompile Include="Cheats\SpecialtyInfoWindow.cpp" />
     <ClCompile Include="Cheats\OfficerRosterResolve.cpp" />
     <ClCompile Include="showcal.cpp" />
     <ClCompile Include="showlog.cpp" />

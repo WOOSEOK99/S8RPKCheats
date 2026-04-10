@@ -343,6 +343,9 @@
     <ClCompile Include="Cheats\SelectOfficercapture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Cheats\SpecialtyInfoWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="MemoryUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
