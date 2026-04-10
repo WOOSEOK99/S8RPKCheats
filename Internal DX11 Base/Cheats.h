@@ -19,6 +19,9 @@ namespace DX11Base {
     bool InstallHeroHook();
     void MaximizeHeroStats();
     void SetFactionLordBonus(bool enable);
+    void SetDomesticsMult(bool enable);
+    void SetDomesticsMultiplier(float playerMult, float forceMult);
+    void ResetDomesticsPlayer();
 
     extern uintptr_t g_HeroAddr;
     extern bool g_isHeroHookInstalled;

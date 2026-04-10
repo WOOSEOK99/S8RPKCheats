@@ -56,6 +56,8 @@ namespace DX11Base {
   static int s_currentFilter = -1; // -1: 전부, 0x18: 일반, 0x28: 태수, 0x58: 재야, 0x68: 미발견, 0x88: 사망, 0x98: NCP
   static bool s_triggerReselection = false;            // [UX] 무장 상태 변경 시 자동으로 다음 무장 선택 여부
   static bool s_requestOfficerListRefresh = false;     // [최적화] 목록 캐시 재구축 요청 플래그
+  static bool s_forceFilterRebuild = false;            // [UX] 캐시 변동 후 필터 리스트 즉각적인 재구축 요청 플래그
+  static uintptr_t s_nextTargetFallback = 0;           // [UX] 일괄 변경 시 다음으로 선택할 무장 주소 보관
   static std::unordered_set<int> s_selectedOfficerIDs; // 다중 선택용 보관함
   static std::vector<CachedOfficer> s_allOfficerCache; // [최적화] 전체 무장 캐시 (새로고침 시 1회 구축)
   static std::vector<CachedOfficer> s_filteredIndices; // [최적화] 필터링 및 이름/ID 캐싱된 목록
@@ -91,6 +93,11 @@ namespace DX11Base {
 
   // 무장 마스터 배열(5102 슬롯, stride 0x3D0) 베이스: CE 포인터 체인 우선, 실패 시 기존 역산
   static void RefreshStableOfficerArrayBase(uintptr_t p1Fallback) {
+    // [최적화] 이미 유효한 베이스가 있으면 굳이 매 프레임 재탐색하지 않음
+    if (s_stableArrayBase > 0x10000 && IsValidPtr(s_stableArrayBase, 8)) {
+        return;
+    }
+
     uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
     uintptr_t chain = 0;
     if (exe && TryResolveOfficerRosterArrayBase(exe, &chain) && chain > 0x10000) {
@@ -138,6 +145,22 @@ namespace DX11Base {
       if (pViewSnap > 0x10000 && IsValidPtr(pGame, 0x3D0))
         memcpy((void *)pViewSnap, (void *)pGame, 0x3D0);
     };
+    auto SetupNextTargetFallback = [&]() {
+        s_nextTargetFallback = 0;
+        if (s_stableArrayBase > 0x10000 && g_capturedOfficerBase != 0) {
+            for (size_t i = 0; i < s_filteredIndices.size(); i++) {
+                uintptr_t base = s_stableArrayBase + (s_filteredIndices[i].originalIndex * 0x3D0);
+                if (base == g_capturedOfficerBase) {
+                    if (i + 1 < s_filteredIndices.size()) s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[i+1].originalIndex * 0x3D0);
+                    else if (i > 0) s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[i-1].originalIndex * 0x3D0);
+                    break;
+                }
+            }
+        }
+        s_forceFilterRebuild = true;
+        s_triggerReselection = true;
+    };
+
     uintptr_t forceAddr = *(uintptr_t *)(pR + 0x18);
     unsigned char vtableByte = *(unsigned char *)(pR + 0x10);
 
@@ -396,7 +419,7 @@ namespace DX11Base {
           unsigned short officerID = *(unsigned short *)(pR + 0x08);
           PatchStatus(pGame);
           PatchMasterData(officerID, PatchStatus);
-          s_triggerReselection = true;
+          SetupNextTargetFallback();
           if (!UpdateOfficerStatusInAllCache((int)officerID, 0x58)) {
             s_requestOfficerListRefresh = true;
           }
@@ -476,7 +499,7 @@ namespace DX11Base {
 
             PatchStatus(pGame);
             PatchMasterData(pBaseID, PatchStatus);
-            s_triggerReselection = true;
+            SetupNextTargetFallback();
             if (!UpdateOfficerStatusInAllCache((int)pBaseID, 0x58)) {
               s_requestOfficerListRefresh = true;
             }
@@ -547,7 +570,7 @@ namespace DX11Base {
           auto patchRonin = [&](uintptr_t base) { ModifyStat(base, 0x10, 0x58, 1); };
           patchRonin(pGame);
           PatchMasterData(pBaseID, patchRonin);
-          s_triggerReselection = true;
+          SetupNextTargetFallback();
           if (!UpdateOfficerStatusInAllCache((int)pBaseID, 0x58)) {
             s_requestOfficerListRefresh = true;
           }
@@ -727,6 +750,7 @@ namespace DX11Base {
         ImGui::End();
       return;
     }
+    // [최적화] 매 프레임 호출되지만 내부에서 유효성 체크 후 즉시 반환함
     RefreshStableOfficerArrayBase(0);
     if (!asChild) {
       ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1), u8"● 배열 기반 선택 편집 모드");
@@ -778,10 +802,19 @@ namespace DX11Base {
             }
             VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, old, &old);
           }
+          
+          // [최적화] 전체 스캔 대신 캐시에서 해당 무장들의 상태를 즉시 업데이트
+          for (auto& info : s_allOfficerCache) {
+              if (info.statusByte == 0x68 || info.statusByte == 0x78) {
+                  info.statusByte = 0x58;
+              }
+          }
         }
         if (count > 0)
           AddLog(u8"[LIFE] 현재 필터링된 %d명의 미발견 무장을 재야(0x58) 상태로 변경했습니다.", count);
-        s_requestOfficerListRefresh = true;
+        s_nextTargetFallback = 0; // 전부 재야 처리이므로 현재 필터에 남은 무장이 없음
+        s_forceFilterRebuild = true;
+        s_triggerReselection = true;
       }
       ImGui::SameLine(0, 8.0f * scale);
 
@@ -805,9 +838,42 @@ namespace DX11Base {
               }
               VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, old, &old);
             }
+            
+            // [최적화] 캐시에서 선택된 무장들의 상태 업데이트
+            for (auto& info : s_allOfficerCache) {
+                if (s_selectedOfficerIDs.count(info.officerID)) {
+                    info.statusByte = 0x58;
+                }
+            }
           }
+          
+          // [UX] 현재 선택된 무장의 위치를 바탕으로 삭제되지 않을 다음 무장을 찾아서 지정
+          s_nextTargetFallback = 0;
+          if (s_stableArrayBase > 0x10000 && g_capturedOfficerBase != 0) {
+              for (size_t i = 0; i < s_filteredIndices.size(); i++) {
+                  uintptr_t base = s_stableArrayBase + (s_filteredIndices[i].originalIndex * 0x3D0);
+                  if (base == g_capturedOfficerBase) {
+                      for (size_t j = i + 1; j < s_filteredIndices.size(); j++) {
+                          if (s_selectedOfficerIDs.count(s_filteredIndices[j].officerID) == 0) {
+                              s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[j].originalIndex * 0x3D0);
+                              break;
+                          }
+                      }
+                      if (s_nextTargetFallback == 0) {
+                          for (int j = (int)i - 1; j >= 0; j--) {
+                              if (s_selectedOfficerIDs.count(s_filteredIndices[j].officerID) == 0) {
+                                  s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[j].originalIndex * 0x3D0);
+                                  break;
+                              }
+                          }
+                      }
+                      break;
+                  }
+              }
+          }
+          
+          s_forceFilterRebuild = true;
           s_triggerReselection = true;
-          s_requestOfficerListRefresh = true;
           AddLog(u8"[LIFE] 선택한 %d명의 미발견 무장을 재야(0x58) 상태로 변경했습니다.", count);
           s_selectedOfficerIDs.clear();
         }
@@ -816,10 +882,16 @@ namespace DX11Base {
       ImGui::Spacing();
     }
 
-    // 선택 무장 본문(0x3D0): 게임 메모리를 매 프레임 훑지 않고 스냅샷으로 표시, 수정 시에만 게임에 쓰고 스냅샷 동기화
-    if (pBase != s_capOfficerSnapGame) {
-      memcpy(s_capOfficerSnap, (void *)pBase, 0x3D0);
-      s_capOfficerSnapGame = pBase;
+    // [최적화] 목록에서 클릭하여 무장이 변경되었을 때만 딱 한 번 스냅샷 읽기
+    static bool s_hasListSnapshot = false;
+    if (pBase != s_capOfficerSnapGame || !s_hasListSnapshot) {
+      if (pBase != 0 && IsValidPtr(pBase, 0x3D0)) {
+        memcpy(s_capOfficerSnap, (void *)pBase, 0x3D0);
+        s_capOfficerSnapGame = pBase;
+        s_hasListSnapshot = true;
+      } else {
+        s_hasListSnapshot = false;
+      }
     }
     const uintptr_t pSnap = (uintptr_t)s_capOfficerSnap;
     g_officerInlineReadPtr = pSnap;
@@ -956,16 +1028,26 @@ namespace DX11Base {
     // 리스트 창의 크기를 수동으로 조절 가능하게 하고, AlwaysAutoResize를 제거하여 레이아웃 부하를 없앱니다.
     if (ImGui::Begin(u8"모든 무장 편집 리스트###OfficerListWin", &bShowOfficerListWin, 
                      ImGuiWindowFlags_None)) {
-      uintptr_t preResolvedArrayBase = 0;
-      bool hasRosterArray = false;
-      {
-        uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
-        if (exe && TryResolveOfficerRosterArrayBase(exe, &preResolvedArrayBase) && preResolvedArrayBase > 0x10000) {
-          hasRosterArray = true;
-        }
-      }
+    // [최적화] 매 프레임 주소 체인을 탐색하던 로직을 캐싱 방식으로 변경
+    static uintptr_t s_cachedMasterArrayBase = 0;
+    static bool s_hasMasterArray = false;
+    static ULONGLONG s_lastBaseCheckMs = 0;
+    ULONGLONG nowMs = GetTickCount64();
 
-      if (!p1 && !hasRosterArray) {
+    if (s_cachedMasterArrayBase == 0 || (nowMs - s_lastBaseCheckMs) > 2000) {
+      s_lastBaseCheckMs = nowMs;
+      uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+      uintptr_t foundBase = 0;
+      if (exe && TryResolveOfficerRosterArrayBase(exe, &foundBase) && foundBase > 0x10000) {
+        s_cachedMasterArrayBase = foundBase;
+        s_hasMasterArray = true;
+      }
+    }
+
+    uintptr_t preResolvedArrayBase = s_cachedMasterArrayBase;
+    bool hasRosterArray = s_hasMasterArray;
+
+    if (!p1 && !hasRosterArray) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"무장 배열 데이터를 찾을 수 없습니다.");
         ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");
         ImGui::Spacing();
@@ -1081,18 +1163,20 @@ namespace DX11Base {
         }
       }
 
-      // 필터 버튼 오른쪽 정렬
+      // 필터 버튼 오른쪽 정렬 [최적화: CalcTextSize 캐싱]
       {
-        const char *filterLabels[] = {u8"군사", u8"일반",   u8"태수", u8"도독", u8"군주",
-                                      u8"재야", u8"미발견", u8"사망", u8"NPC",  u8"전부"};
-        float spacing = ImGui::GetStyle().ItemSpacing.x;
-        float fp = ImGui::GetStyle().FramePadding.x;
-        float totalW = 0.0f;
-        for (auto *lbl : filterLabels) {
-          totalW += ImGui::CalcTextSize(lbl).x + fp * 2.0f;
+        static float s_cachedTotalFilterWidth = 0.0f;
+        if (s_cachedTotalFilterWidth <= 0.0f) {
+            const char *filterLabels[] = {u8"군사", u8"일반",   u8"태수", u8"도독", u8"군주",
+                                          u8"재야", u8"미발견", u8"사망", u8"NPC",  u8"전부"};
+            float fp = ImGui::GetStyle().FramePadding.x;
+            for (auto *lbl : filterLabels) {
+              s_cachedTotalFilterWidth += ImGui::CalcTextSize(lbl).x + fp * 2.0f;
+            }
+            s_cachedTotalFilterWidth += ImGui::GetStyle().ItemSpacing.x * (IM_ARRAYSIZE(filterLabels) - 1);
         }
-        totalW += spacing * (IM_ARRAYSIZE(filterLabels) - 1);
-        float posX = ImGui::GetContentRegionMax().x - totalW;
+        
+        float posX = ImGui::GetContentRegionMax().x - s_cachedTotalFilterWidth;
         if (posX > ImGui::GetCursorPosX())
           ImGui::SameLine(posX);
         else
@@ -1137,13 +1221,11 @@ namespace DX11Base {
         s_lastFilterInputMs = nowMsUi;
       }
 
-      // 필터 리스트: 주기적 폴링 없음 — 필터/검색/트리거 또는 「목록 새로고침」일 때만 메모리 재스캔
+      // [최적화] 필터 리스트: 창을 열었을 때 또는 버튼 클릭 시에만 메모리 스캔. 필터 변경은 캐시에서만 처리.
       bool needsUpdate = false;
-      const bool filterChanged = (s_currentFilter != s_lastFilterForCache);
-      const bool filterDebounceReady = (s_lastFilterInputMs == 0) || ((nowMsUi - s_lastFilterInputMs) >= 80);
       const bool immediateReason = s_triggerReselection || s_forceOfficerListRefresh || s_cacheBuildInProgress;
-      const bool debouncedReason = filterChanged || s_pendingSearch || doSearch;
-      if (!s_deferInitialBuild && (immediateReason || (debouncedReason && filterDebounceReady))) {
+      // 검색어나 필터 변경은 메모리를 다시 읽지 않고 캐시된 데이터(s_allOfficerCache)를 필터링하는 용도로만 사용
+      if (!s_deferInitialBuild && immediateReason) {
         needsUpdate = true;
       }
 
@@ -1221,15 +1303,25 @@ namespace DX11Base {
           }
         }
 
-        // 필터 버튼 전환은 메모리 재스캔 없이 캐시에서 즉시 필터링
-        s_filteredIndices.clear();
-        s_filteredIndices.reserve(s_allOfficerCache.size());
-        for (const auto &info : s_allOfficerCache) {
-          if (s_currentFilter == -1 || info.statusByte == s_currentFilter ||
-              (s_currentFilter == 0x68 && info.statusByte == 0x78)) {
-            s_filteredIndices.push_back(info);
-          }
         }
+
+      // [최적화] 필터링 수행: 캐시가 변경되었거나 필터가 바뀌었을 때만 1회 수행
+      static int s_lastAppliedFilter = -2;
+      static size_t s_lastCacheSize = 0;
+      bool filterTrigger = (s_lastAppliedFilter != s_currentFilter) || (s_lastCacheSize != s_allOfficerCache.size()) || s_forceFilterRebuild;
+      
+      if (filterTrigger || s_forceOfficerListRefresh) {
+          s_forceFilterRebuild = false;
+          s_filteredIndices.clear();
+          s_filteredIndices.reserve(s_allOfficerCache.size());
+          for (const auto &info : s_allOfficerCache) {
+            if (s_currentFilter == -1 || info.statusByte == s_currentFilter ||
+                (s_currentFilter == 0x68 && info.statusByte == 0x78)) {
+              s_filteredIndices.push_back(info);
+            }
+          }
+          s_lastAppliedFilter = s_currentFilter;
+          s_lastCacheSize = s_allOfficerCache.size();
       }
 
       if (s_cacheBuildInProgress) {
@@ -1241,35 +1333,55 @@ namespace DX11Base {
         s_deferInitialBuild = false;
       }
 
-      // [추가] 필터 변경 시 자동으로 첫 번째 장수 선택 (목록이 비어있으면 해제)
+      // [최적화] 매 프레임 수천 번 돌던 '선택 유효성 확인' 루프를 필터링 시에만 수행하도록 변경
+      static bool s_selectedExistsInFiltered = false;
       static int s_lastFilterForSelection = -2;
-      bool selectedExistsInFiltered = false;
-      if (g_capturedOfficerBase != 0 && arrayBase != 0) {
-        for (const auto &info : s_filteredIndices) {
-          uintptr_t base = arrayBase + (info.originalIndex * 0x3D0);
-          if (base == g_capturedOfficerBase) {
-            selectedExistsInFiltered = true;
-            break;
+      if (filterTrigger || s_triggerReselection) {
+        s_selectedExistsInFiltered = false;
+        if (g_capturedOfficerBase != 0 && arrayBase != 0) {
+          for (const auto &info : s_filteredIndices) {
+            uintptr_t base = arrayBase + (info.originalIndex * 0x3D0);
+            if (base == g_capturedOfficerBase) {
+              s_selectedExistsInFiltered = true;
+              break;
+            }
           }
         }
       }
 
       bool needAutoReselect = (s_lastFilterForSelection != s_currentFilter) || s_triggerReselection;
-      // 상태 변경으로 현재 선택이 필터 목록에서 사라진 경우도 자동 재선택
-      if (!selectedExistsInFiltered) {
+      if (!s_selectedExistsInFiltered) {
         needAutoReselect = true;
       }
 
       if (needAutoReselect) {
-        if (!s_filteredIndices.empty()) {
-          uintptr_t firstBase = arrayBase + (s_filteredIndices[0].originalIndex * 0x3D0);
-          g_capturedOfficerBase = firstBase;
-          s_lastCapturedByUI = firstBase;
+        uintptr_t newBase = 0;
+        
+        if (s_nextTargetFallback != 0) {
+            for (const auto& info : s_filteredIndices) {
+                uintptr_t base = arrayBase + (info.originalIndex * 0x3D0);
+                if (base == s_nextTargetFallback) {
+                    newBase = base;
+                    break;
+                }
+            }
+        }
+        
+        if (newBase == 0 && !s_filteredIndices.empty()) {
+            newBase = arrayBase + (s_filteredIndices[0].originalIndex * 0x3D0);
+        }
+        
+        if (newBase != 0) {
+          g_capturedOfficerBase = newBase;
+          s_lastCapturedByUI = newBase;
+          s_selectedExistsInFiltered = true;
         } else {
           g_capturedOfficerBase = 0;
+          s_selectedExistsInFiltered = false;
         }
         s_lastFilterForSelection = s_currentFilter;
         s_triggerReselection = false;
+        s_nextTargetFallback = 0;
       }
 
       if (doSearch && s_searchBuf[0] != '\0') {
@@ -1438,26 +1550,9 @@ namespace DX11Base {
 
       ImGui::SameLine();
 
-      // 오른쪽 상세 패널은 매우 무거우므로, 리스트 창에서는 기본 비활성(경량 모드)로 동작
-      static bool s_showInlineDetailPane = false;
       ImGui::BeginChild("OfficerDetailPane", ImVec2(520 * scale, 0), true);
-      if (ImGui::Checkbox(u8"상세 패널 표시(성능 저하 가능)", &s_showInlineDetailPane)) {
-        if (!s_showInlineDetailPane) {
-          // 인라인 상세를 닫으면 별도 창에서 편집하도록 유도
-          bShowSelectedOfficerWin = false;
-        }
-      }
-      ImGui::Separator();
 
-      if (!s_showInlineDetailPane) {
-        ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f), u8"경량 모드: 리스트 성능 우선");
-        ImGui::TextDisabled(u8"좌측 목록 탐색/키보드 이동 반응을 우선합니다.");
-        ImGui::Spacing();
-        if (ImGui::Button(u8"선택 무장 상세 창 열기", ImVec2(220 * scale, 0))) {
-          bShowSelectedOfficerWin = true;
-          bForceCenterSelectedOfficer = true;
-        }
-      } else if (isSearchBoxActive) {
+      if (isSearchBoxActive) {
         ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), u8"검색 입력 중...");
         ImGui::Separator();
         ImGui::TextDisabled(u8"입력 반응 속도를 위해 상세 패널 갱신을 잠시 중지합니다.");
@@ -1469,6 +1564,9 @@ namespace DX11Base {
       ImGui::EndChild(); // 오른쪽 패널 종료
 
       DrawOfficerDumpPopup(scale);
+    } else {
+        // 창이 닫힐 때 플래그 초기화
+        s_wasOpen = false;
     }
     ImGui::End();
   }

@@ -15,6 +15,17 @@ namespace DX11Base {
   bool bShowOfficerDetail = false;
   extern bool bForceCenterOfficerDetail;
 
+  // --- [성능 최적화용 캐시 & 스냅샷] ---
+  static uintptr_t s_cachedExeBase = 0;
+  static uintptr_t s_cachedCityArrayBase = 0;
+  static std::string s_cachedTitleCity = "";
+  static uintptr_t s_lastProcessedP1 = 0;
+  static ULONGLONG s_lastCityUpdateMs = 0;
+  
+  static unsigned char s_officerSnapshot[0x3D0] = { 0 };
+  static uintptr_t s_lastCapturedAddress = 0;
+  static bool s_hasSnapshot = false;
+
   // --- [변수 선언부] ---
   static int v_Lead = 0, v_War = 0, v_Intel = 0, v_Pol = 0, v_Cha = 0;
   static int v_Rep = 0, v_RepM = 0, v_Notoriety = 0;
@@ -76,17 +87,20 @@ namespace DX11Base {
 
   // --- [공용 헬퍼 함수 1: 수치 행 그리기] ---
   static inline void SyncInlineReadBufFromWrite(uintptr_t pWrite) {
-    if (g_officerInlineReadPtr <= 0x10000 || g_officerInlineReadPtr == pWrite)
+    if (s_lastCapturedAddress == 0 || s_lastCapturedAddress != pWrite)
       return;
-    if (pWrite != g_capturedOfficerBase)
-      return; // 스냅샷은 캡처된 무장 본문(0x3D0)에만 대응
     if (!IsValidPtr(pWrite, 0x3D0))
       return;
-    memcpy((void *)g_officerInlineReadPtr, (void *)pWrite, 0x3D0);
+    memcpy(s_officerSnapshot, (void *)pWrite, 0x3D0);
   }
 
   void RenderStatRow(uintptr_t p1, const char *label, uintptr_t offset, int size, int *inputVal, float scale) {
-    const uintptr_t pR = (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) ? g_officerInlineReadPtr : p1;
+    // [수정] 목록 창의 전역 스냅샷(g_officerInlineReadPtr) 또는 로컬 창 스냅샷(s_officerSnapshot) 중 적절한 리드 버퍼 선택
+    uintptr_t pR = 0;
+    if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase)
+      pR = g_officerInlineReadPtr;
+    else if (s_hasSnapshot && p1 == s_lastCapturedAddress)
+      pR = (uintptr_t)s_officerSnapshot;
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
@@ -101,22 +115,27 @@ namespace DX11Base {
       (*inputVal)--;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
       SyncInlineReadBufFromWrite(p1);
+      // 만약 목록 창 전역 스냅샷을 사용 중이라면 해당 버퍼도 동기화
+      if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) {
+          memcpy((void *)g_officerInlineReadPtr, (void *)p1, 0x3D0);
+      }
     }
     ImGui::SameLine();
  
     // 2. 직접 입력 가능한 수치 박스 (InputInt)
     ImGui::SetNextItemWidth(70 * scale);
-    // EnterReturnsTrue를 제거하여 자판 입력 시 즉시 변수에 반영되도록 함 (숫자만 입력 가능하도록 플래그 추가)
     ImGui::InputInt("##val", inputVal, 0, 0, ImGuiInputTextFlags_CharsDecimal);
     
-    // 포커스를 잃거나 Enter를 쳤을 때(Deactivated) 수정한 내역이 있다면 저장
     bool justFinished = ImGui::IsItemDeactivatedAfterEdit();
     if (justFinished) {
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
-      SyncInlineReadBufFromWrite(p1);
+      SyncInlineReadBufFromWrite(p1); 
+      if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) {
+          memcpy((void *)g_officerInlineReadPtr, (void *)p1, 0x3D0);
+      }
     }
     
-    // [중요] 사용자가 입력 중(포커스 상태)이거나, 막 입력이 끝난 프레임에는 메모리 값을 덮어씌우지 않음
+    // [중요] 사용자가 입력 중이 아닐 때만 적절한 스냅샷 버퍼(pR)에서 값을 가져와 표시
     if (!ImGui::IsItemActive() && !justFinished && pR > 0x10000) {
       if (size == 1)
         *inputVal = (int)(*(unsigned char *)(pR + offset));
@@ -132,13 +151,21 @@ namespace DX11Base {
       (*inputVal)++;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
       SyncInlineReadBufFromWrite(p1);
+      if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) {
+          memcpy((void *)g_officerInlineReadPtr, (void *)p1, 0x3D0);
+      }
     }
     ImGui::PopID();
   }
 
   // --- [공용 헬퍼 함수 2: 연구 트리용 콤팩트] ---
   void RenderCompactSkill(uintptr_t p1, const char *label, uintptr_t offset, int *val, float scale) {
-    const uintptr_t pR = (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) ? g_officerInlineReadPtr : p1;
+    uintptr_t pR = 0;
+    if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase)
+      pR = g_officerInlineReadPtr;
+    else if (s_hasSnapshot && p1 == s_lastCapturedAddress)
+      pR = (uintptr_t)s_officerSnapshot;
+
     if (pR > 0x10000)
       *val = (int)(*(unsigned char *)(pR + offset));
 
@@ -509,45 +536,54 @@ namespace DX11Base {
     if (!bShowOfficerDetail)
       return;
 
-    // 데이터 로딩 보장
-    LoadOfficerNames();
-    LoadEffectDefinitions();
-
-    if (bForceCenterOfficerDetail) {
-      ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
-      ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-      bForceCenterOfficerDetail = false;
-    } else {
-      ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
-      ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    }
-    ImGui::SetNextWindowSize(ImVec2(580 * scale, 750 * scale), ImGuiCond_FirstUseEver);
-
-    // [신규] 주인공 도시 정보 실시간 확보
-    std::string titleCity = u8"";
-    {
-      uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-      uintptr_t cityArrayBase = 0;
-      if (exeBase) {
-        uintptr_t pp1 = *(uintptr_t *)(exeBase + 0x34C8630);
-        if (pp1 && IsValidPtr(pp1, 8)) {
-          uintptr_t pp2 = *(uintptr_t *)(pp1);
-          if (pp2 && IsValidPtr(pp2, 8)) cityArrayBase = *(uintptr_t *)(pp2);
+    // [최적화] 무장이 변경되었을 때만 딱 한 번 스냅샷 읽기
+    if (p1 != s_lastCapturedAddress || !s_hasSnapshot) {
+        if (p1 != 0 && IsValidPtr(p1, 0x3D0)) {
+            memcpy(s_officerSnapshot, (void *)p1, 0x3D0);
+            s_lastCapturedAddress = p1;
+            s_hasSnapshot = true;
+            // 전역 스냅샷 포인터도 업데이트 (고객 요청 대응용 하위 호환성)
+            g_officerInlineReadPtr = (uintptr_t)s_officerSnapshot;
+        } else {
+            s_hasSnapshot = false;
         }
-      }
-      if (cityArrayBase > 0x10000 && p1 > 0x10000) {
-        uintptr_t cityPtr = *(uintptr_t *)(p1 + 0x20);
-        if (cityPtr >= cityArrayBase) {
-          int idx = (int)((cityPtr - cityArrayBase) / 0x2A0);
-          if (idx >= 0 && idx < g_CityCount) {
-            titleCity = " - [" + std::string(g_CityList[idx].cityname) + "]";
+    }
+
+    ImGui::SetNextItemWidth(580 * scale);
+
+    // [최적화] 도시 정보 캐싱 및 검색 루프 제한
+    ULONGLONG now = GetTickCount64();
+    if (p1 != s_lastProcessedP1 || (now - s_lastCityUpdateMs) > 1000) {
+      s_lastProcessedP1 = p1;
+      s_lastCityUpdateMs = now;
+      s_cachedTitleCity = "";
+
+      if (s_cachedExeBase == 0) s_cachedExeBase = (uintptr_t)GetModuleHandle(NULL);
+      
+      if (s_cachedExeBase) {
+        // 도시 배열 베이스 주소가 바뀌는 경우는 거의 없으므로 1회만 캐싱
+        if (s_cachedCityArrayBase == 0) {
+          uintptr_t pp1 = *(uintptr_t *)(s_cachedExeBase + 0x34C8630);
+          if (pp1 && IsValidPtr(pp1, 8)) {
+            uintptr_t pp2 = *(uintptr_t *)(pp1);
+            if (pp2 && IsValidPtr(pp2, 8)) s_cachedCityArrayBase = *(uintptr_t *)(pp2);
+          }
+        }
+
+        if (s_cachedCityArrayBase > 0x10000 && p1 > 0x10000) {
+          uintptr_t cityPtr = *(uintptr_t *)(p1 + 0x20);
+          if (cityPtr >= s_cachedCityArrayBase) {
+            int idx = (int)((cityPtr - s_cachedCityArrayBase) / 0x2A0);
+            if (idx >= 0 && idx < g_CityCount) {
+              s_cachedTitleCity = " - [" + std::string(g_CityList[idx].cityname) + "]";
+            }
           }
         }
       }
     }
 
     char titleBuf[128];
-    sprintf_s(titleBuf, u8"주인공 무장 상세 편집%s###OffDetailWin", titleCity.c_str());
+    sprintf_s(titleBuf, u8"주인공 무장 상세 편집%s###OffDetailWin", s_cachedTitleCity.c_str());
 
     if (ImGui::Begin(titleBuf, &bShowOfficerDetail, Flags)) {
       if (p1 == 0) {

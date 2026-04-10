@@ -41,6 +41,7 @@
 #include "Cheats/Techpointcave.h"
 #include "Cheats/TengiCave.h"
 #include "Cheats/Terrainignore.h"
+#include "Cheats/DomesticsMult.h"
 
 
 namespace DX11Base {
@@ -91,6 +92,7 @@ namespace DX11Base {
   static bool s_appYumokCond = false;
   static bool s_appSangbyeongCond = false;
   static bool s_appFactionLordBonus = false;
+  static bool s_appDomestics = false;
   static uint64_t s_firstP1Time = 0; // p1 감지 시점 기록용
   static bool s_isReset = true;      // 리셋 완료 상태 기록
 
@@ -137,7 +139,8 @@ namespace DX11Base {
       {"bShowWidgetTengi", u8"위젯: 전기발생 취소", &bShowWidgetTengi, nullptr, nullptr, false},
       {"bShowWidgetNotif", u8"위젯: 알림확인", &bShowWidgetNotif, nullptr, nullptr, false},
       {"bShowWidgetHero", u8"위젯: 주인공", &bShowWidgetHero, nullptr, nullptr, false},
-      {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false}};
+      {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false},
+      {"bDomestics", u8"내정 배율", &bDomestics, &s_appDomestics, SetDomesticsMult, false}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];
@@ -156,7 +159,9 @@ namespace DX11Base {
       file << ",\n";
     }
     file << "  \"g_speedMultiplier\": " << g_speedMultiplier << ",\n";
-    file << "  \"g_notificationSpeed\": " << g_notificationSpeed << "\n";
+    file << "  \"g_notificationSpeed\": " << g_notificationSpeed << ",\n";
+    file << "  \"fDomesticsPlayer\": " << fDomesticsPlayer << ",\n";
+    file << "  \"fDomesticsForce\": " << fDomesticsForce << "\n";
     file << "}";
     file.close();
   }
@@ -183,6 +188,28 @@ namespace DX11Base {
         if (colonPos != std::string::npos) {
           try {
             g_notificationSpeed = std::stof(line.substr(colonPos + 1));
+          } catch (...) {
+          }
+        }
+        continue;
+      }
+      if (line.find("fDomesticsPlayer") != std::string::npos) {
+        size_t colonPos = line.find(":");
+        if (colonPos != std::string::npos) {
+          try {
+            fDomesticsPlayer = std::stof(line.substr(colonPos + 1));
+            SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
+          } catch (...) {
+          }
+        }
+        continue;
+      }
+      if (line.find("fDomesticsForce") != std::string::npos) {
+        size_t colonPos = line.find(":");
+        if (colonPos != std::string::npos) {
+          try {
+            fDomesticsForce = std::stof(line.substr(colonPos + 1));
+            SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
           } catch (...) {
           }
         }

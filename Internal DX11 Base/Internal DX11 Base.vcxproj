@@ -157,6 +157,7 @@
     <ClInclude Include="Cheats\Catapult.h" />
     <ClInclude Include="Cheats\Celestia.h" />
     <ClInclude Include="Cheats.h" />
+    <ClInclude Include="Cheats\DomesticsMult.h" />
     <ClInclude Include="Config.h" />
     <ClInclude Include="debug.h" />
     <ClInclude Include="Cheats\Defatkboost.h" />
@@ -229,6 +230,7 @@
     <ClCompile Include="Cheats\Catapult.cpp" />
     <ClCompile Include="Cheats\Celestia.cpp" />
     <ClCompile Include="Cheats.cpp" />
+    <ClCompile Include="Cheats\DomesticsMult.cpp" />
     <ClCompile Include="Config.cpp" />
     <ClCompile Include="debug.cpp" />
     <ClCompile Include="Cheats\Defatkboost.cpp" />

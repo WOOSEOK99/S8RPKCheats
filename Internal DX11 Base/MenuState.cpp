@@ -19,6 +19,9 @@ namespace DX11Base {
   bool bNonggyeongCity = false;
   bool bSangeopCity = false;
   bool bAttitudeHack = false;
+  bool bDomestics = false;
+  float fDomesticsPlayer = 2.0f;
+  float fDomesticsForce = 1.25f;
 
   // 2. 인연/관계 초기화
   bool bLoveCave = false;

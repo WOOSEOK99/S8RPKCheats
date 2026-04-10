@@ -34,6 +34,7 @@
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
+#include "Cheats/DomesticsMult.h"
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -248,8 +249,35 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
           ImGui::EndTooltip();
         }
-
         // -----------------------
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
+
+        if (ImGui::Checkbox(u8"내정 배율 적용", &bDomestics)) {
+          ::DX11Base::SetDomesticsMult(bDomestics);
+          NotifyFeatureToggle(u8"내정 배율 적용", bDomestics);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"내정(개발, 보수 등) 시 배율을 적용합니다.");
+          ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"현재 선택된 무장이 플레이어로 자동 등록됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        if (bDomestics) {
+          ImGui::Indent();
+          if (ImGui::SliderFloat(u8"플레이어 배율", &fDomesticsPlayer, 1.0f, 10.0f, "%.1fx")) {
+            ::DX11Base::SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
+            SaveConfig();
+          }
+          if (ImGui::SliderFloat(u8"세력 배율", &fDomesticsForce, 1.0f, 10.0f, "%.1fx")) {
+            ::DX11Base::SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
+            SaveConfig();
+          }
+          ImGui::Unindent();
+        }
 
         EndSection();
 

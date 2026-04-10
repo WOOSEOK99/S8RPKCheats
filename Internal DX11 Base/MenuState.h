@@ -25,6 +25,9 @@ namespace DX11Base {
   extern bool bAttitudeHack;
   extern bool bZeroInfamy;
   extern bool bSelectOfficerFirstInit;
+  extern bool bDomestics;          // 내정 배율
+  extern float fDomesticsPlayer;   // 플레이어 배율
+  extern float fDomesticsForce;    // 세력 배율
 
   // 2. 인연/관계
   extern bool bLoveCave;
