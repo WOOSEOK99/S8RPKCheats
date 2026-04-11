@@ -36,6 +36,7 @@
 #include "showlog.h"
 #include "Cheats/DomesticsMult.h"
 #include "Cheats/SelectOfficercapture.h"
+#include "Cheats/OfficerRosterResolve.h"
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -568,6 +569,19 @@ namespace DX11Base {
     void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.7f, 1.0f), u8"[ 전쟁 관련 ]");
+
+      if (ImGui::Checkbox(u8"모든 무장 성향 적극(전쟁 유발)", &bAllAggressive)) {
+        DX11Base::NotifyFeatureToggle(u8"모든 무장 성향 적극 자동 적용", bAllAggressive);
+        DX11Base::SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"체크 시, 게임 진입(주인공 포착) 순간 모든 유효 무장의 전략 성향이 '적극'으로 자동 적용됩니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 로드할 때 딱 한 번 적용되며 계속 유지해야 다음 플레이 시에도 반영됩니다.");
+        ImGui::EndTooltip();
+      }
+      ImGui::Separator();
+
 
       if (ImGui::Checkbox(u8"[전법 강화] 치료", &bSelfHeal)) {
         DX11Base::SetSelfHeal(bSelfHeal);

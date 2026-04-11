@@ -44,15 +44,15 @@ namespace DX11Base {
   // --- [목록 필터 및 전역 상태 공유용] ---
   // --- [목록 필터 및 전역 상태 공유용] ---
   struct CachedOfficer {
-    int originalIndex;    // 마스터 배열에서의 인덱스
-    int officerID;        // 무장 고유 ID
-    uint8_t statusByte;   // 상태 바이트 (0x10)
+    int originalIndex;       // 마스터 배열에서의 인덱스
+    int officerID;           // 무장 고유 ID
+    uint8_t statusByte;      // 상태 바이트 (0x10)
     std::string displayName; // 미리 가공된 이름 (NFC/UTF-8 완료)
   };
 
   static uintptr_t s_stableArrayBase = 0;
   static uintptr_t s_lastCapturedByUI = 0;
-  static int s_currentFilter = -1; // -1: 전부, 0x18: 일반, 0x28: 태수, 0x58: 재야, 0x68: 미발견, 0x88: 사망, 0x98: NCP
+  static int s_currentFilter = -1; // -1: 전부, 0x18 군사, 0x28 일반, 0x38 두령, 0x48 동지, 0x58 재야, 0x68 미발견(0x78 동류), 0x88 사망, 0x98 NPC, 0xD8 도독, 0xE8 태수, 0xC8 군주
   static bool s_triggerReselection = false;            // [UX] 무장 상태 변경 시 자동으로 다음 무장 선택 여부
   static bool s_requestOfficerListRefresh = false;     // [최적화] 목록 캐시 재구축 요청 플래그
   static bool s_forceFilterRebuild = false;            // [UX] 캐시 변동 후 필터 리스트 즉각적인 재구축 요청 플래그
@@ -82,11 +82,11 @@ namespace DX11Base {
   // --- [팝업 및 덤프용 상태] ---
   static bool g_showDumpPopup = false;
   static std::string g_dumpText = "";
-  static bool UnsafeRead8(uintptr_t addr, uint8_t* out);
-  static bool UnsafeRead16(uintptr_t addr, unsigned short* out);
-  static bool UnsafeRead32(uintptr_t addr, uint32_t* out);
-  static bool UnsafeReadPtr(uintptr_t addr, uintptr_t* out);
-  static bool UnsafeReadMem(uintptr_t addr, void* buf, size_t size);
+  static bool UnsafeRead8(uintptr_t addr, uint8_t *out);
+  static bool UnsafeRead16(uintptr_t addr, unsigned short *out);
+  static bool UnsafeRead32(uintptr_t addr, uint32_t *out);
+  static bool UnsafeReadPtr(uintptr_t addr, uintptr_t *out);
+  static bool UnsafeReadMem(uintptr_t addr, void *buf, size_t size);
 
   // NOTE:
   // SetOfficerCapture/InstallOfficerCave 코드는 성능/안정성 점검을 위해
@@ -99,7 +99,7 @@ namespace DX11Base {
   static void RefreshStableOfficerArrayBase(uintptr_t p1Fallback) {
     // [최적화] 이미 유효한 베이스가 있으면 굳이 매 프레임 재탐색하지 않음
     if (s_stableArrayBase > 0x10000 && IsValidPtr(s_stableArrayBase, 8)) {
-        return;
+      return;
     }
 
     uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
@@ -150,19 +150,21 @@ namespace DX11Base {
         memcpy((void *)pViewSnap, (void *)pGame, 0x3D0);
     };
     auto SetupNextTargetFallback = [&]() {
-        s_nextTargetFallback = 0;
-        if (s_stableArrayBase > 0x10000 && g_capturedOfficerBase != 0) {
-            for (size_t i = 0; i < s_filteredIndices.size(); i++) {
-                uintptr_t base = s_stableArrayBase + (s_filteredIndices[i].originalIndex * 0x3D0);
-                if (base == g_capturedOfficerBase) {
-                    if (i + 1 < s_filteredIndices.size()) s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[i+1].originalIndex * 0x3D0);
-                    else if (i > 0) s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[i-1].originalIndex * 0x3D0);
-                    break;
-                }
-            }
+      s_nextTargetFallback = 0;
+      if (s_stableArrayBase > 0x10000 && g_capturedOfficerBase != 0) {
+        for (size_t i = 0; i < s_filteredIndices.size(); i++) {
+          uintptr_t base = s_stableArrayBase + (s_filteredIndices[i].originalIndex * 0x3D0);
+          if (base == g_capturedOfficerBase) {
+            if (i + 1 < s_filteredIndices.size())
+              s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[i + 1].originalIndex * 0x3D0);
+            else if (i > 0)
+              s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[i - 1].originalIndex * 0x3D0);
+            break;
+          }
         }
-        s_forceFilterRebuild = true;
-        s_triggerReselection = true;
+      }
+      s_forceFilterRebuild = true;
+      s_triggerReselection = true;
     };
 
     uintptr_t forceAddr = *(uintptr_t *)(pR + 0x18);
@@ -170,7 +172,7 @@ namespace DX11Base {
 
     if (ImGui::BeginTable("DetailInfoTable", 2, ImGuiTableFlags_BordersInnerH)) {
       ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
-      ImGui::TableSetupColumn(u8"내용", ImGuiTableColumnFlags_WidthFixed, 350.0f * scale);
+      ImGui::TableSetupColumn(u8"내용", ImGuiTableColumnFlags_WidthFixed, 500.0f * scale);
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -227,7 +229,7 @@ namespace DX11Base {
       ImGui::TableSetColumnIndex(1);
       ImGui::AlignTextToFramePadding();
       if (s_officerNameEditId == (int)currentID) {
-        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::SetNextItemWidth(120.0f * scale);
         ImGui::PushID("OffNameHdr");
         if (s_focusDetailNameInput) {
           ImGui::SetKeyboardFocusHere();
@@ -250,7 +252,7 @@ namespace DX11Base {
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.15f, 0.45f, 0.5f, 0.35f));
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.2f, 0.5f, 0.55f, 0.45f));
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 1.0f, 1.0f));
-        if (ImGui::Selectable(nameValue.c_str(), false, ImGuiSelectableFlags_None)) {
+        if (ImGui::Selectable(nameValue.c_str(), false, ImGuiSelectableFlags_None, ImVec2(80.0f * scale, 0))) {
           s_officerNameEditId = (int)currentID;
           strncpy_s(s_officerNameEditBuf, sizeof(s_officerNameEditBuf), nameValue.c_str(), _TRUNCATE);
           s_focusDetailNameInput = true;
@@ -259,6 +261,79 @@ namespace DX11Base {
           ImGui::SetTooltip(u8"클릭하여 이름 편집 · Enter 또는 다른 곳 클릭으로 JSON 저장");
         ImGui::PopStyleColor(4);
       }
+
+      {
+        ImGui::SameLine();
+
+        // ImGui::TableNextRow();
+        // ImGui::TableSetColumnIndex(0);
+        // ImGui::AlignTextToFramePadding();
+        // ImGui::TextUnformatted(u8"성별");
+        // ImGui::TableSetColumnIndex(1);
+        // ImGui::AlignTextToFramePadding();
+
+        if (v_Gender == 1) {
+          ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), u8"여성");
+        } else if (v_Gender == 0) {
+          ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"남성");
+        } else {
+          ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), u8"알 수 없음 (%d)", v_Gender);
+        }
+      }
+
+      auto resolveOfficerPtrToName = [](uintptr_t ptr) -> std::string {
+        if (ptr <= 0x10000)
+          return u8"없음";
+        ptr = ptr & 0x0000FFFFFFFFFFFFULL;
+        if (ptr <= 0x10000)
+          return u8"없음";
+        unsigned short id = 0;
+        if (UnsafeRead16(ptr + 0x08, &id) && id >= 1 && id <= 5102) {
+          if (g_officerNames.count(id))
+            return g_officerNames[id];
+          return u8"알수없음";
+        }
+        return u8"없음";
+      };
+
+      uintptr_t famPtr = *(uintptr_t *)(pR + 0x40);
+      uintptr_t dadPtr = *(uintptr_t *)(pR + 0x48);
+      uintptr_t momPtr = *(uintptr_t *)(pR + 0x50);
+      ImGui::SameLine();
+      ImGui::TextDisabled(u8" [ 가문: %s | 부: %s | 모: %s ]", resolveOfficerPtrToName(famPtr).c_str(),
+                          resolveOfficerPtrToName(dadPtr).c_str(), resolveOfficerPtrToName(momPtr).c_str());
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(u8"성향/성격");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      uint8_t stratTend = *(uint8_t *)(pR + 0x60);
+      uint8_t personality = *(uint8_t *)(pR + 0x64);
+      const char *stratStr = u8"?";
+      if (stratTend == 1)
+        stratStr = u8"소극";
+      else if (stratTend == 2)
+        stratStr = u8"보통";
+      else if (stratTend == 3)
+        stratStr = u8"호전";
+      else if (stratTend == 4)
+        stratStr = u8"적극";
+      else if (stratTend == 5)
+        stratStr = u8"사욕";
+      const char *perStr = u8"?";
+      if (personality == 1)
+        perStr = u8"대담";
+      else if (personality == 2)
+        perStr = u8"저돌";
+      else if (personality == 3)
+        perStr = u8"온화";
+      else if (personality == 4)
+        perStr = u8"침착";
+      else if (personality == 5)
+        perStr = u8"나약";
+      ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.6f, 1.0f), u8"전략: %s   성격: %s", stratStr, perStr);
 
       // [최적화] 거주 도시는 선택 변경 시에만 계산하고 캐시를 재사용
       {
@@ -325,6 +400,14 @@ namespace DX11Base {
       case 0x28:
         stateStr = u8"일반";
         stateColor = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+        break;
+      case 0x38:
+        stateStr = u8"두령";
+        stateColor = ImVec4(0.35f, 0.75f, 1.0f, 1.0f);
+        break;
+      case 0x48:
+        stateStr = u8"동지";
+        stateColor = ImVec4(0.45f, 0.85f, 0.55f, 1.0f);
         break;
       case 0x58:
         stateStr = u8"재야";
@@ -604,22 +687,6 @@ namespace DX11Base {
       RenderStatRow(pGame, u8"얼굴 번호", 0x2E, 2, &v_OfficerID, scale);
       RenderStatRow(pGame, u8"모델 번호", 0xA5, 1, &v_ModelNo, scale);
       RenderStatRow(pGame, u8"모델 색상", 0xA6, 1, &v_ModelColor, scale);
-      {
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(u8"성별");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::AlignTextToFramePadding();
-        
-        if (v_Gender == 1) {
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), u8"여성");
-        } else if (v_Gender == 0) {
-            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"남성");
-        } else {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), u8"알 수 없음 (%d)", v_Gender);
-        }
-      }
       RenderStatRow(pGame, u8"등장년도", 0x32, 2, &v_Appear, scale);
       RenderStatRow(pGame, u8"생년", 0x34, 2, &v_Birth, scale);
       RenderStatRow(pGame, u8"몰년(수명)", 0x36, 2, &v_Death, scale);
@@ -811,7 +878,7 @@ namespace DX11Base {
           DWORD old;
           // 5102명 전체 영역(약 2MB)을 한 번만 권한 변경하여 수천 번의 시스템 호출 방지
           if (VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, PAGE_READWRITE, &old)) {
-            for (const auto& info : s_filteredIndices) {
+            for (const auto &info : s_filteredIndices) {
               uintptr_t targetBase = s_stableArrayBase + (info.originalIndex * 0x3D0);
               unsigned short currentID = *(unsigned short *)(targetBase + 0x08);
               unsigned char vByte = *(unsigned char *)(targetBase + 0x10);
@@ -822,12 +889,12 @@ namespace DX11Base {
             }
             VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, old, &old);
           }
-          
+
           // [최적화] 전체 스캔 대신 캐시에서 해당 무장들의 상태를 즉시 업데이트
-          for (auto& info : s_allOfficerCache) {
-              if (info.statusByte == 0x68 || info.statusByte == 0x78) {
-                  info.statusByte = 0x58;
-              }
+          for (auto &info : s_allOfficerCache) {
+            if (info.statusByte == 0x68 || info.statusByte == 0x78) {
+              info.statusByte = 0x58;
+            }
           }
         }
         if (count > 0)
@@ -858,40 +925,40 @@ namespace DX11Base {
               }
               VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, old, &old);
             }
-            
+
             // [최적화] 캐시에서 선택된 무장들의 상태 업데이트
-            for (auto& info : s_allOfficerCache) {
-                if (s_selectedOfficerIDs.count(info.officerID)) {
-                    info.statusByte = 0x58;
-                }
+            for (auto &info : s_allOfficerCache) {
+              if (s_selectedOfficerIDs.count(info.officerID)) {
+                info.statusByte = 0x58;
+              }
             }
           }
-          
+
           // [UX] 현재 선택된 무장의 위치를 바탕으로 삭제되지 않을 다음 무장을 찾아서 지정
           s_nextTargetFallback = 0;
           if (s_stableArrayBase > 0x10000 && g_capturedOfficerBase != 0) {
-              for (size_t i = 0; i < s_filteredIndices.size(); i++) {
-                  uintptr_t base = s_stableArrayBase + (s_filteredIndices[i].originalIndex * 0x3D0);
-                  if (base == g_capturedOfficerBase) {
-                      for (size_t j = i + 1; j < s_filteredIndices.size(); j++) {
-                          if (s_selectedOfficerIDs.count(s_filteredIndices[j].officerID) == 0) {
-                              s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[j].originalIndex * 0x3D0);
-                              break;
-                          }
-                      }
-                      if (s_nextTargetFallback == 0) {
-                          for (int j = (int)i - 1; j >= 0; j--) {
-                              if (s_selectedOfficerIDs.count(s_filteredIndices[j].officerID) == 0) {
-                                  s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[j].originalIndex * 0x3D0);
-                                  break;
-                              }
-                          }
-                      }
-                      break;
+            for (size_t i = 0; i < s_filteredIndices.size(); i++) {
+              uintptr_t base = s_stableArrayBase + (s_filteredIndices[i].originalIndex * 0x3D0);
+              if (base == g_capturedOfficerBase) {
+                for (size_t j = i + 1; j < s_filteredIndices.size(); j++) {
+                  if (s_selectedOfficerIDs.count(s_filteredIndices[j].officerID) == 0) {
+                    s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[j].originalIndex * 0x3D0);
+                    break;
                   }
+                }
+                if (s_nextTargetFallback == 0) {
+                  for (int j = (int)i - 1; j >= 0; j--) {
+                    if (s_selectedOfficerIDs.count(s_filteredIndices[j].officerID) == 0) {
+                      s_nextTargetFallback = s_stableArrayBase + (s_filteredIndices[j].originalIndex * 0x3D0);
+                      break;
+                    }
+                  }
+                }
+                break;
               }
+            }
           }
-          
+
           s_forceFilterRebuild = true;
           s_triggerReselection = true;
           AddLog(u8"[LIFE] 선택한 %d명의 미발견 무장을 재야(0x58) 상태로 변경했습니다.", count);
@@ -1046,28 +1113,27 @@ namespace DX11Base {
     ImGui::SetNextWindowSizeConstraints(ImVec2(820 * scale, 700 * scale), ImVec2(1400 * scale, 1000 * scale));
 
     // 리스트 창의 크기를 수동으로 조절 가능하게 하고, AlwaysAutoResize를 제거하여 레이아웃 부하를 없앱니다.
-    if (ImGui::Begin(u8"모든 무장 편집 리스트###OfficerListWin", &bShowOfficerListWin, 
-                     ImGuiWindowFlags_None)) {
-    // [최적화] 매 프레임 주소 체인을 탐색하던 로직을 캐싱 방식으로 변경
-    static uintptr_t s_cachedMasterArrayBase = 0;
-    static bool s_hasMasterArray = false;
-    static ULONGLONG s_lastBaseCheckMs = 0;
-    ULONGLONG nowMs = GetTickCount64();
+    if (ImGui::Begin(u8"모든 무장 편집 리스트###OfficerListWin", &bShowOfficerListWin, ImGuiWindowFlags_None)) {
+      // [최적화] 매 프레임 주소 체인을 탐색하던 로직을 캐싱 방식으로 변경
+      static uintptr_t s_cachedMasterArrayBase = 0;
+      static bool s_hasMasterArray = false;
+      static ULONGLONG s_lastBaseCheckMs = 0;
+      ULONGLONG nowMs = GetTickCount64();
 
-    if (s_cachedMasterArrayBase == 0 || (nowMs - s_lastBaseCheckMs) > 2000) {
-      s_lastBaseCheckMs = nowMs;
-      uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
-      uintptr_t foundBase = 0;
-      if (exe && TryResolveOfficerRosterArrayBase(exe, &foundBase) && foundBase > 0x10000) {
-        s_cachedMasterArrayBase = foundBase;
-        s_hasMasterArray = true;
+      if (s_cachedMasterArrayBase == 0 || (nowMs - s_lastBaseCheckMs) > 2000) {
+        s_lastBaseCheckMs = nowMs;
+        uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+        uintptr_t foundBase = 0;
+        if (exe && TryResolveOfficerRosterArrayBase(exe, &foundBase) && foundBase > 0x10000) {
+          s_cachedMasterArrayBase = foundBase;
+          s_hasMasterArray = true;
+        }
       }
-    }
 
-    uintptr_t preResolvedArrayBase = s_cachedMasterArrayBase;
-    bool hasRosterArray = s_hasMasterArray;
+      uintptr_t preResolvedArrayBase = s_cachedMasterArrayBase;
+      bool hasRosterArray = s_hasMasterArray;
 
-    if (!p1 && !hasRosterArray) {
+      if (!p1 && !hasRosterArray) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"무장 배열 데이터를 찾을 수 없습니다.");
         ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");
         ImGui::Spacing();
@@ -1143,11 +1209,11 @@ namespace DX11Base {
       if (ImGui::Button(u8"찾기")) {
         doSearch = true;
       }
-      ImGui::SameLine();
-      if (ImGui::Button(u8"목록 새로고침")) {
-        s_forceOfficerListRefresh = true;
-        s_capOfficerSnapGame = 0;
-      }
+      // ImGui::SameLine();
+      // if (ImGui::Button(u8"목록 새로고침")) {
+      //   s_forceOfficerListRefresh = true;
+      //   s_capOfficerSnapGame = 0;
+      // }
 
       // [토글] 전체 선택 / 선택 해제 버튼
       ImGui::SameLine();
@@ -1160,7 +1226,7 @@ namespace DX11Base {
       } else {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.45f, 0.2f, 1.0f));
         if (ImGui::Button(u8"전체 선택")) {
-          for (const auto& info : s_filteredIndices) {
+          for (const auto &info : s_filteredIndices) {
             s_selectedOfficerIDs.insert(info.officerID);
           }
         }
@@ -1187,15 +1253,15 @@ namespace DX11Base {
       {
         static float s_cachedTotalFilterWidth = 0.0f;
         if (s_cachedTotalFilterWidth <= 0.0f) {
-            const char *filterLabels[] = {u8"군사", u8"일반",   u8"태수", u8"도독", u8"군주",
-                                          u8"재야", u8"미발견", u8"사망", u8"NPC",  u8"전부"};
-            float fp = ImGui::GetStyle().FramePadding.x;
-            for (auto *lbl : filterLabels) {
-              s_cachedTotalFilterWidth += ImGui::CalcTextSize(lbl).x + fp * 2.0f;
-            }
-            s_cachedTotalFilterWidth += ImGui::GetStyle().ItemSpacing.x * (IM_ARRAYSIZE(filterLabels) - 1);
+          const char *filterLabels[] = {u8"군사", u8"일반",   u8"두령", u8"동지", u8"태수", u8"도독", u8"군주",
+                                        u8"재야", u8"미발견", u8"사망", u8"NPC",  u8"전부"};
+          float fp = ImGui::GetStyle().FramePadding.x;
+          for (auto *lbl : filterLabels) {
+            s_cachedTotalFilterWidth += ImGui::CalcTextSize(lbl).x + fp * 2.0f;
+          }
+          s_cachedTotalFilterWidth += ImGui::GetStyle().ItemSpacing.x * (IM_ARRAYSIZE(filterLabels) - 1);
         }
-        
+
         float posX = ImGui::GetContentRegionMax().x - s_cachedTotalFilterWidth;
         if (posX > ImGui::GetCursorPosX())
           ImGui::SameLine(posX);
@@ -1219,6 +1285,10 @@ namespace DX11Base {
       DrawFilterButton(u8"군사", 0x18);
       ImGui::SameLine();
       DrawFilterButton(u8"일반", 0x28);
+      ImGui::SameLine();
+      DrawFilterButton(u8"두령", 0x38);
+      ImGui::SameLine();
+      DrawFilterButton(u8"동지", 0x48);
       ImGui::SameLine();
       DrawFilterButton(u8"태수", 0xE8);
       ImGui::SameLine();
@@ -1316,37 +1386,34 @@ namespace DX11Base {
           if (s_cacheBuildCursor >= 5102) {
             // 구축 완료 시 1회만 정렬
             std::sort(s_allOfficerCache.begin(), s_allOfficerCache.end(),
-                      [](const CachedOfficer &a, const CachedOfficer &b) {
-                        return a.officerID < b.officerID;
-                      });
+                      [](const CachedOfficer &a, const CachedOfficer &b) { return a.officerID < b.officerID; });
             s_cacheBuildInProgress = false;
           }
         }
-
-        }
+      }
 
       // [최적화] 필터링 수행: 캐시가 변경되었거나 필터가 바뀌었을 때만 1회 수행
       static int s_lastAppliedFilter = -2;
       static size_t s_lastCacheSize = 0;
-      bool filterTrigger = (s_lastAppliedFilter != s_currentFilter) || (s_lastCacheSize != s_allOfficerCache.size()) || s_forceFilterRebuild;
-      
+      bool filterTrigger = (s_lastAppliedFilter != s_currentFilter) || (s_lastCacheSize != s_allOfficerCache.size()) ||
+                           s_forceFilterRebuild;
+
       if (filterTrigger || s_forceOfficerListRefresh) {
-          s_forceFilterRebuild = false;
-          s_filteredIndices.clear();
-          s_filteredIndices.reserve(s_allOfficerCache.size());
-          for (const auto &info : s_allOfficerCache) {
-            if (s_currentFilter == -1 || info.statusByte == s_currentFilter ||
-                (s_currentFilter == 0x68 && info.statusByte == 0x78)) {
-              s_filteredIndices.push_back(info);
-            }
+        s_forceFilterRebuild = false;
+        s_filteredIndices.clear();
+        s_filteredIndices.reserve(s_allOfficerCache.size());
+        for (const auto &info : s_allOfficerCache) {
+          if (s_currentFilter == -1 || info.statusByte == s_currentFilter ||
+              (s_currentFilter == 0x68 && info.statusByte == 0x78)) {
+            s_filteredIndices.push_back(info);
           }
-          s_lastAppliedFilter = s_currentFilter;
-          s_lastCacheSize = s_allOfficerCache.size();
+        }
+        s_lastAppliedFilter = s_currentFilter;
+        s_lastCacheSize = s_allOfficerCache.size();
       }
 
       if (s_cacheBuildInProgress) {
-        ImGui::TextColored(ImVec4(0.8f, 0.9f, 0.3f, 1.0f), u8"목록 로딩 중... (%d/5102)",
-                           s_cacheBuildCursor);
+        ImGui::TextColored(ImVec4(0.8f, 0.9f, 0.3f, 1.0f), u8"목록 로딩 중... (%d/5102)", s_cacheBuildCursor);
       } else if (s_deferInitialBuild) {
         ImGui::TextColored(ImVec4(0.8f, 0.9f, 0.3f, 1.0f), u8"목록 로딩 준비 중...");
         // 다음 프레임부터 실제 캐시 구축/분할 로딩 시작
@@ -1376,21 +1443,21 @@ namespace DX11Base {
 
       if (needAutoReselect) {
         uintptr_t newBase = 0;
-        
+
         if (s_nextTargetFallback != 0) {
-            for (const auto& info : s_filteredIndices) {
-                uintptr_t base = arrayBase + (info.originalIndex * 0x3D0);
-                if (base == s_nextTargetFallback) {
-                    newBase = base;
-                    break;
-                }
+          for (const auto &info : s_filteredIndices) {
+            uintptr_t base = arrayBase + (info.originalIndex * 0x3D0);
+            if (base == s_nextTargetFallback) {
+              newBase = base;
+              break;
             }
+          }
         }
-        
+
         if (newBase == 0 && !s_filteredIndices.empty()) {
-            newBase = arrayBase + (s_filteredIndices[0].originalIndex * 0x3D0);
+          newBase = arrayBase + (s_filteredIndices[0].originalIndex * 0x3D0);
         }
-        
+
         if (newBase != 0) {
           g_capturedOfficerBase = newBase;
           s_lastCapturedByUI = newBase;
@@ -1482,14 +1549,14 @@ namespace DX11Base {
         clipper.Begin((int)s_filteredIndices.size(), APPROX_HEIGHT);
         while (clipper.Step()) {
           for (int row_idx = clipper.DisplayStart; row_idx < clipper.DisplayEnd; row_idx++) {
-            const auto& info = s_filteredIndices[row_idx];
+            const auto &info = s_filteredIndices[row_idx];
             uintptr_t targetBase = arrayBase + (info.originalIndex * 0x3D0);
 
             ImGui::TableNextRow();
             ImGui::AlignTextToFramePadding();
 
             const int officerID = info.officerID;
-            const std::string& displayName = info.displayName;
+            const std::string &displayName = info.displayName;
             bool isSelected = (g_capturedOfficerBase == targetBase);
 
             ImGui::PushID(info.originalIndex);
@@ -1498,8 +1565,10 @@ namespace DX11Base {
             ImGui::TableNextColumn();
             bool isMultiSelected = s_selectedOfficerIDs.count(officerID) > 0;
             if (ImGui::Checkbox("##sel", &isMultiSelected)) {
-              if (isMultiSelected) s_selectedOfficerIDs.insert(officerID);
-              else s_selectedOfficerIDs.erase(officerID);
+              if (isMultiSelected)
+                s_selectedOfficerIDs.insert(officerID);
+              else
+                s_selectedOfficerIDs.erase(officerID);
             }
 
             // 2열: 무장 이름
@@ -1513,13 +1582,15 @@ namespace DX11Base {
             if (s_officerNameEditId == officerID) {
               ImGui::SetNextItemWidth(-1.0f);
               ImGui::PushID("OffNameInput");
-              if (ImGui::InputText("##e", s_officerNameEditBuf, sizeof(s_officerNameEditBuf), ImGuiInputTextFlags_EnterReturnsTrue) || 
+              if (ImGui::InputText("##e", s_officerNameEditBuf, sizeof(s_officerNameEditBuf),
+                                   ImGuiInputTextFlags_EnterReturnsTrue) ||
                   ImGui::IsItemDeactivatedAfterEdit()) {
                 if (SaveOfficerNameToJson(officerID, s_officerNameEditBuf))
                   AddLog(u8"[이름] ID %d → S8RPK_cheat_char.json 저장", officerID);
                 s_officerNameEditId = -1;
               }
-              if (ImGui::IsKeyPressed(ImGuiKey_Escape)) s_officerNameEditId = -1;
+              if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+                s_officerNameEditId = -1;
               ImGui::PopID();
             } else {
               if (ImGui::Selectable(label, isSelected, ImGuiSelectableFlags_None)) {
@@ -1585,8 +1656,8 @@ namespace DX11Base {
 
       DrawOfficerDumpPopup(scale);
     } else {
-        // 창이 닫힐 때 플래그 초기화
-        s_wasOpen = false;
+      // 창이 닫힐 때 플래그 초기화
+      s_wasOpen = false;
     }
     ImGui::End();
   }
@@ -1596,32 +1667,58 @@ namespace DX11Base {
   static std::atomic<float> s_spouseScanProgress{0.0f};
 
   struct SpouseEntry {
-      uintptr_t pointerAddr; // HeroPtr address in relationship
-      uintptr_t targetBase;  // Spouse address
-      bool selected;
-      uint8_t context[64];   // [New] Memory context around bitAddr
+    uintptr_t pointerAddr; // HeroPtr address in relationship
+    uintptr_t targetBase;  // Spouse address
+    bool selected;
+    uint8_t context[64]; // [New] Memory context around bitAddr
   };
   static std::vector<SpouseEntry> s_spouseList;
   static std::recursive_mutex s_spouseMutex;
 
-  static bool UnsafeRead8(uintptr_t addr, uint8_t* out) {
-      __try { *out = *(uint8_t*)addr; return true; } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+  static bool UnsafeRead8(uintptr_t addr, uint8_t *out) {
+    __try {
+      *out = *(uint8_t *)addr;
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
   }
-  static bool UnsafeRead16(uintptr_t addr, unsigned short* out) {
-      __try { *out = *(unsigned short*)addr; return true; } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+  static bool UnsafeRead16(uintptr_t addr, unsigned short *out) {
+    __try {
+      *out = *(unsigned short *)addr;
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
   }
-  static bool UnsafeRead32(uintptr_t addr, uint32_t* out) {
-      __try { *out = *(uint32_t*)addr; return true; } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+  static bool UnsafeRead32(uintptr_t addr, uint32_t *out) {
+    __try {
+      *out = *(uint32_t *)addr;
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
   }
-  static bool UnsafeReadPtr(uintptr_t addr, uintptr_t* out) {
-      __try { *out = *(uintptr_t*)addr; return true; } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+  static bool UnsafeReadPtr(uintptr_t addr, uintptr_t *out) {
+    __try {
+      *out = *(uintptr_t *)addr;
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
   }
-  static bool UnsafeReadMem(uintptr_t addr, void* buf, size_t size) {
-      __try { memcpy(buf, (void*)addr, size); return true; } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+  static bool UnsafeReadMem(uintptr_t addr, void *buf, size_t size) {
+    __try {
+      memcpy(buf, (void *)addr, size);
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
   }
 
   void StartSpouseScannerAsync() {
-    if (s_isSpouseScanning) return;
+    if (s_isSpouseScanning)
+      return;
     if (g_savedHeroAddr <= 0x10000) {
       AddLog(u8"[배우자 검색] 주인공 주소가 유효하지 않습니다.");
       return;
@@ -1650,83 +1747,87 @@ namespace DX11Base {
       }
 
       unsigned long long processedSize = 0;
-      for (const auto& region : regions) {
+      for (const auto &region : regions) {
         uintptr_t start = (uintptr_t)region.BaseAddress;
         uintptr_t end = start + region.RegionSize;
-        
+
         // 8바이트 정렬된 메모리 영역을 순회하며 heroAddr를 찾음
         const size_t bufferSize = 4096 * 16;
         std::vector<unsigned char> buffer(bufferSize + 8);
-        
-        uintptr_t curr = start;
-        while(curr < end) {
-            size_t remaining = (size_t)(end - curr);
-            size_t toRead = (std::min)(remaining, bufferSize); // 매크로 충돌 방지
-            
-            if (toRead < 8) break;
-            
-            // 안전하게 메모리 읽기 (SEH 처리)
-            bool readSuccess = UnsafeReadMem(curr, buffer.data(), toRead);
-            
-            if (readSuccess) {
-                for (size_t i = 0; i <= toRead - 8; i++) {
-                    uintptr_t* pPtr = (uintptr_t*)(buffer.data() + i);
-                    if (*pPtr == heroAddr) {
-                        uintptr_t hitAddr = curr + i;
-                        
-                        // 배우자 플래그 검사 (-8 위치)
-                        if (hitAddr >= 8) {
-                            uint8_t flag = 0;
-                            bool flagSuccess = UnsafeRead8(hitAddr - 8, &flag);
-                            
-                            if (flagSuccess && flag == 2) {
-                                // 배우자 포인터 얻기 (+8 위치)
-                                uintptr_t spousePtr = 0;
-                                bool ptrSuccess = UnsafeReadPtr(hitAddr + 8, &spousePtr);
-                                
-                                if (ptrSuccess && spousePtr > 0x10000) {
-                                    // 유효한 무장인지 아이디 확인
-                                    unsigned short spouseID = 0;
-                                    bool idSuccess = UnsafeRead16(spousePtr + 0x08, &spouseID);
-                                    
-                                    if (idSuccess && spouseID >= 1 && spouseID <= 5102) {
-                                        // 성별 확인: 여자(1)만 리스트업
-                                        uint8_t gender = 0;
-                                        if (UnsafeRead8(spousePtr + 0x30, &gender) && gender == 1) {
-                                            std::lock_guard<std::recursive_mutex> lock(s_spouseMutex);
-                                            // 중복 검사
-                                            bool exists = false;
-                                            for(const auto& e : s_spouseList) {
-                                                if (e.targetBase == spousePtr) { exists = true; break; }
-                                            }
-                                            if (!exists) {
-                                                SpouseEntry entry;
-                                                entry.pointerAddr = hitAddr;
-                                                entry.targetBase = spousePtr;
-                                                entry.selected = false;
-                                                
-                                                // 주변 메모리 64바이트 덤프 (hitAddr - 24 ~ +40)
-                                                memset(entry.context, 0, 64);
-                                                UnsafeReadMem(hitAddr - 24, entry.context, 64);
 
-                                                s_spouseList.push_back(entry);
-                                                AddLog(u8"[배우자 검색] 여성 배우자 발견! 주소: %p (ID: %d)", (void*)spousePtr, spouseID);
-                                            }
-                                        }
-                                    }
-                                }
+        uintptr_t curr = start;
+        while (curr < end) {
+          size_t remaining = (size_t)(end - curr);
+          size_t toRead = (std::min)(remaining, bufferSize); // 매크로 충돌 방지
+
+          if (toRead < 8)
+            break;
+
+          // 안전하게 메모리 읽기 (SEH 처리)
+          bool readSuccess = UnsafeReadMem(curr, buffer.data(), toRead);
+
+          if (readSuccess) {
+            for (size_t i = 0; i <= toRead - 8; i++) {
+              uintptr_t *pPtr = (uintptr_t *)(buffer.data() + i);
+              if (*pPtr == heroAddr) {
+                uintptr_t hitAddr = curr + i;
+
+                // 배우자 플래그 검사 (-8 위치)
+                if (hitAddr >= 8) {
+                  uint8_t flag = 0;
+                  bool flagSuccess = UnsafeRead8(hitAddr - 8, &flag);
+
+                  if (flagSuccess && flag == 2) {
+                    // 배우자 포인터 얻기 (+8 위치)
+                    uintptr_t spousePtr = 0;
+                    bool ptrSuccess = UnsafeReadPtr(hitAddr + 8, &spousePtr);
+
+                    if (ptrSuccess && spousePtr > 0x10000) {
+                      // 유효한 무장인지 아이디 확인
+                      unsigned short spouseID = 0;
+                      bool idSuccess = UnsafeRead16(spousePtr + 0x08, &spouseID);
+
+                      if (idSuccess && spouseID >= 1 && spouseID <= 5102) {
+                        // 성별 확인: 여자(1)만 리스트업
+                        uint8_t gender = 0;
+                        if (UnsafeRead8(spousePtr + 0x30, &gender) && gender == 1) {
+                          std::lock_guard<std::recursive_mutex> lock(s_spouseMutex);
+                          // 중복 검사
+                          bool exists = false;
+                          for (const auto &e : s_spouseList) {
+                            if (e.targetBase == spousePtr) {
+                              exists = true;
+                              break;
                             }
+                          }
+                          if (!exists) {
+                            SpouseEntry entry;
+                            entry.pointerAddr = hitAddr;
+                            entry.targetBase = spousePtr;
+                            entry.selected = false;
+
+                            // 주변 메모리 64바이트 덤프 (hitAddr - 24 ~ +40)
+                            memset(entry.context, 0, 64);
+                            UnsafeReadMem(hitAddr - 24, entry.context, 64);
+
+                            s_spouseList.push_back(entry);
+                            AddLog(u8"[배우자 검색] 여성 배우자 발견! 주소: %p (ID: %d)", (void *)spousePtr, spouseID);
+                          }
                         }
+                      }
                     }
+                  }
                 }
+              }
             }
-            
-            processedSize += toRead;
-            curr += toRead;
-            s_spouseScanProgress = (float)processedSize / (float)totalSize;
+          }
+
+          processedSize += toRead;
+          curr += toRead;
+          s_spouseScanProgress = (float)processedSize / (float)totalSize;
         }
       }
-      
+
       s_isSpouseScanning = false;
       AddLog(u8"[배우자 검색] 스캔 완료.");
     }).detach();
@@ -1735,15 +1836,15 @@ namespace DX11Base {
   void DrawSpouseListWindow(float scale) {
     static bool s_wasSpouseListWinOpen = false;
     if (!bShowSpouseListWin) {
-        if (s_wasSpouseListWinOpen) {
-            s_wasSpouseListWinOpen = false;
-            std::lock_guard<std::recursive_mutex> lock(s_spouseMutex);
-            s_spouseList.clear();
-            s_spouseList.shrink_to_fit();
-            SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
-            AddLog(u8"[SYSTEM] 배우자 창 종료: 워킹셋(메모리) 강제 반환 완료.");
-        }
-        return;
+      if (s_wasSpouseListWinOpen) {
+        s_wasSpouseListWinOpen = false;
+        std::lock_guard<std::recursive_mutex> lock(s_spouseMutex);
+        s_spouseList.clear();
+        s_spouseList.shrink_to_fit();
+        SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+        AddLog(u8"[SYSTEM] 배우자 창 종료: 워킹셋(메모리) 강제 반환 완료.");
+      }
+      return;
     }
     s_wasSpouseListWinOpen = true;
 
@@ -1758,11 +1859,15 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), u8"조회된 배우자가 없습니다.");
           ImGui::TextDisabled(u8"주인공이 미혼이거나 게임 메모리 구조가 다를 수 있습니다.");
         } else {
-          ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), u8"총 %d 명의 배우자를 찾았습니다.", (int)s_spouseList.size());
+          ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), u8"총 %d 명의 배우자를 찾았습니다.",
+                             (int)s_spouseList.size());
           ImGui::Separator();
-          
+
           ImGui::TextDisabled(u8"주소/ID 클릭 시 복사, 컬럼 경계 드래그로 너비 조절");
-          if (ImGui::BeginTable("SpouseTable", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable, ImVec2(0, 300 * scale))) {
+          if (ImGui::BeginTable("SpouseTable", 5,
+                                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                                    ImGuiTableFlags_Resizable,
+                                ImVec2(0, 300 * scale))) {
             ImGui::TableSetupColumn("Select", ImGuiTableColumnFlags_WidthFixed, 30 * scale);
             ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 150 * scale);
             ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 50 * scale);
@@ -1771,16 +1876,17 @@ namespace DX11Base {
             ImGui::TableHeadersRow();
 
             for (size_t i = 0; i < s_spouseList.size(); i++) {
-              auto& entry = s_spouseList[i];
+              auto &entry = s_spouseList[i];
               uintptr_t relationAddr = entry.pointerAddr;
               uintptr_t spouseAddr = entry.targetBase;
               unsigned short officerID = 0;
               uint32_t slotNumber = 0;
               bool hasSlotNumber = UnsafeRead32(relationAddr + 0x28, &slotNumber);
-              if (!UnsafeRead16(spouseAddr + 0x08, &officerID)) continue;
-              
+              if (!UnsafeRead16(spouseAddr + 0x08, &officerID))
+                continue;
+
               ImGui::TableNextRow();
-              
+
               ImGui::TableSetColumnIndex(0);
               ImGui::PushID((int)i);
               ImGui::Checkbox("##sel", &entry.selected);
@@ -1788,15 +1894,15 @@ namespace DX11Base {
 
               ImGui::TableSetColumnIndex(1);
               char addrText[32];
-              snprintf(addrText, sizeof(addrText), "%p", (void*)relationAddr);
+              snprintf(addrText, sizeof(addrText), "%p", (void *)relationAddr);
               char addrLabel[48];
               snprintf(addrLabel, sizeof(addrLabel), "%s##addr_%d", addrText, (int)i);
               if (ImGui::Selectable(addrLabel, false)) {
-                  ImGui::SetClipboardText(addrText);
-                  AddLog(u8"[복사] 관계 포인터 주소 복사: %s", addrText);
+                ImGui::SetClipboardText(addrText);
+                AddLog(u8"[복사] 관계 포인터 주소 복사: %s", addrText);
               }
               if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
-                  ImGui::SetTooltip(u8"Hex View 기준 주소 (클릭하면 복사)");
+                ImGui::SetTooltip(u8"Hex View 기준 주소 (클릭하면 복사)");
               }
 
               ImGui::TableSetColumnIndex(2);
@@ -1805,70 +1911,75 @@ namespace DX11Base {
               char idLabel[32];
               snprintf(idLabel, sizeof(idLabel), "%s##id_%d", idText, (int)i);
               if (ImGui::Selectable(idLabel, false)) {
-                  ImGui::SetClipboardText(idText);
-                  AddLog(u8"[복사] 배우자 ID 복사: %s", idText);
+                ImGui::SetClipboardText(idText);
+                AddLog(u8"[복사] 배우자 ID 복사: %s", idText);
               }
               if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
-                  ImGui::SetTooltip(u8"클릭하면 ID 복사");
+                ImGui::SetTooltip(u8"클릭하면 ID 복사");
               }
-              
+
               ImGui::TableSetColumnIndex(3);
               if (hasSlotNumber) {
-                  ImGui::Text("%u", slotNumber);
+                ImGui::Text("%u", slotNumber);
               } else {
-                  ImGui::TextUnformatted("-");
+                ImGui::TextUnformatted("-");
               }
 
               ImGui::TableSetColumnIndex(4);
               std::string name = u8"알 수 없음";
               if (g_officerNames.count(officerID)) {
-                  name = g_officerNames[officerID];
+                name = g_officerNames[officerID];
               }
-              
+
               char label[128];
-              snprintf(label, sizeof(label), "%s##%p", name.c_str(), (void*)spouseAddr);
+              snprintf(label, sizeof(label), "%s##%p", name.c_str(), (void *)spouseAddr);
               if (ImGui::Selectable(label)) {
-                  bShowSelectedOfficerWin = true;
-                  g_capturedOfficerBase = spouseAddr;
-                  bForceCenterSelectedOfficer = true;
+                bShowSelectedOfficerWin = true;
+                g_capturedOfficerBase = spouseAddr;
+                bForceCenterSelectedOfficer = true;
               }
 
               // [New] 메모리 분석 섹션
               ImGui::PushID((int)(i + 1000));
               if (ImGui::CollapsingHeader(u8"메모리 분석 (Hex View)")) {
-                  ImGui::BeginChild("HexChild", ImVec2(0, 150 * scale), true);
-                  ImGui::Text(u8"기준 주소(관계 포인터): %p", (void*)relationAddr);
-                  ImGui::Text(u8"배우자 주소: %p", (void*)spouseAddr);
-                  ImGui::Separator();
-                  
-                  for (int row = 0; row < 4; row++) {
-                      int offset = (row * 16) - 24;
-                      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Offset %s%02X: ", (offset >= 0 ? "+" : "-"), abs(offset));
+                ImGui::BeginChild("HexChild", ImVec2(0, 150 * scale), true);
+                ImGui::Text(u8"기준 주소(관계 포인터): %p", (void *)relationAddr);
+                ImGui::Text(u8"배우자 주소: %p", (void *)spouseAddr);
+                ImGui::Separator();
+
+                for (int row = 0; row < 4; row++) {
+                  int offset = (row * 16) - 24;
+                  ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Offset %s%02X: ", (offset >= 0 ? "+" : "-"),
+                                     abs(offset));
+                  ImGui::SameLine();
+
+                  for (int col = 0; col < 16; col++) {
+                    int idx = row * 16 + col;
+                    uint8_t val = entry.context[idx];
+
+                    // 중요 데이터 색상 강조
+                    ImVec4 color = ImVec4(1, 1, 1, 1);
+                    if (idx >= 24 && idx < 32)
+                      color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f); // Hero Ptr (P1)
+                    else if (idx >= 32 && idx < 40)
+                      color = ImVec4(1.0f, 0.8f, 0.4f, 1.0f); // Spouse Ptr
+                    else if (idx >= 16 && idx < 24)
+                      color = ImVec4(0.4f, 0.4f, 1.0f, 1.0f); // Flag (02)
+
+                    ImGui::TextColored(color, "%02X", val);
+                    if (col < 15)
                       ImGui::SameLine();
-                      
-                      for (int col = 0; col < 16; col++) {
-                          int idx = row * 16 + col;
-                          uint8_t val = entry.context[idx];
-                          
-                          // 중요 데이터 색상 강조
-                          ImVec4 color = ImVec4(1, 1, 1, 1);
-                          if (idx >= 24 && idx < 32) color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f); // Hero Ptr (P1)
-                          else if (idx >= 32 && idx < 40) color = ImVec4(1.0f, 0.8f, 0.4f, 1.0f); // Spouse Ptr
-                          else if (idx >= 16 && idx < 24) color = ImVec4(0.4f, 0.4f, 1.0f, 1.0f); // Flag (02)
-
-                          ImGui::TextColored(color, "%02X", val);
-                          if (col < 15) ImGui::SameLine();
-                      }
                   }
-                  
-                  ImGui::Separator();
-                  ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"녹색: 주인공 주소");
-                  ImGui::SameLine();
-                  ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8" 주황: 배우자 주소");
-                  ImGui::SameLine();
-                  ImGui::TextColored(ImVec4(0.4f, 0.4f, 1.0f, 1.0f), u8" 파랑: 플래그(02)");
+                }
 
-                  ImGui::EndChild();
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"녹색: 주인공 주소");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8" 주황: 배우자 주소");
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.4f, 0.4f, 1.0f, 1.0f), u8" 파랑: 플래그(02)");
+
+                ImGui::EndChild();
               }
               ImGui::PopID();
             }
@@ -1879,43 +1990,43 @@ namespace DX11Base {
           int selectedCount = 0;
           std::vector<int> selIndices;
           for (size_t i = 0; i < s_spouseList.size(); i++) {
-              if (s_spouseList[i].selected) {
-                  selectedCount++;
-                  selIndices.push_back((int)i);
-              }
+            if (s_spouseList[i].selected) {
+              selectedCount++;
+              selIndices.push_back((int)i);
+            }
           }
 
           if (selectedCount == 2) {
-              ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.4f, 0.0f, 1.0f));
-              if (ImGui::Button(u8"체크된 배우자 둘 맞바꾸기", ImVec2(-1, 30 * scale))) {
-                  auto& e1 = s_spouseList[selIndices[0]];
-                  auto& e2 = s_spouseList[selIndices[1]];
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.4f, 0.0f, 1.0f));
+            if (ImGui::Button(u8"체크된 배우자 둘 맞바꾸기", ImVec2(-1, 30 * scale))) {
+              auto &e1 = s_spouseList[selIndices[0]];
+              auto &e2 = s_spouseList[selIndices[1]];
 
-                  DWORD old1, old2;
-                  bool s1 = VirtualProtect((LPVOID)e1.pointerAddr, 8, PAGE_READWRITE, &old1);
-                  bool s2 = VirtualProtect((LPVOID)e2.pointerAddr, 8, PAGE_READWRITE, &old2);
+              DWORD old1, old2;
+              bool s1 = VirtualProtect((LPVOID)e1.pointerAddr, 8, PAGE_READWRITE, &old1);
+              bool s2 = VirtualProtect((LPVOID)e2.pointerAddr, 8, PAGE_READWRITE, &old2);
 
-                  if (s1 && s2) {
-                      *(uintptr_t*)e1.pointerAddr = e2.targetBase;
-                      *(uintptr_t*)e2.pointerAddr = e1.targetBase;
+              if (s1 && s2) {
+                *(uintptr_t *)e1.pointerAddr = e2.targetBase;
+                *(uintptr_t *)e2.pointerAddr = e1.targetBase;
 
-                      VirtualProtect((LPVOID)e1.pointerAddr, 8, old1, &old1);
-                      VirtualProtect((LPVOID)e2.pointerAddr, 8, old2, &old2);
+                VirtualProtect((LPVOID)e1.pointerAddr, 8, old1, &old1);
+                VirtualProtect((LPVOID)e2.pointerAddr, 8, old2, &old2);
 
-                      AddLog(u8"[배우자 검색] 두 배우자 순서를 교환했습니다!");
-                      StartSpouseScannerAsync(); // 갱신
-                  } else {
-                      AddLog(u8"[ERROR] 배우자 순서 교환 실패 (메모리 접근 오류).");
-                  }
+                AddLog(u8"[배우자 검색] 두 배우자 순서를 교환했습니다!");
+                StartSpouseScannerAsync(); // 갱신
+              } else {
+                AddLog(u8"[ERROR] 배우자 순서 교환 실패 (메모리 접근 오류).");
               }
-              ImGui::PopStyleColor();
+            }
+            ImGui::PopStyleColor();
           } else {
-              ImGui::BeginDisabled();
-              ImGui::Button(u8"체크된 배우자 둘 맞바꾸기 (2명 선택 필요)", ImVec2(-1, 30 * scale));
-              ImGui::EndDisabled();
+            ImGui::BeginDisabled();
+            ImGui::Button(u8"체크된 배우자 둘 맞바꾸기 (2명 선택 필요)", ImVec2(-1, 30 * scale));
+            ImGui::EndDisabled();
           }
         }
-        
+
         ImGui::Spacing();
         if (ImGui::Button(u8"다시 스캔", ImVec2(-1, 30 * scale))) {
           StartSpouseScannerAsync();

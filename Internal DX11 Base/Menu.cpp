@@ -14,6 +14,7 @@
 #include "Cheats/TengiCave.h"
 #include "Config.h"
 #include "Engine.h"
+#include "Cheats/StatMonitor.h"
 #include "Menu.h"
 #include "MenuSections.h"
 #include "MenuState.h"
@@ -147,6 +148,7 @@ namespace DX11Base {
     if (nowTick - s_lastTechMonitorTick >= 500) {
       s_lastTechMonitorTick = nowTick;
       MonitorTechStatus();
+      MonitorAllAggressive();
     }
 
     // 주의: 아래 로직도 동일 프레임의 gameBase/p1을 재사용

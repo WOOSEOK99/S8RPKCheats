@@ -46,6 +46,7 @@ namespace DX11Base {
   extern bool bDefAtk;
   extern bool bCatapult;
   extern bool bCelestial;
+  extern bool bAllAggressive;
   extern bool bBattleUnit;
 
   // 4. 기타 UI 상태

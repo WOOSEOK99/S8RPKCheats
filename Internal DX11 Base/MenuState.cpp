@@ -40,6 +40,7 @@ namespace DX11Base {
   bool bDefAtk = false;
   bool bCatapult = false;
   bool bCelestial = false;
+  bool bAllAggressive = false;
   bool bBattleUnit = false;
   bool bBattleMapShuffle = false;
 
