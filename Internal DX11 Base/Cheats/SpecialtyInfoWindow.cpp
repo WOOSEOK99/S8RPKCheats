@@ -264,6 +264,78 @@ namespace DX11Base {
       }
       return 0;
     }
+
+    static std::string GetSpecialtyAttributesString(uintptr_t objPtr) {
+      if (objPtr <= 0x10000)
+        return "";
+
+      uint8_t type = 0, skill = 0, skillLv = 0, ability = 0, abilityVal = 0, effect = 0, effectVal = 0, value = 0;
+      Read8(objPtr + 0x0E, &type);
+      Read8(objPtr + 0x10, &skill); // 말그림
+      Read8(objPtr + 0x20, &skillLv);
+      Read8(objPtr + 0x22, &ability);
+      Read8(objPtr + 0x23, &abilityVal);
+      Read8(objPtr + 0x24, &effect); //??
+      Read8(objPtr + 0x25, &effectVal);
+      Read8(objPtr + 0x26, &value);
+
+      static const std::unordered_map<uint8_t, const char *> typeMap = {
+          {1, u8"명마"},  {2, u8"검"},     {3, u8"도"},    {4, u8"대도"},  {5, u8"창"},    {6, u8"극"},
+          {7, u8"도끼"},  {8, u8"채찍"},   {9, u8"둔기"},  {10, u8"암기"}, {11, u8"활"},   {12, u8"병서"},
+          {13, u8"정서"}, {14, u8"사서"},  {15, u8"경서"}, {16, u8"논문"}, {17, u8"의서"}, {18, u8"기서"},
+          {19, u8"지도"}, {20, u8"장식"},  {21, u8"보물"}, {22, u8"약"},   {23, u8"술"},   {24, u8"옥새"},
+          {25, u8"기타"}, {26, u8"기증품"}};
+
+      static const std::unordered_map<uint8_t, const char *> skillMap = {
+          {1, u8"과감"}, {18, u8"과감"}, {40, u8"과감"}, {22, u8"여력"}, {29, u8"여력"}, {35, u8"여력"}};
+
+      static const std::unordered_map<uint8_t, const char *> abilityMap = {
+          {1, u8"통솔"}, {2, u8"무력"}, {3, u8"지력"}, {4, u8"정치"}, {5, u8"매력"}};
+
+      static const std::unordered_map<uint8_t, const char *> effectMap = {
+          {1, u8"퇴각확실"}, {2, u8"수명연장"}, {3, u8"능력효과"}};
+
+      std::string result;
+      char buf[256];
+
+      // 종류
+      auto itType = typeMap.find(type);
+      snprintf(buf, sizeof(buf), u8"종류 : %s", itType != typeMap.end() ? itType->second : u8"--");
+      result += buf;
+
+      // 특기
+      auto itSkill = skillMap.find(skill);
+      if (itSkill != skillMap.end()) {
+        snprintf(buf, sizeof(buf), u8" , 특기 : %s +%u", itSkill->second, (unsigned)skillLv);
+      } else {
+        snprintf(buf, sizeof(buf), u8" , 특기 : --");
+      }
+      result += buf;
+
+      // 능력
+      auto itAbility = abilityMap.find(ability);
+      if (itAbility != abilityMap.end()) {
+        snprintf(buf, sizeof(buf), u8" , 능력 : %s +%u", itAbility->second, (unsigned)abilityVal);
+      } else {
+        snprintf(buf, sizeof(buf), u8" , 능력 : --");
+      }
+      result += buf;
+
+      // 효과
+      auto itEffect = effectMap.find(effect);
+      if (itEffect != effectMap.end()) {
+        snprintf(buf, sizeof(buf), u8" , 효과 : %s", itEffect->second);
+      } else {
+        snprintf(buf, sizeof(buf), u8" , 효과 : --");
+      }
+      result += buf;
+
+      // 가치
+      snprintf(buf, sizeof(buf), u8" , 가치 : %u", (unsigned)value);
+      result += buf;
+
+      return result;
+    }
   } // namespace
 
   void DrawSpecialtyInfoWindow(float scale) {
@@ -326,7 +398,7 @@ namespace DX11Base {
     // ImGui::Separator();
 
     // 다른 창과 비슷한 주황 계열 섹션 스타일
-    ImGui::BeginChild("SpecialtyActionSection", ImVec2(0, 120 * scale), true);
+    ImGui::BeginChild("SpecialtyActionSection", ImVec2(0, 140 * scale), true);
     if (s_selectedSpecialtyObj > 0x10000) {
       ImGui::Text(u8"선택 명품: %s",
                   s_selectedSpecialtyName.empty() ? u8"(이름 미확인)" : s_selectedSpecialtyName.c_str());
@@ -345,6 +417,11 @@ namespace DX11Base {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.0f, 1.0f));
         ImGui::TextWrapped(u8"설명: %s", s_selectedSpecialtyDesc.c_str());
         ImGui::PopStyleColor();
+      }
+
+      std::string attrStr = GetSpecialtyAttributesString(s_selectedSpecialtyObj);
+      if (!attrStr.empty()) {
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s", attrStr.c_str());
       }
 
       ImGui::Separator();
@@ -449,7 +526,7 @@ namespace DX11Base {
                 snprintf(label, sizeof(label), "No.%u##sp_%d_%d", (unsigned)specialityNo, cityIdx, slot);
               else
                 snprintf(label, sizeof(label), u8"판매중##sp_%d_%d", cityIdx, slot);
-              if (ImGui::Selectable(label, false, ImGuiSelectableFlags_SpanAllColumns)) {
+              if (ImGui::Selectable(label, false, 0)) {
                 s_selectedSpecialtyObj = slotObjPtr;
                 s_selectedSpecialtySlotAddr = slotAddr;
                 s_selectedSpecialtyName = specialityName.empty()
