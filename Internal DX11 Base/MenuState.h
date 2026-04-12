@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.72"
+#define SAM8_CHEAT_VERSION "V0.73"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -25,9 +25,9 @@ namespace DX11Base {
   extern bool bAttitudeHack;
   extern bool bZeroInfamy;
   extern bool bSelectOfficerFirstInit;
-  extern bool bDomestics;          // 내정 배율
-  extern float fDomesticsPlayer;   // 플레이어 배율
-  extern float fDomesticsForce;    // 세력 배율
+  extern bool bDomestics;        // 내정 배율
+  extern float fDomesticsPlayer; // 플레이어 배율
+  extern float fDomesticsForce;  // 세력 배율
 
   // 2. 인연/관계
   extern bool bLoveCave;
@@ -102,7 +102,7 @@ namespace DX11Base {
   extern bool bShowPasswordPopup;         // 디버그 비밀번호 창 표시 여부
   extern bool bShowNotificationLog;       // 알림 기록 창 표시 여부
 
-  extern uintptr_t g_savedHeroAddr;       // [신규] 데모플레이 대비 주인공 주소 백업용
+  extern uintptr_t g_savedHeroAddr; // [신규] 데모플레이 대비 주인공 주소 백업용
 
   bool IsAnyUIOpen(); // 모든 UI 창 활성화 여부 확인 함수
 } // namespace DX11Base

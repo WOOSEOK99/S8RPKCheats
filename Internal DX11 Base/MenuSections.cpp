@@ -8,6 +8,7 @@
 #include "Cheats/Celestia.h"
 #include "Cheats/Defatkboost.h"
 #include "Cheats/Defbuildingboost.h"
+#include "Cheats/DomesticsMult.h"
 #include "Cheats/Dongto.h"
 #include "Cheats/FactionLordBonus.h"
 #include "Cheats/Fastrelationship.h"
@@ -16,9 +17,11 @@
 #include "Cheats/InstantLoveCave.h"
 #include "Cheats/Loyaltycave.h"
 #include "Cheats/NonggyeongCity.h"
+#include "Cheats/OfficerRosterResolve.h"
 #include "Cheats/Resonancecave.h"
 #include "Cheats/Roadblock.h"
 #include "Cheats/SangeopCity.h"
+#include "Cheats/SelectOfficercapture.h"
 #include "Cheats/Selfheal.h"
 #include "Cheats/SkillCondition.h"
 #include "Cheats/SpeedHack.h"
@@ -34,9 +37,6 @@
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
-#include "Cheats/DomesticsMult.h"
-#include "Cheats/SelectOfficercapture.h"
-#include "Cheats/OfficerRosterResolve.h"
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -551,7 +551,7 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 대신 타 세력의 경우 등용은 안되네요.");
         ImGui::EndTooltip();
       }
-      
+
       // ImGui::Spacing();
       // if (ImGui::Button(u8"배우자 검색", ImVec2(120.0f * scale, 26.0f * scale))) {
       //   DX11Base::bShowSpouseListWin = true;
@@ -559,9 +559,9 @@ namespace DX11Base {
       // }
       // if (ImGui::IsItemHovered()) {
       //   ImGui::BeginTooltip();
-      //   ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"현재 주인공의 배우자 목록을 메모리에서 스캔하여 표시합니다.");
-      //   ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 결과는 전용 창에 나타납니다. (몇 초 정도 소요 가능)");
-      //   ImGui::EndTooltip();
+      //   ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"현재 주인공의 배우자 목록을 메모리에서 스캔하여
+      //   표시합니다."); ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 결과는 전용 창에 나타납니다. (몇 초
+      //   정도 소요 가능)"); ImGui::EndTooltip();
       // }
       EndSection(); // 결혼/인연
     }
@@ -576,12 +576,14 @@ namespace DX11Base {
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"체크 시, 게임 진입(주인공 포착) 순간 모든 유효 무장의 전략 성향이 '적극'으로 자동 적용됩니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 로드할 때 딱 한 번 적용되며 계속 유지해야 다음 플레이 시에도 반영됩니다.");
+        ImGui::TextColored(
+            ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+            u8"체크 시, 게임 진입(주인공 포착) 순간 모든 유효 무장의 전략 성향이 '적극'으로 자동 적용됩니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 로드할 때 딱 한 번 적용되며 계속 유지해야 다음 플레이 시에도 반영됩니다.");
         ImGui::EndTooltip();
       }
       ImGui::Separator();
-
 
       if (ImGui::Checkbox(u8"[전법 강화] 치료", &bSelfHeal)) {
         DX11Base::SetSelfHeal(bSelfHeal);
@@ -818,11 +820,12 @@ namespace DX11Base {
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),u8"[사용 방법]");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),u8"데모플레이 중 중지 버튼을 눌러 데모플레이를 중지합니다.");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),u8"저장을 한뒤에 불러오기를 하면 정상적으로 플레이가 가능합니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f),u8"[ 주의 사항 ]");
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f),u8"마우스 우측키를 눌러 일시 정지후에 중지 버튼을 누르면 까만화면으로 바뀝니다.");
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"[사용 방법]");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"데모플레이 중 중지 버튼을 눌러 데모플레이를 중지합니다.");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"저장을 한뒤에 불러오기를 하면 정상적으로 플레이가 가능합니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), u8"[ 주의 사항 ]");
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f),
+                           u8"마우스 우측키를 눌러 일시 정지후에 중지 버튼을 누르면 까만화면으로 바뀝니다.");
         ImGui::EndTooltip();
       }
 
@@ -835,37 +838,31 @@ namespace DX11Base {
       float btnHeight = 26.0f * scale;
       float spacing = 10.0f * scale; // 버튼 사이의 여백
 
+      ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 정보 ]");
       if (p1 != 0) {
-        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 정보 ]");
+        if (ImGui::Button(u8"명품", ImVec2(btnWidth, btnHeight))) {
+          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
+        }
+
+        ImGui::SameLine(0, spacing);
         if (ImGui::Button(u8"주인공", ImVec2(btnWidth, btnHeight))) {
           bShowOfficerDetail = !bShowOfficerDetail;
         }
+
         ImGui::SameLine(0, spacing);
         if (ImGui::Button(u8"선택 무장", ImVec2(btnWidth, btnHeight))) {
           bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
         }
-        ImGui::SameLine(0, spacing); // p1이 있을 때만 같은 줄에 배치
 
-        if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
-          bShowOfficerListWin = !bShowOfficerListWin;
-        }
         ImGui::SameLine(0, spacing);
-        if (ImGui::Button(u8"명품", ImVec2(btnWidth, btnHeight))) {
-          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
-        }
-        // ImGui::SameLine(0, spacing);
-        // if (ImGui::Button(u8"메모장", ImVec2(btnWidth, btnHeight))) {
-        //   bShowMemoryNotepadWin = !bShowMemoryNotepadWin;
-        // }
       }
 
-      // if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
-      //   DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
-      // }
-
+      if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
+        DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+      }
 
       EndSection(); // 무장 정보
-      
+
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
       if (ImGui::Checkbox(u8"전기취소##WIDGET", &DX11Base::bShowWidgetTengi)) {

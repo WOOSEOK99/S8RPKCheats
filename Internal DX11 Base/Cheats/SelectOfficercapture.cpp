@@ -272,6 +272,7 @@ namespace DX11Base {
         // ImGui::TableSetColumnIndex(1);
         // ImGui::AlignTextToFramePadding();
 
+        v_Gender = *(unsigned char *)(pR + 0x30);
         if (v_Gender == 1) {
           ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), u8"여성");
         } else if (v_Gender == 0) {
