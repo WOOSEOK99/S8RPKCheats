@@ -759,6 +759,7 @@ namespace DX11Base {
       if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
         DX11Base::SetTechZero(bTechZero);
         NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);
+        SaveConfig();
       }
 
       if (ImGui::IsItemHovered()) {
