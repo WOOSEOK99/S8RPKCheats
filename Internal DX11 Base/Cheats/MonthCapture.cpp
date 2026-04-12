@@ -8,6 +8,91 @@
 
 namespace DX11Base {
 
+    namespace {
+        // 게임 모듈 내 인스턴스 포인터(고정) → 실제 데이터 블록
+        constexpr uintptr_t kScenarioInstanceStaticOffset = 0x2E98BC8;
+        constexpr uintptr_t kScenarioYearOffset = 0x72D0;
+        // 월 후킹 패턴 mov [rsi+0x72D2], al 과 동일 오프셋
+        constexpr uintptr_t kScenarioMonthOffset = 0x72D2;
+
+        // 연·월 필드만 검사 (넓은 범위 IsValidPtr는 VirtualQuery 비용이 큼)
+        uintptr_t ResolveScenarioDataCenter() {
+            uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
+            if (!moduleBase)
+                return 0;
+            uintptr_t ptrAddr = moduleBase + kScenarioInstanceStaticOffset;
+            if (!IsValidPtr(ptrAddr, sizeof(uintptr_t)))
+                return 0;
+            uintptr_t inst = *(uintptr_t *)ptrAddr;
+            if (!inst || inst < 0x10000)
+                return 0;
+            uintptr_t yearAddr = inst + kScenarioYearOffset;
+            uintptr_t monthAddr = inst + kScenarioMonthOffset;
+            if (!IsValidPtr(yearAddr, 2) || !IsValidPtr(monthAddr, 1))
+                return 0;
+            return inst;
+        }
+    } // namespace
+
+    void UpdateYear(unsigned short targetYear) {
+        uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter)
+            return;
+        uintptr_t yearAddr = dataCenter + kScenarioYearOffset;
+        DWORD oldProt, tmp;
+        if (!VirtualProtect((LPVOID)yearAddr, 2, PAGE_READWRITE, &oldProt))
+            return;
+        *(unsigned short *)yearAddr = targetYear;
+        VirtualProtect((LPVOID)yearAddr, 2, oldProt, &tmp);
+    }
+
+    void UpdateMonth(uint8_t targetMonth) {
+        if (targetMonth < 1 || targetMonth > 12)
+            return;
+        uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter)
+            return;
+        uintptr_t monthAddr = dataCenter + kScenarioMonthOffset;
+        DWORD oldProt, tmp;
+        if (!VirtualProtect((LPVOID)monthAddr, 1, PAGE_READWRITE, &oldProt))
+            return;
+        *(uint8_t *)monthAddr = targetMonth;
+        VirtualProtect((LPVOID)monthAddr, 1, oldProt, &tmp);
+    }
+
+    bool ReadScenarioYear(unsigned short *outYear) {
+        if (!outYear)
+            return false;
+        uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter)
+            return false;
+        *outYear = *(unsigned short *)(dataCenter + kScenarioYearOffset);
+        return true;
+    }
+
+    bool ReadScenarioMonth(uint8_t *outMonth) {
+        if (!outMonth)
+            return false;
+        uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter)
+            return false;
+        *outMonth = *(uint8_t *)(dataCenter + kScenarioMonthOffset);
+        return true;
+    }
+
+    bool ReadScenarioDate(unsigned short *outYear, uint8_t *outMonth) {
+        if (!outYear && !outMonth)
+            return false;
+        uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter)
+            return false;
+        if (outYear)
+            *outYear = *(unsigned short *)(dataCenter + kScenarioYearOffset);
+        if (outMonth)
+            *outMonth = *(uint8_t *)(dataCenter + kScenarioMonthOffset);
+        return true;
+    }
+
     // ---------------------------------------------------------------------------
     // 글로벌 상태 및 설정
     // ---------------------------------------------------------------------------

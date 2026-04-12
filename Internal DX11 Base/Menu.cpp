@@ -67,9 +67,26 @@ namespace DX11Base {
     uintptr_t gameBase = GetGameBase();
     uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;
 
-    // 로딩 초기/주소 전환 구간에서는 직접 메모리 쓰기를 지연
-    const bool p1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
-    const bool gameBaseReady = (gameBase > 0x10000) && IsValidPtr(gameBase, 0x6000);
+    // IsValidPtr → VirtualQuery 비용 큼: 주소/시간 기준으로만 재검증
+    static uintptr_t s_loopProbeGameBase = 0;
+    static uintptr_t s_loopProbeP1 = 0;
+    static uint64_t s_loopProbeTick = 0;
+    static bool s_loopP1Ready = false;
+    static bool s_loopGameBaseReady = false;
+
+    uint64_t nowTick = GetTickCount64();
+    const bool needProbe =
+        (gameBase != s_loopProbeGameBase) || (p1 != s_loopProbeP1) || (nowTick - s_loopProbeTick >= 200ull);
+    if (needProbe) {
+      s_loopProbeTick = nowTick;
+      s_loopProbeGameBase = gameBase;
+      s_loopProbeP1 = p1;
+      s_loopP1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
+      s_loopGameBaseReady = (gameBase > 0x10000) && IsValidPtr(gameBase, 0x6000);
+    }
+
+    const bool p1Ready = s_loopP1Ready;
+    const bool gameBaseReady = s_loopGameBaseReady;
 
     // 무한 행동력
     if (bInfiniteAP) {
@@ -139,7 +156,6 @@ namespace DX11Base {
 
     static uint64_t s_lastBattleMonitorTick = 0;
     static uint64_t s_lastTechMonitorTick = 0;
-    uint64_t nowTick = GetTickCount64();
 
     if (nowTick - s_lastBattleMonitorTick >= 100) {
       s_lastBattleMonitorTick = nowTick;
@@ -158,7 +174,9 @@ namespace DX11Base {
       // 주인공 주소가 처음 잡히거나, 다른 주소로 변경된 경우에만 백업 갱신
       if (IsValidPtr(p1, 0x100)) {
         g_savedHeroAddr = p1;
-        AddLog(u8"[백업] 주인공 주소 저장 완료: %p", (void*)g_savedHeroAddr);
+        AddLog(u8"[백업] 주인공 주소 저장 완료: %p", (void *)g_savedHeroAddr);
+        s_loopProbeP1 = p1;
+        s_loopP1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
       }
     } else if (p1 == 0 && g_savedHeroAddr > 0x10000 && gameBase && s_autoRestoreP1) {
       // 자동 복원 모드: p1이 null이 됐고 백업이 있으면 자동으로 복원
@@ -169,6 +187,9 @@ namespace DX11Base {
           VirtualProtect((LPVOID)(gameBase + 0xE0), 8, oldP, &oldP);
           p1 = g_savedHeroAddr; // 이번 프레임부터 바로 사용
           AddLog(u8"[복원] 주인공 주소 자동 복원 완료 (Base: %p)", (void *)g_savedHeroAddr);
+          s_loopProbeP1 = p1;
+          s_loopProbeGameBase = gameBase;
+          s_loopP1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
         }
       }
     }

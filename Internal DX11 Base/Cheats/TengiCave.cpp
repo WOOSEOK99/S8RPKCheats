@@ -145,22 +145,40 @@ namespace DX11Base {
 
   // 전기 쓰기
   void SetTengi(uint8_t value) {
-    if (!g_tengiAddr || !IsValidPtr(g_tengiAddr, 1))
+    if (!g_tengiAddr)
       return;
+
+    static uintptr_t s_trustedTengiAddr = 0;
+    static uint64_t s_lastTengiValidMs = 0;
+    const uint64_t now = GetTickCount64();
+    if (g_tengiAddr != s_trustedTengiAddr || (now - s_lastTengiValidMs) >= 500ull) {
+      if (!IsValidPtr(g_tengiAddr, 1))
+        return;
+      s_trustedTengiAddr = g_tengiAddr;
+      s_lastTengiValidMs = now;
+    }
 
     // 전기 게이지 값 쓰기
     *(uint8_t *)g_tengiAddr = value;
 
     // 전기 발생 플래그 동기화 (오프셋 +0x18 -> xxA8)
     uintptr_t flagAddr = g_tengiAddr + 0x18;
-    if (IsValidPtr(flagAddr, 1)) {
-      if (value >= 100) {
-        // [2026-04-05] 크래시 방지: +0x08과 +0x10에 이벤트 포인터가 들어왔을 때만 1 셋팅
-        uintptr_t ptr1 = *(uintptr_t *)(g_tengiAddr + 0x08);
-        uintptr_t ptr2 = *(uintptr_t *)(g_tengiAddr + 0x10);
-        if (ptr1 != 0 && ptr2 != 0) {
-          *(uint8_t *)flagAddr = 1;
-        }
+    static uintptr_t s_trustedTengiForFlag = 0;
+    static uint64_t s_lastFlagValidMs = 0;
+    bool flagOk = true;
+    if (g_tengiAddr != s_trustedTengiForFlag || (now - s_lastFlagValidMs) >= 500ull) {
+      flagOk = IsValidPtr(flagAddr, 1);
+      if (flagOk) {
+        s_trustedTengiForFlag = g_tengiAddr;
+        s_lastFlagValidMs = now;
+      }
+    }
+    if (flagOk && value >= 100) {
+      // [2026-04-05] 크래시 방지: +0x08과 +0x10에 이벤트 포인터가 들어왔을 때만 1 셋팅
+      uintptr_t ptr1 = *(uintptr_t *)(g_tengiAddr + 0x08);
+      uintptr_t ptr2 = *(uintptr_t *)(g_tengiAddr + 0x10);
+      if (ptr1 != 0 && ptr2 != 0) {
+        *(uint8_t *)flagAddr = 1;
       }
     }
   }

@@ -16,6 +16,7 @@
 #include "Cheats/Infinitetalk.h"
 #include "Cheats/InstantLoveCave.h"
 #include "Cheats/Loyaltycave.h"
+#include "Cheats/MonthCapture.h"
 #include "Cheats/NonggyeongCity.h"
 #include "Cheats/OfficerRosterResolve.h"
 #include "Cheats/Resonancecave.h"
@@ -733,6 +734,65 @@ namespace DX11Base {
       BeginSection();
       ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.0f, 1.0f), u8"[ 시나리오 ]");
 
+      ImGui::PushID(u8"ScenarioDate");
+      {
+        static int s_scenarioYearEdit = 200;
+        static int s_scenarioMonthEdit = 1;
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("[");
+        ImGui::SameLine(0, 0);
+        ImGui::SetNextItemWidth(70.0f * scale);
+        ImGui::InputInt(u8"##scY", &s_scenarioYearEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+        const bool yearDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
+        const bool yearActive = ImGui::IsItemActive();
+
+        ImGui::SameLine(0, 0);
+        ImGui::TextUnformatted("]");
+        ImGui::SameLine(0, 4.0f * scale);
+        ImGui::Text(u8"년");
+        ImGui::SameLine(0, 10.0f * scale);
+        ImGui::TextUnformatted("[");
+        ImGui::SameLine(0, 0);
+        ImGui::SetNextItemWidth(44.0f * scale);
+        ImGui::InputInt(u8"##scM", &s_scenarioMonthEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+        const bool monthDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
+        const bool monthActive = ImGui::IsItemActive();
+
+        ImGui::SameLine(0, 0);
+        ImGui::TextUnformatted("]");
+        ImGui::SameLine(0, 4.0f * scale);
+        ImGui::Text(u8"월");
+
+        if (yearDeactivatedAfterEdit)
+          UpdateYear((unsigned short)s_scenarioYearEdit);
+        if (monthDeactivatedAfterEdit) {
+          if (s_scenarioMonthEdit >= 1 && s_scenarioMonthEdit <= 12)
+            UpdateMonth((uint8_t)s_scenarioMonthEdit);
+          else
+            DX11Base::AddLog(u8"[시나리오 날짜] 월은 1~12만 가능합니다.");
+        }
+
+        // 매 프레임 VirtualQuery 폭주 방지: 짧게 스로틀 + 한 번에 연·월 읽기
+        if (!yearActive && !yearDeactivatedAfterEdit && !monthActive && !monthDeactivatedAfterEdit) {
+          static unsigned long long s_lastScenarioDatePoll = 0;
+          const unsigned long long now = GetTickCount64();
+          if (now - s_lastScenarioDatePoll >= 250ull) {
+            s_lastScenarioDatePoll = now;
+            unsigned short cy = 0;
+            uint8_t cm = 0;
+            if (ReadScenarioDate(&cy, &cm)) {
+              if ((int)cy != s_scenarioYearEdit)
+                s_scenarioYearEdit = (int)cy;
+              if ((int)cm != s_scenarioMonthEdit)
+                s_scenarioMonthEdit = (int)cm;
+            }
+          }
+        }
+      }
+      ImGui::PopID();
+
+      
       if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
         DX11Base::SetStartSetting(bStartSetting);
         NotifyFeatureToggle(u8"시나리오 수정", bStartSetting);
@@ -787,7 +847,7 @@ namespace DX11Base {
         NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
         SaveConfig();
       }
-
+      
       // [신규] 데모플레이 제어 버튼
       float demoBtnWidth = 140.0f * scale;
       // ImGui::Spacing();
