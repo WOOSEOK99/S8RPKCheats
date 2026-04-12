@@ -17,6 +17,7 @@
 #include "Cheats/SystemMonth.h"
 #include "Cheats/BattleMapShuffle.h"
 #include "Cheats/StatMonitor.h"
+#include "Cheats/SelectOfficercapture.h"
 
 namespace DX11Base {
 
@@ -76,28 +77,27 @@ void MonitorBattleStatus() {
 }
 
 void MonitorTechStatus() {
-    static uint8_t s_lastAppliedMonth = 0xFF; // 초기값 0xFF (0월 감지 가능하도록)
+    static uint8_t s_lastAppliedMonth = 0xFF;
 
-    // [2026-04-04] 월 비교를 통한 평정(Council) 자동 감지
     uint8_t sm = GetSystemMonthValue();
     uint8_t rm = GetCurrentMonth();
 
-    // 평정 조건: 시스템월(sm)과 실제월(rm)의 차이 기반 감지
-    // sm=0(1월), 3(4월), 6(7월), 9(10월) 일 때 rm이 1, 4, 7, 10 이면 평정
-    bool isCouncil = (sm % 3 == 0) && (rm == (sm % 12) + 1);
+    // [2026-04-12] 신규 포착 정보: gameBase+0xD0 (05:평정, 07:내정)
+    uintptr_t gameBase = DX11Base::GetGameBase();
+    uint8_t gameState = 0;
+    bool isCouncil = false;
+    if (gameBase && IsValidPtr(gameBase + 0xD0, 1)) {
+        gameState = *(uint8_t*)(gameBase + 0xD0);
+        isCouncil = (gameState == 0x05);
+    }
 
     if (isCouncil) {
         if (s_lastAppliedMonth != sm) {
-            AddLog(u8"[자동화] 평정(Council) 감지됨 (Sys:%d, Real:%d)", sm, rm);
-
             if (bDefBuilding) {
                 SetDefBuildingBoost(false);
                 SetDefBuildingBoost(true);
             }
-
-            // 능력치 99 -> 100 자동 보정
             UpdateOfficerStats99To100();
-
             s_lastAppliedMonth = sm; 
         }
     } else {
@@ -107,6 +107,7 @@ void MonitorTechStatus() {
     }
 
     UpdateBattleMapAuto(isCouncil);
+    UpdateAutoSpecialtyDistribution(isCouncil);
 }
 
 // 전투 상태 반환 함수 추가 (외부 모듈에서 현재 전투중인지 판별할 때 사용)

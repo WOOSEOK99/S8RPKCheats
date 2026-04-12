@@ -18,6 +18,7 @@ namespace DX11Base {
 
   extern bool bInfiniteAP;
   extern bool bFastJewel;
+  extern bool bAutoFillSpecialties; // 평정 종료 시 명품 자동 배분
   extern bool bBigCity;
   extern bool bBangmokCity;
   extern bool bNonggyeongCity;

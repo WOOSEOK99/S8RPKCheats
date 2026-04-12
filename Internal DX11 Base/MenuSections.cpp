@@ -173,7 +173,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::Separator();
+        // ImGui::Separator();
         // --- 대도시 전환 추가 ---
         bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
         if (wasBigCityRunning)
@@ -251,9 +251,14 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
           ImGui::EndTooltip();
         }
+        if (ImGui::Checkbox(u8"[도시] 명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
+          NotifyFeatureToggle(u8"[도시] 명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
+          SaveConfig();
+        }
+
         // -----------------------
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
+        // ImGui::Separator();
+        // ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
 
         if (ImGui::Checkbox(u8"내정 배율 적용", &bDomestics)) {
           ::DX11Base::SetDomesticsMult(bDomestics);

@@ -53,4 +53,5 @@ namespace DX11Base {
   void StartSpouseScannerAsync();
   void DrawSpouseListWindow(float scale);
   void DrawSpecialtyInfoWindow(float scale);
+  void UpdateAutoSpecialtyDistribution(bool isCouncil);
 } // namespace DX11Base

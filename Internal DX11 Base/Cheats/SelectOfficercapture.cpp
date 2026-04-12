@@ -374,6 +374,17 @@ namespace DX11Base {
         ImGui::TableSetColumnIndex(1);
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.6f, 1.0f), "%s", s_cachedCityName.c_str()); // 노란색 계열
+        if (bShowDebug) {
+          uintptr_t cityPtr = *(uintptr_t *)(pR + 0x20);
+          ImGui::SameLine();
+          ImGui::TextDisabled(u8"(%p)", (void *)cityPtr);
+          ImGui::SameLine();
+          if (ImGui::SmallButton(u8"복사##CityAddrCopy")) {
+            char buf[32];
+            sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)cityPtr);
+            ImGui::SetClipboardText(buf);
+          }
+        }
       }
 
       ImGui::TableNextRow();

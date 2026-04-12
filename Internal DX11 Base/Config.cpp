@@ -99,6 +99,7 @@ namespace DX11Base {
   static ConfigEntry g_Entries[] = {
       {"bInfiniteAP", u8"행동력 무한", &bInfiniteAP, nullptr, nullptr, false},
       {"bFastJewel", u8"보주교체 무제한", &bFastJewel, nullptr, nullptr, false},
+      {"bAutoFillSpecialties", u8"평정 시 남는 명품 자동 배분", &bAutoFillSpecialties, nullptr, nullptr, false},
       {"bBigCity", u8"대도시 전환", &bBigCity, &s_appBigCity, SetBigCityConvert, false},
       {"bBangmokCity", u8"방목도시 황폐화", &bBangmokCity, &s_appBangmokCity, SetBangmokCity, false},
       {"bNonggyeongCity", u8"농경도시 버프", &bNonggyeongCity, &s_appNonggyeongCity, SetNonggyeongCity, false},

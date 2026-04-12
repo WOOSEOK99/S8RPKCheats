@@ -1,4 +1,5 @@
 #include "Cheats.h"
+#include "Cheats/OfficerRosterResolve.h"
 #include "CityData.h"
 #include "MenuState.h"
 #include "OfficerData.h"
@@ -10,6 +11,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <random>
+#include <set>
 #include <unordered_map>
 
 // 한블럭의 크기 0x40(64byte)
@@ -189,6 +192,7 @@ namespace DX11Base {
         }
       }
       file.close();
+      s_specialityDefsLoaded = true;
       AddLog(u8"[명품] 정의 로드 완료: %s (%d개)", loadedPath.string().c_str(), (int)s_specialityNameById.size());
     }
 
@@ -218,7 +222,7 @@ namespace DX11Base {
       return it->second;
     }
 
-    static bool ResolveOwnerNameFromObj(uintptr_t objPtr, std::string &outName) {
+    static bool ResolveOwnerNameFromObj(uintptr_t objPtr, std::string &outName, uintptr_t cityArrayBase = 0) {
       outName.clear();
       objPtr = Ptr48(objPtr);
       if (objPtr <= 0x10000)
@@ -229,18 +233,32 @@ namespace DX11Base {
       ownerPtr = Ptr48(ownerPtr);
       if (ownerPtr <= 0x10000)
         return false;
-      uint16_t ownerId = 0;
-      if (!Read16(ownerPtr + 0x08, &ownerId) || ownerId < 1 || ownerId > 5102)
-        return false;
-      auto it = g_officerNames.find((int)ownerId);
-      if (it != g_officerNames.end())
-        outName = it->second;
-      else {
-        char buf[24];
-        snprintf(buf, sizeof(buf), u8"ID:%u", (unsigned)ownerId);
-        outName = buf;
+
+      // 도시 배열 베이스가 있으면 도시 주소인지 먼저 확인
+      if (cityArrayBase > 0x10000) {
+        constexpr uintptr_t kCityStride = 0x2A0;
+        for (int c = 0; c < g_CityCount; c++) {
+          if (ownerPtr == cityArrayBase + (uintptr_t)c * kCityStride) {
+            outName = std::string(g_CityList[c].cityname) + u8" (도시)";
+            return true;
+          }
+        }
       }
-      return true;
+
+      uint16_t ownerId = 0;
+      if (Read16(ownerPtr + 0x08, &ownerId) && ownerId >= 1 && ownerId <= 5102) {
+        auto it = g_officerNames.find((int)ownerId);
+        if (it != g_officerNames.end()) {
+          outName = it->second;
+          return true;
+        } else {
+          char buf[24];
+          snprintf(buf, sizeof(buf), u8"ID:%u", (unsigned)ownerId);
+          outName = buf;
+          return true;
+        }
+      }
+      return false;
     }
 
     static uintptr_t ResolveOfficerBaseById(uint16_t officerId) {
@@ -287,7 +305,10 @@ namespace DX11Base {
           {25, u8"기타"}, {26, u8"기증품"}};
 
       static const std::unordered_map<uint8_t, const char *> skillMap = {
-          {1, u8"과감"}, {18, u8"과감"}, {40, u8"과감"}, {22, u8"여력"}, {29, u8"여력"}, {35, u8"여력"}};
+          {1, u8"과감"},   {10, u8"발명"},  {13, u8"과감"},  {14, u8"과감"}, {16, u8"여력"},
+          {17, u8"여력"},  {24, u8"여력"},  {30, u8"여력"},  {32, u8"과감"}, {53, u8"과감"},
+          {54, u8"과감"},  {66, u8"축성"},  {71, u8"경작"},  {78, u8"화술"}, {87, u8"열변"},
+          {104, u8"신산"}, {105, u8"귀모"}, {107, u8"행군"}, {108, u8"행군"}};
 
       static const std::unordered_map<uint8_t, const char *> abilityMap = {
           {1, u8"통솔"}, {2, u8"무력"}, {3, u8"지력"}, {4, u8"정치"}, {5, u8"매력"}};
@@ -336,18 +357,254 @@ namespace DX11Base {
 
       return result;
     }
+
+    static bool HasSpecialtyAttributes(uintptr_t objPtr) {
+      if (objPtr <= 0x10000)
+        return false;
+
+      uint8_t skill = 0, ability = 0, effect = 0;
+      Read8(objPtr + 0x10, &skill);
+      Read8(objPtr + 0x22, &ability);
+      Read8(objPtr + 0x24, &effect);
+
+      // 정의된 맵에 ID가 존재하는 경우에만 유효한 속성으로 간주 (단순 0 체크 지양)
+      static const std::set<uint8_t> validSkills = {1,  10, 13, 14, 16, 17,  24,  30,  32,  53,
+                                                    54, 66, 71, 78, 87, 104, 105, 107, 108, 184};
+      static const std::set<uint8_t> validAbilities = {1, 2, 3, 4, 5};
+      static const std::set<uint8_t> validEffects = {1, 2, 3};
+
+      return (validSkills.count(skill) > 0 || validAbilities.count(ability) > 0 || validEffects.count(effect) > 0);
+    }
+
+    static uintptr_t s_lastResolvedSpBase = 0;
+
+    static void AssignRandomSpecialtiesToEmptySlots() {
+      uintptr_t cityArrayBase = ResolveCityArrayBase();
+      if (cityArrayBase <= 0x10000) {
+        AddLog(u8"[명품자동배분] 도시 데이터 베이스를 찾기 못했습니다.");
+        return;
+      }
+
+      // 1. 명품 베이스 주소 확보 (포인터 체인 우선)
+      uintptr_t spBase = 0;
+      uintptr_t exeBase = GetGameBase();
+      if (exeBase > 0x10000) {
+        TryResolveSpecialtyArrayBase(exeBase, &spBase);
+      }
+
+      // 포인터 체인이 실패하면 기존 역산 로직 사용
+      if (spBase <= 0x10000) {
+        constexpr uintptr_t kCityStride = 0x2A0;
+        const uintptr_t slotOffsets[3] = {0x248, 0x260, 0x278};
+        bool foundBase = false;
+        for (int c = 0; c < g_CityCount && !foundBase; c++) {
+          uintptr_t cityAddr = cityArrayBase + c * kCityStride;
+          for (int s = 0; s < 3 && !foundBase; s++) {
+            uintptr_t slotPtr = 0;
+            if (ReadPtr(cityAddr + slotOffsets[s], &slotPtr)) {
+              slotPtr = Ptr48(slotPtr);
+              if (slotPtr > 0x10000) {
+                uint16_t spId = 0;
+                if (Read16(slotPtr + 0x08, &spId) && spId > 0 && spId <= 300) {
+                  spBase = slotPtr - ((uintptr_t)(spId - 1) * 0x40);
+                  foundBase = true;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (spBase <= 0x10000) {
+        AddLog(u8"[명품자동배분] 명품 데이터 베이스를 찾지 못했습니다. (데이터 로딩 대기 중)");
+        return;
+      }
+      s_lastResolvedSpBase = spBase;
+
+      // 이름 정의 로드 확인
+      LoadSpecialityDefinitionsIfNeeded();
+
+      constexpr uintptr_t kCityStride = 0x2A0;
+      const uintptr_t slotOffsets[3] = {0x248, 0x260, 0x278};
+
+      // [추가] 현재 도시 슬롯에 이미 배치된 명품 주소들을 모두 수집 (중복 배분 방지)
+      std::set<uintptr_t> alreadyAssigned;
+      for (int c = 0; c < g_CityCount; c++) {
+        uintptr_t cityAddr = cityArrayBase + (uintptr_t)c * kCityStride;
+        for (int s = 0; s < 3; s++) {
+          uintptr_t slotAddr = cityAddr + slotOffsets[s];
+          uintptr_t slotObjPtr = 0;
+          if (ReadPtr(slotAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000) {
+            uintptr_t p = Ptr48(slotObjPtr);
+            uint16_t spId = 0;
+            // 소모품(250~254)은 중복 배분 허용하므로 체크에서 제외
+            if (Read16(p + 0x08, &spId) && (spId < 250 || spId > 254)) {
+              alreadyAssigned.insert(p);
+            }
+          }
+        }
+      }
+
+      // 2. 소유주가 없는 명품 수집 (ID 1 ~ 300 범위 탐색)
+      std::vector<uintptr_t> unownedSpecialties;
+      for (int i = 1; i <= 300; i++) {
+        // 이름 정의가 없는 ID는 빈 슬롯/더미로 간주하여 제외
+        if (s_specialityNameById.find(i) == s_specialityNameById.end())
+          continue;
+
+        uintptr_t objPtr = spBase + ((uintptr_t)(i - 1) * 0x40);
+
+        // 소모품(250~254)은 중복 사용이 가능하므로 이미 배치 여부 검사를 건너뜀
+        if (i < 250 || i > 254) {
+          if (alreadyAssigned.count(objPtr) > 0)
+            continue;
+        }
+
+        uint16_t readId = 0;
+        if (Read16(objPtr + 0x08, &readId) && readId == i) {
+          uintptr_t ownerPtr = 0;
+          if (ReadPtr(objPtr + 0x30, &ownerPtr)) {
+            ownerPtr = Ptr48(ownerPtr);
+            // 소유주가 없거나(0), 소유주 포인터가 가리키는 대상이 무효할 때
+            if (ownerPtr <= 0x10000) {
+              unownedSpecialties.push_back(objPtr);
+            }
+          }
+        }
+      }
+
+      // (고유 명품이 없더라도 빈 슬롯/무효 아이템 정리를 위해 계속 진행)
+      if (unownedSpecialties.empty()) {
+        // AddLog(u8"[명품자동배분] 배분할 새 고유 명품이 없습니다. 빈자리 정리 모드로 진행합니다.");
+      }
+
+      // 3. 비어있는 도시 슬롯 수집
+      struct EmptySlot {
+        uintptr_t cityAddr;
+        uintptr_t slotPtrAddr;
+        int slotIdx;
+      };
+      std::vector<EmptySlot> emptySlots;
+      for (int c = 0; c < g_CityCount; c++) {
+        uintptr_t cityAddr = cityArrayBase + (uintptr_t)c * kCityStride;
+        for (int s = 0; s < 3; s++) {
+          uintptr_t slotAddr = cityAddr + slotOffsets[s];
+          uintptr_t slotObjPtr = 0;
+          uint32_t enabled = 0;
+
+          // 슬롯 포인터가 비어있거나, 활성화되지 않았거나, 이름이 없는 무효 아이템인 경우 빈 슬롯으로 간주
+          bool hasPtr = ReadPtr(slotAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000;
+          bool okEnabled = Read32(slotAddr - 0x08, &enabled);
+          bool isEnabled = okEnabled && enabled != 0;
+
+          bool hasName = false;
+          if (hasPtr && isEnabled) {
+            uint16_t spIdFromObj = 0;
+            if (Read16(Ptr48(slotObjPtr) + 0x08, &spIdFromObj)) {
+              hasName = (s_specialityNameById.find((int)spIdFromObj) != s_specialityNameById.end());
+            }
+          }
+
+          // 포인터가 없거나, 활성화가 꺼져있거나, 이름이 없는 경우 모두 빈 슬롯으로 취급
+          if (!hasPtr || !isEnabled || !hasName) {
+            emptySlots.push_back({cityAddr, slotAddr, s});
+          }
+        }
+      }
+
+      if (emptySlots.empty()) {
+        AddLog(u8"[명품자동배분] 도시 슬롯에 남는 자리가 없습니다.");
+        return;
+      }
+
+      // 4. 랜덤 셔플 및 배분
+      std::random_device rd;
+      std::mt19937 g(rd());
+      std::shuffle(unownedSpecialties.begin(), unownedSpecialties.end(), g);
+      std::shuffle(emptySlots.begin(), emptySlots.end(), g);
+
+      int assignCount = (int)(std::min)(unownedSpecialties.size(), emptySlots.size());
+      int successCount = 0;
+      for (int i = 0; i < assignCount; i++) {
+        uintptr_t spObj = unownedSpecialties[i];
+        EmptySlot &target = emptySlots[i];
+
+        bool ok = true;
+        // 도시 슬롯에 명품 주소 쓰기
+        ok &= WritePtrSafe(target.slotPtrAddr, spObj);
+        // 명품 객체에 소유주(도시) 주소 쓰기
+        ok &= WritePtrSafe(spObj + 0x30, target.cityAddr);
+
+        // [수정] 소유주 타입 플래그 설정 (City=2) - 구매 시 프리징 해결 시도
+        ok &= Write32Safe(spObj + 0x38, 2);
+
+        // 슬롯 활성화 플래그 (Enabled=1, Bought=0)
+        ok &= Write32Safe(target.slotPtrAddr - 0x08, 1);
+        ok &= Write32Safe(target.slotPtrAddr + 0x08, 0);
+
+        if (ok)
+          successCount++;
+      }
+
+      // [추가] 남은 빈 슬롯이 있으면 소모품(251~254)으로 채우기
+      if (successCount < (int)emptySlots.size()) {
+        std::vector<int> consumableIds = {251, 252, 253, 254};
+        std::uniform_int_distribution<int> dist(0, (int)consumableIds.size() - 1);
+
+        for (int i = successCount; i < (int)emptySlots.size(); i++) {
+          EmptySlot &target = emptySlots[i];
+          int pickedId = consumableIds[dist(g)];
+          uintptr_t spObj = spBase + ((uintptr_t)(pickedId - 1) * 0x40);
+
+          WritePtrSafe(target.slotPtrAddr, spObj);
+          WritePtrSafe(spObj + 0x30, target.cityAddr);
+          Write32Safe(spObj + 0x38, 2);              // City Type
+          Write32Safe(target.slotPtrAddr - 0x08, 1); // Enabled
+          Write32Safe(target.slotPtrAddr + 0x08, 0); // Not Bought
+        }
+      }
+
+      AddLog(u8"[명품자동배분] 배분 결과: 총 %d개 명품을 빈 슬롯에 배치했습니다.", successCount);
+    }
   } // namespace
+
+  void UpdateAutoSpecialtyDistribution(bool isCouncil) {
+    if (!bAutoFillSpecialties)
+      return;
+
+    static bool s_lastCouncil = false;
+
+    // 평정 종료 시점 감지 (Council: true -> false)
+    if (!isCouncil && s_lastCouncil) {
+      AddLog(u8"[자동화] 평정 종료 감지 -> 남는 명품 자동 배분 시작");
+      AssignRandomSpecialtiesToEmptySlots();
+    }
+    s_lastCouncil = isCouncil;
+  }
 
   void DrawSpecialtyInfoWindow(float scale) {
     if (!bShowSpecialtyInfoWin)
       return;
     LoadSpecialityDefinitionsIfNeeded();
-
-    ImGui::SetNextWindowSize(ImVec2(600 * scale, 760 * scale), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(700 * scale, 760 * scale), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin(u8"명품 정보###SpecialtyInfoWin", &bShowSpecialtyInfoWin)) {
       ImGui::End();
       return;
     }
+
+    // 상단 수동 조작 영역
+    // ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.2f, 1.0f));
+    // if (ImGui::Button(u8"명품 강제 무작위 배분")) {
+    //   AssignRandomSpecialtiesToEmptySlots();
+    // }
+    // ImGui::PopStyleColor();
+
+    // ImGui::SameLine();
+    // if (ImGui::Button(u8"명품 정보 캐시 초기화")) {
+    //   s_lastResolvedSpBase = 0;
+    //   AddLog(u8"[명품] 명품 베이스 주소 캐시를 초기화했습니다.");
+    // }
+    // ImGui::Separator();
 
     // ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 도시별 명품 보유 현황 ]");
 #if 0
@@ -473,20 +730,16 @@ namespace DX11Base {
       if (ImGui::BeginTabItem(u8"도시별 명품 보유 현황")) {
         ImGuiTableFlags flags =
             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
-        if (ImGui::BeginTable("CitySpecialtyOverview", 6, flags, ImVec2(0, 620 * scale))) {
+        // 슬롯별 정보를 상세히 표시하기 위해 컬럼 구성을 단순화 (도시 + 슬롯 1,2,3)
+        if (ImGui::BeginTable("CitySpecialtyOverview", 4, flags, ImVec2(0, 620 * scale))) {
           ImGui::TableSetupColumn(u8"도시", ImGuiTableColumnFlags_WidthFixed, 90 * scale);
-          ImGui::TableSetupColumn(u8"슬롯1", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-          ImGui::TableSetupColumn(u8"슬롯2", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-          ImGui::TableSetupColumn(u8"슬롯3", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-          ImGui::TableSetupColumn(u8"구매가능", ImGuiTableColumnFlags_WidthFixed, 85 * scale);
-          ImGui::TableSetupColumn(u8"구매완료", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+          ImGui::TableSetupColumn(u8"슬롯 1", ImGuiTableColumnFlags_WidthStretch);
+          ImGui::TableSetupColumn(u8"슬롯 2", ImGuiTableColumnFlags_WidthStretch);
+          ImGui::TableSetupColumn(u8"슬롯 3", ImGuiTableColumnFlags_WidthStretch);
           ImGui::TableHeadersRow();
 
           for (int cityIdx = 0; cityIdx < g_CityCount; cityIdx++) {
             uintptr_t cityAddr = cityArrayBase + (uintptr_t)cityIdx * kCityStride;
-            bool hasBuyable = false;
-            bool hasBought = false;
-            std::vector<std::string> boughtOwners;
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
@@ -505,68 +758,85 @@ namespace DX11Base {
               bool hasData = okSlotPtr && slotObjPtr > 0x10000;
               bool isEnabled = okEnabled && enabled != 0;
               bool isBought = okBought && bought != 0;
-              if (hasData && isEnabled && !isBought)
-                hasBuyable = true;
-              if (isBought)
-                hasBought = true;
 
               ImGui::TableSetColumnIndex(slot + 1);
-              if (!hasData) {
-                ImGui::TextUnformatted(u8"-");
+              // [중요] 게임상에서 활성화되지 않은 슬롯은 데이터가 있어도 빈 슬롯(-)으로 표시
+              if (!hasData || !isEnabled) {
+                ImGui::TextDisabled("-");
                 continue;
               }
 
               std::string specialityName;
               uint16_t specialityNo = 0;
-              ResolveSpecialityNameAndNo(slotObjPtr, specialityName, &specialityNo);
-              char label[256];
-              if (!specialityName.empty())
-                snprintf(label, sizeof(label), "%s##sp_%d_%d", specialityName.c_str(), cityIdx, slot);
-              else if (specialityNo > 0)
-                snprintf(label, sizeof(label), "No.%u##sp_%d_%d", (unsigned)specialityNo, cityIdx, slot);
-              else
-                snprintf(label, sizeof(label), u8"판매중##sp_%d_%d", cityIdx, slot);
-              if (ImGui::Selectable(label, false, 0)) {
+              bool nameResolved = ResolveSpecialityNameAndNo(slotObjPtr, specialityName, &specialityNo);
+
+              // 이름이 없는 경우 (fallback No.XXX 포함) ? 로 표시
+              if (!nameResolved || specialityName.empty()) {
+                ImGui::TextDisabled("?");
+                continue;
+              }
+
+              bool isSelected = (s_selectedSpecialtyObj == slotObjPtr);
+              char label[128];
+              snprintf(label, sizeof(label), "%s##sp_%d_%d", specialityName.c_str(), cityIdx, slot);
+
+              // 1. 선택 가능한 텍스트 (셀 전체 영역)
+              float startX = ImGui::GetCursorPosX();
+              float columnWidth = ImGui::GetColumnWidth();
+
+              // 등급별 색상 선정 (가치 50+ 는 분홍색, 속성보유는 노란색)
+              uint8_t spValue = 0;
+              Read8(slotObjPtr + 0x26, &spValue);
+              bool hasAttr = HasSpecialtyAttributes(slotObjPtr);
+
+              if (spValue >= 50) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.9f, 1.0f)); // 분홍색
+              } else if (hasAttr) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.0f, 1.0f)); // 황금색
+              }
+
+              ImGui::BeginGroup();
+              if (ImGui::Selectable(label, isSelected, ImGuiSelectableFlags_AllowItemOverlap)) {
                 s_selectedSpecialtyObj = slotObjPtr;
                 s_selectedSpecialtySlotAddr = slotAddr;
-                s_selectedSpecialtyName = specialityName.empty()
-                                              ? std::string(label).substr(0, std::string(label).find("##"))
-                                              : specialityName;
+                s_selectedSpecialtyName = specialityName;
                 s_selectedSpecialtyDesc = ResolveSpecialityDescByNo(specialityNo);
               }
 
-              if (isBought) {
-                std::string ownerText;
-                if (ResolveOwnerNameFromObj(slotObjPtr, ownerText) && !ownerText.empty()) {
-                  bool exists = false;
-                  for (const auto &n : boughtOwners) {
-                    if (n == ownerText) {
-                      exists = true;
-                      break;
-                    }
-                  }
-                  if (!exists)
-                    boughtOwners.push_back(ownerText);
-                }
+              if (spValue >= 50 || hasAttr) {
+                ImGui::PopStyleColor();
               }
-            }
 
-            ImGui::TableSetColumnIndex(4);
-            ImGui::TextUnformatted(hasBuyable ? u8"구매가능" : u8"-");
-            ImGui::TableSetColumnIndex(5);
-            if (hasBought) {
-              std::string ownersJoined;
-              for (size_t i = 0; i < boughtOwners.size(); i++) {
-                if (i > 0)
-                  ownersJoined += ", ";
-                ownersJoined += boughtOwners[i];
+              // 2. 우측 상태 태그 (Selectable 위에 겹쳐서 출력)
+              ImGui::SameLine();
+
+              std::string statusText;
+              ImVec4 statusColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+              bool isNormalStatus = true;
+
+              if (isBought) {
+                std::string ownerName;
+                if (ResolveOwnerNameFromObj(slotObjPtr, ownerName, cityArrayBase)) {
+                  statusText = u8"[소유:" + ownerName + u8"]";
+                  statusColor = ImVec4(1.0f, 0.6f, 0.2f, 1.0f);
+                } else {
+                  statusText = u8"[구매완료]";
+                  statusColor = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+                }
+              } else if (isEnabled) {
+                statusText = u8"[구매가능]";
+                statusColor = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+              } else {
+                statusText = u8"[-]";
+                isNormalStatus = false;
               }
-              if (!ownersJoined.empty())
-                ImGui::Text(u8"소유자:%s", ownersJoined.c_str());
-              else
-                ImGui::TextUnformatted(u8"구매완료");
-            } else {
-              ImGui::TextUnformatted(u8"-");
+
+              if (isNormalStatus) {
+                float textWidth = ImGui::CalcTextSize(statusText.c_str()).x;
+                ImGui::SetCursorPosX(startX + columnWidth - textWidth - 5.0f * scale);
+                ImGui::TextColored(statusColor, "%s", statusText.c_str());
+              }
+              ImGui::EndGroup();
             }
           }
           ImGui::EndTable();
@@ -602,7 +872,7 @@ namespace DX11Base {
           if (ImGui::BeginTable("SpecialtyAllList", 3, flags2, ImVec2(0, 620 * scale))) {
             ImGui::TableSetupColumn(u8"ID", ImGuiTableColumnFlags_WidthFixed, 40 * scale);
             ImGui::TableSetupColumn(u8"명품 이름", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-            ImGui::TableSetupColumn(u8"위치/소유자", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+            ImGui::TableSetupColumn(u8"위치/소유자", ImGuiTableColumnFlags_WidthStretch, 1.2f);
             ImGui::TableHeadersRow();
 
             std::vector<int> sortedIds;
@@ -624,6 +894,18 @@ namespace DX11Base {
               std::string name = s_specialityNameById[spId];
               char label[256];
               snprintf(label, sizeof(label), "%s##allsp_%d", name.c_str(), spId);
+
+              // 등급별 색상 선정
+              uint8_t spValue = 0;
+              Read8(objPtr + 0x26, &spValue);
+              bool hasAttr = HasSpecialtyAttributes(objPtr);
+
+              if (spValue >= 50) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.9f, 1.0f)); // 분홍색
+              } else if (hasAttr) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.0f, 1.0f)); // 황금색
+              }
+
               if (ImGui::Selectable(label, false, ImGuiSelectableFlags_SpanAllColumns)) {
                 s_selectedSpecialtyObj = objPtr;
                 s_selectedSpecialtySlotAddr = 0;
@@ -631,37 +913,16 @@ namespace DX11Base {
                 s_selectedSpecialtyDesc = ResolveSpecialityDescByNo(spId);
               }
 
+              if (spValue >= 50 || hasAttr) {
+                ImGui::PopStyleColor();
+              }
+
               ImGui::TableSetColumnIndex(2);
               std::string ownerStr = u8"없음";
-              uintptr_t ownerPtr = 0;
-              if (ReadPtr(objPtr + 0x30, &ownerPtr)) {
-                ownerPtr = Ptr48(ownerPtr);
-                if (ownerPtr > 0x10000) {
-                  bool isCity = false;
-                  for (int c = 0; c < g_CityCount; c++) {
-                    if (ownerPtr == cityArrayBase + c * kCityStride) {
-                      ownerStr = std::string(g_CityList[c].cityname) + u8" (도시)";
-                      isCity = true;
-                      break;
-                    }
-                  }
-                  if (!isCity) {
-                    uint16_t ownerId = 0;
-                    if (Read16(ownerPtr + 0x08, &ownerId) && ownerId >= 1 && ownerId <= 5102) {
-                      if (g_officerNames.count((int)ownerId)) {
-                        ownerStr = g_officerNames[(int)ownerId];
-                      } else {
-                        ownerStr = u8"장수:" + std::to_string(ownerId);
-                      }
-                    } else {
-                      ownerStr = u8"알수없음";
-                    }
-                  }
-                }
+              if (!ResolveOwnerNameFromObj(objPtr, ownerStr, cityArrayBase)) {
+                ownerStr = u8"없음";
               }
               ImGui::TextUnformatted(ownerStr.c_str());
-
-              // 설명 컬럼 제거됨
             }
             ImGui::EndTable();
           }
