@@ -1,0 +1,4 @@
+EXPORTS
+    CreateDXGIFactory=Proxy_CreateDXGIFactory
+    CreateDXGIFactory1=Proxy_CreateDXGIFactory1
+    CreateDXGIFactory2=Proxy_CreateDXGIFactory2

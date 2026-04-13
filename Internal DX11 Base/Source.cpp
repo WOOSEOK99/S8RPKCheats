@@ -225,6 +225,8 @@ void ClientBGThread()
 }
 
 DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
+    // [중요] 초기화 안정성을 위해 5초 대기
+    Sleep(5000);
 
     UNREFERENCED_PARAMETER(dwModule);
     // quick debug popup removed
