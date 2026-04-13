@@ -7,7 +7,7 @@ namespace DX11Base {
   extern bool bSpeedHack;
 
   void SpeedHack_Init();
-  void SpeedHack_Update();
+  void SpeedHack_Update(uintptr_t p1);
   void SpeedHack_Sleep_Install();
 
 } // namespace DX11Base

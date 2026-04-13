@@ -167,12 +167,13 @@ namespace DX11Base {
     SpeedHack_Sleep_Install();
   }
   
-  void SpeedHack_Update() {
+  void SpeedHack_Update(uintptr_t p1) {
     if (!s_installed) {
       SpeedHack_Init();
     }
     
-    float desired = bSpeedHack ? g_speedMultiplier : 1.0f;
+    // p1이 0x10000 이상일 때만 (즉 인게임 진입 후) 작동 허용, 그 외엔 기본 속도.
+    float desired = (bSpeedHack && p1 > 0x10000) ? g_speedMultiplier : 1.0f;
     float current = s_multiplier.load();
     
     if (current != desired) {

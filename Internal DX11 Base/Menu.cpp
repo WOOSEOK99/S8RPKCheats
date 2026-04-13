@@ -211,7 +211,7 @@ namespace DX11Base {
     RoninMonitor_Tick(p1);
 
     // 2026-04-04 배속 상태 동기화
-    SpeedHack_Update();
+    SpeedHack_Update(p1);
 
     // [추가] 전기 주소 캡처 감시 (알림 발생용)
     DX11Base::TengiCave_Tick();
@@ -443,7 +443,7 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {
         NotifyFeatureToggle(u8"배속", bSpeedHack);
-        SpeedHack_Update();
+        SpeedHack_Update(p1);
         SaveConfig();
       }
 
@@ -461,7 +461,7 @@ namespace DX11Base {
         if (g_speedMultiplier < 0.1f)
           g_speedMultiplier = 0.1f;
 
-        SpeedHack_Update();
+        SpeedHack_Update(p1);
         SaveConfig();
       }
 
@@ -469,7 +469,7 @@ namespace DX11Base {
 
       ImGui::SetNextItemWidth(100.0f * scale);
       if (ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx")) {
-        SpeedHack_Update();
+        SpeedHack_Update(p1);
         SaveConfig();
       }
 
@@ -481,7 +481,7 @@ namespace DX11Base {
         if (g_speedMultiplier > 5.0f)
           g_speedMultiplier = 5.0f;
 
-        SpeedHack_Update();
+        SpeedHack_Update(p1);
         SaveConfig();
       }
 
