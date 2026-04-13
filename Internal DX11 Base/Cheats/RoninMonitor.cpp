@@ -46,7 +46,7 @@ namespace DX11Base {
     static uint8_t s_lastSystemMonth = 0xFF;
 
     // unordered_map 대신 고정 배열 – O(1) 접근, 할당 오버헤드 없음
-    static uint8_t s_prevStatuses[5103] = {};
+    static bool s_isRonin[5103] = {false};
 
     // Tick(배경)과 Draw(UI)가 공유 – 짧은 잠금으로만 보호
     static std::mutex s_notifMtx;
@@ -56,7 +56,7 @@ namespace DX11Base {
   // 외부(수동 조작) 동기화
   void RoninMonitor_UpdatePrevStatus(int id, uint8_t st) {
     if (id >= 1 && id <= 5102)
-      s_prevStatuses[id] = st;
+      s_isRonin[id] = (st == 0x58);
   }
 
   // ---------------------------------------------------------------------------
@@ -64,32 +64,20 @@ namespace DX11Base {
     if (s_baseResolved)
       return true;
 
+    if (!p1)
+      return false;
+
     // 1) 포인터 체인을 통한 안정적인 해상도 (SelectOfficercapture 방식)
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
     uintptr_t chainBase = 0;
     if (exeBase && TryResolveOfficerRosterArrayBase(exeBase, &chainBase) && chainBase > 0x10000) {
       s_arrayBase = chainBase;
       s_baseResolved = true;
-      AddLog(u8"[RoninMonitor] 무장 배열 확보(안정): 0x%llX", (unsigned long long)s_arrayBase);
+      AddLog(u8"[RoninMonitor] 무장 배열 확보: 0x%llX", (unsigned long long)s_arrayBase);
       return true;
     }
 
-    // 2) Fallback: 기존 주인공 주소 기반 역산 (위 방법 실패 시에만 수행)
-    if (!p1 || p1 < 0x10000 || !IsValidPtr(p1, 0x10))
-      return false;
-
-    unsigned short heroID = *(unsigned short *)(p1 + 0x08);
-    if (heroID == 0 || heroID > 5102)
-      return false;
-
-    uintptr_t candidate = p1 - (uintptr_t)(heroID - 1) * 0x3D0;
-    if (!IsValidPtr(candidate, 0x20))
-      return false;
-
-    s_arrayBase = candidate;
-    s_baseResolved = true;
-    AddLog(u8"[RoninMonitor] 무장 배열 확보(Fallback): 0x%llX (영웅 ID %d)", (unsigned long long)s_arrayBase, (int)heroID);
-    return true;
+    return false;
   }
 
   // ---------------------------------------------------------------------------
@@ -99,7 +87,7 @@ namespace DX11Base {
     if (!bMonitorRonin) {
       s_initialized = s_baseResolved = false;
       s_arrayBase = 0;
-      memset(s_prevStatuses, 0, sizeof(s_prevStatuses));
+      memset(s_isRonin, 0, sizeof(s_isRonin));
       s_lastSystemMonth = 0xFF;
       {
         std::lock_guard<std::mutex> lk(s_notifMtx);
@@ -146,6 +134,7 @@ namespace DX11Base {
 
     // 전수 조사 – 4KB 페이지 단위 유효성 체크 (~50회 vs 5102회)
     std::vector<RoninNotification> found;
+    std::vector<std::string> initialRonins;
 
     // ⑤ 도시 배열 주소 획득 (가급적 한 번만 수행)
     if (s_cityBase <= 0x10000) {
@@ -164,6 +153,9 @@ namespace DX11Base {
 
     uintptr_t lastPage = 0;
     bool pageOk = false;
+
+    // 가비지 데이터(예: 배열 뒤편의 쓰레기값)가 동일한 realID를 가질 경우 반복 갱신되는 버그 방어
+    bool seenThisTick[5103] = {false};
 
     for (int i = 1; i <= 5102; i++) {
       uintptr_t addr = s_arrayBase + (uintptr_t)(i - 1) * 0x3D0;
@@ -185,26 +177,60 @@ namespace DX11Base {
       if (realID == 0 || realID > 5102)
         continue;
 
+      // 이미 이번 틱에서 읽은 ID라면 중복 가비지로 간주하고 스킵
+      if (seenThisTick[realID])
+        continue;
+      seenThisTick[realID] = true;
+
       uint8_t cur = *(uint8_t *)(addr + 0x10);
-      uint8_t prev = s_prevStatuses[realID];
-      s_prevStatuses[realID] = cur;
-
-      // 어떤 상태에서든 재야(0x58)로 바뀌면 감지 (미발견, 사망, 재직 등 포함)
-      if (s_initialized && prev != 0x58 && cur == 0x58) {
-        std::string name = g_officerNames.count(realID) ? g_officerNames[realID] : (u8"미등록 무장(ID:" + std::to_string(realID) + u8")");
-        std::string city = u8"알 수 없는 장소";
-        if (cityBase > 0x10000) {
-          uintptr_t cityPtr = *(uintptr_t *)(addr + 0x20);
-          if (cityPtr >= cityBase) {
-            int idx = (int)((cityPtr - cityBase) / 0x2A0);
-            if (idx >= 0 && idx < g_CityCount) {
-              city = g_CityList[idx].cityname;
-            }
-          }
+      
+      if (!s_initialized) {
+        // 첫 스캔: 재야(0x58) 무장만 추출해서 저장, 알림 없음
+        bool isRonin = (cur == 0x58);
+        s_isRonin[realID] = isRonin;
+        if (isRonin) {
+          std::string name = g_officerNames.count(realID) ? g_officerNames[realID] : (u8"미등록 무장(ID:" + std::to_string(realID) + u8")");
+          initialRonins.push_back(name);
         }
-
-        found.push_back({name, city, 12.f});
+      } else {
+        // 이후 스캔: 재야 무장에 추가되었는지 확인
+        if (cur == 0x58) {
+          if (!s_isRonin[realID]) {
+            // 새로 추가된 경우 알림
+            std::string name = g_officerNames.count(realID) ? g_officerNames[realID] : (u8"미등록 무장(ID:" + std::to_string(realID) + u8")");
+            std::string city = u8"알 수 없는 장소";
+            if (cityBase > 0x10000) {
+              uintptr_t cityPtr = *(uintptr_t *)(addr + 0x20);
+              if (cityPtr >= cityBase) {
+                int idx = (int)((cityPtr - cityBase) / 0x2A0);
+                if (idx >= 0 && idx < g_CityCount) {
+                  city = g_CityList[idx].cityname;
+                }
+              }
+            }
+            found.push_back({name, city, 12.f});
+            s_isRonin[realID] = true;
+          }
+        } else {
+          // 재야가 아닌 경우
+          s_isRonin[realID] = false;
+        }
       }
+    }
+    
+    if (!s_initialized && !initialRonins.empty()) {
+        std::string logBuf = u8"[RoninMonitor] 최초 재야장수 목록: ";
+        for (size_t i = 0; i < initialRonins.size(); i++) {
+           logBuf += initialRonins[i];
+           if (i + 1 < initialRonins.size()) logBuf += u8", ";
+           if (logBuf.length() > 500) {
+               AddLog(u8"%s", logBuf.c_str());
+               logBuf = u8"[RoninMonitor] 최초 재야장수 계속: ";
+           }
+        }
+        if (logBuf.length() > 50) { // "[RoninMonitor] 최초 재야장수 계속: "보다 길 때만
+            AddLog(u8"%s", logBuf.c_str());
+        }
     }
     s_initialized = true;
 

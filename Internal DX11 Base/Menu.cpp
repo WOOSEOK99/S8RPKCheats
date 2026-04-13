@@ -88,6 +88,17 @@ namespace DX11Base {
     const bool p1Ready = s_loopP1Ready;
     const bool gameBaseReady = s_loopGameBaseReady;
 
+    // 초기 설정 지연 로드 (안정성을 위해 GameBase가 최초로 사용 가능해진 시점에 로드)
+    static bool s_configLoaded = false;
+    if (gameBaseReady && !s_configLoaded) {
+      DX11Base::LoadConfig();
+      if (DX11Base::bAutoLoadMenu) {
+        g_Engine->bShowMenu = true;
+      }
+      s_configLoaded = true;
+      DX11Base::AddLog(u8"[System] GameBase 설정 준비 완료. 사용자 설정 불러오기 시작.");
+    }
+
     // 무한 행동력
     if (bInfiniteAP) {
       if (p1Ready && IsValidPtr(p1 + 0xEE, 1))
@@ -429,37 +440,51 @@ namespace DX11Base {
       ImGui::Spacing();
 
       ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
+
       if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {
         NotifyFeatureToggle(u8"배속", bSpeedHack);
         SpeedHack_Update();
         SaveConfig();
       }
+
       ImGui::PopStyleColor();
 
       ImGui::SameLine();
-      // [-] 버튼 - 높이를 0으로 두어 슬라이더와 동일한 자동 높이 사용 (히트박스 일치)
+
+      // 🔥 모드 선택 추가 (핵심)
+      // 모드 선택 제거 (QPC 필터링 적용으로 통합됨)
+
+
+      // [-] 버튼
       if (ImGui::Button("-##SpeedMinus", ImVec2(25 * scale, 0))) {
         g_speedMultiplier -= 0.1f;
         if (g_speedMultiplier < 0.1f)
           g_speedMultiplier = 0.1f;
+
         SpeedHack_Update();
         SaveConfig();
       }
+
       ImGui::SameLine();
+
       ImGui::SetNextItemWidth(100.0f * scale);
       if (ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx")) {
         SpeedHack_Update();
         SaveConfig();
       }
+
       ImGui::SameLine();
-      // [+] 버튼 - 높이를 0으로 두어 슬라이더와 동일한 자동 높이 사용 (히트박스 일치)
+
+      // [+] 버튼
       if (ImGui::Button("+##SpeedPlus", ImVec2(25 * scale, 0))) {
         g_speedMultiplier += 0.1f;
         if (g_speedMultiplier > 5.0f)
           g_speedMultiplier = 5.0f;
+
         SpeedHack_Update();
         SaveConfig();
       }
+
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"0.1 = 슬로우, 1.0 = 정상, 2.0 = 2배속, 최대 5배속");

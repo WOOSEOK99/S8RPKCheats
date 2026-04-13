@@ -249,12 +249,7 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
         }
     }).detach();
 
-    // [추가] 파일에서 이전 설정값만 읽어옴 (지연 적용은 Menu::Loops에서 수행)
-    DX11Base::LoadConfig();
-
-    if (DX11Base::bAutoLoadMenu) {
-        g_Engine->bShowMenu = true;
-    }
+    // Config Loading and Initial AutoLoad is now deferred to Menu::Loops() when p1 becomes valid
 
     g_D3D11Window->HookD3D();
     g_Hooking->Initialize();

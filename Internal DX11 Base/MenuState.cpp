@@ -64,8 +64,6 @@ namespace DX11Base {
   bool bSangbyeongCondition = false; // 상병 습득 조건 해제
   bool bFactionLordBonus = false;    // 세력 군주 보너스 자동 배정
   bool bCancelTengi = false;         // 2026-04-05 전기발생 취소
-  bool bSpeedHack = false;           // 2026-04-04 배속
-  float g_speedMultiplier = 2.0f;    // 2026-04-04 기본 2배속
   bool bShowSelectedOfficerWin = false;
   bool bShowOfficerListWin = false;
   bool bShowSpouseListWin = false;

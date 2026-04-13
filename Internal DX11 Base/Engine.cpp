@@ -1,5 +1,6 @@
 #include "Engine.h"
 #include "Cheats/RoninMonitor.h"
+#include "Cheats/SpeedHack.h"
 #include "Fonts.h"
 #include "Framework/imgui.h"
 #include "Framework/imgui_impl_dx11.h"
@@ -65,7 +66,7 @@ namespace DX11Base {
     bool bWantKbd = ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
 
     if (bAnyUIOpen) {
-      // 1. IME 전처리: 조합창(미리보기) 강제 표시 설정 
+      // 1. IME 전처리: 조합창(미리보기) 강제 표시 설정
       if (msg == WM_IME_SETCONTEXT) {
         lParam |= ISC_SHOWUICOMPOSITIONWINDOW;
         return DefWindowProc(hWnd, msg, TRUE, lParam);
@@ -116,9 +117,11 @@ namespace DX11Base {
       }
 
       // 4. 중복 입력 방지: 이미 GCS_RESULTSTR에서 처리한 글자(WM_IME_CHAR, WM_CHAR)는 차단
-      if (msg == WM_IME_CHAR) return 0;
+      if (msg == WM_IME_CHAR)
+        return 0;
       if (msg == WM_CHAR) {
-        if (wParam >= 0x0080) return 0; // 한글/특수문자는 위에서 처리됨
+        if (wParam >= 0x0080)
+          return 0; // 한글/특수문자는 위에서 처리됨
       }
 
       // 5. 기타 키보드 메시지 ImGui 전달 및 게임 차단
@@ -135,10 +138,16 @@ namespace DX11Base {
                         (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor);
       if (!DX11Base::bAllowGameClick && !DX11Base::bShowDebug && bHardBlock) {
         switch (msg) {
-        case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
-        case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
-        case WM_MOUSEMOVE: case WM_MOUSEWHEEL:
-          if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return 1;
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_LBUTTONDBLCLK:
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+        case WM_RBUTTONDBLCLK:
+        case WM_MOUSEMOVE:
+        case WM_MOUSEWHEEL:
+          if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+            return 1;
           return 1;
         }
       }
@@ -152,9 +161,33 @@ namespace DX11Base {
 
     return DefWindowProc(hWnd, msg, wParam, lParam);
   }
+#if false // 기존 코드
+  HRESULT APIENTRY D3D11Window::SwapChain_Present_hook(IDXGISwapChain *pSwapChain, UINT SyncInterval, UINT Flags) {
+    // g_D3D11Window->Overlay(pSwapChain);
+    // 수정
+    if (IsAnyUIOpen() || ImGui::GetIO().WantTextInput) {
+      g_D3D11Window->Overlay(pSwapChain);
+    }
+    return g_D3D11Window->IDXGISwapChain_Present_stub(pSwapChain, SyncInterval, Flags);
+  }
+#endif
+
+  // HRESULT APIENTRY D3D11Window::SwapChain_Present_hook(IDXGISwapChain *pSwapChain, UINT SyncInterval, UINT Flags) {
+  //   // 🔥 UI 있을 때만 Overlay 실행
+  //   if (IsAnyUIOpen()) {
+  //     g_D3D11Window->Overlay(pSwapChain);
+  //   }
+
+  //   return g_D3D11Window->IDXGISwapChain_Present_stub(pSwapChain, SyncInterval, Flags);
+  // }
 
   HRESULT APIENTRY D3D11Window::SwapChain_Present_hook(IDXGISwapChain *pSwapChain, UINT SyncInterval, UINT Flags) {
-    g_D3D11Window->Overlay(pSwapChain);
+    using namespace DX11Base;
+
+    if (IsAnyUIOpen()) {
+      g_D3D11Window->Overlay(pSwapChain);
+    }
+
     return g_D3D11Window->IDXGISwapChain_Present_stub(pSwapChain, SyncInterval, Flags);
   }
 
@@ -188,9 +221,13 @@ namespace DX11Base {
       AddLog(u8"[System] D3D11 VTable 가로채기 시작...");
       Hooking::CreateHook((void *)MethodsTable[IDXGI_PRESENT], &SwapChain_Present_hook,
                           (void **)&IDXGISwapChain_Present_stub);
-      Hooking::CreateHook((void *)MethodsTable[IDXGI_RESIZE_BUFFERS], &SwapChain_ResizeBuffers_hook,
-                          (void **)&IDXGISwapChain_ResizeBuffers_stub);
+      // Hooking::CreateHook((void *)MethodsTable[IDXGI_RESIZE_BUFFERS], &SwapChain_ResizeBuffers_hook,
+      //                     (void **)&IDXGISwapChain_ResizeBuffers_stub);
       bInit = true;
+
+      // 🔥 여기 추가
+      DX11Base::SpeedHack_Sleep_Install();
+
       AddLog(u8"[Success] Direct3D 11 후킹 성공!");
       return true;
     }
@@ -352,13 +389,13 @@ namespace DX11Base {
       koFont.MergeMode = true;
       koFont.PixelSnapH = true;
       static const ImWchar ranges[] = {0x0020, 0x00FF, 0x2000, 0x2BFF, 0xAC00, 0xD7A3, 0};
-      
-      const char* fontPath = "C:\\Windows\\Fonts\\malgun.ttf";
+
+      const char *fontPath = "C:\\Windows\\Fonts\\malgun.ttf";
       if (GetFileAttributesA(fontPath) != INVALID_FILE_ATTRIBUTES) {
-          io.Fonts->AddFontFromFileTTF(fontPath, baseFontSize, &koFont, ranges);
+        io.Fonts->AddFontFromFileTTF(fontPath, baseFontSize, &koFont, ranges);
       } else {
-          // 폰트가 없을 경우 기본 폰트로 병합 시도 (실패 방지)
-          DX11Base::AddLog(u8"[Warn] 맑은 고딕 폰트를 찾을 수 없습니다: %s", fontPath);
+        // 폰트가 없을 경우 기본 폰트로 병합 시도 (실패 방지)
+        DX11Base::AddLog(u8"[Warn] 맑은 고딕 폰트를 찾을 수 없습니다: %s", fontPath);
       }
       io.Fonts->Build();
 
@@ -424,9 +461,14 @@ namespace DX11Base {
     s_prevAnyUIOpen = currAnyUIOpen;
     s_prevWantText = currWantText;
 
-    Menu::Render();
+    // Menu::Render();
 
-    // 2026-04-04 재야장수 모니터링 알림상 렌더링 (RoninMonitor 모듈)
+    // // 2026-04-04 재야장수 모니터링 알림상 렌더링 (RoninMonitor 모듈)
+    // RoninMonitor_Draw();
+
+    if (currAnyUIOpen) {
+      Menu::Render();
+    }
     RoninMonitor_Draw();
 
     ImGui::EndFrame();

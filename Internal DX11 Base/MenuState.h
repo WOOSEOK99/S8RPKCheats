@@ -75,8 +75,6 @@ namespace DX11Base {
   extern bool bYumokCondition;      // 유목기병 습득 조건 해제
   extern bool bSangbyeongCondition; // 상병 습득 조건 해제
   extern bool bFactionLordBonus;    // 세력 군주 보너스 자동 배정
-  extern bool bSpeedHack;           // 2026-04-04 배속
-  extern float g_speedMultiplier;   // 2026-04-04 배속 배율 (0.1x ~ 5.0x)
 
   extern bool bShowSelectedOfficerWin;
   extern bool bShowOfficerListWin;

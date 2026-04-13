@@ -43,7 +43,7 @@
 #include "Cheats/TengiCave.h"
 #include "Cheats/Terrainignore.h"
 #include "Cheats/DomesticsMult.h"
-
+#include "Cheats/SpeedHack.h"
 
 namespace DX11Base {
   extern HMODULE g_hModule;
