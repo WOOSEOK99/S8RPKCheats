@@ -1,5 +1,7 @@
 #include "StartSetting.h"
 #include "Cheats.h"
+#include "MemoryUtils.h"
+#include "MonthCapture.h"
 #include "NotificationManager.h"
 #include "pch.h"
 #include "showlog.h"
@@ -78,21 +80,19 @@ namespace DX11Base {
 
   static void RunOnce() {
     uintptr_t root = ResolveRoot();
-    if (!root)
+    if (!root) {
       return;
+    }
 
     uintptr_t yearAddr = root + 0x49EB06;
-    if (!IsValidPtr(yearAddr, 2))
+    if (!IsValidPtr(yearAddr, 2)) {
       return;
+    }
     int16_t yearVal = *(int16_t *)yearAddr;
 
     if (yearVal != 0) {
       g_flag1 = g_flag2 = g_flag3 = g_flag4 = g_flag5 = false;
       g_loggedRelationSwap = false;
-      if (!g_loggedYearNotZero) {
-        AddLog(u8"[시작설정] 대기: year=%d (0이 아님)", (int)yearVal);
-        g_loggedYearNotZero = true;
-      }
       return;
     }
     g_loggedYearNotZero = false;
@@ -116,15 +116,12 @@ namespace DX11Base {
           g_loggedRelationNoMatch = false;
           g_loggedRelationAlreadyApplied = false;
           if (!g_loggedRelationWaiting) {
-            AddLog(u8"[시작설정][관계] 대기: revenge/enemy 슬롯이 아직 비어있음 (rev=%p, enemy=%p)", (void *)revengeVal,
-                   (void *)enemyVal);
             g_loggedRelationWaiting = true;
           }
         } else if (condSwapNeeded && !g_flag1) {
           g_loggedRelationWaiting = false;
           g_loggedRelationAlreadyApplied = false;
           if (!g_loggedRelationSwap) {
-            AddLog(u8"[시작설정][관계] swap 전: revengeSlot=%p enemySlot=%p", (void *)revengeAddr, (void *)enemyAddr);
             LogOfficerPtrBrief("revenge(current)", revengeVal);
             LogOfficerPtrBrief("enemy(current)", enemyVal);
             LogOfficerPtrBrief("target(caohongPos)", guanyuPosAddr);
@@ -147,7 +144,6 @@ namespace DX11Base {
           g_loggedRelationWaiting = false;
           g_loggedRelationNoMatch = false;
           if (!g_loggedRelationAlreadyApplied) {
-            AddLog(u8"[시작설정][관계] 이미 적용 상태 유지 (rev=%p, enemy=%p)", (void *)revengeVal, (void *)enemyVal);
             g_loggedRelationAlreadyApplied = true;
           }
         } else {
@@ -156,8 +152,6 @@ namespace DX11Base {
           g_loggedRelationWaiting = false;
           g_loggedRelationAlreadyApplied = false;
           if (!g_loggedRelationNoMatch) {
-            AddLog(u8"[시작설정][관계] 조건 미충족: revenge=%p enemy=%p 기대(관우=%p, 조홍=%p)", (void *)revengeVal,
-                   (void *)enemyVal, (void *)guanyuPosAddr, (void *)caohongPosAddr);
             g_loggedRelationNoMatch = true;
           }
         }
@@ -201,6 +195,8 @@ namespace DX11Base {
         uint8_t zStatus = *(uint8_t *)zStatusAddr;
         uint8_t bStatus = *(uint8_t *)bStatusAddr;
         bool cond = (zStatus == 200 && bStatus == 200);
+
+
         if (cond && !g_flag3) {
           WriteByte(cStatusAddr, 88);
           g_flag3 = true;
@@ -285,6 +281,8 @@ namespace DX11Base {
       if (!g_startSettingEnabled)
         break;
       RunOnce();
+      extern void UpdateUndiscoveredToRonin();
+      UpdateUndiscoveredToRonin();
     }
     g_startSettingRunning = false;
     return 0;
@@ -333,4 +331,142 @@ namespace DX11Base {
     }
   }
 
-} // namespace DX11Base
+  // 모든 미발견 무장 재야로 변경 및 나이 보정
+  extern bool bUndiscoveredToRonin;
+  void SetUndiscoveredToRonin(bool enable) {
+    if (enable) {
+      AddLog(u8"[시작설정] 미발견 무장 보정 기능 활성화 시도");
+      SetStartSetting(true);
+    }
+  }
+
+  void UpdateUndiscoveredToRonin() {
+    if (!bUndiscoveredToRonin)
+      return;
+
+    // ReadScenarioDate는 메뉴에서도 동작함 (MonthCapture 경로 사용)
+    unsigned short currentYear = 0;
+    uint8_t currentMonth = 0;
+    if (!ReadScenarioDate(&currentYear, &currentMonth)) {
+      static uint64_t s_logFail = 0;
+      if (GetTickCount64() - s_logFail > 10000) {
+        AddLog(u8"[미발견보정] ReadScenarioDate 실패");
+        s_logFail = GetTickCount64();
+      }
+      return;
+    }
+
+    static bool s_waitForStart = false;
+    static bool s_seenMenu = false;
+    static bool s_logged = false;
+
+    // 메뉴 화면 (year >= 100) 감지: s_seenMenu 기록만
+    // 단, 이미 대기 중이면 리셋하면 안 됨 (시나리오 연도도 >= 100일 수 있음)
+    if (currentYear >= 100) {
+      if (!s_seenMenu) {
+        AddLog(u8"[미발견보정] 메뉴 확인 (year=%d)", (int)currentYear);
+        s_seenMenu = true;
+      }
+      if (!s_waitForStart) {
+        // 아직 대기 전 → 메뉴 상태이므로 그냥 리턴
+        return;
+      }
+      // s_waitForStart == true → 시나리오 연도가 확인된 것이므로 아래 트리거 로직으로 fall-through
+    }
+
+    // 1. 시나리오 선택 전 초기화 상태 (0년 0월) 감지 - 반드시 메뉴를 거친 뒤에만
+    if (currentYear == 0 && currentMonth == 0) {
+      if (s_seenMenu && !s_waitForStart) {
+        AddLog(u8"[미발견보정] 대기 상태 진입 (year=0, month=0, 메뉴 확인됨)");
+        s_logged = false;
+        s_waitForStart = true;
+      }
+      return;
+    }
+
+    // 2. 대기 없이 연도가 바뀐 경우 스킵 (게임 첫 로딩 184년 등)
+    if (!s_waitForStart) {
+      if (!s_logged) {
+        AddLog(u8"[미발견보정] 스킵 (year=%d month=%d, 0->0 단계 미통과)", (int)currentYear, (int)currentMonth);
+        s_logged = true;
+      }
+      return;
+    }
+
+    // 3. 트리거 발동: 0년에서 실제 시나리오 연도로 바뀐 순간
+    AddLog(u8"[미발견보정] 트리거! year=%d month=%d", (int)currentYear, (int)currentMonth);
+
+    // 이제 ResolveRoot 시도 (시나리오 로드 후이므로 잡혀야 함)
+    uintptr_t root = ResolveRoot();
+    if (!root) {
+      AddLog(u8"[미발견보정] root 없음 - 다음 루프 재시도");
+      // s_waitForStart는 true로 유지하여 다음 루프에서 재시도
+      return;
+    }
+
+    int targetYear = (int)currentYear;
+    s_waitForStart = false;
+    s_logged = false;
+
+    AddNotification(u8"미발견 무장이 발견되었습니다. 재야로 변경중입니다. 잠시 기다려주세요");
+
+    uintptr_t baseAddr = root + 0x1d4560;
+    if (!IsValidPtr(baseAddr, 0x100)) {
+      AddLog(u8"[미발견보정] baseAddr 무효 root=%p base=%p", (void *)root, (void *)baseAddr);
+      return;
+    }
+
+    AddLog(u8"[미발견보정] 보정 시작 baseAddr=%p targetYear=%d", (void *)baseAddr, targetYear);
+
+    const int stride = 0x3D0;
+    const int maxOfficers = 1000;
+    int countModified = 0;
+
+    for (int i = 0; i < maxOfficers; i++) {
+      uintptr_t offPtr = baseAddr + (i * stride);
+      if (!IsValidPtr(offPtr, 0x40))
+        break;
+
+      uint16_t id = *(uint16_t *)(offPtr + 0x08);
+      if (id == 0 || id > 2000)
+        continue;
+
+      uint8_t *pStatus = (uint8_t *)(offPtr + 0x10);
+      uint8_t status = *pStatus;
+
+      bool modified = false;
+      if (status == 0x68 || status == 0x78) {
+        WriteByte((uintptr_t)pStatus, 0x58);
+        modified = true;
+      }
+
+      uint16_t *pAppearYear = (uint16_t *)(offPtr + 0x32);
+      uint16_t *pBirthYear  = (uint16_t *)(offPtr + 0x34);
+      uint16_t *pDeathYear  = (uint16_t *)(offPtr + 0x36);
+
+      if (IsValidPtr((uintptr_t)pAppearYear, 6)) {
+        if (*pAppearYear > targetYear && *pAppearYear < 400) {
+          *(uint16_t *)pAppearYear = (uint16_t)targetYear;
+          modified = true;
+        }
+        if (*pBirthYear >= (targetYear - 15) && *pBirthYear < 400) {
+          *(uint16_t *)pBirthYear = (uint16_t)(targetYear - 20);
+          modified = true;
+        }
+        if (*pDeathYear <= targetYear && *pDeathYear != 0) {
+          *(uint16_t *)pDeathYear = (uint16_t)(targetYear + 50);
+          modified = true;
+        }
+      }
+
+      if (modified)
+        countModified++;
+    }
+
+    AddLog(u8"[미발견보정] 완료: %d명 수정", countModified);
+    if (countModified > 0) {
+      AddNotification(std::to_string(countModified) + u8"명의 미발견 무장이 재야로 변경되었습니다.");
+    }
+  }
+
+  } // namespace DX11Base

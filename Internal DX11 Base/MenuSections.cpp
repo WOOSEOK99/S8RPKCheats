@@ -792,12 +792,12 @@ namespace DX11Base {
       }
       ImGui::PopID();
 
-      
       if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
         DX11Base::SetStartSetting(bStartSetting);
         NotifyFeatureToggle(u8"시나리오 수정", bStartSetting);
         SaveConfig();
       }
+
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"시나리오 설정");
@@ -812,6 +812,12 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"삼의 삼국지 : 환씨 조앙군으로 이적");
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"네 군주 마지막 전쟁 : 반동탁 연합 해산, 네군주 우호도 0");
         ImGui::EndTooltip();
+      }
+
+      if (ImGui::Checkbox(u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin)) {
+        DX11Base::SetUndiscoveredToRonin(bUndiscoveredToRonin);
+        NotifyFeatureToggle(u8"모든 미발견 무장 재야로 변경", bUndiscoveredToRonin);
+        SaveConfig();
       }
 
       ImGui::SameLine(160.0f * scale);
@@ -847,7 +853,7 @@ namespace DX11Base {
         NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
         SaveConfig();
       }
-      
+
       // [신규] 데모플레이 제어 버튼
       float demoBtnWidth = 140.0f * scale;
       // ImGui::Spacing();

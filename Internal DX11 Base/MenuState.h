@@ -67,6 +67,7 @@ namespace DX11Base {
   extern bool bRoadBlock2;
   extern bool bStartSetting;
   extern bool bMonitorRonin;
+  extern bool bUndiscoveredToRonin;
   extern bool bAutoStatUp99;        // 능력치 99 -> 100 자동 보정
   extern bool bInfTengi;            // 2026-04-05 무한 전기
   extern bool bCancelCastleEvent;   // 2026-04-05 중지 성성 취소

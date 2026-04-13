@@ -96,6 +96,7 @@ namespace DX11Base {
   static bool s_appSangbyeongCond = false;
   static bool s_appFactionLordBonus = false;
   static bool s_appDomestics = false;
+  static bool s_appUndiscovered = false;
   static uint64_t s_firstGameBaseTime = 0; // gameBase 감지 시점
   static uint64_t s_firstP1Time = 0;       // p1 감지 시점 기록용
   static bool s_isReset = true;            // 리셋 완료 상태 기록
@@ -147,7 +148,8 @@ namespace DX11Base {
       {"bShowWidgetNotif", u8"위젯: 알림확인", &bShowWidgetNotif, nullptr, nullptr, false, true},
       {"bShowWidgetHero", u8"위젯: 주인공", &bShowWidgetHero, nullptr, nullptr, false, true},
       {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false, true},
-      {"bDomestics", u8"내정 배율", &bDomestics, &s_appDomestics, SetDomesticsMult, false, true}};
+      {"bDomestics", u8"내정 배율", &bDomestics, &s_appDomestics, SetDomesticsMult, false, true},
+      {"bUndiscoveredToRonin", u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin, &s_appUndiscovered, SetUndiscoveredToRonin, false, false}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];
