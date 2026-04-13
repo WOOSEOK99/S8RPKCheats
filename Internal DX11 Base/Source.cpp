@@ -258,25 +258,19 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
     g_Hooking->Initialize();
 
     // 2. [추가] 훅 초기화 직후에 우리만의 좌표 속이기 훅을 설치합니다.
+    // [수정] MH_EnableHook에 IAT 스텁(&GetCursorPos 등)을 직접 넘기면
+    //        일부 PC에서 충돌 발생. MH_CreateHookApi 등록 후 MH_ALL_HOOKS로
+    //        한꺼번에 활성화하는 방식으로 변경.
     if (oGetCursorPos == NULL) {
-        if (MH_CreateHookApi(L"user32.dll", "GetCursorPos", &hkGetCursorPos, (LPVOID*)&oGetCursorPos) == MH_OK) {
-            MH_EnableHook(&GetCursorPos);
-        }
-        if (MH_CreateHookApi(L"user32.dll", "GetAsyncKeyState", &hkGetAsyncKeyState, (LPVOID*)&oGetAsyncKeyState) == MH_OK) {
-            MH_EnableHook(&GetAsyncKeyState);
-        }
-        if (MH_CreateHookApi(L"user32.dll", "GetKeyState", &hkGetKeyState, (LPVOID*)&oGetKeyState) == MH_OK) {
-            MH_EnableHook(&GetKeyState);
-        }
-        if (MH_CreateHookApi(L"user32.dll", "GetKeyboardState", &hkGetKeyboardState, (LPVOID*)&oGetKeyboardState) == MH_OK) {
-            MH_EnableHook(&GetKeyboardState);
-        }
-        if (MH_CreateHookApi(L"user32.dll", "PeekMessageW", &hkPeekMessageW, (LPVOID*)&oPeekMessageW) == MH_OK) {
-            MH_EnableHook(&PeekMessageW);
-        }
-        if (MH_CreateHookApi(L"user32.dll", "PeekMessageA", &hkPeekMessageA, (LPVOID*)&oPeekMessageA) == MH_OK) {
-            MH_EnableHook(&PeekMessageA);
-        }
+        MH_CreateHookApi(L"user32.dll", "GetCursorPos",      &hkGetCursorPos,      (LPVOID*)&oGetCursorPos);
+        MH_CreateHookApi(L"user32.dll", "GetAsyncKeyState",  &hkGetAsyncKeyState,  (LPVOID*)&oGetAsyncKeyState);
+        MH_CreateHookApi(L"user32.dll", "GetKeyState",       &hkGetKeyState,       (LPVOID*)&oGetKeyState);
+        MH_CreateHookApi(L"user32.dll", "GetKeyboardState",  &hkGetKeyboardState,  (LPVOID*)&oGetKeyboardState);
+        MH_CreateHookApi(L"user32.dll", "PeekMessageW",      &hkPeekMessageW,      (LPVOID*)&oPeekMessageW);
+        MH_CreateHookApi(L"user32.dll", "PeekMessageA",      &hkPeekMessageA,      (LPVOID*)&oPeekMessageA);
+
+        // 모든 등록된 훅을 한꺼번에 활성화 (안전)
+        MH_EnableHook(MH_ALL_HOOKS);
     }
 
     //	INITIALIZE BACKGROUND THREAD

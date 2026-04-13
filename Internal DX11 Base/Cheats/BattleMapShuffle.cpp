@@ -204,12 +204,22 @@ namespace DX11Base {
     static std::vector<MapRecord>  g_records;
     static std::vector<uint64_t>   g_uniquePool;
     static bool g_battleMapShuffleActive = false; // 현재 셔플 적용 중인지
-    static bool g_isInitialized = false;
 
     // ───────────────────────────────────────────────
-    //  포인터 체인 해석
+    //  포인터 체인 해석 (캐시 적용 – 매 루프 5단계 접근 부하 제거)
     // ───────────────────────────────────────────────
+    static uintptr_t g_cachedMapBase = 0;           // 캐시된 베이스
+    static DWORD     g_cacheTickLast = 0;           // 마지막 캐시 갱신 틱
+
     static uintptr_t ResolveBattleMapBase() {
+        // 2초마다 한 번만 포인터 체인 재해석 (매 8ms 루프 방지)
+        DWORD now = GetTickCount();
+        if (now - g_cacheTickLast < 2000 && g_cachedMapBase != 0)
+            return g_cachedMapBase;
+
+        g_cacheTickLast = now;
+        g_cachedMapBase = 0;  // 재확인 전 리셋
+
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase) return 0;
 
@@ -224,6 +234,7 @@ namespace DX11Base {
         p = *(uintptr_t*)(p + 0x0);
         if (!IsValidPtr(p, 8)) return 0;
 
+        g_cachedMapBase = p;
         return p;
     }
 
@@ -273,6 +284,16 @@ namespace DX11Base {
     //  초기화
     // ───────────────────────────────────────────────
     static bool InitRecords() {
+        // 이미 셔플 적용 중이면 원상복구 후 원본값을 재읽기
+        // (셔플된 값을 원본으로 오해하는 버그 방지)
+        if (g_battleMapShuffleActive) {
+            RestoreOriginals();
+        }
+
+        // 캐시 강제 갱신 (평정 새 시작마다 최신 베이스 사용)
+        g_cachedMapBase = 0;
+        g_cacheTickLast = 0;
+
         uintptr_t base = ResolveBattleMapBase();
         if (!base) return false;
 
@@ -295,7 +316,8 @@ namespace DX11Base {
             }
             g_records.push_back(rec);
         }
-        g_isInitialized = true;
+        AddLog(u8"[전투맵셔플] 원본 맵 %d종 읽기 완료 (풀 크기: %d)",
+               k_mapCount, (int)g_uniquePool.size());
         return !g_uniquePool.empty();
     }
 
@@ -306,27 +328,38 @@ namespace DX11Base {
         if (!bBattleMapShuffle) {
             // 기능이 꺼졌는데 적용 중이면 복구
             if (g_battleMapShuffleActive) RestoreOriginals();
+            // 상태 초기화 (다음 평정을 위해)
             return;
         }
 
         static bool s_lastCouncil = false;
-        
-        // 평정(Council) 상태 변화 감지
-        if (isCouncil && !s_lastCouncil) {
-            // 평정 시작
-            if (!g_isInitialized) InitRecords();
-            DoRandomShuffle();
-        } 
-        else if (!isCouncil && s_lastCouncil) {
-            // 평정 종료
+        static bool s_appliedThisCouncil = false; // 이번 평정에서 이미 셔플했는지
+
+        // [평정 종료 감지]
+        if (!isCouncil && s_lastCouncil) {
             RestoreOriginals();
+            s_appliedThisCouncil = false;
+        }
+
+        // [평정 중] 아직 셔플 안 했으면 초기화 + 셔플
+        // - 평정 시작 시점에 기능이 켜져 있는 경우
+        // - 평정 중간에 기능을 활성화한 경우 모두 처리
+        if (isCouncil && !s_appliedThisCouncil) {
+            if (InitRecords() && !g_uniquePool.empty()) {
+                DoRandomShuffle();
+                s_appliedThisCouncil = true;
+            }
         }
 
         s_lastCouncil = isCouncil;
 
-        // 게임 종료(베이스 사라짐) 대응을 위한 추가 복구 로직 (이미지 베이스 유효성 체크 등)
-        if (g_battleMapShuffleActive && !ResolveBattleMapBase()) {
-            g_battleMapShuffleActive = false; // 강제 복구 상태로 플래그만 변경
+        // 게임 종료(베이스 사라짐) 대응 – 캐시 무효화만 (포인터 체인 5단계 재접근 방지)
+        if (g_battleMapShuffleActive) {
+            // 캐시가 만료됐을 때만 재확인 (ResolveBattleMapBase 내부 캐시 활용)
+            if (ResolveBattleMapBase() == 0) {
+                g_battleMapShuffleActive = false;
+                g_cachedMapBase = 0;
+            }
         }
     }
 
