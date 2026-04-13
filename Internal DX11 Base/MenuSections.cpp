@@ -814,13 +814,13 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::SameLine(160.0f * scale);
+
       if (ImGui::Checkbox(u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin)) {
         DX11Base::SetUndiscoveredToRonin(bUndiscoveredToRonin);
         NotifyFeatureToggle(u8"모든 미발견 무장 재야로 변경", bUndiscoveredToRonin);
         SaveConfig();
       }
-
-      ImGui::SameLine(160.0f * scale);
 
       if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
         DX11Base::SetTechZero(bTechZero);
@@ -835,9 +835,16 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::SameLine(160.0f * scale);
+
       if (ImGui::Checkbox(u8"교지 <-> 건녕 도로 차단", &bRoadBlock)) {
         DX11Base::SetRoadBlock(bRoadBlock);
         NotifyFeatureToggle(u8"교지 <-> 건녕 도로 차단", bRoadBlock);
+        SaveConfig();
+      }
+
+      if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
+        NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
         SaveConfig();
       }
 
@@ -846,11 +853,6 @@ namespace DX11Base {
       if (ImGui::Checkbox(u8"교지 <-> 회계 도로 차단", &bRoadBlock2)) {
         DX11Base::SetRoadBlock2(bRoadBlock2);
         NotifyFeatureToggle(u8"교지 <-> 회계 도로 차단", bRoadBlock2);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
-        NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
         SaveConfig();
       }
 

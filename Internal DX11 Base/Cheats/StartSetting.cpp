@@ -464,9 +464,7 @@ namespace DX11Base {
     }
 
     AddLog(u8"[미발견보정] 완료: %d명 수정", countModified);
-    if (countModified > 0) {
-      AddNotification(std::to_string(countModified) + u8"명의 미발견 무장이 재야로 변경되었습니다.");
-    }
+    AddNotification(std::to_string(countModified) + u8"명의 미발견 무장이 재야로 변경되었습니다.");
   }
 
   } // namespace DX11Base
