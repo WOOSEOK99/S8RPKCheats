@@ -2,9 +2,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "🔨 빌드 - dinput8.dll (기본)",
+            "label": "🔨 빌드 - 모든 프록시 (All)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build_dinput8.bat",
+            "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}\\build.ps1 all",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -19,9 +19,9 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "label": "🔨 빌드 - dwmapi.dll (대체 프록시)",
+            "label": "🔨 빌드 - dinput8.dll (추천)",
             "type": "shell",
-            "command": "${workspaceFolder}\\build_dwmapi.bat",
+            "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}\\build.ps1 dinput8",
             "group": "build",
             "presentation": {
                 "echo": true,
@@ -33,9 +33,9 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "label": "🔨 빌드 - dxgi.dll (대체 프록시 2)",
+            "label": "🔨 빌드 - dxgi.dll",
             "type": "shell",
-            "command": "${workspaceFolder}\\build_dxgi.bat",
+            "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}\\build.ps1 dxgi",
             "group": "build",
             "presentation": {
                 "echo": true,
@@ -47,9 +47,9 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "label": "🔨 빌드 - 기본 (build.bat)",
+            "label": "🔨 빌드 - dwmapi.dll",
             "type": "shell",
-            "command": "${workspaceFolder}\\build.bat",
+            "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}\\build.ps1 dwmapi",
             "group": "build",
             "presentation": {
                 "echo": true,

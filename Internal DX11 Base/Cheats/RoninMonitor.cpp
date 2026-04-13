@@ -19,6 +19,7 @@
 #include "Framework/imgui.h"
 #include "MenuState.h"   // bMonitorRonin
 #include "OfficerData.h" // g_officerNames
+#include "OfficerRosterResolve.h"
 #include "SystemMonth.h" // GetSystemMonthValue()
 #include "pch.h"
 #include "showlog.h" // AddLog()
@@ -61,6 +62,18 @@ namespace DX11Base {
   static bool TryResolveBase(uintptr_t p1) {
     if (s_baseResolved)
       return true;
+
+    // 1) 포인터 체인을 통한 안정적인 해상도 (SelectOfficercapture 방식)
+    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+    uintptr_t chainBase = 0;
+    if (exeBase && TryResolveOfficerRosterArrayBase(exeBase, &chainBase) && chainBase > 0x10000) {
+      s_arrayBase = chainBase;
+      s_baseResolved = true;
+      AddLog(u8"[RoninMonitor] 무장 배열 확보(안정): 0x%llX", (unsigned long long)s_arrayBase);
+      return true;
+    }
+
+    // 2) Fallback: 기존 주인공 주소 기반 역산 (위 방법 실패 시에만 수행)
     if (!p1 || p1 < 0x10000 || !IsValidPtr(p1, 0x10))
       return false;
 
@@ -74,7 +87,7 @@ namespace DX11Base {
 
     s_arrayBase = candidate;
     s_baseResolved = true;
-    AddLog(u8"[RoninMonitor] 무장 배열 확보: 0x%llX (영웅 ID %d)", (unsigned long long)s_arrayBase, (int)heroID);
+    AddLog(u8"[RoninMonitor] 무장 배열 확보(Fallback): 0x%llX (영웅 ID %d)", (unsigned long long)s_arrayBase, (int)heroID);
     return true;
   }
 
@@ -158,12 +171,17 @@ namespace DX11Base {
           continue;
       }
 
+      uint16_t realID = *(uint16_t *)(addr + 0x08);
+      if (realID == 0 || realID > 5102)
+        continue;
+
       uint8_t cur = *(uint8_t *)(addr + 0x10);
-      uint8_t prev = s_prevStatuses[i];
-      s_prevStatuses[i] = cur;
+      uint8_t prev = s_prevStatuses[realID];
+      s_prevStatuses[realID] = cur;
 
       // 어떤 상태에서든 재야(0x58)로 바뀌면 감지 (미발견, 사망, 재직 등 포함)
-      if (s_initialized && prev != 0x58 && cur == 0x58 && g_officerNames.count(i)) {
+      if (s_initialized && prev != 0x58 && cur == 0x58) {
+        std::string name = g_officerNames.count(realID) ? g_officerNames[realID] : (u8"미등록 무장(ID:" + std::to_string(realID) + u8")");
         std::string city = u8"알 수 없는 장소";
         if (cityBase > 0x10000) {
           uintptr_t cityPtr = *(uintptr_t *)(addr + 0x20);
@@ -175,7 +193,7 @@ namespace DX11Base {
           }
         }
 
-        found.push_back({g_officerNames[i], city, 12.f});
+        found.push_back({name, city, 12.f});
       }
     }
     s_initialized = true;
