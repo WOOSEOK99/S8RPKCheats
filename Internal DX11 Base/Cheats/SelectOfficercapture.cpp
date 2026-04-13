@@ -218,7 +218,9 @@ namespace DX11Base {
         }
       }
       unsigned short currentID = *(unsigned short *)(pR + 0x08);
-      std::string nameValue = u8"???";
+      char idBuf[16];
+      sprintf_s(idBuf, "#%u", currentID);
+      std::string nameValue = idBuf;
       if (g_officerNames.count(currentID)) {
         nameValue = g_officerNames[currentID];
       }
@@ -718,9 +720,6 @@ namespace DX11Base {
       ImGui::EndTable();
     }
 
-    uintptr_t officerRealBase = DX11Base::GetSelectedOfficerBase();
-    static int editId[3] = {0, 0, 0};
-
     // [최적화] 기재 상세 파싱은 선택 변경 시 1회 캐시
     static uintptr_t s_cachedTalentBase = 0;
     static TalentInfo s_cachedTalentInfo[3] = {};
@@ -770,8 +769,12 @@ namespace DX11Base {
       ImGui::BeginGroup();
       if (s_cachedTalentValid[i]) {
         info = s_cachedTalentInfo[i];
-        ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), u8"[*] 기재 %d : %s (ID %d)", i + 1, GetTalentName(info.id),
-                           info.id);
+        const char* tName = GetTalentName(info.id);
+        if (tName && strcmp(tName, "Unknown") == 0) {
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), u8"[*] 기재 %d : #%d (ID %d)", i + 1, info.id, info.id);
+        } else {
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), u8"[*] 기재 %d : %s (ID %d)", i + 1, tName, info.id);
+        }
         ImGui::Indent(15.0f * scale);
         for (const auto &line : s_cachedTalentLines[i]) {
           ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", line.c_str());
@@ -781,15 +784,6 @@ namespace DX11Base {
         ImGui::TextDisabled(u8"[ ] 기재 %d : 비어있음", i + 1);
       }
 
-      if (officerRealBase) {
-        ImGui::SetNextItemWidth(100 * scale);
-        ImGui::InputInt(u8"##id", &editId[i]);
-        ImGui::SameLine();
-        if (ImGui::Button(u8"기속 적용", ImVec2(80 * scale, 0))) {
-          SetTraitID(officerRealBase, i, (uint16_t)editId[i]);
-          s_forceTalentCacheRefresh = true;
-        }
-      }
       ImGui::EndGroup();
       if (i < 2)
         ImGui::Separator();
@@ -1382,7 +1376,9 @@ namespace DX11Base {
 
             s_cacheSeenIDs[s.id_08] = true;
             uint8_t status = *(uint8_t *)(targetBase + 0x10);
-            std::string name = u8"???";
+            char idBuf[16];
+            sprintf_s(idBuf, "#%u", s.id_08);
+            std::string name = idBuf;
             auto it = g_officerNames.find((int)s.id_08);
             if (it != g_officerNames.end()) {
               name = it->second;

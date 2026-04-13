@@ -44,11 +44,9 @@ bool TryResolveOfficerRosterArrayBase(std::uintptr_t exeBase, std::uintptr_t *ou
   if (!IsValidPtr(p, 0x3D0))
     return false;
 
-  RosterStats s = SafeReadRosterStats(p);
-  if (!s.valid)
-    return false;
-
+  // 사용자님의 확언에 따라, 이 체인이 성공하면 항상 1번 무장을 가리키는 것으로 신뢰합니다.
   *outRosterBase = p;
+  
   return true;
 }
 

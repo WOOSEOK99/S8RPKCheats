@@ -38,6 +38,7 @@ namespace DX11Base {
       float timeRemaining;
     };
 
+    static uintptr_t s_lastHeroAddr = 0;
     static uintptr_t s_arrayBase = 0;
     static uintptr_t s_cityBase = 0;
     static bool s_baseResolved = false;
@@ -107,6 +108,18 @@ namespace DX11Base {
       return;
     }
 
+    // --- [세션 관리] 주인공 주소가 바뀌면 세이브 로드로 간주하여 초기화 ---
+    if (p1 != 0 && p1 != s_lastHeroAddr) {
+      if (s_lastHeroAddr != 0) {
+        AddLog(u8"[RoninMonitor] 주인공 주소 변경 감지 (0x%llX -> 0x%llX). 세션 초기화 및 재스캔 예약.", 
+               (unsigned long long)s_lastHeroAddr, (unsigned long long)p1);
+      }
+      s_lastHeroAddr = p1;
+      s_initialized = false;
+      s_baseResolved = false;
+      s_lastSystemMonth = 0xFF; // 다음 월 체크 때 즉시 트리거되도록
+    }
+
     if (IsInBattle())
       return;
     if (!IsConfigReady()) {
@@ -117,13 +130,10 @@ namespace DX11Base {
       }
       return;
     }
+
+    // 매달 스캔 직전에 주소 재확인 (세션 동기화)
     if (!TryResolveBase(p1)) {
-      static bool s_warnedBase = false;
-      if (!s_warnedBase) {
-        s_warnedBase = true;
-        AddLog(u8"[RoninMonitor] TryResolveBase 실패 (p1=0x%llX)", (unsigned long long)p1);
-      }
-      return;
+      return; // 베이스 확보될 때까지 대기
     }
 
     // 월이 바뀔 때만 전수 조사 수행 (GetSystemMonthValue 기준)

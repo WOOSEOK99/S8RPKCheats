@@ -77,7 +77,9 @@ namespace DX11Base {
                             
                             // [알림 추가] 무장 이름 가져오기
                             unsigned short officerID = *(unsigned short*)(targetBase + 0x08);
-                            std::string name("무명장수");
+                            char objIdBuf[16];
+                            sprintf_s(objIdBuf, "#%u", officerID);
+                            std::string name(objIdBuf);
                             if (DX11Base::g_officerNames.count(officerID)) {
                                 name = DX11Base::g_officerNames[officerID];
                             }
