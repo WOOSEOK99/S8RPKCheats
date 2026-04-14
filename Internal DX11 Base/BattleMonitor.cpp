@@ -1,27 +1,28 @@
-#include "pch.h"
 #include "BattleMonitor.h"
-#include "MenuState.h"
 #include "Cheats.h"
-#include "showlog.h"
+#include "Cheats/BattleMapShuffle.h"
 #include "Cheats/Battleunitcapture.h"
-#include "Cheats/Celestia.h"
 #include "Cheats/Catapult.h"
+#include "Cheats/Celestia.h"
 #include "Cheats/Defatkboost.h"
 #include "Cheats/Defbuildingboost.h"
-#include "Cheats/Selfheal.h"
-#include "Cheats/Terrainignore.h"
-#include "Cheats/Techpointcave.h"
 #include "Cheats/Dongto.h"
-#include "Cheats/Roadblock.h"
 #include "Cheats/MonthCapture.h"
-#include "Cheats/SystemMonth.h"
-#include "Cheats/BattleMapShuffle.h"
-#include "Cheats/StatMonitor.h"
+#include "Cheats/Roadblock.h"
 #include "Cheats/SelectOfficercapture.h"
+#include "Cheats/Selfheal.h"
+#include "Cheats/StatMonitor.h"
+#include "Cheats/SystemMonth.h"
+#include "Cheats/Techpointcave.h"
+#include "Cheats/Terrainignore.h"
+#include "MenuState.h"
+#include "pch.h"
+#include "showlog.h"
+
 
 namespace DX11Base {
 
-void MonitorBattleStatus() {
+  void MonitorBattleStatus() {
     static bool s_isWarModsApplied = false;
     static float s_lastSeenTime = 0.0f;
     float currentTime = (float)GetTickCount64() / 1000.0f;
@@ -46,18 +47,35 @@ void MonitorBattleStatus() {
       // [전투 중] 주소가 포착됨
       s_lastSeenTime = currentTime;
 
-
       // 아직 리프레시를 안 했다면 실행
       if (!s_isWarModsApplied) {
         AddLog(u8"[자동화] 전투 감지(%llX) -> 모든 전쟁 모드 리프레시", addr1);
 
         // 켜져 있는 기능들에 대해 원본 복구 후 다시 적용 (Refresh)
-        if (bSelfHeal)       { DX11Base::SetSelfHeal(false); DX11Base::SetSelfHeal(true); }
-        if (bDongto)         { DX11Base::SetDongto(false); DX11Base::SetDongto(true); } // 2026-03-30 추가
-        if (bTerrainIgnore)  { DX11Base::SetTerrainIgnore(false); DX11Base::SetTerrainIgnore(true); }
-        if (bDefAtk)         { DX11Base::SetDefAtkBoost(false); DX11Base::SetDefAtkBoost(true); }
-        if (bCatapult)       { DX11Base::SetCatapultCheat(false); DX11Base::SetCatapultCheat(true); }
-        if (bCelestial)      { DX11Base::SetCelestialMod(false); DX11Base::SetCelestialMod(true); }
+        if (bSelfHeal) {
+          DX11Base::SetSelfHeal(false);
+          DX11Base::SetSelfHeal(true);
+        }
+        if (bDongto) {
+          DX11Base::SetDongto(false);
+          DX11Base::SetDongto(true);
+        } // 2026-03-30 추가
+        if (bTerrainIgnore) {
+          DX11Base::SetTerrainIgnore(false);
+          DX11Base::SetTerrainIgnore(true);
+        }
+        if (bDefAtk) {
+          DX11Base::SetDefAtkBoost(false);
+          DX11Base::SetDefAtkBoost(true);
+        }
+        if (bCatapult) {
+          DX11Base::SetCatapultCheat(false);
+          DX11Base::SetCatapultCheat(true);
+        }
+        if (bCelestial) {
+          DX11Base::SetCelestialMod(false);
+          DX11Base::SetCelestialMod(true);
+        }
 
         s_isWarModsApplied = true;
       }
@@ -74,58 +92,58 @@ void MonitorBattleStatus() {
         s_lastSeenTime = 0;
       }
     }
-}
+  }
 
-void MonitorTechStatus() {
+  void MonitorTechStatus() {
     static uint8_t s_lastAppliedMonth = 0xFF;
 
     uint8_t sm = GetSystemMonthValue();
     uint8_t rm = GetCurrentMonth();
 
-    // [2026-04-12] 신규 포착 정보: gameBase+0xD0 (05:평정, 07:내정)
+    // [2026-04-12] 신규 포착 정보: gameBase+0xD0 (00: 시작메뉴, 05:평정, 07:내정)
     uintptr_t gameBase = DX11Base::GetGameBase();
     uint8_t gameState = 0;
     bool isCouncil = false;
     if (gameBase && IsValidPtr(gameBase + 0xD0, 1)) {
-        gameState = *(uint8_t*)(gameBase + 0xD0);
-        isCouncil = (gameState == 0x05);
+      gameState = *(uint8_t *)(gameBase + 0xD0);
+      isCouncil = (gameState == 0x05);
     }
 
     if (isCouncil) {
-        if (s_lastAppliedMonth != sm) {
-            if (bDefBuilding) {
-                SetDefBuildingBoost(false);
-                SetDefBuildingBoost(true);
-            }
-            UpdateOfficerStats99To100();
-            s_lastAppliedMonth = sm; 
+      if (s_lastAppliedMonth != sm) {
+        if (bDefBuilding) {
+          SetDefBuildingBoost(false);
+          SetDefBuildingBoost(true);
         }
+        UpdateOfficerStats99To100();
+        s_lastAppliedMonth = sm;
+      }
     } else {
-        if (s_lastAppliedMonth != 0xFF) {
-            s_lastAppliedMonth = 0xFF; 
-        }
+      if (s_lastAppliedMonth != 0xFF) {
+        s_lastAppliedMonth = 0xFF;
+      }
     }
 
     UpdateBattleMapAuto(isCouncil);
     UpdateAutoSpecialtyDistribution(isCouncil);
-}
+  }
 
-// 전투 상태 반환 함수 추가 (외부 모듈에서 현재 전투중인지 판별할 때 사용)
-bool IsInBattle() {
+  // 전투 상태 반환 함수 추가 (외부 모듈에서 현재 전투중인지 판별할 때 사용)
+  bool IsInBattle() {
     float currentTime = (float)GetTickCount64() / 1000.0f;
     static float s_lastKnownSeenTime = 0.0f;
-    
+
     // Check global addr directly to update heartbeat if needed without MonitorBattleStatus side effects
     if (DX11Base::g_battleUnitAddr1 != 0 || DX11Base::g_battleUnitAddr2 != 0) {
-        s_lastKnownSeenTime = currentTime;
-        return true;
+      s_lastKnownSeenTime = currentTime;
+      return true;
     }
-    
+
     // Heartbeat timeout is 1.25s
     if ((currentTime - s_lastKnownSeenTime) < 1.25f) {
-        return true;
+      return true;
     }
     return false;
-}
+  }
 
 } // namespace DX11Base
