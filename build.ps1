@@ -1,6 +1,6 @@
-# SAM8RPK Ingame Cheat Build Script (PowerShell)
+﻿# SAM8RPK Ingame Cheat Build Script (PowerShell)
 param (
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [ValidateSet("dinput8", "dxgi", "dwmapi", "all")]
     [string]$Type
 )
@@ -49,11 +49,18 @@ if (-not $msBuildPath) {
 
 Write-Host "사용 중인 MSBuild: $msBuildPath" -ForegroundColor Gray
 
+# MSBuild가 출력을 UTF-8로 하도록 환경 변수 설정
+$env:DOTNET_CLI_UI_LANGUAGE = "ko-KR"
+$env:MSBuildLogNumberOfParameterErrors = "1"
+# 아래 명령어가 핵심입니다 (출력 인코딩 강제)
+$env:PYTHONIOENCODING = "utf-8"
+
 # 2. 빌드 실행
 $targets = @()
 if ($Type -eq "all") {
     $targets = @("dinput8", "dxgi", "dwmapi")
-} else {
+}
+else {
     $targets = @($Type)
 }
 
@@ -61,11 +68,13 @@ foreach ($t in $targets) {
     Write-Host "`n>>> [$t.dll] 빌드 시도..." -ForegroundColor Yellow
     
     # 파워쉘의 호출 연산자(&)를 사용하여 실행
-    & $msBuildPath "SAM8RPK_Ingame_Cheat.sln" /p:Configuration=Release "/p:ProxyType=$t" "/p:TargetName=$t" /m /v:m
+    # 명령어를 실행하기 직전에 chcp를 실행하도록 구성
+cmd /c "chcp 65001 > nul && `"$msBuildPath`" `"SAM8RPK_Ingame_Cheat.sln`" /p:Configuration=Release /p:ProxyType=$t /p:TargetName=$t /m /v:m"
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host "   [성공] $t.dll 빌드 완료" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "   [실패] $t.dll 빌드 중 오류 발생 (ExitCode: $LASTEXITCODE)" -ForegroundColor Red
         if ($Type -eq "all") {
             Write-Host "전체 빌드를 중단합니다." -ForegroundColor Red
