@@ -13,7 +13,7 @@
 #pragma comment(lib, "dwmapi.lib")
 
 extern DWORD WINAPI MainThread_Initialize(LPVOID dwModule);
-namespace DX11Base { void Shutdown(); }
+namespace DX11Base { void Shutdown(bool isTerminating); }
 
 static HMODULE g_hOriginalDwm = NULL;
 
@@ -201,7 +201,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID /*lpRese
         DX11Base::g_hModule = hModule;
         break;
     case DLL_PROCESS_DETACH:
-        DX11Base::Shutdown();
+        DX11Base::Shutdown(lpReserved != NULL);
         if (g_hOriginalDwm)
             FreeLibrary(g_hOriginalDwm);
         break;

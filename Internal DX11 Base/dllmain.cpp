@@ -17,7 +17,7 @@
 #pragma comment(linker, "/export:GetdfDIJoystick=C:\\Windows\\System32\\dinput8.GetdfDIJoystick")
 
 extern DWORD WINAPI MainThread_Initialize(LPVOID dwModule);
-namespace DX11Base { void Shutdown(); }
+namespace DX11Base { void Shutdown(bool isTerminating); }
 
 static void InitializeOnce() {
     static bool initialized = false;
@@ -41,7 +41,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         InitializeOnce();
         break;
     case DLL_PROCESS_DETACH:
-        DX11Base::Shutdown();
+        DX11Base::Shutdown(lpReserved != NULL);
         break;
     }
     return TRUE;

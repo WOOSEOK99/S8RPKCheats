@@ -72,7 +72,7 @@ extern "C" HRESULT WINAPI Proxy_CreateDXGIFactory2(UINT Flags, REFIID riid, void
     return oCreateDXGIFactory2 ? oCreateDXGIFactory2(Flags, riid, ppFactory) : E_FAIL;
 }
 
-namespace DX11Base { void Shutdown(); }
+namespace DX11Base { void Shutdown(bool isTerminating); }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
@@ -81,8 +81,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         DX11Base::g_hModule = hModule;
         break;
     case DLL_PROCESS_DETACH:
-        // 프로세스 종료 시에는 시스템이 보조 스레드를 강제로 종료할 수 있으므로 안전하게 정리만 시도
-        DX11Base::Shutdown();
+        // lpReserved가 NULL이 아니면 프로세스 종료(Terminate) 상황임
+        DX11Base::Shutdown(lpReserved != NULL);
         break;
     }
     return TRUE;

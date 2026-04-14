@@ -227,7 +227,7 @@ void ClientBGThread()
 }
 
 namespace DX11Base {
-    void Shutdown() {
+    void Shutdown(bool isTerminating) {
         static bool s_done = false;
         if (s_done) return;
         s_done = true;
@@ -235,7 +235,21 @@ namespace DX11Base {
         g_Running = false;
         g_KillSwitch = true;
 
-        // 훅 해제를 최우선으로 수행하여 시스템 함수 호출이 꼬이지 않게 함
+        // 프로세스 종료 시에는 시스템이 메모리를 알아서 회수하므로, 
+        // 훅으로 인한 크래시를 방지하기 위해 가로채기만 최소한으로 해제합니다.
+        if (isTerminating) {
+            MH_DisableHook(MH_ALL_HOOKS);
+            if (g_D3D11Window) {
+                // D3D 리소스 해제(Release)를 건너뛰고 윈도우 프로시저만 복구 (고속 종료)
+                if (g_Engine && g_Engine->pGameWindow && g_D3D11Window->m_OldWndProc) {
+                    SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)g_D3D11Window->m_OldWndProc);
+                    g_D3D11Window->m_OldWndProc = nullptr;
+                }
+            }
+            return;
+        }
+
+        // 일반적인 언로드(FreeLibrary) 상황에서는 모든 리소스를 정석대로 해제합니다.
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
 
@@ -335,7 +349,7 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
 
 
     //  EXIT
-    DX11Base::Shutdown();
+    DX11Base::Shutdown(false); // 여기는 정상 스레드 종료 상황
 
     // join() 대기를 제거하여 종료 시 프리징 방지
     // if (WCMUpdate.joinable())
