@@ -439,6 +439,16 @@ namespace DX11Base {
       ImGui::Separator();
       ImGui::Spacing();
 
+      if (ImGui::Checkbox(u8"파일 로그 출력", &bFileLog)) {
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::Text(u8"에포크 초기화 오류 파악용 로그(S8RPK_cheat.log)를 자동 저장합니다.");
+        ImGui::EndTooltip();
+      }
+      ImGui::SameLine(0.0f, 30.0f * scale);
+
       ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
 
       if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {

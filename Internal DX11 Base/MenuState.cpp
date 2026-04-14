@@ -96,4 +96,5 @@ namespace DX11Base {
   bool bShowPasswordPopup = false;
 
   uintptr_t g_savedHeroAddr = 0;
+  bool bFileLog = false;
 } // namespace DX11Base

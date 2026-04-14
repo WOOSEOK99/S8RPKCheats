@@ -21,7 +21,8 @@ namespace DX11Base {
 
   // 로그 추가 함수
   void AddLog(const char *fmt, ...) {
-    if (!bShowDebug)
+    // 디버그 또는 파일 로그 옵션이 모두 꺼져있다면 아무것도 하지 않음
+    if (!bShowDebug && !bFileLog)
       return;
 
     char buf[1024];
@@ -31,21 +32,25 @@ namespace DX11Base {
     va_end(args);
 
     std::lock_guard<std::mutex> lock(g_logMutex);
-    g_loveLogs.push_back(buf);
-
-    // [추가] 파일 로그 기록
-    std::ofstream logFile("S8RPK_cheat.log", std::ios::app);
-    if (logFile.is_open()) {
-        auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        struct tm tm_info;
-        localtime_s(&tm_info, &now);
-        logFile << "[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S") << "] " << buf << std::endl;
-        logFile.close();
+    
+    // UI 디버그용 메모리 저장
+    if (bShowDebug) {
+      g_loveLogs.push_back(buf);
+      if (g_loveLogs.size() > 50) {
+        g_loveLogs.erase(g_loveLogs.begin());
+      }
     }
 
-    // 로그가 너무 많아지면 메모리 관리를 위해 앞부분 삭제 (선택 사항)
-    if (g_loveLogs.size() > 50) {
-      g_loveLogs.erase(g_loveLogs.begin());
+    // 파일 로그용 저장
+    if (bFileLog) {
+      std::ofstream logFile("S8RPK_cheat.log", std::ios::app);
+      if (logFile.is_open()) {
+          auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+          struct tm tm_info;
+          localtime_s(&tm_info, &now);
+          logFile << "[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S") << "] " << buf << std::endl;
+          logFile.close();
+      }
     }
   }
 

@@ -132,6 +132,7 @@ namespace DX11Base {
       {"bRoadBlock2", u8"전쟁: 진로 방해 무시 (교지↔회계)", &bRoadBlock2, &s_appRoadBlock2, SetRoadBlock2, false, true},
       {"bStartSetting", u8"시나리오 수정", &bStartSetting, &s_appStartSetting, SetStartSetting, false, false},
       {"bTechZero", u8"모든 세력 기술 초기화", &bTechZero, &s_appTechZero, SetTechZero, false, false},
+      {"bFileLog", u8"파일 로그출력", &bFileLog, nullptr, nullptr, false, false},
       {"bSkillCondition", u8"만병 습득 조건 해제", &bSkillCondition, &s_appSkillCond, ApplySkillCondition, false, true},
       {"bYumokCondition", u8"유목기병 습득 조건 해제", &bYumokCondition, &s_appYumokCond, ApplyYumokCondition, false, true},
       {"bSangbyeongCondition", u8"상병 습득 조건 해제", &bSangbyeongCondition, &s_appSangbyeongCond,
@@ -155,6 +156,22 @@ namespace DX11Base {
     char path[MAX_PATH];
     GetModuleFileNameA(DX11Base::g_hModule, path, MAX_PATH);
     return std::filesystem::path(path).parent_path().append("S8RPK_cheat_config.json").string();
+  }
+
+  // [신규] D3D Hook 이전, 모듈 로드 극초기에 로그출력 여부만 가장 먼저 파악
+  void LoadEarlyLogConfig() {
+    std::ifstream file(GetConfigPath());
+    if (!file.is_open())
+      return;
+
+    std::string line;
+    while (std::getline(file, line)) {
+      if (line.find("\"bFileLog\"") != std::string::npos && line.find("true") != std::string::npos) {
+        bFileLog = true;
+        break;
+      }
+    }
+    file.close();
   }
 
   void SaveConfig() {
