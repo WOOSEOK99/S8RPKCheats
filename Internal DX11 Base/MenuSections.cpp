@@ -822,6 +822,14 @@ namespace DX11Base {
         SaveConfig();
       }
 
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"<주의사항>");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"체크시 저장된 게임 불러올시에도 적용이 됩니다.");
+        ImGui::EndTooltip();
+      }
+
       if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
         DX11Base::SetTechZero(bTechZero);
         NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);

@@ -218,19 +218,9 @@ namespace DX11Base {
       }
     }
     
+    // 2026-04-14 유저 요청: 초기 재야장수 목록 너무 길어서 출력 삭제
     if (!s_initialized && !initialRonins.empty()) {
-        std::string logBuf = u8"[RoninMonitor] 최초 재야장수 목록: ";
-        for (size_t i = 0; i < initialRonins.size(); i++) {
-           logBuf += initialRonins[i];
-           if (i + 1 < initialRonins.size()) logBuf += u8", ";
-           if (logBuf.length() > 500) {
-               AddLog(u8"%s", logBuf.c_str());
-               logBuf = u8"[RoninMonitor] 최초 재야장수 계속: ";
-           }
-        }
-        if (logBuf.length() > 50) { // "[RoninMonitor] 최초 재야장수 계속: "보다 길 때만
-            AddLog(u8"%s", logBuf.c_str());
-        }
+        // 내부 데이터는 위에서 이미 s_isRonin 배열에 정상 등록됨. 출력만 제거.
     }
     s_initialized = true;
 
