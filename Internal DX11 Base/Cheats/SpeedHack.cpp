@@ -1,6 +1,7 @@
 #include "SpeedHack.h"
 #include "../Hooking/MinHook.h"
 #include "../MenuState.h"
+#include "../showlog.h"
 #include <atomic>
 #include <windows.h>
 #include <intrin.h>
@@ -177,7 +178,12 @@ namespace DX11Base {
     float current = s_multiplier.load();
     
     if (current != desired) {
-      // 속도가 바뀔 때 시공간의 끊김을 막기 위해 기준시를 현재시로 갱신
+      if (bSpeedHack && p1 <= 0x10000 && desired == 1.0f) {
+        AddLog(u8"[SpeedHack] 배속 적용 대기 중 (원인: 주인공 데이터(p1) 미확보)");
+      } else {
+        AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx (활성화: %s)", current, desired, bSpeedHack ? "ON" : "OFF");
+      }
+      // 속도가 바뀔 때 시공간의 끊김을 막기 위해 기준시간을 현재 시간으로 재설정
       ResetBases(current, desired);
     }
   }
