@@ -7,6 +7,8 @@
 #include "debug.h"
 #include "MenuState.h"
 #include "Cheats/SpeedHack.h"
+#include "showlog.h"
+#include <filesystem>
 
 #include <ShellScalingApi.h>
 #pragma comment(lib, "Shcore.lib")
@@ -228,8 +230,18 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
     // [신규] 가장 초기에 수동으로 로그출력 플래그를 확보하여 D3D 훅 등 극초기 오류를 파일에 기록
     DX11Base::LoadEarlyLogConfig();
 
+    // 현재 DLL 파일명 확인
+    char dllPath[MAX_PATH];
+    GetModuleFileNameA((HMODULE)dwModule, dllPath, MAX_PATH);
+    std::string dllName = std::filesystem::path(dllPath).filename().string();
+
     // [중요] 초기화 안정성을 위해 5초 대기
     Sleep(5000);
+
+    DX11Base::AddLog(u8"========================================");
+    DX11Base::AddLog(u8"[System] 치트 로드 성공 (DLL: %s)", dllName.c_str());
+    DX11Base::AddLog(u8"[System] 버전: %s", SAM8_CHEAT_VERSION);
+    DX11Base::AddLog(u8"========================================");
 
     UNREFERENCED_PARAMETER(dwModule);
     // quick debug popup removed
