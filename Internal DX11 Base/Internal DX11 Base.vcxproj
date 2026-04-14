@@ -237,12 +237,8 @@
     <ClCompile Include="Cheats\Defatkboost.cpp" />
     <ClCompile Include="Cheats\Defbuildingboost.cpp" />
     <ClCompile Include="dllmain.cpp">
-      <!-- ProxyType이 dwmapi나 dxgi가 아닐 때 이 파일 포함 -->
-      <ExcludedFromBuild Condition="'$(ProxyType)'=='dwmapi' or '$(ProxyType)'=='dxgi'">true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="dllmain_dwmapi.cpp">
-      <!-- ProxyType=dwmapi 일 때만 이 파일 포함 -->
-      <ExcludedFromBuild Condition="'$(ProxyType)'!='dwmapi'">true</ExcludedFromBuild>
+      <!-- ProxyType이 dxgi가 아닐 때 이 파일 포함 -->
+      <ExcludedFromBuild Condition="'$(ProxyType)'=='dxgi'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="dllmain_dxgi.cpp">
       <!-- ProxyType=dxgi 일 때만 이 파일 포함 -->
