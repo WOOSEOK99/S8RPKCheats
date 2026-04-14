@@ -26,10 +26,6 @@
 
 namespace DX11Base {
 
-  // --- [데모 플레이 대응] p1 백업/복원 전역 상태 ---
-  // (MenuState.h에 정의된 g_savedHeroAddr 사용)
-  static bool s_autoRestoreP1 = false;    // p1 자동 복원 모드 On/Off
-
   static void DrawMemoryNotepadWindow(float scale) {
     if (!bShowMemoryNotepadWin) return;
 
@@ -180,28 +176,14 @@ namespace DX11Base {
 
     // 주의: 아래 로직도 동일 프레임의 gameBase/p1을 재사용
 
-    // --- [데모 플레이 대응] p1 자동 백업 및 복원 ---
-    if (p1 > 0x10000 && p1 != g_savedHeroAddr) { 
-      // 주인공 주소가 처음 잡히거나, 다른 주소로 변경된 경우에만 백업 갱신
+    // --- [주인공 주소 감지 및 로그] ---
+    if (p1 > 0x10000 && p1 != g_savedHeroAddr) {
+      // 주인공 주소가 처음 잡히거나, 다른 주소로 변경된 경우에만 백업 갱신 및 로그 출력
       if (IsValidPtr(p1, 0x100)) {
         g_savedHeroAddr = p1;
-        AddLog(u8"[백업] 주인공 주소 저장 완료: %p", (void *)g_savedHeroAddr);
+        AddLog(u8"[System] 주인공 주소 감지: %p", (void *)g_savedHeroAddr);
         s_loopProbeP1 = p1;
         s_loopP1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
-      }
-    } else if (p1 == 0 && g_savedHeroAddr > 0x10000 && gameBase && s_autoRestoreP1) {
-      // 자동 복원 모드: p1이 null이 됐고 백업이 있으면 자동으로 복원
-      if (IsValidPtr(g_savedHeroAddr, 0x100)) {
-        DWORD oldP;
-        if (VirtualProtect((LPVOID)(gameBase + 0xE0), 8, PAGE_READWRITE, &oldP)) {
-          *(uintptr_t *)(gameBase + 0xE0) = g_savedHeroAddr;
-          VirtualProtect((LPVOID)(gameBase + 0xE0), 8, oldP, &oldP);
-          p1 = g_savedHeroAddr; // 이번 프레임부터 바로 사용
-          AddLog(u8"[복원] 주인공 주소 자동 복원 완료 (Base: %p)", (void *)g_savedHeroAddr);
-          s_loopProbeP1 = p1;
-          s_loopProbeGameBase = gameBase;
-          s_loopP1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
-        }
       }
     }
 

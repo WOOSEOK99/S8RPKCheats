@@ -220,7 +220,7 @@ void ClientBGThread()
 
         }
 
-        std::this_thread::sleep_for(8ms);
+        std::this_thread::sleep_for(30ms);
     }
 }
 
@@ -295,7 +295,7 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
         //{
         //    g_KillSwitch = true;
         //}
-        std::this_thread::sleep_for(8ms);
+        std::this_thread::sleep_for(30ms);
     }
 
 

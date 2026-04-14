@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 
@@ -43,12 +44,23 @@ namespace DX11Base {
 
     // 파일 로그용 저장
     if (bFileLog) {
-      std::ofstream logFile("S8RPK_cheat.log", std::ios::app);
+      std::string logPath = "S8RPK_cheat.log";
+      bool isNew = !std::filesystem::exists(logPath) || std::filesystem::file_size(logPath) == 0;
+      
+      std::ofstream logFile(logPath, std::ios::app | std::ios::binary);
       if (logFile.is_open()) {
+          if (isNew) {
+              unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+              logFile.write((char*)bom, sizeof(bom));
+          }
           auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
           struct tm tm_info;
           localtime_s(&tm_info, &now);
-          logFile << "[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S") << "] " << buf << std::endl;
+          
+          std::stringstream ss;
+          ss << "[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S") << "] " << buf << "\r\n";
+          std::string entry = ss.str();
+          logFile.write(entry.c_str(), entry.size());
           logFile.close();
       }
     }
@@ -106,10 +118,16 @@ namespace DX11Base {
     if (p1 == 0)
       return;
 
-    // 파일 열기 (ios::app 모드로 기존 내용 뒤에 이어서 기록)
-    std::ofstream logFile("officer_log.txt", std::ios::app);
+    std::string logPath = "officer_log.txt";
+    bool isNew = !std::filesystem::exists(logPath) || std::filesystem::file_size(logPath) == 0;
+    std::ofstream logFile(logPath, std::ios::app | std::ios::binary);
     if (!logFile.is_open())
       return;
+
+    if (isNew) {
+      unsigned char bom[] = {0xEF, 0xBB, 0xBF};
+      logFile.write((char *)bom, sizeof(bom));
+    }
 
     bool changed = false;
 
@@ -129,9 +147,14 @@ namespace DX11Base {
         auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         struct tm tm_info;
         localtime_s(&tm_info, &now);
-        logFile << "[" << std::put_time(&tm_info, "%H:%M:%S") << "] ";
-        logFile << "Offset +0x" << std::hex << std::uppercase << i << " Changed: " << (int)g_OldData[bufIdx] << " -> "
-                << (int)currentVal << std::endl;
+
+        std::stringstream ss;
+        ss << "[" << std::put_time(&tm_info, "%H:%M:%S") << "] ";
+        ss << "Offset +0x" << std::hex << std::uppercase << i << " Changed: " << (int)g_OldData[bufIdx] << " -> "
+           << (int)currentVal << "\r\n";
+
+        std::string entry = ss.str();
+        logFile.write(entry.c_str(), entry.size());
 
         g_OldData[bufIdx] = currentVal; // 값 업데이트
         changed = true;
