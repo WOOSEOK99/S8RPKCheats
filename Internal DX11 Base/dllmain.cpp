@@ -17,6 +17,7 @@
 #pragma comment(linker, "/export:GetdfDIJoystick=C:\\Windows\\System32\\dinput8.GetdfDIJoystick")
 
 extern DWORD WINAPI MainThread_Initialize(LPVOID dwModule);
+namespace DX11Base { void Shutdown(); }
 
 static void InitializeOnce() {
     static bool initialized = false;
@@ -38,6 +39,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         DX11Base::g_hModule = hModule;
         // dinput8.dll은 로드 즉시 초기화 트리거 가능 (포워딩이 링커 수준에서 처리됨)
         InitializeOnce();
+        break;
+    case DLL_PROCESS_DETACH:
+        DX11Base::Shutdown();
         break;
     }
     return TRUE;

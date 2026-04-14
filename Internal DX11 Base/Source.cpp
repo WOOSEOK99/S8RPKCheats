@@ -226,6 +226,29 @@ void ClientBGThread()
     }
 }
 
+namespace DX11Base {
+    void Shutdown() {
+        static bool s_done = false;
+        if (s_done) return;
+        s_done = true;
+
+        g_Running = false;
+        g_KillSwitch = true;
+
+        // 훅 해제를 최우선으로 수행하여 시스템 함수 호출이 꼬이지 않게 함
+        MH_DisableHook(MH_ALL_HOOKS);
+        MH_Uninitialize();
+
+        if (g_D3D11Window) {
+            g_D3D11Window->UnhookD3D();
+        }
+
+        if (g_Hooking) {
+            g_Hooking->Shutdown();
+        }
+    }
+}
+
 DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
     // [신규] 가장 초기에 수동으로 로그출력 플래그를 확보하여 D3D 훅 등 극초기 오류를 파일에 기록
     DX11Base::LoadEarlyLogConfig();
@@ -312,13 +335,12 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
 
 
     //  EXIT
-    WCMUpdate.join();
+    DX11Base::Shutdown();
+
+    // join() 대기를 제거하여 종료 시 프리징 방지
+    // if (WCMUpdate.joinable())
+    //     WCMUpdate.join();
+
     FreeLibraryAndExitThread(g_hModule, EXIT_SUCCESS);
-    if (MH_DisableHook(MH_ALL_HOOKS) != MH_OK) {
-        return 1;
-    }
-    if (MH_Uninitialize() != MH_OK) {
-        return 1;
-    }
     return EXIT_SUCCESS;
 }
