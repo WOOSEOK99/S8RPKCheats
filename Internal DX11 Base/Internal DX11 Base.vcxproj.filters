@@ -24,6 +24,24 @@
     <Filter Include="Engine">
       <UniqueIdentifier>{ba004837-af92-4270-a054-30c98ea94872}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Cheats">
+      <UniqueIdentifier>{8c7e00a9-1a4e-4f3b-b6d8-9a8c7e00a91a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Cheats\Civilian">
+      <UniqueIdentifier>{b1c2d3e4-f5a6-4b7c-8d9e-1f2a3b4c5d6e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Cheats\Social">
+      <UniqueIdentifier>{c1d2e3f4-a5b6-4c7d-8e9f-2a3b4c5d6e7f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Cheats\War">
+      <UniqueIdentifier>{d1e2f3a4-b5c6-4d7e-8f9a-3b4c5d6e7f8a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Cheats\Officer">
+      <UniqueIdentifier>{e1f2a3b4-c5d6-4e7f-8a9b-4c5d6e7f8a9b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Cheats\System">
+      <UniqueIdentifier>{f1a2b3c4-d5e6-4f7a-8b9c-5d6e7f8a9b0c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -113,92 +131,107 @@
     <ClInclude Include="Cheats.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\DomesticsMult.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Civilian\BangmokCity.h">
+      <Filter>Cheats\Civilian</Filter>
     </ClInclude>
-    <ClInclude Include="Config.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\BattleMapShuffle.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\InstantLoveCave.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Battleunitcapture.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="showlog.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Civilian\Bigcityconvert.h">
+      <Filter>Cheats\Civilian</Filter>
     </ClInclude>
-    <ClInclude Include="showcal.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Catapult.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="debug.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Celestia.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\OfficerDetail.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Civilian\DomesticsMult.h">
+      <Filter>Cheats\Civilian</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Loyaltycave.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Social\InstantLoveCave.h">
+      <Filter>Cheats\Social</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Resonancecave.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Officer\OfficerDetail.h">
+      <Filter>Cheats\Officer</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Infinitegift.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Social\Loyaltycave.h">
+      <Filter>Cheats\Social</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Infinitetalk.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Social\Resonancecave.h">
+      <Filter>Cheats\Social</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Fastrelationship.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Social\Infinitegift.h">
+      <Filter>Cheats\Social</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Selfheal.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Social\Infinitetalk.h">
+      <Filter>Cheats\Social</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Dongto.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Social\Fastrelationship.h">
+      <Filter>Cheats\Social</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Terrainignore.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Selfheal.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Defbuildingboost.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Dongto.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Defatkboost.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Terrainignore.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Catapult.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Defbuildingboost.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Celestia.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Defatkboost.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Battleunitcapture.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Civilian\Techpointcave.h">
+      <Filter>Cheats\Civilian</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Bigcityconvert.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Civilian\Techzero.h">
+      <Filter>Cheats\Civilian</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Techpointcave.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\War\Roadblock.h">
+      <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Techzero.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Officer\SelectOfficercapture.h">
+      <Filter>Cheats\Officer</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Roadblock.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Officer\OfficerData.h">
+      <Filter>Cheats\Officer</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\SelectOfficercapture.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\System\TengiCave.h">
+      <Filter>Cheats\System</Filter>
     </ClInclude>
-    <ClInclude Include="MemoryUtils.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\System\SkillCondition.h">
+      <Filter>Cheats\System</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\OfficerData.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Officer\OfficerRosterResolve.h">
+      <Filter>Cheats\Officer</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\TengiCave.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Civilian\NonggyeongCity.h">
+      <Filter>Cheats\Civilian</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\SkillCondition.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="Cheats\Civilian\SangeopCity.h">
+      <Filter>Cheats\Civilian</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\System\MonthCapture.h">
+      <Filter>Cheats\System</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\System\SystemMonth.h">
+      <Filter>Cheats\System</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\System\StartSetting.h">
+      <Filter>Cheats\System</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\War\FactionLordBonus.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\Officer\StatMonitor.h">
+      <Filter>Cheats\Officer</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -256,8 +289,35 @@
     <ClCompile Include="Cheats.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\DomesticsMult.cpp">
+    <ClCompile Include="Cheats\Civilian\BangmokCity.cpp">
+      <Filter>Cheats\Civilian</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\BattleMapShuffle.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\Battleunitcapture.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Civilian\Bigcityconvert.cpp">
+      <Filter>Cheats\Civilian</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Officer\RoninMonitor.cpp">
+      <Filter>Cheats\Officer</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\System\SpeedHack.cpp">
+      <Filter>Cheats\System</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\Catapult.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\Celestia.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Civilian\DomesticsMult.cpp">
+      <Filter>Cheats\Civilian</Filter>
     </ClCompile>
     <ClCompile Include="Config.cpp">
       <Filter>Source Files</Filter>
@@ -274,8 +334,8 @@
     <ClCompile Include="BattleMonitor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\InstantLoveCave.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Social\InstantLoveCave.cpp">
+      <Filter>Cheats\Social</Filter>
     </ClCompile>
     <ClCompile Include="showlog.cpp">
       <Filter>Source Files</Filter>
@@ -286,77 +346,89 @@
     <ClCompile Include="debug.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\OfficerDetail.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Officer\OfficerDetail.cpp">
+      <Filter>Cheats\Officer</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Loyaltycave.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Social\Loyaltycave.cpp">
+      <Filter>Cheats\Social</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Resonancecave.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Social\Resonancecave.cpp">
+      <Filter>Cheats\Social</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Infinitegift.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Social\Infinitegift.cpp">
+      <Filter>Cheats\Social</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Infinitetalk.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Social\Infinitetalk.cpp">
+      <Filter>Cheats\Social</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Fastrelationship.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Social\Fastrelationship.cpp">
+      <Filter>Cheats\Social</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Selfheal.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\War\Selfheal.cpp">
+      <Filter>Cheats\War</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Dongto.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\War\Dongto.cpp">
+      <Filter>Cheats\War</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Terrainignore.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\War\Terrainignore.cpp">
+      <Filter>Cheats\War</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Defbuildingboost.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\War\Defbuildingboost.cpp">
+      <Filter>Cheats\War</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Defatkboost.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\War\Defatkboost.cpp">
+      <Filter>Cheats\War</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Catapult.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Civilian\NonggyeongCity.cpp">
+      <Filter>Cheats\Civilian</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Celestia.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Civilian\SangeopCity.cpp">
+      <Filter>Cheats\Civilian</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Battleunitcapture.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Civilian\Techpointcave.cpp">
+      <Filter>Cheats\Civilian</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Bigcityconvert.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Civilian\Techzero.cpp">
+      <Filter>Cheats\Civilian</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Techpointcave.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\War\Roadblock.cpp">
+      <Filter>Cheats\War</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Techzero.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Officer\SelectOfficercapture.cpp">
+      <Filter>Cheats\Officer</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\Roadblock.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Cheats\SelectOfficercapture.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Cheats\SpecialtyInfoWindow.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Officer\SpecialtyInfoWindow.cpp">
+      <Filter>Cheats\Officer</Filter>
     </ClCompile>
     <ClCompile Include="MemoryUtils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\OfficerData.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\Officer\OfficerData.cpp">
+      <Filter>Cheats\Officer</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\TengiCave.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\System\TengiCave.cpp">
+      <Filter>Cheats\System</Filter>
     </ClCompile>
-    <ClCompile Include="Cheats\SkillCondition.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="Cheats\System\SkillCondition.cpp">
+      <Filter>Cheats\System</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Officer\OfficerRosterResolve.cpp">
+      <Filter>Cheats\Officer</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\System\MonthCapture.cpp">
+      <Filter>Cheats\System</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\System\SystemMonth.cpp">
+      <Filter>Cheats\System</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\System\StartSetting.cpp">
+      <Filter>Cheats\System</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\FactionLordBonus.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Officer\StatMonitor.cpp">
+      <Filter>Cheats\Officer</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

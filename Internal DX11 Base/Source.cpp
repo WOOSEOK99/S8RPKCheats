@@ -1,20 +1,21 @@
 #pragma once
-#include "pch.h"
+#include "Cheats.h"
+#include "Cheats/System/SpeedHack.h"
+#include "Config.h"
 #include "Engine.h"
 #include "Menu.h"
-#include "Cheats.h"
-#include "Config.h"
-#include "debug.h"
 #include "MenuState.h"
-#include "Cheats/SpeedHack.h"
+#include "debug.h"
+#include "pch.h"
 #include "showlog.h"
 #include <filesystem>
+
 
 #include <ShellScalingApi.h>
 #pragma comment(lib, "Shcore.lib")
 
-// --- ç•°ë¶½???ï§ë¶¾ãˆç”±??ì„ì ™ æ¿¡ì’–ì­… ---
-#define TRAITS_PTR_OFFSET 0x57A4B8 
+// --- ì¶”ê???ë©”ëª¨ë¦??˜ì • ë¡œì§ ---
+#define TRAITS_PTR_OFFSET 0x57A4B8
 
 #ifndef WM_IME_FIRST
 #define WM_IME_FIRST 0x0281
@@ -24,337 +25,336 @@
 #endif
 
 void ApplyGoldCheat(int amount) {
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+  uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
 
-    // ?ë‰ìŸ¾?ì„ì¾¶ ï§£?è¸°ë‰ã ?ÑŠì”¤???ì„ë¦°
-    uintptr_t* step1Ptr = (uintptr_t*)(exeBase + 0x0); // è¸°ì¢ì” ??äºŒì‡±ëƒ¼
-    if (IsBadReadPtr(step1Ptr, sizeof(uintptr_t))) return;
+  // ?ˆì „?˜ê²Œ ì²?ë²ˆì§¸ ?¬ì¸???½ê¸°
+  uintptr_t *step1Ptr = (uintptr_t *)(exeBase + 0x0); // ë² ì´??ì£¼ì†Œ
+  if (IsBadReadPtr(step1Ptr, sizeof(uintptr_t)))
+    return;
 
-    uintptr_t step1 = *step1Ptr;
-    uintptr_t* traitsPtr = (uintptr_t*)(step1 + TRAITS_PTR_OFFSET);
-    if (IsBadReadPtr(traitsPtr, sizeof(uintptr_t))) return;
+  uintptr_t step1 = *step1Ptr;
+  uintptr_t *traitsPtr = (uintptr_t *)(step1 + TRAITS_PTR_OFFSET);
+  if (IsBadReadPtr(traitsPtr, sizeof(uintptr_t)))
+    return;
 
-    uintptr_t traitsBaseAddress = *traitsPtr;
-    if (traitsBaseAddress != 0) {
-        // æ¹²?Gold) ?ã…½ë´½???ê³¸ìŠœ
-        int* goldPtr = (int*)(traitsBaseAddress + 0x40);
-        if (!IsBadWritePtr(goldPtr, sizeof(int))) {
-            *goldPtr = amount;
-        }
+  uintptr_t traitsBaseAddress = *traitsPtr;
+  if (traitsBaseAddress != 0) {
+    // ê¸?Gold) ?¤í”„???ìš©
+    int *goldPtr = (int *)(traitsBaseAddress + 0x40);
+    if (!IsBadWritePtr(goldPtr, sizeof(int))) {
+      *goldPtr = amount;
     }
+  }
 }
 
-
-typedef BOOL(WINAPI* PGetCursorPos)(LPPOINT);
+typedef BOOL(WINAPI *PGetCursorPos)(LPPOINT);
 static PGetCursorPos oGetCursorPos = NULL;
 
-typedef SHORT(WINAPI* PGetAsyncKeyState)(int);
+typedef SHORT(WINAPI *PGetAsyncKeyState)(int);
 static PGetAsyncKeyState oGetAsyncKeyState = NULL;
 
-typedef SHORT(WINAPI* PGetKeyState)(int);
+typedef SHORT(WINAPI *PGetKeyState)(int);
 static PGetKeyState oGetKeyState = NULL;
 
-typedef BOOL(WINAPI* PGetKeyboardState)(PBYTE);
+typedef BOOL(WINAPI *PGetKeyboardState)(PBYTE);
 static PGetKeyboardState oGetKeyboardState = NULL;
 
-typedef BOOL(WINAPI* PPeekMessageW)(LPMSG, HWND, UINT, UINT, UINT);
+typedef BOOL(WINAPI *PPeekMessageW)(LPMSG, HWND, UINT, UINT, UINT);
 static PPeekMessageW oPeekMessageW = NULL;
 
-typedef BOOL(WINAPI* PPeekMessageA)(LPMSG, HWND, UINT, UINT, UINT);
+typedef BOOL(WINAPI *PPeekMessageA)(LPMSG, HWND, UINT, UINT, UINT);
 static PPeekMessageA oPeekMessageA = NULL;
 
 SHORT WINAPI hkGetAsyncKeyState(int vKey) {
-    if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
-        // [ì¤‘ìš”] í•œê¸€ ì…ë ¥ê¸°(IME)ì™€ UIê°€ ì‰¬í”„íŠ¸/ì»¨íŠ¸ë¡¤/ì•ŒíŠ¸ ìƒíƒœë¥¼ ì •í™•íˆ ì¸ì§€í•´ì•¼ ìŒììŒ ë“±ì´ ê°€ëŠ¥í•©ë‹ˆë‹¤.
-        // ë”°ë¼ì„œ ì‹œìŠ¤í…œ ê¸°ëŠ¥í‚¤ë“¤ì€ ì°¨ë‹¨í•˜ì§€ ì•Šê³  ì‹¤ì œ ê°’ì„ ë°˜í™˜í•©ë‹ˆë‹¤.
-        bool isModifier = (vKey == VK_SHIFT || vKey == VK_LSHIFT || vKey == VK_RSHIFT ||
-                           vKey == VK_CONTROL || vKey == VK_LCONTROL || vKey == VK_RCONTROL ||
-                           vKey == VK_MENU || vKey == VK_LMENU || vKey == VK_RMENU);
-        
-        // í•œ/ì˜(0x15), ë°±í‹±(VK_OEM_3) ë° ëª¨ë“  ìˆ˜ì • í‚¤(Modifier)ëŠ” í†µê³¼
-        if (ImGui::GetIO().WantCaptureKeyboard && !isModifier && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
-            return 0;
-        }
+  if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
+    // [Áß¿ä] ÇÑ±Û ÀÔ·Â±â(IME)¿Í UI°¡ ½¬ÇÁÆ®/ÄÁÆ®·Ñ/¾ËÆ® »óÅÂ¸¦ Á¤È®È÷ ÀÎÁöÇØ¾ß ½ÖÀÚÀ½ µîÀÌ °¡´ÉÇÕ´Ï´Ù.
+    // µû¶ó¼­ ½Ã½ºÅÛ ±â´ÉÅ°µéÀº Â÷´ÜÇÏÁö ¾Ê°í ½ÇÁ¦ °ªÀ» ¹İÈ¯ÇÕ´Ï´Ù.
+    bool isModifier =
+        (vKey == VK_SHIFT || vKey == VK_LSHIFT || vKey == VK_RSHIFT || vKey == VK_CONTROL || vKey == VK_LCONTROL ||
+         vKey == VK_RCONTROL || vKey == VK_MENU || vKey == VK_LMENU || vKey == VK_RMENU);
+
+    // ÇÑ/¿µ(0x15), ¹éÆ½(VK_OEM_3) ¹× ¸ğµç ¼öÁ¤ Å°(Modifier)´Â Åë°ú
+    if (ImGui::GetIO().WantCaptureKeyboard && !isModifier && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
+      return 0;
     }
-    return oGetAsyncKeyState(vKey);
+  }
+  return oGetAsyncKeyState(vKey);
 }
 
 SHORT WINAPI hkGetKeyState(int vKey) {
-    if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
-        bool isModifier = (vKey == VK_SHIFT || vKey == VK_LSHIFT || vKey == VK_RSHIFT ||
-                           vKey == VK_CONTROL || vKey == VK_LCONTROL || vKey == VK_RCONTROL ||
-                           vKey == VK_MENU || vKey == VK_LMENU || vKey == VK_RMENU);
+  if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
+    bool isModifier =
+        (vKey == VK_SHIFT || vKey == VK_LSHIFT || vKey == VK_RSHIFT || vKey == VK_CONTROL || vKey == VK_LCONTROL ||
+         vKey == VK_RCONTROL || vKey == VK_MENU || vKey == VK_LMENU || vKey == VK_RMENU);
 
-        if (ImGui::GetIO().WantCaptureKeyboard && !isModifier && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
-            return 0;
-        }
+    if (ImGui::GetIO().WantCaptureKeyboard && !isModifier && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
+      return 0;
     }
-    return oGetKeyState(vKey);
+  }
+  return oGetKeyState(vKey);
 }
 
 BOOL WINAPI hkGetKeyboardState(PBYTE lpKeyState) {
-    BOOL result = oGetKeyboardState(lpKeyState);
-    if (result && DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
-        if (ImGui::GetIO().WantCaptureKeyboard) {
-            // ë³´ì¡´í•  í‚¤ë“¤ì˜ ìƒíƒœë¥¼ ìˆ˜ë™ìœ¼ë¡œ ë°±ì—…
-            BYTE tilde  = lpKeyState[VK_OEM_3];
-            BYTE hangul = lpKeyState[0x15]; 
-            BYTE ralt   = lpKeyState[0xA5];
-            BYTE shift  = lpKeyState[VK_SHIFT];
-            BYTE lshift = lpKeyState[VK_LSHIFT];
-            BYTE rshift = lpKeyState[VK_RSHIFT];
-            BYTE ctrl   = lpKeyState[VK_CONTROL];
-            BYTE lctrl  = lpKeyState[VK_LCONTROL];
-            BYTE rctrl  = lpKeyState[VK_RCONTROL];
-            BYTE alt    = lpKeyState[VK_MENU];
-            BYTE lalt   = lpKeyState[VK_LMENU];
+  BOOL result = oGetKeyboardState(lpKeyState);
+  if (result && DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
+    if (ImGui::GetIO().WantCaptureKeyboard) {
+      // º¸Á¸ÇÒ Å°µéÀÇ »óÅÂ¸¦ ¼öµ¿À¸·Î ¹é¾÷
+      BYTE tilde = lpKeyState[VK_OEM_3];
+      BYTE hangul = lpKeyState[0x15];
+      BYTE ralt = lpKeyState[0xA5];
+      BYTE shift = lpKeyState[VK_SHIFT];
+      BYTE lshift = lpKeyState[VK_LSHIFT];
+      BYTE rshift = lpKeyState[VK_RSHIFT];
+      BYTE ctrl = lpKeyState[VK_CONTROL];
+      BYTE lctrl = lpKeyState[VK_LCONTROL];
+      BYTE rctrl = lpKeyState[VK_RCONTROL];
+      BYTE alt = lpKeyState[VK_MENU];
+      BYTE lalt = lpKeyState[VK_LMENU];
 
-            // ì „ì²´ë¥¼ 0ìœ¼ë¡œ ë°€ì–´ë²„ë¦¬ë˜, ìœ„ì—ì„œ ë°±ì—…í•œ í‚¤ë“¤ë§Œ ë³µêµ¬ (ì‹œìŠ¤í…œ/IMEìš©)
-            memset(lpKeyState, 0, 256);
-            lpKeyState[VK_OEM_3]  = tilde;
-            lpKeyState[0x15]      = hangul; 
-            lpKeyState[0xA5]      = ralt;
-            lpKeyState[VK_SHIFT]  = shift;
-            lpKeyState[VK_LSHIFT] = lshift;
-            lpKeyState[VK_RSHIFT] = rshift;
-            lpKeyState[VK_CONTROL]= ctrl;
-            lpKeyState[VK_LCONTROL]= lctrl;
-            lpKeyState[VK_RCONTROL]= rctrl;
-            lpKeyState[VK_MENU]   = alt;
-            lpKeyState[VK_LMENU]  = lalt;
-        }
+      // ÀüÃ¼¸¦ 0À¸·Î ¹Ğ¾î¹ö¸®µÇ, À§¿¡¼­ ¹é¾÷ÇÑ Å°µé¸¸ º¹±¸ (½Ã½ºÅÛ/IME¿ë)
+      memset(lpKeyState, 0, 256);
+      lpKeyState[VK_OEM_3] = tilde;
+      lpKeyState[0x15] = hangul;
+      lpKeyState[0xA5] = ralt;
+      lpKeyState[VK_SHIFT] = shift;
+      lpKeyState[VK_LSHIFT] = lshift;
+      lpKeyState[VK_RSHIFT] = rshift;
+      lpKeyState[VK_CONTROL] = ctrl;
+      lpKeyState[VK_LCONTROL] = lctrl;
+      lpKeyState[VK_RCONTROL] = rctrl;
+      lpKeyState[VK_MENU] = alt;
+      lpKeyState[VK_LMENU] = lalt;
     }
-    return result;
+  }
+  return result;
 }
 
-// OSê°€ ë©”ì‹œì§€ë¥¼ ê°€ì ¸ê°ˆ ë•Œ Raw Inputë§Œ ì œê±°í•˜ì—¬ ë‹¨ì¶•í‚¤ ì°¨ë‹¨, í‚¤ ë©”ì‹œì§€ëŠ” ê°•ì œ ë³€í™˜
+// OS°¡ ¸Ş½ÃÁö¸¦ °¡Á®°¥ ¶§ Raw Input¸¸ Á¦°ÅÇÏ¿© ´ÜÃàÅ° Â÷´Ü, Å° ¸Ş½ÃÁö´Â °­Á¦ º¯È¯
 void HandleMessageCapture(LPMSG lpMsg) {
-    if (!DX11Base::g_Engine || !DX11Base::IsAnyUIOpen() || !ImGui::GetCurrentContext()) return;
-    ImGuiIO& io = ImGui::GetIO();
+  if (!DX11Base::g_Engine || !DX11Base::IsAnyUIOpen() || !ImGui::GetCurrentContext())
+    return;
+  ImGuiIO &io = ImGui::GetIO();
 
-    // 1. ë‹¨ì¶•í‚¤ ë°©ì§€: Raw Input ì¸í„°ì…‰íŠ¸
-    if (lpMsg->message == WM_INPUT && io.WantCaptureKeyboard) {
-        UINT dwSize = 0;
-        GetRawInputData((HRAWINPUT)lpMsg->lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
-        if (dwSize > 0) {
-            BYTE buf[1024];
-            if (dwSize <= sizeof(buf) && GetRawInputData((HRAWINPUT)lpMsg->lParam, RID_INPUT, buf, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
-                RAWINPUT* raw = (RAWINPUT*)buf;
-                if (raw->header.dwType == RIM_TYPEKEYBOARD) {
-                    USHORT vkey = raw->data.keyboard.VKey;
-                    bool isModifier = (vkey == VK_SHIFT || vkey == VK_LSHIFT || vkey == VK_RSHIFT ||
-                                       vkey == VK_CONTROL || vkey == VK_LCONTROL || vkey == VK_RCONTROL ||
-                                       vkey == VK_MENU || vkey == VK_LMENU || vkey == VK_RMENU);
-                    bool isImeKey = (vkey == 0x15 || vkey == 0xA5 || vkey == VK_PROCESSKEY);
-                    bool isMenuToggle = (vkey == VK_OEM_3);
+  // 1. ´ÜÃàÅ° ¹æÁö: Raw Input ÀÎÅÍ¼ÁÆ®
+  if (lpMsg->message == WM_INPUT && io.WantCaptureKeyboard) {
+    UINT dwSize = 0;
+    GetRawInputData((HRAWINPUT)lpMsg->lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
+    if (dwSize > 0) {
+      BYTE buf[1024];
+      if (dwSize <= sizeof(buf) &&
+          GetRawInputData((HRAWINPUT)lpMsg->lParam, RID_INPUT, buf, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
+        RAWINPUT *raw = (RAWINPUT *)buf;
+        if (raw->header.dwType == RIM_TYPEKEYBOARD) {
+          USHORT vkey = raw->data.keyboard.VKey;
+          bool isModifier =
+              (vkey == VK_SHIFT || vkey == VK_LSHIFT || vkey == VK_RSHIFT || vkey == VK_CONTROL ||
+               vkey == VK_LCONTROL || vkey == VK_RCONTROL || vkey == VK_MENU || vkey == VK_LMENU || vkey == VK_RMENU);
+          bool isImeKey = (vkey == 0x15 || vkey == 0xA5 || vkey == VK_PROCESSKEY);
+          bool isMenuToggle = (vkey == VK_OEM_3);
 
-                    // í…ìŠ¤íŠ¸ ì…ë ¥ ì¤‘ì—ëŠ” ê²Œì„ ë‹¨ì¶•í‚¤ê°€ ì ˆëŒ€ ë¨¹ì§€ ì•Šë„ë¡ ê±°ì˜ ëª¨ë“  í‚¤ë¥¼ ì°¨ë‹¨.
-                    // ë‹¨, IME/ìˆ˜ì •í‚¤/ë©”ë‰´ í† ê¸€ í‚¤ëŠ” ì‹œìŠ¤í…œ ì²˜ë¦¬ì— ë§¡ê¸´ë‹¤.
-                    if (io.WantTextInput && !isModifier && !isImeKey && !isMenuToggle) {
-                        lpMsg->message = WM_NULL;
-                        return;
-                    }
+          // ÅØ½ºÆ® ÀÔ·Â Áß¿¡´Â °ÔÀÓ ´ÜÃàÅ°°¡ Àı´ë ¸ÔÁö ¾Êµµ·Ï °ÅÀÇ ¸ğµç Å°¸¦ Â÷´Ü.
+          // ´Ü, IME/¼öÁ¤Å°/¸Ş´º Åä±Û Å°´Â ½Ã½ºÅÛ Ã³¸®¿¡ ¸Ã±ä´Ù.
+          if (io.WantTextInput && !isModifier && !isImeKey && !isMenuToggle) {
+            lpMsg->message = WM_NULL;
+            return;
+          }
 
-                    // í…ìŠ¤íŠ¸ ì…ë ¥ì´ ì•„ë‹ˆë”ë¼ë„, ê¸°ì¡´ì²˜ëŸ¼ ìŠ¤í˜ì´ìŠ¤/ë°±ìŠ¤í˜ì´ìŠ¤ëŠ” ì°¨ë‹¨ ìœ ì§€.
-                    if (vkey == VK_SPACE || vkey == VK_BACK) {
-                        lpMsg->message = WM_NULL; 
-                        return;
-                    }
-                    // ê·¸ ì™¸ í‚¤ëŠ” ì•„ë¬´ê²ƒë„ í•˜ì§€ ì•ŠìŒ (ìì—°ìŠ¤ëŸ½ê²Œ í†µê³¼)
-                }
-            }
+          // ÅØ½ºÆ® ÀÔ·ÂÀÌ ¾Æ´Ï´õ¶óµµ, ±âÁ¸Ã³·³ ½ºÆäÀÌ½º/¹é½ºÆäÀÌ½º´Â Â÷´Ü À¯Áö.
+          if (vkey == VK_SPACE || vkey == VK_BACK) {
+            lpMsg->message = WM_NULL;
+            return;
+          }
+          // ±× ¿Ü Å°´Â ¾Æ¹«°Íµµ ÇÏÁö ¾ÊÀ½ (ÀÚ¿¬½º·´°Ô Åë°ú)
         }
+      }
     }
+  }
 
-    // 2. íƒ€ì´í•‘ í™œì„±í™”: í‚¤ë³´ë“œ ë©”ì‹œì§€ ê°•ì œ ë³€í™˜ ë¡œì§ ì œê±°
-    //    ê²Œì„ ìì²´ ë£¨í”„ì—ì„œ TranslateMessageë¥¼ í˜¸ì¶œí•˜ë¯€ë¡œ, 
-    //    ì—¬ê¸°ì„œ ìˆ˜ë™ìœ¼ë¡œ í˜¸ì¶œí•˜ë©´ WM_CHARê°€ ë‘ ë²ˆ ë°œìƒí•˜ì—¬ ë¬¸ì/ìˆ«ìê°€ ë‘ ë²ˆì”© ì…ë ¥ë˜ëŠ” ë²„ê·¸ê°€ ë°œìƒí•©ë‹ˆë‹¤.
-    //    ë”°ë¼ì„œ í•´ë‹¹ ë¶€ë¶„ì„ ì‚­ì œí•˜ì—¬ ê²Œì„ì˜ ê¸°ë³¸ ë©”ì‹œì§€ íŒí”„ì— ë§¡ê¹ë‹ˆë‹¤.
+  // 2. Å¸ÀÌÇÎ È°¼ºÈ­: Å°º¸µå ¸Ş½ÃÁö °­Á¦ º¯È¯ ·ÎÁ÷ Á¦°Å
+  //    °ÔÀÓ ÀÚÃ¼ ·çÇÁ¿¡¼­ TranslateMessage¸¦ È£ÃâÇÏ¹Ç·Î,
+  //    ¿©±â¼­ ¼öµ¿À¸·Î È£ÃâÇÏ¸é WM_CHAR°¡ µÎ ¹ø ¹ß»ıÇÏ¿© ¹®ÀÚ/¼ıÀÚ°¡ µÎ ¹ø¾¿ ÀÔ·ÂµÇ´Â ¹ö±×°¡ ¹ß»ıÇÕ´Ï´Ù.
+  //    µû¶ó¼­ ÇØ´ç ºÎºĞÀ» »èÁ¦ÇÏ¿© °ÔÀÓÀÇ ±âº» ¸Ş½ÃÁö ÆßÇÁ¿¡ ¸Ã±é´Ï´Ù.
 }
 
 BOOL WINAPI hkPeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg) {
-    BOOL result = oPeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
-    if (result && lpMsg && (wRemoveMsg & PM_REMOVE)) {
-        HandleMessageCapture(lpMsg);
-    }
-    return result;
+  BOOL result = oPeekMessageW(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+  if (result && lpMsg && (wRemoveMsg & PM_REMOVE)) {
+    HandleMessageCapture(lpMsg);
+  }
+  return result;
 }
 
 BOOL WINAPI hkPeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg) {
-    BOOL result = oPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
-    if (result && lpMsg && (wRemoveMsg & PM_REMOVE)) {
-        HandleMessageCapture(lpMsg);
-    }
-    return result;
+  BOOL result = oPeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+  if (result && lpMsg && (wRemoveMsg & PM_REMOVE)) {
+    HandleMessageCapture(lpMsg);
+  }
+  return result;
 }
 
-// [ì¶”ê°€] ìš°ë¦¬ê°€ ê°€ë¡œì±ˆ ê°€ì§œ í•¨ìˆ˜
+// [Ãß°¡] ¿ì¸®°¡ °¡·ÎÃ¦ °¡Â¥ ÇÔ¼ö
 BOOL WINAPI hkGetCursorPos(LPPOINT lpPoint) {
-    BOOL result = oGetCursorPos(lpPoint); // ì‹¤ì œ ì¢Œí‘œë¥¼ ë¨¼ì € ê°€ì ¸ì˜´
+  BOOL result = oGetCursorPos(lpPoint); // ½ÇÁ¦ ÁÂÇ¥¸¦ ¸ÕÀú °¡Á®¿È
 
-    // ë©”ë‰´ê°€ ì¼œì ¸ ìˆê³  "ë””ë²„ê·¸ ëª¨ë“œ", "ê²Œì„ í™”ë©´ í´ë¦­ í—ˆìš©" ìƒíƒœê°€ ì•„ë‹ ë•Œ 
-    // (ë©”ì¸ ë©”ë‰´ í¼ì³ì§, ë˜ëŠ” ì¥ìˆ˜ ë¦¬ìŠ¤íŠ¸ì°½ ì˜µì…˜ ì¼œì§, ë˜ëŠ” ë©”ëª¨ë¦¬ ì—ë””í„° í™œì„±í™”)
-    // + ì„êµ¬ì´ê°€ ë§ˆìš°ìŠ¤ë¥¼ ì ìœ  ì¤‘ì¼ ë•Œë§Œ ê²Œì„ í™”ë©´ ë°–ìœ¼ë¡œ ê±°ì§“ë§
-    bool bHardBlock = !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) || (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor) || DX11Base::bShowSpecialtyInfoWin;
-    if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext() && 
-        ImGui::GetIO().WantCaptureMouse &&
-        !DX11Base::bShowDebug && !DX11Base::bAllowGameClick && bHardBlock) {
-        lpPoint->x = -1;
-        lpPoint->y = -1;
-    }
-    return result;
+  // ¸Ş´º°¡ ÄÑÁ® ÀÖ°í "µğ¹ö±× ¸ğµå", "°ÔÀÓ È­¸é Å¬¸¯ Çã¿ë" »óÅÂ°¡ ¾Æ´Ò ¶§
+  // (¸ŞÀÎ ¸Ş´º ÆîÃÄÁü, ¶Ç´Â Àå¼ö ¸®½ºÆ®Ã¢ ¿É¼Ç ÄÑÁü, ¶Ç´Â ¸Ş¸ğ¸® ¿¡µğÅÍ È°¼ºÈ­)
+  // + ÀÓ±¸ÀÌ°¡ ¸¶¿ì½º¸¦ Á¡À¯ ÁßÀÏ ¶§¸¸ °ÔÀÓ È­¸é ¹ÛÀ¸·Î °ÅÁş¸»
+  bool bHardBlock =
+      !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) ||
+      (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor) || DX11Base::bShowSpecialtyInfoWin;
+  if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse &&
+      !DX11Base::bShowDebug && !DX11Base::bAllowGameClick && bHardBlock) {
+    lpPoint->x = -1;
+    lpPoint->y = -1;
+  }
+  return result;
 }
 
 using namespace DX11Base;
 
-void ClientBGThread()
-{
-    while (g_Running)
-    {
-        Menu::Loops();
+void ClientBGThread() {
+  while (g_Running) {
+    Menu::Loops();
 
-        if (g_KillSwitch)
-        {
-            g_D3D11Window->UnhookD3D();
-            g_Hooking->Shutdown();
-            g_Engine.release();     //  releases all created class instances
-            g_Running = false;
-
-        }
-
-        std::this_thread::sleep_for(30ms);
+    if (g_KillSwitch) {
+      g_D3D11Window->UnhookD3D();
+      g_Hooking->Shutdown();
+      g_Engine.release(); //  releases all created class instances
+      g_Running = false;
     }
+
+    std::this_thread::sleep_for(30ms);
+  }
 }
 
 namespace DX11Base {
-    void Shutdown(bool isTerminating) {
-        static bool s_done = false;
-        if (s_done) return;
-        s_done = true;
+  void Shutdown(bool isTerminating) {
+    static bool s_done = false;
+    if (s_done)
+      return;
+    s_done = true;
 
-        g_Running = false;
-        g_KillSwitch = true;
+    g_Running = false;
+    g_KillSwitch = true;
 
-        // í”„ë¡œì„¸ìŠ¤ ì¢…ë£Œ ì‹œì—ëŠ” ì‹œìŠ¤í…œì´ ë©”ëª¨ë¦¬ë¥¼ ì•Œì•„ì„œ íšŒìˆ˜í•˜ë¯€ë¡œ, 
-        // í›…ìœ¼ë¡œ ì¸í•œ í¬ë˜ì‹œë¥¼ ë°©ì§€í•˜ê¸° ìœ„í•´ ê°€ë¡œì±„ê¸°ë§Œ ìµœì†Œí•œìœ¼ë¡œ í•´ì œí•©ë‹ˆë‹¤.
-        if (isTerminating) {
-            MH_DisableHook(MH_ALL_HOOKS);
-            if (g_D3D11Window) {
-                // D3D ë¦¬ì†ŒìŠ¤ í•´ì œ(Release)ë¥¼ ê±´ë„ˆë›°ê³  ìœˆë„ìš° í”„ë¡œì‹œì €ë§Œ ë³µêµ¬ (ê³ ì† ì¢…ë£Œ)
-                if (g_Engine && g_Engine->pGameWindow && g_D3D11Window->m_OldWndProc) {
-                    SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)g_D3D11Window->m_OldWndProc);
-                    g_D3D11Window->m_OldWndProc = nullptr;
-                }
-            }
-            return;
+    // ÇÁ·Î¼¼½º Á¾·á ½Ã¿¡´Â ½Ã½ºÅÛÀÌ ¸Ş¸ğ¸®¸¦ ¾Ë¾Æ¼­ È¸¼öÇÏ¹Ç·Î,
+    // ÈÅÀ¸·Î ÀÎÇÑ Å©·¡½Ã¸¦ ¹æÁöÇÏ±â À§ÇØ °¡·ÎÃ¤±â¸¸ ÃÖ¼ÒÇÑÀ¸·Î ÇØÁ¦ÇÕ´Ï´Ù.
+    if (isTerminating) {
+      MH_DisableHook(MH_ALL_HOOKS);
+      if (g_D3D11Window) {
+        // D3D ¸®¼Ò½º ÇØÁ¦(Release)¸¦ °Ç³Ê¶Ù°í À©µµ¿ì ÇÁ·Î½ÃÀú¸¸ º¹±¸ (°í¼Ó Á¾·á)
+        if (g_Engine && g_Engine->pGameWindow && g_D3D11Window->m_OldWndProc) {
+          SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)g_D3D11Window->m_OldWndProc);
+          g_D3D11Window->m_OldWndProc = nullptr;
         }
-
-        // ì¼ë°˜ì ì¸ ì–¸ë¡œë“œ(FreeLibrary) ìƒí™©ì—ì„œëŠ” ëª¨ë“  ë¦¬ì†ŒìŠ¤ë¥¼ ì •ì„ëŒ€ë¡œ í•´ì œí•©ë‹ˆë‹¤.
-        MH_DisableHook(MH_ALL_HOOKS);
-        MH_Uninitialize();
-
-        if (g_D3D11Window) {
-            g_D3D11Window->UnhookD3D();
-        }
-
-        if (g_Hooking) {
-            g_Hooking->Shutdown();
-        }
+      }
+      return;
     }
-}
+
+    // ÀÏ¹İÀûÀÎ ¾ğ·Îµå(FreeLibrary) »óÈ²¿¡¼­´Â ¸ğµç ¸®¼Ò½º¸¦ Á¤¼®´ë·Î ÇØÁ¦ÇÕ´Ï´Ù.
+    MH_DisableHook(MH_ALL_HOOKS);
+    MH_Uninitialize();
+
+    if (g_D3D11Window) {
+      g_D3D11Window->UnhookD3D();
+    }
+
+    if (g_Hooking) {
+      g_Hooking->Shutdown();
+    }
+  }
+} // namespace DX11Base
 
 DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
-    // [ì‹ ê·œ] ê°€ì¥ ì´ˆê¸°ì— ìˆ˜ë™ìœ¼ë¡œ ë¡œê·¸ì¶œë ¥ í”Œë˜ê·¸ë¥¼ í™•ë³´í•˜ì—¬ D3D í›… ë“± ê·¹ì´ˆê¸° ì˜¤ë¥˜ë¥¼ íŒŒì¼ì— ê¸°ë¡
-    DX11Base::LoadEarlyLogConfig();
+  // [½Å±Ô] °¡Àå ÃÊ±â¿¡ ¼öµ¿À¸·Î ·Î±×Ãâ·Â ÇÃ·¡±×¸¦ È®º¸ÇÏ¿© D3D ÈÅ µî ±ØÃÊ±â ¿À·ù¸¦ ÆÄÀÏ¿¡ ±â·Ï
+  DX11Base::LoadEarlyLogConfig();
 
-    // í˜„ì¬ DLL íŒŒì¼ëª… í™•ì¸
-    char dllPath[MAX_PATH];
-    GetModuleFileNameA((HMODULE)dwModule, dllPath, MAX_PATH);
-    std::string dllName = std::filesystem::path(dllPath).filename().string();
+  // ÇöÀç DLL ÆÄÀÏ¸í È®ÀÎ
+  char dllPath[MAX_PATH];
+  GetModuleFileNameA((HMODULE)dwModule, dllPath, MAX_PATH);
+  std::string dllName = std::filesystem::path(dllPath).filename().string();
 
-    // [ì¤‘ìš”] ì´ˆê¸°í™” ì•ˆì •ì„±ì„ ìœ„í•´ 5ì´ˆ ëŒ€ê¸°
-    Sleep(5000);
+  // [Áß¿ä] ÃÊ±âÈ­ ¾ÈÁ¤¼ºÀ» À§ÇØ 5ÃÊ ´ë±â
+  Sleep(5000);
 
-    DX11Base::AddLog(u8"========================================");
-    DX11Base::AddLog(u8"[System] ì¹˜íŠ¸ ë¡œë“œ ì„±ê³µ (DLL: %s)", dllName.c_str());
-    DX11Base::AddLog(u8"[System] ë²„ì „: %s", SAM8_CHEAT_VERSION);
-    DX11Base::AddLog(u8"========================================");
+  DX11Base::AddLog(u8"========================================");
+  DX11Base::AddLog(u8"[System] Ä¡Æ® ·Îµå ¼º°ø (DLL: %s)", dllName.c_str());
+  DX11Base::AddLog(u8"[System] ¹öÀü: %s", SAM8_CHEAT_VERSION);
+  DX11Base::AddLog(u8"========================================");
 
-    UNREFERENCED_PARAMETER(dwModule);
-    // quick debug popup removed
+  UNREFERENCED_PARAMETER(dwModule);
+  // quick debug popup removed
 
-    // ì›ë³¸ ê²Œì„ì˜ DPI ì¸ì‹ ìƒíƒœë¥¼ ê°•ì œë¡œ ë³€ê²½í•˜ë©´ ë§ˆìš°ìŠ¤ í¬ì¸í„° ì¢Œí‘œ(WM_MOUSEMOVE)ì™€ 
-    // ì‹¤ì œ ë Œë”ë§ëœ GUI ì¢Œí‘œ ì‚¬ì´ì— ì‹¬ê°í•œ ì˜¤í”„ì…‹(ì–´ê¸‹ë‚¨)ì´ ë°œìƒí•©ë‹ˆë‹¤.
-    // SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-    // -----------------------------------------------------------
+  // ¿øº» °ÔÀÓÀÇ DPI ÀÎ½Ä »óÅÂ¸¦ °­Á¦·Î º¯°æÇÏ¸é ¸¶¿ì½º Æ÷ÀÎÅÍ ÁÂÇ¥(WM_MOUSEMOVE)¿Í
+  // ½ÇÁ¦ ·»´õ¸µµÈ GUI ÁÂÇ¥ »çÀÌ¿¡ ½É°¢ÇÑ ¿ÀÇÁ¼Â(¾î±ß³²)ÀÌ ¹ß»ıÇÕ´Ï´Ù.
+  // SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+  // -----------------------------------------------------------
 
-    g_Engine = std::make_unique<Engine>();
-    // initialize cheats subsystem (resolve pointers)
-    // try immediately, but also retry in background until game finishes loading
-    DX11Base::InitCheats();
-    std::thread([]() {
-        int attempts = 0;
-        while (attempts < 60) { // retry up to ~30 seconds
-            if (DX11Base::InitCheats()) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            attempts++;
-        }
-    }).detach();
+  g_Engine = std::make_unique<Engine>();
+  // initialize cheats subsystem (resolve pointers)
+  // try immediately, but also retry in background until game finishes loading
+  DX11Base::InitCheats();
+  std::thread([]() {
+    int attempts = 0;
+    while (attempts < 60) { // retry up to ~30 seconds
+      if (DX11Base::InitCheats())
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      attempts++;
+    }
+  }).detach();
 
-    // Config Loading and Initial AutoLoad is now deferred to Menu::Loops() when p1 becomes valid
+  // Config Loading and Initial AutoLoad is now deferred to Menu::Loops() when p1 becomes valid
 
-    g_D3D11Window->HookD3D();
-    g_Hooking->Initialize();
+  g_D3D11Window->HookD3D();
+  g_Hooking->Initialize();
 
-    // 2. [ì¶”ê°€] í›… ì´ˆê¸°í™” ì§í›„ì— ìš°ë¦¬ë§Œì˜ ì¢Œí‘œ ì†ì´ê¸° í›…ì„ ì„¤ì¹˜í•©ë‹ˆë‹¤.
-    // [ìˆ˜ì •] MH_EnableHookì— IAT ìŠ¤í…(&GetCursorPos ë“±)ì„ ì§ì ‘ ë„˜ê¸°ë©´
-    //        ì¼ë¶€ PCì—ì„œ ì¶©ëŒ ë°œìƒ. MH_CreateHookApi ë“±ë¡ í›„ MH_ALL_HOOKSë¡œ
-    //        í•œêº¼ë²ˆì— í™œì„±í™”í•˜ëŠ” ë°©ì‹ìœ¼ë¡œ ë³€ê²½.
-    if (oGetCursorPos == NULL) {
-        MH_CreateHookApi(L"user32.dll", "GetCursorPos",      &hkGetCursorPos,      (LPVOID*)&oGetCursorPos);
-        MH_CreateHookApi(L"user32.dll", "GetAsyncKeyState",  &hkGetAsyncKeyState,  (LPVOID*)&oGetAsyncKeyState);
-        MH_CreateHookApi(L"user32.dll", "GetKeyState",       &hkGetKeyState,       (LPVOID*)&oGetKeyState);
-        MH_CreateHookApi(L"user32.dll", "GetKeyboardState",  &hkGetKeyboardState,  (LPVOID*)&oGetKeyboardState);
-        MH_CreateHookApi(L"user32.dll", "PeekMessageW",      &hkPeekMessageW,      (LPVOID*)&oPeekMessageW);
-        MH_CreateHookApi(L"user32.dll", "PeekMessageA",      &hkPeekMessageA,      (LPVOID*)&oPeekMessageA);
+  // 2. [Ãß°¡] ÈÅ ÃÊ±âÈ­ Á÷ÈÄ¿¡ ¿ì¸®¸¸ÀÇ ÁÂÇ¥ ¼ÓÀÌ±â ÈÅÀ» ¼³Ä¡ÇÕ´Ï´Ù.
+  // [¼öÁ¤] MH_EnableHook¿¡ IAT ½ºÅÓ(&GetCursorPos µî)À» Á÷Á¢ ³Ñ±â¸é
+  //        ÀÏºÎ PC¿¡¼­ Ãæµ¹ ¹ß»ı. MH_CreateHookApi µî·Ï ÈÄ MH_ALL_HOOKS·Î
+  //        ÇÑ²¨¹ø¿¡ È°¼ºÈ­ÇÏ´Â ¹æ½ÄÀ¸·Î º¯°æ.
+  if (oGetCursorPos == NULL) {
+    MH_CreateHookApi(L"user32.dll", "GetCursorPos", &hkGetCursorPos, (LPVOID *)&oGetCursorPos);
+    MH_CreateHookApi(L"user32.dll", "GetAsyncKeyState", &hkGetAsyncKeyState, (LPVOID *)&oGetAsyncKeyState);
+    MH_CreateHookApi(L"user32.dll", "GetKeyState", &hkGetKeyState, (LPVOID *)&oGetKeyState);
+    MH_CreateHookApi(L"user32.dll", "GetKeyboardState", &hkGetKeyboardState, (LPVOID *)&oGetKeyboardState);
+    MH_CreateHookApi(L"user32.dll", "PeekMessageW", &hkPeekMessageW, (LPVOID *)&oPeekMessageW);
+    MH_CreateHookApi(L"user32.dll", "PeekMessageA", &hkPeekMessageA, (LPVOID *)&oPeekMessageA);
 
-        // ëª¨ë“  ë“±ë¡ëœ í›…ì„ í•œêº¼ë²ˆì— í™œì„±í™” (ì•ˆì „)
-        MH_EnableHook(MH_ALL_HOOKS);
+    // ¸ğµç µî·ÏµÈ ÈÅÀ» ÇÑ²¨¹ø¿¡ È°¼ºÈ­ (¾ÈÀü)
+    MH_EnableHook(MH_ALL_HOOKS);
+  }
+
+  //	INITIALIZE BACKGROUND THREAD
+  std::thread WCMUpdate(ClientBGThread);
+
+  //  RENDER LOOP
+  g_Running = true;
+  // [¼öÁ¤] int¸¦ ULONGLONGÀ¸·Î º¯°æ (64ºñÆ® Á¤¼öÇü)
+  static ULONGLONG LastTick = 0;
+
+  while (g_Running) {
+    // ÅÇ Å° À§ÀÇ ` (¹°°á/¹éÆ½) Å°·Î º¯°æ
+    if ((GetAsyncKeyState(VK_OEM_3) & 0x8000) && ((GetTickCount64() - LastTick) > 500)) {
+      DX11Base::bToggleMenuCollapseRequest = true;
+      g_Engine->bShowMenu = true; // ¹«Á¶°Ç ¸Ş´º´Â Ç¥½Ã»óÅÂ¸¦ À¯Áö
+      LastTick = GetTickCount64();
     }
 
-    //	INITIALIZE BACKGROUND THREAD
-    std::thread WCMUpdate(ClientBGThread);
+    // if (GetAsyncKeyState(VK_END) & 0x8000)
+    //{
+    //     g_KillSwitch = true;
+    // }
+    std::this_thread::sleep_for(30ms);
+  }
 
-    //  RENDER LOOP
-    g_Running = true;
-    // [ìˆ˜ì •] intë¥¼ ULONGLONGìœ¼ë¡œ ë³€ê²½ (64ë¹„íŠ¸ ì •ìˆ˜í˜•)
-    static ULONGLONG LastTick = 0;
+  //  EXIT
+  DX11Base::Shutdown(false); // ¿©±â´Â Á¤»ó ½º·¹µå Á¾·á »óÈ²
 
-    while (g_Running)
-    {
-        // íƒ­ í‚¤ ìœ„ì˜ ` (ë¬¼ê²°/ë°±í‹±) í‚¤ë¡œ ë³€ê²½
-        if ((GetAsyncKeyState(VK_OEM_3) & 0x8000) && ((GetTickCount64() - LastTick) > 500))
-        {
-            DX11Base::bToggleMenuCollapseRequest = true;
-            g_Engine->bShowMenu = true; // ë¬´ì¡°ê±´ ë©”ë‰´ëŠ” í‘œì‹œìƒíƒœë¥¼ ìœ ì§€
-            LastTick = GetTickCount64();
-        }
+  // join() ´ë±â¸¦ Á¦°ÅÇÏ¿© Á¾·á ½Ã ÇÁ¸®Â¡ ¹æÁö
+  // if (WCMUpdate.joinable())
+  //     WCMUpdate.join();
 
-        //if (GetAsyncKeyState(VK_END) & 0x8000)
-        //{
-        //    g_KillSwitch = true;
-        //}
-        std::this_thread::sleep_for(30ms);
-    }
-
-
-    //  EXIT
-    DX11Base::Shutdown(false); // ì—¬ê¸°ëŠ” ì •ìƒ ìŠ¤ë ˆë“œ ì¢…ë£Œ ìƒí™©
-
-    // join() ëŒ€ê¸°ë¥¼ ì œê±°í•˜ì—¬ ì¢…ë£Œ ì‹œ í”„ë¦¬ì§• ë°©ì§€
-    // if (WCMUpdate.joinable())
-    //     WCMUpdate.join();
-
-    FreeLibraryAndExitThread(g_hModule, EXIT_SUCCESS);
-    return EXIT_SUCCESS;
+  FreeLibraryAndExitThread(g_hModule, EXIT_SUCCESS);
+  return EXIT_SUCCESS;
 }

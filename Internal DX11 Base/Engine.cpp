@@ -1,6 +1,6 @@
 #include "Engine.h"
-#include "Cheats/RoninMonitor.h"
-#include "Cheats/SpeedHack.h"
+#include "Cheats/Officer/RoninMonitor.h"
+#include "Cheats/System/SpeedHack.h"
 #include "Fonts.h"
 #include "Framework/imgui.h"
 #include "Framework/imgui_impl_dx11.h"
