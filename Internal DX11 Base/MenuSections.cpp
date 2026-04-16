@@ -1,35 +1,35 @@
 #include "MenuSections.h"
 #include "Cheats.h"
 #include "Cheats/Civilian/BangmokCity.h"
-#include "Cheats/War/BattleMapShuffle.h"
-#include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/Civilian/Bigcityconvert.h"
-#include "Cheats/War/Catapult.h"
-#include "Cheats/War/Celestia.h"
-#include "Cheats/War/Defatkboost.h"
-#include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/Civilian/DomesticsMult.h"
-#include "Cheats/War/Dongto.h"
-#include "Cheats/War/FactionLordBonus.h"
+#include "Cheats/Civilian/NonggyeongCity.h"
+#include "Cheats/Civilian/SangeopCity.h"
+#include "Cheats/Civilian/Techpointcave.h"
+#include "Cheats/Civilian/Techzero.h"
+#include "Cheats/Officer/OfficerRosterResolve.h"
+#include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Social/Fastrelationship.h"
 #include "Cheats/Social/Infinitegift.h"
 #include "Cheats/Social/Infinitetalk.h"
 #include "Cheats/Social/InstantLoveCave.h"
 #include "Cheats/Social/Loyaltycave.h"
-#include "Cheats/System/MonthCapture.h"
-#include "Cheats/Civilian/NonggyeongCity.h"
-#include "Cheats/Officer/OfficerRosterResolve.h"
 #include "Cheats/Social/Resonancecave.h"
-#include "Cheats/War/Roadblock.h"
-#include "Cheats/Civilian/SangeopCity.h"
-#include "Cheats/Officer/SelectOfficercapture.h"
-#include "Cheats/War/Selfheal.h"
+#include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SkillCondition.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/System/StartSetting.h"
-#include "Cheats/Civilian/Techpointcave.h"
-#include "Cheats/Civilian/Techzero.h"
 #include "Cheats/System/TengiCave.h"
+#include "Cheats/War/BattleMapShuffle.h"
+#include "Cheats/War/Battleunitcapture.h"
+#include "Cheats/War/Catapult.h"
+#include "Cheats/War/Celestia.h"
+#include "Cheats/War/Defatkboost.h"
+#include "Cheats/War/Defbuildingboost.h"
+#include "Cheats/War/Dongto.h"
+#include "Cheats/War/FactionLordBonus.h"
+#include "Cheats/War/Roadblock.h"
+#include "Cheats/War/Selfheal.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"
 #include "Framework/imgui.h"
@@ -558,17 +558,6 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      // ImGui::Spacing();
-      // if (ImGui::Button(u8"배우자 검색", ImVec2(120.0f * scale, 26.0f * scale))) {
-      //   DX11Base::bShowSpouseListWin = true;
-      //   DX11Base::StartSpouseScannerAsync();
-      // }
-      // if (ImGui::IsItemHovered()) {
-      //   ImGui::BeginTooltip();
-      //   ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"현재 주인공의 배우자 목록을 메모리에서 스캔하여
-      //   표시합니다."); ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 결과는 전용 창에 나타납니다. (몇 초
-      //   정도 소요 가능)"); ImGui::EndTooltip();
-      // }
       EndSection(); // 결혼/인연
     }
 
@@ -576,10 +565,11 @@ namespace DX11Base {
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.7f, 1.0f), u8"[ 전쟁 관련 ]");
 
-      if (ImGui::Checkbox(u8"모든 무장 성향 적극(전쟁 유발)", &bAllAggressive)) {
+      if (ImGui::Checkbox(u8"모든 무장 성향 적극", &bAllAggressive)) {
         DX11Base::NotifyFeatureToggle(u8"모든 무장 성향 적극 자동 적용", bAllAggressive);
         DX11Base::SaveConfig();
       }
+
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(
@@ -599,10 +589,6 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 치료 능력 강화");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 1 : 본인 부대 치료");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 2 : 본인 부대 치료 / 아군 부대 1칸 전체 치료");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 3 : 본인 부대 치료 / 아군 부대 2칸 전체 치료");
         ImGui::EndTooltip();
       }
 
@@ -615,7 +601,7 @@ namespace DX11Base {
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"발동 조건 : 비");
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"발동 조건 : 비(격류) / 강풍(낙석)");
         ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨별 데미지는 기존 데미지의 1/2");
         ImGui::EndTooltip();
       }
@@ -628,26 +614,15 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 동토 능력 강화");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 1 : 동토 확률 100%%");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 2 : 동토 확률 100%% / 상태이상 50%%");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 3 : 동토 확률 100%% / 상태이상 100%%");
         ImGui::EndTooltip();
       }
 
       ImGui::SameLine(160.0f * scale);
 
-      if (ImGui::Checkbox(u8"[전법 강화] 투석 병기", &bCatapult)) {
+      if (ImGui::Checkbox(u8"[병기 강화] 투석", &bCatapult)) {
         DX11Base::SetCatapultCheat(bCatapult);
-        NotifyFeatureToggle(u8"[전법 강화] 투석 병기", bCatapult);
+        NotifyFeatureToggle(u8"[병기 강화] 투석", bCatapult);
         SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"사거리 증가: 2->5");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"광역딜");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"데미지증가 20->100");
-        ImGui::EndTooltip();
       }
 
       if (ImGui::Checkbox(u8"[전법 강화] 천계", &bCelestial)) {
@@ -658,12 +633,15 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 천계 능력 강화");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"레벨 1 : 치료 효과 2000 / 광범위");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"레벨 2 : 치료 효과 3500 / 광범위");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"레벨 3 : 치료 효과 7000 / 광범위");
         ImGui::EndTooltip();
       }
+
+      ImGui::SameLine(160.0f * scale);
+      if (ImGui::Button(u8"전법 수정", ImVec2(100.0f * scale, 25.0f * scale))) {
+        bShowTacticsEditWin = !bShowTacticsEditWin;
+      }
+
+      ImGui::Separator();
 
       if (ImGui::Checkbox(u8"방어 건물 사거리 강화", &bDefBuilding)) {
         DX11Base::SetDefBuildingBoost(bDefBuilding);
@@ -866,24 +844,6 @@ namespace DX11Base {
 
       // [신규] 데모플레이 제어 버튼
       float demoBtnWidth = 140.0f * scale;
-      // ImGui::Spacing();
-      // if (ImGui::Button(u8"데모플레이 시작", ImVec2(demoBtnWidth, 26.0f * scale))) {
-      //   uintptr_t gBase = DX11Base::GetGameBase();
-      //   uintptr_t p1_ptr = gBase + 0xE0;
-      //   if (DX11Base::IsValidPtr(p1_ptr, 8)) {
-      //     uintptr_t current_p1 = *(uintptr_t *)p1_ptr;
-      //     if (current_p1 > 0x10000) {
-      //       DX11Base::g_savedHeroAddr = current_p1;
-      //     }
-      //     DWORD oldP;
-      //     if (VirtualProtect((LPVOID)p1_ptr, 8, PAGE_READWRITE, &oldP)) {
-      //       *(uintptr_t *)p1_ptr = 0;
-      //       VirtualProtect((LPVOID)p1_ptr, 8, oldP, &oldP);
-      //       DX11Base::AddLog(u8"[데모] 데모 플레이 시작 (주인공 주소 NULL 처리)");
-      //     }
-      //   }
-      // }
-      // ImGui::SameLine();
       if (ImGui::Button(u8"데모플레이 중지", ImVec2(demoBtnWidth, 26.0f * scale))) {
         uintptr_t gBase = DX11Base::GetGameBase();
         uintptr_t p1_ptr = gBase + 0xE0;
@@ -911,7 +871,6 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      // (전기 관련 UI는 '평정 및 진급 관련' 섹션으로 이동됨)
       EndSection(); // 시나리오
 
       BeginSection();

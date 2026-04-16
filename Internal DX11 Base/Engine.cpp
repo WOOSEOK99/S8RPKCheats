@@ -10,6 +10,8 @@
 #include "debug.h"
 #include "pch.h"
 #include "showlog.h"
+#include "TextureLoader.h"
+#include <filesystem>
 #include <imm.h>
 #include <windowsx.h>
 
@@ -411,6 +413,19 @@ namespace DX11Base {
       m_OldWndProc = (WNDPROC)SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)WndProc);
 
       bInitImGui = true;
+
+#include "resource.h"
+
+      // [추가] 범위 이미지 로드 (resource 방식)
+      for (int i = 1; i <= 11; i++) {
+          ID3D11ShaderResourceView* srv = nullptr;
+          int w, h;
+          if (LoadTextureFromResource(m_Device, IDR_PNG_RANGE1 + (i - 1), &srv, &w, &h)) {
+              g_RangeTextures[i] = (void*)srv;
+          }
+      }
+
+      AddLog(u8"[Success] 리포스 이미지 로드 완료");
       AddLog(u8"[Success] ImGui 초기화 완료 (폰트 스케일: %.2f)", scale);
       return true;
     }

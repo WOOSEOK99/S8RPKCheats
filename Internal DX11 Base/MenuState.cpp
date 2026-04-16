@@ -94,7 +94,52 @@ namespace DX11Base {
 
   bool bToggleMenuCollapseRequest = false;
   bool bShowPasswordPopup = false;
+  bool bShowTacticsEditWin = false;
+
+  // 전법 수정 세부 설정 (치료)
+  bool bHealLv1_Self = true;
+  int v_HealLv1_Amount = 2000;
+  bool bHealLv2_Self = true;
+  int v_HealLv2_Range = 9;
+  int v_HealLv2_Amount = 3500;
+  bool bHealLv3_Self = true;
+  int v_HealLv3_Range = 11;
+  int v_HealLv3_Amount = 7000;
+
+  // 전법 수정 세부 설정 (동토)
+  int v_DongtoLv1_Prob = 100;
+  int v_DongtoLv1_StateProb = 20;
+  int v_DongtoLv2_Prob = 100;
+  int v_DongtoLv2_StateProb = 50;
+  int v_DongtoLv3_Prob = 100;
+  int v_DongtoLv3_StateProb = 100;
+
+  // 전법 수정 세부 설정 (천계)
+  int v_CelestiaLv1_Prob = 100;
+  int v_CelestiaLv1_Amount = 2000;
+  int v_CelestiaLv1_Range = 11;
+  int v_CelestiaLv2_Prob = 100;
+  int v_CelestiaLv2_Amount = 3500;
+  int v_CelestiaLv2_Range = 11;
+  int v_CelestiaLv3_Prob = 100;
+  int v_CelestiaLv3_Amount = 7000;
+  int v_CelestiaLv3_Range = 11;
+
+  // 전법 수정 세부 설정 (투석기)
+  int v_Catapult_MinRange = 5;
+  int v_Catapult_MaxRange = 5;
+  int v_Catapult_Amount = 100;
+  int v_Catapult_Range = 11;
+
+  // 전법 수정 세부 설정 (격류/낙석) default values
+  int v_WaterLv1_Amount = 60, v_WaterLv1_Range = 5;
+  int v_WaterLv2_Amount = 70, v_WaterLv2_Range = 5;
+  int v_WaterLv3_Amount = 85, v_WaterLv3_Range = 5;
+  int v_StoneLv1_Amount = 60, v_StoneLv1_Range = 4;
+  int v_StoneLv2_Amount = 70, v_StoneLv2_Range = 4;
+  int v_StoneLv3_Amount = 85, v_StoneLv3_Range = 4;
 
   uintptr_t g_savedHeroAddr = 0;
   bool bFileLog = false;
+  void *g_RangeTextures[12] = {nullptr};
 } // namespace DX11Base

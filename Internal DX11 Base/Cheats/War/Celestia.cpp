@@ -10,7 +10,7 @@
 #include "../Social/Resonancecave.h"
 #include "Selfheal.h"
 #include "../../showlog.h"
-
+#include "../../MenuState.h"
 
 #include <psapi.h>
 #include <string>
@@ -28,31 +28,24 @@ namespace DX11Base {
   // 전역 변수 또는 정적 변수
   uintptr_t g_LastCelestialAddr = 0;
 
-  // 천계(Celestial) 데이터 구조체 (offset 0 = 0x64 기준 보정)
-  static const celestialEntry k_celestialTable[] = {
-      {0x06, 10, 100, false}, // 전의 // 테스트용도
+  // 천계(Celestial) 데이터 구조체 (기본 효과/대상 자동 수정용)
+  static const celestialEntry k_celestialBaseTable[] = {
+      {0x06, 10, 100, false}, // 전의
 
-      // 레벨 1
+      // 레벨 1 기본값 (효과/대상)
       {0x1C, 20, 0, false},   // 효과2 치료
       {0x1E, 6, 0, false},    // 대상2 아군전체
-      {0x20, 2000, 1, true},  // 위력2 2000 (0x20, 0x21 2바이트 사용)
       {0x22, 99, 0, false},   // 특수2 99
-      {0x26, 11, 0, false},   // 범위2 11 (시람+1칸)
-      {0x27, 100, 0, false},  // 확률2 100
-      // 레벨 2
-      {0x3E, 20, 0, false},   // 효과2 치료
-      {0x40, 6, 0, false},    // 대상2 아군전체
-      {0x42, 3500, 1, true},  // 위력2 3500
-      {0x44, 99, 0, false},   // 특수2 99
-      {0x48, 11, 0, false},   // 범위2 11 (시람+1칸)
-      {0x49, 100, 0, false},  // 확률2 100
-      // 레벨 3
-      {0x60, 20, 0, false},   // 효과2 치료
-      {0x62, 6, 0, false},    // 대상2 아군전체
-      {0x64, 7000, 1, true},  // 위력2 7000
-      {0x66, 99, 0, false},   // 특수2 99
-      {0x6A, 11, 0, false},   // 범위2 11 (시람+1칸)
-      {0x6B, 100, 0, false},  // 확률2 100
+
+      // 레벨 2 기본값
+      {0x3E, 20, 0, false},
+      {0x40, 6, 0, false},
+      {0x44, 99, 0, false},
+
+      // 레벨 3 기본값
+      {0x60, 20, 0, false},
+      {0x62, 6, 0, false},
+      {0x66, 99, 0, false},
   };
 
   static uintptr_t ResolveCelestialPtr() {
@@ -87,27 +80,55 @@ namespace DX11Base {
     if (!target)
       return;
 
-    // --- [추가된 검증 로그] ---
-    if (!IsBadReadPtr((void *)target, 4)) {
-      unsigned int header = *(unsigned int *)target;
-      // 정상이라면 로그에 00260026 이 찍혀야 합니다.
-      // AddLog(u8"[디버그] Target: %llX, Data: %08X", target, header);
-    }
-    // --------------------------
-
     DWORD old, tmp;
-    VirtualProtect((LPVOID)target, 0x40, PAGE_READWRITE, &old);
+    VirtualProtect((LPVOID)target, 0x100, PAGE_READWRITE, &old);
 
-    for (const auto &e : k_celestialTable) {
-      int val = enable ? e.enableVal : e.disableVal;
-      if (e.isWord)
-        *(uint16_t *)(target + e.offset) = (uint16_t)val;
-      else
-        *(uint8_t *)(target + e.offset) = (uint8_t)val;
+    if (enable) {
+      // 1. 공통/기본 효과 수동 패치
+      for (const auto &e : k_celestialBaseTable) {
+        if (e.isWord) *(uint16_t *)(target + e.offset) = (uint16_t)e.enableVal;
+        else *(uint8_t *)(target + e.offset) = (uint8_t)e.enableVal;
+      }
+
+      // 2. 가변 수치 패치
+      // [Lv.1]
+      *(uint16_t *)(target + 0x20) = (uint16_t)v_CelestiaLv1_Amount;
+      *(uint8_t *)(target + 0x26) = (uint8_t)v_CelestiaLv1_Range;
+      *(uint8_t *)(target + 0x27) = (uint8_t)v_CelestiaLv1_Prob;
+
+      // [Lv.2]
+      *(uint16_t *)(target + 0x42) = (uint16_t)v_CelestiaLv2_Amount;
+      *(uint8_t *)(target + 0x48) = (uint8_t)v_CelestiaLv2_Range;
+      *(uint8_t *)(target + 0x49) = (uint8_t)v_CelestiaLv2_Prob;
+
+      // [Lv.3]
+      *(uint16_t *)(target + 0x64) = (uint16_t)v_CelestiaLv3_Amount;
+      *(uint8_t *)(target + 0x6A) = (uint8_t)v_CelestiaLv3_Range;
+      *(uint8_t *)(target + 0x6B) = (uint8_t)v_CelestiaLv3_Prob;
+
+      AddLog(u8"[천계] 광역 치료 설정 적용 완료!");
+    } else {
+      // 기본값 복구 (k_celestialBaseTable 활용 및 수동 복구)
+      for (const auto &e : k_celestialBaseTable) {
+        if (e.isWord) *(uint16_t *)(target + e.offset) = (uint16_t)e.disableVal;
+        else *(uint8_t *)(target + e.offset) = (uint8_t)e.disableVal;
+      }
+      *(uint16_t *)(target + 0x20) = 1;
+      *(uint8_t *)(target + 0x26) = 1;
+      *(uint8_t *)(target + 0x27) = 10;
+
+      *(uint16_t *)(target + 0x42) = 1;
+      *(uint8_t *)(target + 0x48) = 1;
+      *(uint8_t *)(target + 0x49) = 10;
+
+      *(uint16_t *)(target + 0x64) = 1;
+      *(uint8_t *)(target + 0x6A) = 1;
+      *(uint8_t *)(target + 0x6B) = 10;
+
+      AddLog(u8"[천계] 원본 데이터 복구 완료");
     }
 
-    VirtualProtect((LPVOID)target, 0x40, old, &tmp);
-    AddLog(enable ? u8"[천계] 광역 치료 활성화!" : u8"[천계] 원본 복구");
+    VirtualProtect((LPVOID)target, 0x100, old, &tmp);
   }
 
 } // namespace DX11Base

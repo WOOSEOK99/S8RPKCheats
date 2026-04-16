@@ -150,7 +150,10 @@ namespace DX11Base {
       {"bShowWidgetHero", u8"위젯: 주인공", &bShowWidgetHero, nullptr, nullptr, false, true},
       {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false, true},
       {"bDomestics", u8"내정 배율", &bDomestics, &s_appDomestics, SetDomesticsMult, false, true},
-      {"bUndiscoveredToRonin", u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin, &s_appUndiscovered, SetUndiscoveredToRonin, false, false}};
+      {"bUndiscoveredToRonin", u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin, &s_appUndiscovered, SetUndiscoveredToRonin, false, false},
+      {"bHealLv1_Self", u8"치료Lv1 자기치료", &bHealLv1_Self, nullptr, nullptr, false, true},
+      {"bHealLv2_Self", u8"치료Lv2 자기치료", &bHealLv2_Self, nullptr, nullptr, false, true},
+      {"bHealLv3_Self", u8"치료Lv3 자기치료", &bHealLv3_Self, nullptr, nullptr, false, true}};
 
   std::string GetConfigPath() {
     char path[MAX_PATH];
@@ -187,7 +190,39 @@ namespace DX11Base {
     file << "  \"g_speedMultiplier\": " << g_speedMultiplier << ",\n";
     file << "  \"g_notificationSpeed\": " << g_notificationSpeed << ",\n";
     file << "  \"fDomesticsPlayer\": " << fDomesticsPlayer << ",\n";
-    file << "  \"fDomesticsForce\": " << fDomesticsForce << "\n";
+    file << "  \"fDomesticsForce\": " << fDomesticsForce << ",\n";
+    file << "  \"v_HealLv1_Amount\": " << v_HealLv1_Amount << ",\n";
+    file << "  \"v_HealLv2_Amount\": " << v_HealLv2_Amount << ",\n";
+    file << "  \"v_HealLv2_Range\": " << v_HealLv2_Range << ",\n";
+    file << "  \"v_HealLv3_Amount\": " << v_HealLv3_Amount << ",\n";
+    file << "  \"v_HealLv3_Range\": " << v_HealLv3_Range << ",\n";
+    file << "  \"v_DongtoLv3_Prob\": " << v_DongtoLv3_Prob << ",\n";
+    file << "  \"v_DongtoLv3_StateProb\": " << v_DongtoLv3_StateProb << ",\n";
+    file << "  \"v_CelestiaLv1_Prob\": " << v_CelestiaLv1_Prob << ",\n";
+    file << "  \"v_CelestiaLv1_Amount\": " << v_CelestiaLv1_Amount << ",\n";
+    file << "  \"v_CelestiaLv1_Range\": " << v_CelestiaLv1_Range << ",\n";
+    file << "  \"v_CelestiaLv2_Prob\": " << v_CelestiaLv2_Prob << ",\n";
+    file << "  \"v_CelestiaLv2_Amount\": " << v_CelestiaLv2_Amount << ",\n";
+    file << "  \"v_CelestiaLv2_Range\": " << v_CelestiaLv2_Range << ",\n";
+    file << "  \"v_CelestiaLv3_Prob\": " << v_CelestiaLv3_Prob << ",\n";
+    file << "  \"v_CelestiaLv3_Amount\": " << v_CelestiaLv3_Amount << ",\n";
+    file << "  \"v_CelestiaLv3_Range\": " << v_CelestiaLv3_Range << ",\n";
+    file << "  \"v_Catapult_MinRange\": " << v_Catapult_MinRange << ",\n";
+    file << "  \"v_Catapult_MaxRange\": " << v_Catapult_MaxRange << ",\n";
+    file << "  \"v_Catapult_Amount\": " << v_Catapult_Amount << ",\n";
+    file << "  \"v_Catapult_Range\": " << v_Catapult_Range << ",\n";
+    file << "  \"v_WaterLv1_Amount\": " << v_WaterLv1_Amount << ",\n";
+    file << "  \"v_WaterLv1_Range\": " << v_WaterLv1_Range << ",\n";
+    file << "  \"v_WaterLv2_Amount\": " << v_WaterLv2_Amount << ",\n";
+    file << "  \"v_WaterLv2_Range\": " << v_WaterLv2_Range << ",\n";
+    file << "  \"v_WaterLv3_Amount\": " << v_WaterLv3_Amount << ",\n";
+    file << "  \"v_WaterLv3_Range\": " << v_WaterLv3_Range << ",\n";
+    file << "  \"v_StoneLv1_Amount\": " << v_StoneLv1_Amount << ",\n";
+    file << "  \"v_StoneLv1_Range\": " << v_StoneLv1_Range << ",\n";
+    file << "  \"v_StoneLv2_Amount\": " << v_StoneLv2_Amount << ",\n";
+    file << "  \"v_StoneLv2_Range\": " << v_StoneLv2_Range << ",\n";
+    file << "  \"v_StoneLv3_Amount\": " << v_StoneLv3_Amount << ",\n";
+    file << "  \"v_StoneLv3_Range\": " << v_StoneLv3_Range << "\n";
     file << "}";
     file.close();
   }
@@ -240,6 +275,192 @@ namespace DX11Base {
           }
         }
         continue;
+      }
+
+      if (line.find("v_HealLv1_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_HealLv1_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_HealLv2_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_HealLv2_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_HealLv2_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_HealLv2_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_HealLv3_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_HealLv3_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_HealLv3_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_HealLv3_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_DongtoLv1_Prob") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_DongtoLv1_Prob = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_DongtoLv1_StateProb") != std::string::npos) {
+        size_t colonPos = line.find(":");
+        if (colonPos != std::string::npos) {
+          try {
+            v_DongtoLv1_StateProb = std::stoi(line.substr(colonPos + 1));
+          } catch (...) {
+          }
+        }
+        continue;
+      }
+      if (line.find("v_DongtoLv2_Prob") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_DongtoLv2_Prob = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_DongtoLv2_StateProb") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_DongtoLv2_StateProb = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_DongtoLv3_Prob") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_DongtoLv3_Prob = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_DongtoLv3_StateProb") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_DongtoLv3_StateProb = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv1_Prob") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv1_Prob = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv1_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv1_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv1_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv1_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv2_Prob") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv2_Prob = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv2_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv2_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv2_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv2_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv3_Prob") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv3_Prob = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv3_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv3_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_CelestiaLv3_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_CelestiaLv3_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Catapult_MinRange") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Catapult_MinRange = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Catapult_MaxRange") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Catapult_MaxRange = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Catapult_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Catapult_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Catapult_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Catapult_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WaterLv1_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WaterLv1_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WaterLv1_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WaterLv1_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WaterLv2_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WaterLv2_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WaterLv2_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WaterLv2_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WaterLv3_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WaterLv3_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WaterLv3_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WaterLv3_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_StoneLv1_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_StoneLv1_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_StoneLv1_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_StoneLv1_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_StoneLv2_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_StoneLv2_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_StoneLv2_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_StoneLv2_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_StoneLv3_Amount") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_StoneLv3_Amount = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_StoneLv3_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_StoneLv3_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
       }
 
       for (auto &entry : g_Entries) {

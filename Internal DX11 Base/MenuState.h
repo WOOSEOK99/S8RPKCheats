@@ -101,9 +101,55 @@ namespace DX11Base {
   extern bool bToggleMenuCollapseRequest; // 틸트 키로 접기/펴기 요청
   extern bool bShowPasswordPopup;         // 디버그 비밀번호 창 표시 여부
   extern bool bShowNotificationLog;       // 알림 기록 창 표시 여부
+  extern bool bShowTacticsEditWin;        // 전법 수정 창 표시 여부
+
+  // 전법 수정 세부 설정 (치료)
+  extern bool bHealLv1_Self;
+  extern int v_HealLv1_Amount;
+  extern bool bHealLv2_Self;
+  extern int v_HealLv2_Range;
+  extern int v_HealLv2_Amount;
+  extern bool bHealLv3_Self;
+  extern int v_HealLv3_Range;
+  extern int v_HealLv3_Amount;
+
+  // 전법 수정 세부 설정 (동토)
+  extern int v_DongtoLv1_Prob;
+  extern int v_DongtoLv1_StateProb;
+  extern int v_DongtoLv2_Prob;
+  extern int v_DongtoLv2_StateProb;
+  extern int v_DongtoLv3_Prob;
+  extern int v_DongtoLv3_StateProb;
+
+  // 전법 수정 세부 설정 (천계)
+  extern int v_CelestiaLv1_Prob;
+  extern int v_CelestiaLv1_Amount;
+  extern int v_CelestiaLv1_Range;
+  extern int v_CelestiaLv2_Prob;
+  extern int v_CelestiaLv2_Amount;
+  extern int v_CelestiaLv2_Range;
+  extern int v_CelestiaLv3_Prob;
+  extern int v_CelestiaLv3_Amount;
+  extern int v_CelestiaLv3_Range;
+
+  // 전법 수정 세부 설정 (투석기)
+  extern int v_Catapult_MinRange;
+  extern int v_Catapult_MaxRange;
+  extern int v_Catapult_Amount;
+  extern int v_Catapult_Range;
+
+  // 전법 수정 세부 설정 (격류/낙석)
+  extern int v_WaterLv1_Amount, v_WaterLv1_Range;
+  extern int v_WaterLv2_Amount, v_WaterLv2_Range;
+  extern int v_WaterLv3_Amount, v_WaterLv3_Range;
+  extern int v_StoneLv1_Amount, v_StoneLv1_Range;
+  extern int v_StoneLv2_Amount, v_StoneLv2_Range;
+  extern int v_StoneLv3_Amount, v_StoneLv3_Range;
 
   extern uintptr_t g_savedHeroAddr; // [신규] 데모플레이 대비 주인공 주소 백업용
   extern bool bFileLog;             // 파일 로그 출력 변수
+
+  extern void* g_RangeTextures[12]; // ID3D11ShaderResourceView* 배열 (1~11번)
 
   bool IsAnyUIOpen(); // 모든 UI 창 활성화 여부 확인 함수
 } // namespace DX11Base

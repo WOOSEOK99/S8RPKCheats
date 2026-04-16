@@ -1,5 +1,5 @@
 #include "Cheats.h"
-#include "Cheats\InstantLoveCave.h"
+#include "Cheats\Social\InstantLoveCave.h"
 #include "pch.h"
 #include <psapi.h>
 #include <string>

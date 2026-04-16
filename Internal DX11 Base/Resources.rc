@@ -1,0 +1,13 @@
+#include "resource.h"
+
+IDR_PNG_RANGE1  RCDATA "images/ranges/1.png"
+IDR_PNG_RANGE2  RCDATA "images/ranges/2.png"
+IDR_PNG_RANGE3  RCDATA "images/ranges/3.png"
+IDR_PNG_RANGE4  RCDATA "images/ranges/4.png"
+IDR_PNG_RANGE5  RCDATA "images/ranges/5.png"
+IDR_PNG_RANGE6  RCDATA "images/ranges/6.png"
+IDR_PNG_RANGE7  RCDATA "images/ranges/7.png"
+IDR_PNG_RANGE8  RCDATA "images/ranges/8.png"
+IDR_PNG_RANGE9  RCDATA "images/ranges/9.png"
+IDR_PNG_RANGE10 RCDATA "images/ranges/10.png"
+IDR_PNG_RANGE11 RCDATA "images/ranges/11.png"

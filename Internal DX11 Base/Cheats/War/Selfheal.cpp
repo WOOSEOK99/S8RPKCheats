@@ -8,6 +8,7 @@
 #include "../Social/Resonancecave.h"
 #include "Selfheal.h"
 #include "../../showlog.h"
+#include "../../MenuState.h"
 
 #include <psapi.h>
 #include <string>
@@ -58,24 +59,36 @@ namespace DX11Base {
     VirtualProtect((LPVOID)p, 0x108B, PAGE_READWRITE, &old);
 
     if (enable) {
-      *(uint16_t *)(p + 0x102B) = 0x0100; // 최소 사거리 0
-      // [Lv.2] 자가 치료 가능, 범위 확장 (범위 2~3)
-      *(uint16_t *)(p + 0x104D) = 0x0100; // 최소 사거리 0  //
-      *(uint8_t *)(p + 0x105A) = 5;       // (주변 1칸)
-      *(uint8_t *)(p + 0x1068) = 5;       // 범위 3 (주변 2칸)
-      // [Lv.3] 자가 치료 가능, 화면 전체 치료 (범위 9)
-      *(uint16_t *)(p + 0x106F) = 0x0100; // 최소 사거리 0
-      *(uint8_t *)(p + 0x107C) = 9;       // (주변 2칸)
-      *(uint8_t *)(p + 0x108A) = 9;       // 범위 9 (전체)
+      // [Lv.1]
+      *(uint16_t *)(p + 0x102B) = bHealLv1_Self ? 0x0100 : 0x0101; 
+      *(uint16_t *)(p + 0x1032) = (uint16_t)v_HealLv1_Amount;
+
+      // [Lv.2]
+      *(uint16_t *)(p + 0x104D) = bHealLv2_Self ? 0x0100 : 0x0101;
+      *(uint8_t *)(p + 0x105A) = (uint8_t)v_HealLv2_Range;
+      *(uint8_t *)(p + 0x1068) = (uint8_t)v_HealLv2_Range;
+      *(uint16_t *)(p + 0x1054) = (uint16_t)v_HealLv2_Amount;
+
+      // [Lv.3]
+      *(uint16_t *)(p + 0x106F) = bHealLv3_Self ? 0x0100 : 0x0101;
+      *(uint8_t *)(p + 0x107C) = (uint8_t)v_HealLv3_Range;
+      *(uint8_t *)(p + 0x108A) = (uint8_t)v_HealLv3_Range;
+      *(uint16_t *)(p + 0x1076) = (uint16_t)v_HealLv3_Amount;
+
       g_selfHealApplied = true;
     } else {
       *(uint16_t *)(p + 0x102B) = 0x0101;
       *(uint16_t *)(p + 0x104D) = 0x0101;
       *(uint16_t *)(p + 0x106F) = 0x0101;
+      *(uint16_t *)(p + 0x1032) = 2000;
+
       *(uint8_t *)(p + 0x105A) = 1;
       *(uint8_t *)(p + 0x1068) = 1;
+      *(uint16_t *)(p + 0x1054) = 3500;
+
       *(uint8_t *)(p + 0x107C) = 1;
       *(uint8_t *)(p + 0x108A) = 1;
+      *(uint16_t *)(p + 0x1076) = 7000;
 
       g_selfHealApplied = false;
     }

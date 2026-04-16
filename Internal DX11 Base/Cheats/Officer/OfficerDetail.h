@@ -12,7 +12,7 @@ namespace DX11Base {
   void SetupTableHeaders(float scale);
   void RenderStatRow(uintptr_t pBase, const char *label, uintptr_t offset, int size, int *outValue, float scale);
   void RenderCompactSkill(uintptr_t pBase, const char *label, uintptr_t offset, int *outValue, float scale);
-  void RenderResearchRow(uintptr_t pBase, const char *catLabel, const char *items[], uintptr_t offsets[], int *vars[], int count, float scale);
+  void RenderResearchRow(uintptr_t pBase, const char *catLabel, const char *items[], uintptr_t offsets[], int *vars[], int count, float scale, int expOffset = -1);
   
   uint16_t GetTraitID(uintptr_t base, int slot);
   void SetTraitID(uintptr_t base, int slot, uint16_t traitID);

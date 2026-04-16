@@ -1,0 +1,13 @@
+#pragma once
+
+#define IDR_PNG_RANGE1  101
+#define IDR_PNG_RANGE2  102
+#define IDR_PNG_RANGE3  103
+#define IDR_PNG_RANGE4  104
+#define IDR_PNG_RANGE5  105
+#define IDR_PNG_RANGE6  106
+#define IDR_PNG_RANGE7  107
+#define IDR_PNG_RANGE8  108
+#define IDR_PNG_RANGE9  109
+#define IDR_PNG_RANGE10 110
+#define IDR_PNG_RANGE11 111

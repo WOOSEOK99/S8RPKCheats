@@ -8,6 +8,7 @@
 #include "../Social/Resonancecave.h"
 #include "Selfheal.h"
 #include "../../showlog.h"
+#include "../../MenuState.h"
 
 #include <psapi.h>
 #include <string>
@@ -60,19 +61,24 @@ namespace DX11Base {
     VirtualProtect((LPVOID)dp, 0x108B, PAGE_READWRITE, &old);
 
     if (enable) {
-      // Selfheal 로직을 그대로 사용하되 dp (base - 0x200) 기준으로 적용
-      *(uint16_t *)(dp + 0x1029) = 100; // level1 통토 확률 100%로 조정
-      *(uint16_t *)(dp + 0x104B) = 100; // levle2 통토 확률 100%로 조정
-      *(uint16_t *)(dp + 0x106D) = 100; // levle3 통토 확률 100%로 조정
-      //
-      *(uint8_t *)(dp + 0x1069) = 50;  // level2 상태 이상 확률 50%
-      *(uint8_t *)(dp + 0x108B) = 100; // level3 상태 이상 확률 100%
+      // [Lv.1]
+      *(uint16_t *)(dp + 0x1029) = (uint16_t)v_DongtoLv1_Prob;
+      *(uint16_t *)(dp + 0x1047) = (uint16_t)v_DongtoLv1_StateProb;
+
+      // [Lv.2]
+      *(uint16_t *)(dp + 0x104B) = (uint16_t)v_DongtoLv2_Prob;
+      *(uint8_t *)(dp + 0x1069) = (uint8_t)v_DongtoLv2_StateProb;
+
+      // [Lv.3]
+      *(uint16_t *)(dp + 0x106D) = (uint16_t)v_DongtoLv3_Prob;
+      *(uint8_t *)(dp + 0x108B) = (uint8_t)v_DongtoLv3_StateProb;
+
       g_dongtoApplied = true;
     } else {
+      // 기본값 복구 (추정치)
       *(uint16_t *)(dp + 0x1029) = 10;
       *(uint16_t *)(dp + 0x104B) = 10;
       *(uint16_t *)(dp + 0x106D) = 10;
-      //
       *(uint8_t *)(dp + 0x1069) = 10;
       *(uint8_t *)(dp + 0x108B) = 10;
 

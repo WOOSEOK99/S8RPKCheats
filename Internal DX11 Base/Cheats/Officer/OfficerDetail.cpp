@@ -45,6 +45,8 @@ namespace DX11Base {
   static int v_A_I1 = 0, v_A_I2 = 0, v_A_I3 = 0, v_A_I4 = 0, v_A_I5 = 0, v_A_I6 = 0;
   static int v_A_U1 = 0, v_A_U2 = 0, v_A_U3 = 0, v_A_U4 = 0, v_A_U5 = 0, v_A_U6 = 0;
   static int v_A_W1 = 0, v_A_W2 = 0, v_A_W3 = 0, v_A_W4 = 0, v_A_W5 = 0, v_A_W6 = 0;
+  static int v_A_C1 = 0, v_A_C2 = 0, v_A_C3 = 0, v_A_C4 = 0, v_A_C5 = 0, v_A_C6 = 0;
+  static int v_A_D1 = 0, v_A_D2 = 0, v_A_D3 = 0, v_A_D4 = 0, v_A_D5 = 0, v_A_D6 = 0;
 
   // 소양 변수
   static int v_Exp_Inf = 0, v_Exp_Cav = 0, v_Exp_Arch = 0, v_Exp_Nav = 0, v_Exp_Str = 0, v_Exp_Sup = 0, v_Exp_Dis = 0;
@@ -87,11 +89,18 @@ namespace DX11Base {
 
   // --- [공용 헬퍼 함수 1: 수치 행 그리기] ---
   static inline void SyncInlineReadBufFromWrite(uintptr_t pWrite) {
-    if (s_lastCapturedAddress == 0 || s_lastCapturedAddress != pWrite)
-      return;
     if (!IsValidPtr(pWrite, 0x3D0))
       return;
-    memcpy(s_officerSnapshot, (void *)pWrite, 0x3D0);
+
+    // 1. 소양/능력 팝업용 로컬 스냅샷 동기화
+    if (s_lastCapturedAddress != 0 && s_lastCapturedAddress == pWrite) {
+      memcpy(s_officerSnapshot, (void *)pWrite, 0x3D0);
+    }
+
+    // 2. 모든 무장 리스트용 전역 스냅샷 동기화
+    if (g_officerInlineReadPtr > 0x10000 && pWrite == g_capturedOfficerBase) {
+      memcpy((void *)g_officerInlineReadPtr, (void *)pWrite, 0x3D0);
+    }
   }
 
   void RenderStatRow(uintptr_t p1, const char *label, uintptr_t offset, int size, int *inputVal, float scale) {
@@ -115,10 +124,6 @@ namespace DX11Base {
       (*inputVal)--;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
       SyncInlineReadBufFromWrite(p1);
-      // 만약 목록 창 전역 스냅샷을 사용 중이라면 해당 버퍼도 동기화
-      if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) {
-          memcpy((void *)g_officerInlineReadPtr, (void *)p1, 0x3D0);
-      }
     }
     ImGui::SameLine();
  
@@ -130,9 +135,6 @@ namespace DX11Base {
     if (justFinished) {
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
       SyncInlineReadBufFromWrite(p1); 
-      if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) {
-          memcpy((void *)g_officerInlineReadPtr, (void *)p1, 0x3D0);
-      }
     }
     
     // [중요] 사용자가 입력 중이 아닐 때만 적절한 스냅샷 버퍼(pR)에서 값을 가져와 표시
@@ -151,9 +153,6 @@ namespace DX11Base {
       (*inputVal)++;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
       SyncInlineReadBufFromWrite(p1);
-      if (g_officerInlineReadPtr > 0x10000 && p1 == g_capturedOfficerBase) {
-          memcpy((void *)g_officerInlineReadPtr, (void *)p1, 0x3D0);
-      }
     }
     ImGui::PopID();
   }
@@ -221,11 +220,12 @@ namespace DX11Base {
 
   // --- [공용 헬퍼 함수 3: 전법/특기 행 그리기] ---
   void RenderResearchRow(uintptr_t pBase, const char *catLabel, const char *items[], uintptr_t offsets[], int *vars[],
-                         int count, float scale) {
+                         int count, float scale, int expOffset) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(catLabel);
+
     for (int i = 0; i < count; i++) {
       ImGui::TableSetColumnIndex(i + 1);
       RenderCompactSkill(pBase, items[i], offsets[i], vars[i], scale);
@@ -445,48 +445,36 @@ namespace DX11Base {
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
-      ImGui::Separator();
-
-      // --- [ 특기 (Skills) ] ---
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      // 배경색을 살짝 깔고 전체 열을 차지하게 함 (잘림 방지)
       ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.7f, 0.4f, 0.0f, 0.2f));
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.2f, 1.0f));
       ImGui::Selectable(u8" [ 특기 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
       ImGui::PopStyleColor(2);
       ImGui::TableNextRow();
 
-      // 특기 상세
+      // 특기 상세 (Sam8 Remake 기준 4대 분류)
       {
-        const char *s[] = {u8"연전", u8"급습", u8"질주", u8"견수", u8"매복", u8"신속"};
-        uintptr_t o[] = {0x1C4, 0x1C5, 0x1C6, 0x1C7, 0x1C8, 0x1C9};
-        int *v[] = {&v_A_M1, &v_A_M2, &v_A_M3, &v_A_M4, &v_A_M5, &v_A_M6};
-        RenderResearchRow(pBase, u8"무용", s, o, v, 6, scale);
-      }
-      {
-        const char *s[] = {u8"전식", u8"공성", u8"수성", u8"복병", u8"수상", u8"강창"};
-        uintptr_t o[] = {0x1CA, 0x1CB, 0x1CC, 0x1CD, 0x1CE, 0x1CF};
-        int *v[] = {&v_A_I1, &v_A_I2, &v_A_I3, &v_A_I4, &v_A_I5, &v_A_I6};
-        RenderResearchRow(pBase, u8"기술", s, o, v, 6, scale);
-      }
-      {
-        const char *s[] = {u8"치료", u8"진정", u8"정비", u8"격려", u8"질타", u8"선동"};
+        const char *s[] = {u8"경작", u8"상재", u8"축성", u8"경비", u8"발명", u8"천성"};
         uintptr_t o[] = {0x1D0, 0x1D1, 0x1D2, 0x1D3, 0x1D4, 0x1D5};
         int *v[] = {&v_A_U1, &v_A_U2, &v_A_U3, &v_A_U4, &v_A_U5, &v_A_U6};
-        RenderResearchRow(pBase, u8"보조", s, o, v, 6, scale);
+        RenderResearchRow(pBase, u8"임무", s, o, v, 6, scale, 0xCB);
+      }
+      {
+        const char *s[] = {u8"교섭", u8"허보", u8"공작", u8"화술", u8"열변", u8"귀모"};
+        uintptr_t o[] = {0x1D6, 0x1D7, 0x1D8, 0x1D9, 0x1DA, 0x1DB};
+        int *v[] = {&v_A_D1, &v_A_D2, &v_A_D3, &v_A_D4, &v_A_D5, &v_A_D6};
+        RenderResearchRow(pBase, u8"지모", s, o, v, 6, scale, 0xCC);
       }
       {
         const char *s[] = {u8"보장", u8"기장", u8"궁장", u8"수군", u8"조기", u8"신산"};
         uintptr_t o[] = {0x1DC, 0x1DD, 0x1DE, 0x1DF, 0x1E0, 0x1E1};
-        int *v[] = {&v_A_U1, &v_A_U2, &v_A_U3, &v_A_U4, &v_A_U5, &v_A_U6};
-        RenderResearchRow(pBase, u8"병과", s, o, v, 6, scale);
+        int *v[] = {&v_A_C1, &v_A_C2, &v_A_C3, &v_A_C4, &v_A_C5, &v_A_C6};
+        RenderResearchRow(pBase, u8"병과", s, o, v, 6, scale, 0xCD);
       }
       {
         const char *s[] = {u8"원호", u8"파성", u8"행군", u8"여력", u8"과감", u8"위풍"};
         uintptr_t o[] = {0x1E2, 0x1E3, 0x1E4, 0x1E5, 0x1E6, 0x1E7};
         int *v[] = {&v_A_W1, &v_A_W2, &v_A_W3, &v_A_W4, &v_A_W5, &v_A_W6};
-        RenderResearchRow(pBase, u8"군사", s, o, v, 6, scale);
+        RenderResearchRow(pBase, u8"군사", s, o, v, 6, scale, 0xCE);
       }
       ImGui::EndTable();
     }

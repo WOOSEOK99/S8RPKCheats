@@ -22,6 +22,7 @@
 #include "showcal.h"
 #include "showlog.h"
 #include "NotificationManager.h"
+#include "TacticsEditWindow.h"
 #include <functional>
 
 namespace DX11Base {
@@ -637,6 +638,7 @@ namespace DX11Base {
     DrawSpecialtyInfoWindow(scale);
     DrawMemoryNotepadWindow(scale);
     DrawNotificationHistoryWindow(scale);
+    MenuSections::DrawTacticsEditWindow(scale);
 
     // [전역] 숫자 입력기 관리 (어떤 창에서 요청했든 상관없이 렌더링되게 함)
     if (pSelectedVar != nullptr) {

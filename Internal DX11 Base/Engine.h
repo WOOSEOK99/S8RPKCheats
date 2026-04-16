@@ -44,6 +44,8 @@ namespace DX11Base
 		bool								DeleteWindow();
 		bool								InitImGui(IDXGISwapChain* swapChain);
 		void								Overlay(IDXGISwapChain* pSwapChain);
+		ID3D11Device*						GetDevice() { return m_Device; }
+		ID3D11DeviceContext*				GetDeviceContext() { return m_DeviceContext; }
 
 	public:
 		explicit D3D11Window();
