@@ -161,7 +161,6 @@
     <ClInclude Include="Cheats\Civilian\DomesticsMult.h" />
     <ClInclude Include="Config.h" />
     <ClInclude Include="debug.h" />
-    <ClInclude Include="Cheats\War\Defatkboost.h" />
     <ClInclude Include="Cheats\War\Defbuildingboost.h" />
     <ClInclude Include="Engine.h" />
     <ClInclude Include="Cheats\Social\Fastrelationship.h" />
@@ -237,7 +236,6 @@
     <ClCompile Include="Cheats\Civilian\DomesticsMult.cpp" />
     <ClCompile Include="Config.cpp" />
     <ClCompile Include="debug.cpp" />
-    <ClCompile Include="Cheats\War\Defatkboost.cpp" />
     <ClCompile Include="Cheats\War\Defbuildingboost.cpp" />
     <ClCompile Include="dllmain.cpp">
       <!-- ProxyType이 dxgi가 아닐 때 이 파일 포함 -->

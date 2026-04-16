@@ -4,7 +4,6 @@
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Catapult.h"
 #include "Cheats/War/Celestia.h"
-#include "Cheats/War/Defatkboost.h"
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/Dongto.h"
 #include "Cheats/System/MonthCapture.h"
@@ -64,9 +63,9 @@ namespace DX11Base {
           DX11Base::SetTerrainIgnore(false);
           DX11Base::SetTerrainIgnore(true);
         }
-        if (bDefAtk) {
-          DX11Base::SetDefAtkBoost(false);
-          DX11Base::SetDefAtkBoost(true);
+        if (bDefBuilding) {
+          DX11Base::SetDefBuildingBoost(false);
+          DX11Base::SetDefBuildingBoost(true);
         }
         if (bCatapult) {
           DX11Base::SetCatapultCheat(false);

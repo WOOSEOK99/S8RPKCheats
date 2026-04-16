@@ -21,7 +21,6 @@
 #include "Cheats/Civilian/Bigcityconvert.h"
 #include "Cheats/War/Catapult.h"
 #include "Cheats/War/Celestia.h"
-#include "Cheats/War/Defatkboost.h"
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/FactionLordBonus.h"
@@ -83,7 +82,6 @@ namespace DX11Base {
   static bool s_appDongto = false;
   static bool s_appTerrain = false;
   static bool s_appDefBuild = false;
-  static bool s_appDefAtk = false;
   static bool s_appCatapult = false;
   static bool s_appCelestial = false;
   static bool s_appBattleUnit = false;
@@ -122,7 +120,6 @@ namespace DX11Base {
       {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true, true},
       {"bTerrainIgnore", u8"전쟁: 격류낙석 지형 무시", &bTerrainIgnore, &s_appTerrain, SetTerrainIgnore, true, true},
       {"bDefBuilding", u8"전쟁: 방어건물 강화", &bDefBuilding, &s_appDefBuild, SetDefBuildingBoost, true, true},
-      {"bDefAtk", u8"전쟁: 공격/방어 부스트", &bDefAtk, &s_appDefAtk, SetDefAtkBoost, true, true},
       {"bCatapult", u8"전쟁: 투석기 강화", &bCatapult, &s_appCatapult, SetCatapultCheat, true, true},
       {"bCelestial", u8"전쟁: 천계 강화", &bCelestial, &s_appCelestial, SetCelestialMod, true, true},
       {"bAllAggressive", u8"전쟁: 모든 무장 성향 적극", &bAllAggressive, nullptr, nullptr, false, true},
@@ -222,7 +219,26 @@ namespace DX11Base {
     file << "  \"v_StoneLv2_Amount\": " << v_StoneLv2_Amount << ",\n";
     file << "  \"v_StoneLv2_Range\": " << v_StoneLv2_Range << ",\n";
     file << "  \"v_StoneLv3_Amount\": " << v_StoneLv3_Amount << ",\n";
-    file << "  \"v_StoneLv3_Range\": " << v_StoneLv3_Range << "\n";
+    file << "  \"v_StoneLv3_Range\": " << v_StoneLv3_Range << ",\n";
+    file << "  \"v_City_Dur\": " << v_City_Dur << ",\n";
+    file << "  \"v_City_Range\": " << v_City_Range << ",\n";
+    file << "  \"v_City_Atk\": " << v_City_Atk << ",\n";
+    file << "  \"v_City_Sight\": " << v_City_Sight << ",\n";
+    file << "  \"v_Gate_Dur\": " << v_Gate_Dur << ",\n";
+    file << "  \"v_Gate_Range\": " << v_Gate_Range << ",\n";
+    file << "  \"v_Gate_Atk\": " << v_Gate_Atk << ",\n";
+    file << "  \"v_Gate_Sight\": " << v_Gate_Sight << ",\n";
+    file << "  \"v_Tower_Dur\": " << v_Tower_Dur << ",\n";
+    file << "  \"v_Tower_Range\": " << v_Tower_Range << ",\n";
+    file << "  \"v_Tower_Atk\": " << v_Tower_Atk << ",\n";
+    file << "  \"v_Tower_Sight\": " << v_Tower_Sight << ",\n";
+    file << "  \"v_WallCatapult_Dur\": " << v_WallCatapult_Dur << ",\n";
+    file << "  \"v_WallCatapult_Range\": " << v_WallCatapult_Range << ",\n";
+    file << "  \"v_WallCatapult_Atk\": " << v_WallCatapult_Atk << ",\n";
+    file << "  \"v_WallCatapult_Sight\": " << v_WallCatapult_Sight << ",\n";
+    file << "  \"v_Signal_Dur\": " << v_Signal_Dur << ",\n";
+    file << "  \"v_Signal_Spirit\": " << v_Signal_Spirit << ",\n";
+    file << "  \"v_Signal_Sight\": " << v_Signal_Sight << "\n";
     file << "}";
     file.close();
   }
@@ -460,6 +476,101 @@ namespace DX11Base {
       if (line.find("v_StoneLv3_Range") != std::string::npos) {
           size_t colonPos = line.find(":");
           if (colonPos != std::string::npos) { try { v_StoneLv3_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_City_Dur") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_City_Dur = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_City_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_City_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_City_Atk") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_City_Atk = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_City_Sight") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_City_Sight = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Gate_Dur") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Gate_Dur = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Gate_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Gate_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Gate_Atk") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Gate_Atk = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Gate_Sight") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Gate_Sight = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Tower_Dur") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Tower_Dur = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Tower_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Tower_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Tower_Atk") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Tower_Atk = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Tower_Sight") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Tower_Sight = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WallCatapult_Dur") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WallCatapult_Dur = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WallCatapult_Range") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WallCatapult_Range = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WallCatapult_Atk") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WallCatapult_Atk = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_WallCatapult_Sight") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_WallCatapult_Sight = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Signal_Dur") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Signal_Dur = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Signal_Spirit") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Signal_Spirit = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("v_Signal_Sight") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { v_Signal_Sight = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
           continue;
       }
 

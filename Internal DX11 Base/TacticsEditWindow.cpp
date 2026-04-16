@@ -1,9 +1,11 @@
 #include "TacticsEditWindow.h"
 #include "Cheats/War/Catapult.h"
 #include "Cheats/War/Celestia.h"
+#include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/Terrainignore.h"
+#include "NotificationManager.h"
 #include "Config.h"
 #include "Framework/imgui.h"
 #include "MenuState.h"
@@ -152,6 +154,7 @@ namespace DX11Base {
             if (ImGui::Button(u8"설정 적용", ImVec2(-1, 30 * scale))) {
               SetSelfHeal(bSelfHeal); // 리프레시를 위해 강제로 다시 호출
               SaveConfig();
+              AddNotification(u8"치료 설정 적용 완료");
             }
             // ImGui::TextWrapped(u8"※ 전투 중 실시간으로 반영됩니다.");
             ImGui::EndTabItem();
@@ -312,6 +315,7 @@ namespace DX11Base {
             if (ImGui::Button(u8"설정 적용##Celestia", ImVec2(-1, 30 * scale))) {
               SaveConfig();
               SetCelestialMod(bCelestial);
+              AddNotification(u8"천계 설정 적용 완료");
             }
             ImGui::EndTabItem();
           }
@@ -385,6 +389,7 @@ namespace DX11Base {
             if (ImGui::Button(u8"설정 적용##Dongto", ImVec2(-1, 30 * scale))) {
               SetDongto(bDongto);
               SaveConfig();
+              AddNotification(u8"동토 설정 적용 완료");
             }
             ImGui::EndTabItem();
           }
@@ -448,11 +453,14 @@ namespace DX11Base {
             if (ImGui::Button(u8"투석 설정 적용", ImVec2(-1, 30 * scale))) {
               SaveConfig();
               SetCatapultCheat(bCatapult);
+              AddNotification(u8"투석 설정 적용 완료");
             }
             ImGui::EndTabItem();
           }
           if (ImGui::BeginTabItem(u8"격류/낙석")) {
             ImGui::TextColored(ImVec4(0, 1, 1, 1), u8"[ 격류/낙석 설정 ]");
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"※ 발동 조건 : 격류 - 비 / 낙석 - 강풍");
+
             if (ImGui::CollapsingHeader(u8"격류 (Torrent)", ImGuiTreeNodeFlags_DefaultOpen)) {
               for (int lv = 1; lv <= 3; lv++) {
                 char lvHeader[32];
@@ -555,6 +563,62 @@ namespace DX11Base {
             if (ImGui::Button(u8"격류/낙석 설정 적용", ImVec2(-1, 30 * scale))) {
               SaveConfig();
               SetTerrainIgnore(bTerrainIgnore);
+              AddNotification(u8"격류/낙석 설정 적용 완료");
+            }
+            ImGui::EndTabItem();
+          }
+          if (ImGui::BeginTabItem(u8"건물강화")) {
+            ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 방어 건물 강화 설정 ]");
+            ImGui::Checkbox(u8"건물 강화 활성화", &bDefBuilding);
+            ImGui::Separator();
+
+            auto DrawBuildingSection = [&](const char* label, int* dur, int* range, int* atk, int* sight) {
+              if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Columns(2, nullptr, false);
+                ImGui::SetColumnWidth(0, 100 * scale);
+
+                ImGui::TextUnformatted(u8"내구도:"); ImGui::NextColumn();
+                ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Dur") + label).c_str(), dur, 100, 500); ImGui::NextColumn();
+
+                if (range) {
+                  ImGui::TextUnformatted(u8"사거리:"); ImGui::NextColumn();
+                  ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Range") + label).c_str(), range, 1, 1); ImGui::NextColumn();
+                }
+
+                if (atk) {
+                  ImGui::TextUnformatted(u8"공격력:"); ImGui::NextColumn();
+                  ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Atk") + label).c_str(), atk, 1, 5); ImGui::NextColumn();
+                }
+
+                ImGui::TextUnformatted(u8"시야:"); ImGui::NextColumn();
+                ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Sight") + label).c_str(), sight, 1, 1); ImGui::NextColumn();
+
+                ImGui::Columns(1);
+              }
+            };
+
+            DrawBuildingSection(u8"도시 (City)", &v_City_Dur, &v_City_Range, &v_City_Atk, &v_City_Sight);
+            DrawBuildingSection(u8"관문 (Gate)", &v_Gate_Dur, &v_Gate_Range, &v_Gate_Atk, &v_Gate_Sight);
+            DrawBuildingSection(u8"망루 (Tower)", &v_Tower_Dur, &v_Tower_Range, &v_Tower_Atk, &v_Tower_Sight);
+            DrawBuildingSection(u8"투석기 (Catapult)", &v_WallCatapult_Dur, &v_WallCatapult_Range, &v_WallCatapult_Atk, &v_WallCatapult_Sight);
+            
+            if (ImGui::CollapsingHeader(u8"봉화대 (Signal Fire)", ImGuiTreeNodeFlags_DefaultOpen)) {
+              ImGui::Columns(2, nullptr, false);
+              ImGui::SetColumnWidth(0, 100 * scale);
+              ImGui::TextUnformatted(u8"내구도:"); ImGui::NextColumn();
+              ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt("##SignalDur", &v_Signal_Dur, 100, 500); ImGui::NextColumn();
+              ImGui::TextUnformatted(u8"전의증가:"); ImGui::NextColumn();
+              ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt("##SignalSpirit", &v_Signal_Spirit, 1, 5); ImGui::NextColumn();
+              ImGui::TextUnformatted(u8"시야:"); ImGui::NextColumn();
+              ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt("##SignalSight", &v_Signal_Sight, 1, 1); ImGui::NextColumn();
+              ImGui::Columns(1);
+            }
+
+            ImGui::Separator();
+            if (ImGui::Button(u8"건물 강화 설정 적용", ImVec2(-1, 30 * scale))) {
+              SaveConfig();
+              DX11Base::SetDefBuildingBoost(bDefBuilding);
+              AddNotification(u8"건물 강화 설정 적용 완료");
             }
             ImGui::EndTabItem();
           }

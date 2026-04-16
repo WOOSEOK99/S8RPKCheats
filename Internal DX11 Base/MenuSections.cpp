@@ -24,7 +24,6 @@
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Catapult.h"
 #include "Cheats/War/Celestia.h"
-#include "Cheats/War/Defatkboost.h"
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/FactionLordBonus.h"
@@ -147,14 +146,50 @@ namespace DX11Base {
       ImGui::PopID();
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // 3. 수치 입력 및 메모리 동기화 (간소화 버전 - 한 줄 표시용)
+    // ------------------------------------------------------------------------------------------------
+    static void DrawStatMini(const char *label, int *val, int offset, int size, uintptr_t baseAddr, float scale) {
+      ImGui::TextUnformatted(label);
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(60 * scale);
+      ImGui::PushID(label);
+      if (ImGui::InputInt("##val", val, 0, 0, ImGuiInputTextFlags_CharsDecimal)) {
+        if (baseAddr > 0x10000)
+          DX11Base::ModifyStat(baseAddr, offset, *val, size);
+      }
+      if (!ImGui::IsItemActive() && baseAddr > 0x10000) {
+        if (size == 1)
+          *val = (int)(*(unsigned char *)(baseAddr + offset));
+        else if (size == 2)
+          *val = (int)(*(unsigned short *)(baseAddr + offset));
+        else
+          *val = (int)(*(unsigned int *)(baseAddr + offset));
+      }
+      ImGui::PopID();
+    }
+    //
+    // ─────────────────────────────────────────────────────────────
     void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       if (p1) {
         BeginSection();
 
+
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 자원 및 도시 활동 ]");
-        DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
-        DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
-        DrawStatRow(u8"우호의 증표", 0xF8, 2, &v_Token, 0, gameBase, scale);
+        // DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
+        // DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
+        // DrawStatRow(u8"우호의 증표", 0xF8, 2, &v_Token, 0, gameBase, scale);
+
+        DrawStatMini(u8"금", &v_Gold, 0x300, 2, p1, scale);
+        ImGui::SameLine(80 * scale);
+        DrawStatMini(u8"행동력", &v_AP, 0xEE, 1, p1, scale);
+        ImGui::SameLine(200 * scale);
+        DrawStatMini(u8"우호의 증표", &v_Token, 0xF8, 2, p1, scale);
+
+        ImGui::Spacing(); // 위아래 여백
+        ImGui::Separator();
+        ImGui::Spacing(); // 위아래 여백
+
         if (ImGui::Checkbox(u8"[내정] 행동력 무한", &bInfiniteAP)) {
           NotifyFeatureToggle(u8"[내정] 행동력 무한", bInfiniteAP);
           SaveConfig();
@@ -174,7 +209,45 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
+        if (ImGui::Checkbox(u8"[도시] 명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
+          NotifyFeatureToggle(u8"[도시] 명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
+          SaveConfig();
+        }
+
+        // -----------------------
         // ImGui::Separator();
+        // ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
+
+        if (ImGui::Checkbox(u8"내정 배율 적용", &bDomestics)) {
+          ::DX11Base::SetDomesticsMult(bDomestics);
+          NotifyFeatureToggle(u8"내정 배율 적용", bDomestics);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"내정(개발, 보수 등) 시 배율을 적용합니다.");
+          ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"현재 선택된 무장이 플레이어로 자동 등록됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        if (bDomestics) {
+          ImGui::Indent();
+          if (ImGui::SliderFloat(u8"플레이어 배율", &fDomesticsPlayer, 1.0f, 10.0f, "%.1fx")) {
+            ::DX11Base::SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
+            SaveConfig();
+          }
+          if (ImGui::SliderFloat(u8"세력 배율", &fDomesticsForce, 1.0f, 10.0f, "%.1fx")) {
+            ::DX11Base::SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
+            SaveConfig();
+          }
+          ImGui::Unindent();
+        }
+
+        ImGui::Spacing(); // 위아래 여백
+        ImGui::Separator();
+        ImGui::Spacing(); // 위아래 여백
+
         // --- 대도시 전환 추가 ---
         bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
         if (wasBigCityRunning)
@@ -252,48 +325,17 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
           ImGui::EndTooltip();
         }
-        if (ImGui::Checkbox(u8"[도시] 명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
-          NotifyFeatureToggle(u8"[도시] 명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
-          SaveConfig();
-        }
-
-        // -----------------------
-        // ImGui::Separator();
-        // ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
-
-        if (ImGui::Checkbox(u8"내정 배율 적용", &bDomestics)) {
-          ::DX11Base::SetDomesticsMult(bDomestics);
-          NotifyFeatureToggle(u8"내정 배율 적용", bDomestics);
-          SaveConfig();
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"내정(개발, 보수 등) 시 배율을 적용합니다.");
-          ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"현재 선택된 무장이 플레이어로 자동 등록됩니다.");
-          ImGui::EndTooltip();
-        }
-
-        if (bDomestics) {
-          ImGui::Indent();
-          if (ImGui::SliderFloat(u8"플레이어 배율", &fDomesticsPlayer, 1.0f, 10.0f, "%.1fx")) {
-            ::DX11Base::SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
-            SaveConfig();
-          }
-          if (ImGui::SliderFloat(u8"세력 배율", &fDomesticsForce, 1.0f, 10.0f, "%.1fx")) {
-            ::DX11Base::SetDomesticsMultiplier(fDomesticsPlayer, fDomesticsForce);
-            SaveConfig();
-          }
-          ImGui::Unindent();
-        }
 
         EndSection();
 
         BeginSection();
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 명성치 편집 ]");
-        DrawStatRow(u8"무명", 0x106, 2, &v_RepM, p1, gameBase, scale);
-        DrawStatRow(u8"문명", 0x104, 2, &v_RepL, p1, gameBase, scale);
-        DrawStatRow(u8"악명", 0x108, 2, &v_RepI, p1, gameBase, scale);
+
+        DrawStatMini(u8"무명", &v_RepM, 0x106, 2, p1, scale);
+        ImGui::SameLine(100 * scale);
+        DrawStatMini(u8"문명", &v_RepL, 0x104, 2, p1, scale);
+        ImGui::SameLine(200 * scale);
+        DrawStatMini(u8"악명", &v_RepI, 0x108, 2, p1, scale);
 
         if (ImGui::Checkbox(u8"악명 항상 0 유지", &bZeroInfamy)) {
           NotifyFeatureToggle(u8"악명 항상 0 유지", bZeroInfamy);
@@ -304,9 +346,15 @@ namespace DX11Base {
 
         BeginSection();
         ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 및 진급 관련 ]");
-        DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP, p1, gameBase, scale);
-        DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
-        DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
+        // DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP, p1, gameBase, scale);
+        // DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
+        // DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
+
+        DrawStatMini(u8"전략 포인트", &v_SP, 0xED, 1, p1, scale);
+        ImGui::SameLine(100 * scale);
+        DrawStatMini(u8"공적", &v_Merit, 0x100, 2, p1, scale);
+        ImGui::SameLine(200 * scale);
+        DrawStatMini(u8"특권", &v_Priv, 0xEA, 1, p1, scale);
 
         ImGui::Spacing(); // 위아래 여백
 
@@ -432,7 +480,8 @@ namespace DX11Base {
 
       if (p1 != 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
-        DrawStatRow(u8"담력", 0x5BB8, 4, &v_Brave, 0, gameBase, scale);
+        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, p1, scale);
+        ImGui::SameLine(100 * scale);
         if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
           NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
           SaveConfig();
@@ -579,97 +628,8 @@ namespace DX11Base {
                            u8"※ 로드할 때 딱 한 번 적용되며 계속 유지해야 다음 플레이 시에도 반영됩니다.");
         ImGui::EndTooltip();
       }
-      ImGui::Separator();
-
-      if (ImGui::Checkbox(u8"[전법 강화] 치료", &bSelfHeal)) {
-        DX11Base::SetSelfHeal(bSelfHeal);
-        NotifyFeatureToggle(u8"[전법 강화] 치료", bSelfHeal);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 치료 능력 강화");
-        ImGui::EndTooltip();
-      }
 
       ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"[전법 강화] 격류/낙석", &bTerrainIgnore)) {
-        DX11Base::SetTerrainIgnore(bTerrainIgnore);
-        NotifyFeatureToggle(u8"[전법 강화] 격류/낙석", bTerrainIgnore);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"발동 조건 : 비(격류) / 강풍(낙석)");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨별 데미지는 기존 데미지의 1/2");
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"[전법 강화] 동토", &bDongto)) {
-        DX11Base::SetDongto(bDongto);
-        NotifyFeatureToggle(u8"[전법 강화] 동토", bDongto);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 동토 능력 강화");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"[병기 강화] 투석", &bCatapult)) {
-        DX11Base::SetCatapultCheat(bCatapult);
-        NotifyFeatureToggle(u8"[병기 강화] 투석", bCatapult);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"[전법 강화] 천계", &bCelestial)) {
-        DX11Base::SetCelestialMod(bCelestial);
-        NotifyFeatureToggle(u8"[전법 강화] 천계", bCelestial);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"레벨별 천계 능력 강화");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-      if (ImGui::Button(u8"전법 수정", ImVec2(100.0f * scale, 25.0f * scale))) {
-        bShowTacticsEditWin = !bShowTacticsEditWin;
-      }
-
-      ImGui::Separator();
-
-      if (ImGui::Checkbox(u8"방어 건물 사거리 강화", &bDefBuilding)) {
-        DX11Base::SetDefBuildingBoost(bDefBuilding);
-        NotifyFeatureToggle(u8"방어 건물 사거리 강화", bDefBuilding);
-        SaveConfig();
-      }
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"수비측의 모든 건물의 사거리/시야 1 증가");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 전투중인 상태로 저장된 게임을 불러올때에는 반영이 안됩니다.");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"방어 건물 공격력 강화", &bDefAtk)) {
-        DX11Base::SetDefAtkBoost(bDefAtk);
-        NotifyFeatureToggle(u8"방어 건물 공격력 강화", bDefAtk);
-        SaveConfig();
-      }
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"수비측의 모든 건물의 공격력이 2배 증가합니다.");
-        ImGui::EndTooltip();
-      }
 
       if (ImGui::Checkbox(u8"전투맵 랜덤(관문제외)", &bBattleMapShuffle)) {
         DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
@@ -684,25 +644,52 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"세력 군주 보너스 자동 배정", &bFactionLordBonus)) {
-        DX11Base::SetFactionLordBonus(bFactionLordBonus);
-        NotifyFeatureToggle(u8"세력 군주 보너스 자동 배정", bFactionLordBonus);
+      ImGui::Separator();
+
+      if (ImGui::Checkbox(u8"치료", &bSelfHeal)) {
+        DX11Base::SetSelfHeal(bSelfHeal);
+        NotifyFeatureToggle(u8"치료", bSelfHeal);
         SaveConfig();
       }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"관직 보너스");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"황제 : 모든 능력치 +5, 병력 +5000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"왕 : 모든 능력치 +4, 병력 +3000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"공 : 모든 능력치 +3, 병력 +2000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"주목 : 모든 능력치 +2, 병력 +1000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"그냥 군주 : 모든 능력치 +1");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 지역별 왕이나 공의 차이는 없음");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 군주 관작 중 승상, 대장군은 주목과 동격");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 방랑군 두령은 보너스를 적용받지 않음");
 
-        ImGui::EndTooltip();
+      ImGui::SameLine();
+
+      if (ImGui::Checkbox(u8"동토", &bDongto)) {
+        DX11Base::SetDongto(bDongto);
+        NotifyFeatureToggle(u8"동토", bDongto);
+        SaveConfig();
+      }
+      ImGui::SameLine();
+
+      if (ImGui::Checkbox(u8"천계", &bCelestial)) {
+        DX11Base::SetCelestialMod(bCelestial);
+        NotifyFeatureToggle(u8"천계", bCelestial);
+        SaveConfig();
+      }
+      ImGui::SameLine();
+
+      if (ImGui::Checkbox(u8"투석", &bCatapult)) {
+        DX11Base::SetCatapultCheat(bCatapult);
+        NotifyFeatureToggle(u8"투석", bCatapult);
+        SaveConfig();
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Checkbox(u8"격류/낙석", &bTerrainIgnore)) {
+        DX11Base::SetTerrainIgnore(bTerrainIgnore);
+        NotifyFeatureToggle(u8"격류/낙석", bTerrainIgnore);
+        SaveConfig();
+      }
+
+      if (ImGui::Checkbox(u8"방어 건물 강화", &bDefBuilding)) {
+        DX11Base::SetDefBuildingBoost(bDefBuilding);
+        NotifyFeatureToggle(u8"방어 건물 강화", bDefBuilding);
+        SaveConfig();
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button(u8"수정", ImVec2(100.0f * scale, 25.0f * scale))) {
+        bShowTacticsEditWin = !bShowTacticsEditWin;
       }
 
       EndSection(); // 전쟁
@@ -720,7 +707,7 @@ namespace DX11Base {
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("[");
         ImGui::SameLine(0, 0);
-        ImGui::SetNextItemWidth(70.0f * scale);
+        ImGui::SetNextItemWidth(40.0f * scale);
         ImGui::InputInt(u8"##scY", &s_scenarioYearEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
         const bool yearDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
         const bool yearActive = ImGui::IsItemActive();
@@ -732,7 +719,7 @@ namespace DX11Base {
         ImGui::SameLine(0, 10.0f * scale);
         ImGui::TextUnformatted("[");
         ImGui::SameLine(0, 0);
-        ImGui::SetNextItemWidth(44.0f * scale);
+        ImGui::SetNextItemWidth(20.0f * scale);
         ImGui::InputInt(u8"##scM", &s_scenarioMonthEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
         const bool monthDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
         const bool monthActive = ImGui::IsItemActive();
@@ -769,6 +756,28 @@ namespace DX11Base {
         }
       }
       ImGui::PopID();
+
+      ImGui::SameLine(160.0f * scale);
+      if (ImGui::Checkbox(u8"세력 군주 보너스 자동 배정", &bFactionLordBonus)) {
+        DX11Base::SetFactionLordBonus(bFactionLordBonus);
+        NotifyFeatureToggle(u8"세력 군주 보너스 자동 배정", bFactionLordBonus);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"관직 보너스");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"황제 : 모든 능력치 +5, 병력 +5000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"왕 : 모든 능력치 +4, 병력 +3000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"공 : 모든 능력치 +3, 병력 +2000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"주목 : 모든 능력치 +2, 병력 +1000");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"그냥 군주 : 모든 능력치 +1");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 지역별 왕이나 공의 차이는 없음");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 군주 관작 중 승상, 대장군은 주목과 동격");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 방랑군 두령은 보너스를 적용받지 않음");
+
+        ImGui::EndTooltip();
+      }
 
       if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
         DX11Base::SetStartSetting(bStartSetting);

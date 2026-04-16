@@ -185,9 +185,6 @@
     <ClInclude Include="Cheats\War\Defbuildingboost.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\War\Defatkboost.h">
-      <Filter>Cheats\War</Filter>
-    </ClInclude>
     <ClInclude Include="Cheats\Civilian\Techpointcave.h">
       <Filter>Cheats\Civilian</Filter>
     </ClInclude>
@@ -374,9 +371,6 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\Defbuildingboost.cpp">
-      <Filter>Cheats\War</Filter>
-    </ClCompile>
-    <ClCompile Include="Cheats\War\Defatkboost.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\Civilian\NonggyeongCity.cpp">

@@ -1,16 +1,17 @@
 #include "pch.h"
 
-#include "../../pch.h"
-#include "Celestia.h"
 #include "../../Cheats.h"
+#include "../../MenuState.h"
+#include "../../pch.h"
+#include "../../showlog.h"
 #include "../Social/Fastrelationship.h"
 #include "../Social/Infinitetalk.h"
 #include "../Social/InstantLoveCave.h"
 #include "../Social/Loyaltycave.h"
 #include "../Social/Resonancecave.h"
+#include "Celestia.h"
 #include "Selfheal.h"
-#include "../../showlog.h"
-#include "../../MenuState.h"
+
 
 #include <psapi.h>
 #include <string>
@@ -30,12 +31,12 @@ namespace DX11Base {
 
   // 천계(Celestial) 데이터 구조체 (기본 효과/대상 자동 수정용)
   static const celestialEntry k_celestialBaseTable[] = {
-      {0x06, 10, 100, false}, // 전의
+      // {0x06, 10, 100, false}, // 전의 test code
 
       // 레벨 1 기본값 (효과/대상)
-      {0x1C, 20, 0, false},   // 효과2 치료
-      {0x1E, 6, 0, false},    // 대상2 아군전체
-      {0x22, 99, 0, false},   // 특수2 99
+      {0x1C, 20, 0, false}, // 효과2 치료
+      {0x1E, 6, 0, false},  // 대상2 아군전체
+      {0x22, 99, 0, false}, // 특수2 99
 
       // 레벨 2 기본값
       {0x3E, 20, 0, false},
@@ -86,8 +87,10 @@ namespace DX11Base {
     if (enable) {
       // 1. 공통/기본 효과 수동 패치
       for (const auto &e : k_celestialBaseTable) {
-        if (e.isWord) *(uint16_t *)(target + e.offset) = (uint16_t)e.enableVal;
-        else *(uint8_t *)(target + e.offset) = (uint8_t)e.enableVal;
+        if (e.isWord)
+          *(uint16_t *)(target + e.offset) = (uint16_t)e.enableVal;
+        else
+          *(uint8_t *)(target + e.offset) = (uint8_t)e.enableVal;
       }
 
       // 2. 가변 수치 패치
@@ -110,8 +113,10 @@ namespace DX11Base {
     } else {
       // 기본값 복구 (k_celestialBaseTable 활용 및 수동 복구)
       for (const auto &e : k_celestialBaseTable) {
-        if (e.isWord) *(uint16_t *)(target + e.offset) = (uint16_t)e.disableVal;
-        else *(uint8_t *)(target + e.offset) = (uint8_t)e.disableVal;
+        if (e.isWord)
+          *(uint16_t *)(target + e.offset) = (uint16_t)e.disableVal;
+        else
+          *(uint8_t *)(target + e.offset) = (uint8_t)e.disableVal;
       }
       *(uint16_t *)(target + 0x20) = 1;
       *(uint8_t *)(target + 0x26) = 1;

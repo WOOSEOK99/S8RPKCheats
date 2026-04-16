@@ -38,7 +38,6 @@ namespace DX11Base {
   bool bDongto = false;
   bool bTerrainIgnore = false;
   bool bDefBuilding = false;
-  bool bDefAtk = false;
   bool bCatapult = false;
   bool bCelestial = false;
   bool bAllAggressive = false;
@@ -138,6 +137,13 @@ namespace DX11Base {
   int v_StoneLv1_Amount = 60, v_StoneLv1_Range = 4;
   int v_StoneLv2_Amount = 70, v_StoneLv2_Range = 4;
   int v_StoneLv3_Amount = 85, v_StoneLv3_Range = 4;
+
+  // 방어 건물강화 세부 설정 default values
+  int v_City_Dur = 6000, v_City_Range = 4, v_City_Atk = 16, v_City_Sight = 6;
+  int v_Gate_Dur = 4000, v_Gate_Range = 4, v_Gate_Atk = 16, v_Gate_Sight = 4;
+  int v_Tower_Dur = 1400, v_Tower_Range = 4, v_Tower_Atk = 12, v_Tower_Sight = 4;
+  int v_WallCatapult_Dur = 2000, v_WallCatapult_Range = 5, v_WallCatapult_Atk = 20, v_WallCatapult_Sight = 5;
+  int v_Signal_Dur = 1400, v_Signal_Spirit = 10, v_Signal_Sight = 4;
 
   uintptr_t g_savedHeroAddr = 0;
   bool bFileLog = false;

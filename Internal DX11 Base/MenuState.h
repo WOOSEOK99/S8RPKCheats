@@ -44,7 +44,6 @@ namespace DX11Base {
   extern bool bDongto;
   extern bool bTerrainIgnore;
   extern bool bDefBuilding;
-  extern bool bDefAtk;
   extern bool bCatapult;
   extern bool bCelestial;
   extern bool bAllAggressive;
@@ -145,6 +144,13 @@ namespace DX11Base {
   extern int v_StoneLv1_Amount, v_StoneLv1_Range;
   extern int v_StoneLv2_Amount, v_StoneLv2_Range;
   extern int v_StoneLv3_Amount, v_StoneLv3_Range;
+
+  // 방어 건물강화 세부 설정
+  extern int v_City_Dur, v_City_Range, v_City_Atk, v_City_Sight;
+  extern int v_Gate_Dur, v_Gate_Range, v_Gate_Atk, v_Gate_Sight;
+  extern int v_Tower_Dur, v_Tower_Range, v_Tower_Atk, v_Tower_Sight;
+  extern int v_WallCatapult_Dur, v_WallCatapult_Range, v_WallCatapult_Atk, v_WallCatapult_Sight;
+  extern int v_Signal_Dur, v_Signal_Spirit, v_Signal_Sight;
 
   extern uintptr_t g_savedHeroAddr; // [신규] 데모플레이 대비 주인공 주소 백업용
   extern bool bFileLog;             // 파일 로그 출력 변수
