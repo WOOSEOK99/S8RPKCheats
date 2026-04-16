@@ -174,7 +174,6 @@ namespace DX11Base {
       if (p1) {
         BeginSection();
 
-
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 자원 및 도시 활동 ]");
         // DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
         // DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
@@ -350,7 +349,7 @@ namespace DX11Base {
         // DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
         // DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
 
-        DrawStatMini(u8"전략 포인트", &v_SP, 0xED, 1, p1, scale);
+        DrawStatMini(u8"전략P", &v_SP, 0xED, 1, p1, scale);
         ImGui::SameLine(100 * scale);
         DrawStatMini(u8"공적", &v_Merit, 0x100, 2, p1, scale);
         ImGui::SameLine(200 * scale);
@@ -480,8 +479,8 @@ namespace DX11Base {
 
       if (p1 != 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
-        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, p1, scale);
-        ImGui::SameLine(100 * scale);
+        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, scale);
+        ImGui::SameLine(120 * scale);
         if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
           NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
           SaveConfig();

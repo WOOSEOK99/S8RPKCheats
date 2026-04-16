@@ -10,11 +10,9 @@
 #include "showlog.h"
 #include <filesystem>
 
-
 #include <ShellScalingApi.h>
 #pragma comment(lib, "Shcore.lib")
 
-// --- ì¶”ê???ë©”ëª¨ë¦??˜ì • ë¡œì§ ---
 #define TRAITS_PTR_OFFSET 0x57A4B8
 
 #ifndef WM_IME_FIRST
@@ -27,7 +25,6 @@
 void ApplyGoldCheat(int amount) {
   uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
 
-  // ?ˆì „?˜ê²Œ ì²?ë²ˆì§¸ ?¬ì¸???½ê¸°
   uintptr_t *step1Ptr = (uintptr_t *)(exeBase + 0x0); // ë² ì´??ì£¼ì†Œ
   if (IsBadReadPtr(step1Ptr, sizeof(uintptr_t)))
     return;
@@ -39,7 +36,6 @@ void ApplyGoldCheat(int amount) {
 
   uintptr_t traitsBaseAddress = *traitsPtr;
   if (traitsBaseAddress != 0) {
-    // ê¸?Gold) ?¤í”„???ìš©
     int *goldPtr = (int *)(traitsBaseAddress + 0x40);
     if (!IsBadWritePtr(goldPtr, sizeof(int))) {
       *goldPtr = amount;
@@ -67,13 +63,13 @@ static PPeekMessageA oPeekMessageA = NULL;
 
 SHORT WINAPI hkGetAsyncKeyState(int vKey) {
   if (DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
-    // [Áß¿ä] ÇÑ±Û ÀÔ·Â±â(IME)¿Í UI°¡ ½¬ÇÁÆ®/ÄÁÆ®·Ñ/¾ËÆ® »óÅÂ¸¦ Á¤È®È÷ ÀÎÁöÇØ¾ß ½ÖÀÚÀ½ µîÀÌ °¡´ÉÇÕ´Ï´Ù.
-    // µû¶ó¼­ ½Ã½ºÅÛ ±â´ÉÅ°µéÀº Â÷´ÜÇÏÁö ¾Ê°í ½ÇÁ¦ °ªÀ» ¹ÝÈ¯ÇÕ´Ï´Ù.
+    // [ï¿½ß¿ï¿½] ï¿½Ñ±ï¿½ ï¿½Ô·Â±ï¿½(IME)ï¿½ï¿½ UIï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®/ï¿½ï¿½Æ®ï¿½ï¿½/ï¿½ï¿½Æ® ï¿½ï¿½ï¿½Â¸ï¿½ ï¿½ï¿½È®ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ø¾ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Õ´Ï´ï¿½.
+    // ï¿½ï¿½ï¿½ï¿½ ï¿½Ã½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Å°ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ê°ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È¯ï¿½Õ´Ï´ï¿½.
     bool isModifier =
         (vKey == VK_SHIFT || vKey == VK_LSHIFT || vKey == VK_RSHIFT || vKey == VK_CONTROL || vKey == VK_LCONTROL ||
          vKey == VK_RCONTROL || vKey == VK_MENU || vKey == VK_LMENU || vKey == VK_RMENU);
 
-    // ÇÑ/¿µ(0x15), ¹éÆ½(VK_OEM_3) ¹× ¸ðµç ¼öÁ¤ Å°(Modifier)´Â Åë°ú
+    // ï¿½ï¿½/ï¿½ï¿½(0x15), ï¿½ï¿½Æ½(VK_OEM_3) ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Å°(Modifier)ï¿½ï¿½ ï¿½ï¿½ï¿½
     if (ImGui::GetIO().WantCaptureKeyboard && !isModifier && vKey != VK_OEM_3 && vKey != 0x15 && vKey != 0xA5) {
       return 0;
     }
@@ -98,7 +94,7 @@ BOOL WINAPI hkGetKeyboardState(PBYTE lpKeyState) {
   BOOL result = oGetKeyboardState(lpKeyState);
   if (result && DX11Base::g_Engine && DX11Base::IsAnyUIOpen() && ImGui::GetCurrentContext()) {
     if (ImGui::GetIO().WantCaptureKeyboard) {
-      // º¸Á¸ÇÒ Å°µéÀÇ »óÅÂ¸¦ ¼öµ¿À¸·Î ¹é¾÷
+      // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ Å°ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Â¸ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½
       BYTE tilde = lpKeyState[VK_OEM_3];
       BYTE hangul = lpKeyState[0x15];
       BYTE ralt = lpKeyState[0xA5];
@@ -111,7 +107,7 @@ BOOL WINAPI hkGetKeyboardState(PBYTE lpKeyState) {
       BYTE alt = lpKeyState[VK_MENU];
       BYTE lalt = lpKeyState[VK_LMENU];
 
-      // ÀüÃ¼¸¦ 0À¸·Î ¹Ð¾î¹ö¸®µÇ, À§¿¡¼­ ¹é¾÷ÇÑ Å°µé¸¸ º¹±¸ (½Ã½ºÅÛ/IME¿ë)
+      // ï¿½ï¿½Ã¼ï¿½ï¿½ 0ï¿½ï¿½ï¿½ï¿½ ï¿½Ð¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ Å°ï¿½é¸¸ ï¿½ï¿½ï¿½ï¿½ (ï¿½Ã½ï¿½ï¿½ï¿½/IMEï¿½ï¿½)
       memset(lpKeyState, 0, 256);
       lpKeyState[VK_OEM_3] = tilde;
       lpKeyState[0x15] = hangul;
@@ -129,13 +125,14 @@ BOOL WINAPI hkGetKeyboardState(PBYTE lpKeyState) {
   return result;
 }
 
-// OS°¡ ¸Þ½ÃÁö¸¦ °¡Á®°¥ ¶§ Raw Input¸¸ Á¦°ÅÇÏ¿© ´ÜÃàÅ° Â÷´Ü, Å° ¸Þ½ÃÁö´Â °­Á¦ º¯È¯
+// OSï¿½ï¿½ ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ Raw Inputï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¿ï¿½ ï¿½ï¿½ï¿½ï¿½Å° ï¿½ï¿½ï¿½ï¿½, Å°
+// ï¿½Þ½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È¯
 void HandleMessageCapture(LPMSG lpMsg) {
   if (!DX11Base::g_Engine || !DX11Base::IsAnyUIOpen() || !ImGui::GetCurrentContext())
     return;
   ImGuiIO &io = ImGui::GetIO();
 
-  // 1. ´ÜÃàÅ° ¹æÁö: Raw Input ÀÎÅÍ¼ÁÆ®
+  // 1. ï¿½ï¿½ï¿½ï¿½Å° ï¿½ï¿½ï¿½ï¿½: Raw Input ï¿½ï¿½ï¿½Í¼ï¿½Æ®
   if (lpMsg->message == WM_INPUT && io.WantCaptureKeyboard) {
     UINT dwSize = 0;
     GetRawInputData((HRAWINPUT)lpMsg->lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
@@ -152,28 +149,29 @@ void HandleMessageCapture(LPMSG lpMsg) {
           bool isImeKey = (vkey == 0x15 || vkey == 0xA5 || vkey == VK_PROCESSKEY);
           bool isMenuToggle = (vkey == VK_OEM_3);
 
-          // ÅØ½ºÆ® ÀÔ·Â Áß¿¡´Â °ÔÀÓ ´ÜÃàÅ°°¡ Àý´ë ¸ÔÁö ¾Êµµ·Ï °ÅÀÇ ¸ðµç Å°¸¦ Â÷´Ü.
-          // ´Ü, IME/¼öÁ¤Å°/¸Þ´º Åä±Û Å°´Â ½Ã½ºÅÛ Ã³¸®¿¡ ¸Ã±ä´Ù.
+          // ï¿½Ø½ï¿½Æ® ï¿½Ô·ï¿½ ï¿½ß¿ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Å°ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Êµï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ Å°ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½.
+          // ï¿½ï¿½, IME/ï¿½ï¿½ï¿½ï¿½Å°/ï¿½Þ´ï¿½ ï¿½ï¿½ï¿½ Å°ï¿½ï¿½ ï¿½Ã½ï¿½ï¿½ï¿½ Ã³ï¿½ï¿½ï¿½ï¿½ ï¿½Ã±ï¿½ï¿½.
           if (io.WantTextInput && !isModifier && !isImeKey && !isMenuToggle) {
             lpMsg->message = WM_NULL;
             return;
           }
 
-          // ÅØ½ºÆ® ÀÔ·ÂÀÌ ¾Æ´Ï´õ¶óµµ, ±âÁ¸Ã³·³ ½ºÆäÀÌ½º/¹é½ºÆäÀÌ½º´Â Â÷´Ü À¯Áö.
+          // ï¿½Ø½ï¿½Æ® ï¿½Ô·ï¿½ï¿½ï¿½ ï¿½Æ´Ï´ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½Ã³ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ì½ï¿½/ï¿½é½ºï¿½ï¿½ï¿½Ì½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½.
           if (vkey == VK_SPACE || vkey == VK_BACK) {
             lpMsg->message = WM_NULL;
             return;
           }
-          // ±× ¿Ü Å°´Â ¾Æ¹«°Íµµ ÇÏÁö ¾ÊÀ½ (ÀÚ¿¬½º·´°Ô Åë°ú)
+          // ï¿½ï¿½ ï¿½ï¿½ Å°ï¿½ï¿½ ï¿½Æ¹ï¿½ï¿½Íµï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ (ï¿½Ú¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½)
         }
       }
     }
   }
 
-  // 2. Å¸ÀÌÇÎ È°¼ºÈ­: Å°º¸µå ¸Þ½ÃÁö °­Á¦ º¯È¯ ·ÎÁ÷ Á¦°Å
-  //    °ÔÀÓ ÀÚÃ¼ ·çÇÁ¿¡¼­ TranslateMessage¸¦ È£ÃâÇÏ¹Ç·Î,
-  //    ¿©±â¼­ ¼öµ¿À¸·Î È£ÃâÇÏ¸é WM_CHAR°¡ µÎ ¹ø ¹ß»ýÇÏ¿© ¹®ÀÚ/¼ýÀÚ°¡ µÎ ¹ø¾¿ ÀÔ·ÂµÇ´Â ¹ö±×°¡ ¹ß»ýÇÕ´Ï´Ù.
-  //    µû¶ó¼­ ÇØ´ç ºÎºÐÀ» »èÁ¦ÇÏ¿© °ÔÀÓÀÇ ±âº» ¸Þ½ÃÁö ÆßÇÁ¿¡ ¸Ã±é´Ï´Ù.
+  // 2. Å¸ï¿½ï¿½ï¿½ï¿½ È°ï¿½ï¿½È­: Å°ï¿½ï¿½ï¿½ï¿½ ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È¯ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+  //    ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ã¼ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ TranslateMessageï¿½ï¿½ È£ï¿½ï¿½ï¿½Ï¹Ç·ï¿½,
+  //    ï¿½ï¿½ï¿½â¼­ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ È£ï¿½ï¿½ï¿½Ï¸ï¿½ WM_CHARï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ ï¿½ß»ï¿½ï¿½Ï¿ï¿½ ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½Ú°ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+  //    ï¿½Ô·ÂµÇ´ï¿½ ï¿½ï¿½ï¿½×°ï¿½ ï¿½ß»ï¿½ï¿½Õ´Ï´ï¿½. ï¿½ï¿½ï¿½ï¿½ ï¿½Ø´ï¿½ ï¿½Îºï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¿ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½âº»
+  //    ï¿½Þ½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ã±ï¿½Ï´ï¿½.
 }
 
 BOOL WINAPI hkPeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg) {
@@ -192,13 +190,15 @@ BOOL WINAPI hkPeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsg
   return result;
 }
 
-// [Ãß°¡] ¿ì¸®°¡ °¡·ÎÃ¦ °¡Â¥ ÇÔ¼ö
+// [ï¿½ß°ï¿½] ï¿½ì¸®ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ã¦ ï¿½ï¿½Â¥ ï¿½Ô¼ï¿½
 BOOL WINAPI hkGetCursorPos(LPPOINT lpPoint) {
-  BOOL result = oGetCursorPos(lpPoint); // ½ÇÁ¦ ÁÂÇ¥¸¦ ¸ÕÀú °¡Á®¿È
+  BOOL result = oGetCursorPos(lpPoint); // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ç¥ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-  // ¸Þ´º°¡ ÄÑÁ® ÀÖ°í "µð¹ö±× ¸ðµå", "°ÔÀÓ È­¸é Å¬¸¯ Çã¿ë" »óÅÂ°¡ ¾Æ´Ò ¶§
-  // (¸ÞÀÎ ¸Þ´º ÆîÃÄÁü, ¶Ç´Â Àå¼ö ¸®½ºÆ®Ã¢ ¿É¼Ç ÄÑÁü, ¶Ç´Â ¸Þ¸ð¸® ¿¡µðÅÍ È°¼ºÈ­)
-  // + ÀÓ±¸ÀÌ°¡ ¸¶¿ì½º¸¦ Á¡À¯ ÁßÀÏ ¶§¸¸ °ÔÀÓ È­¸é ¹ÛÀ¸·Î °ÅÁþ¸»
+  // ï¿½Þ´ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ö°ï¿½ "ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½", "ï¿½ï¿½ï¿½ï¿½ È­ï¿½ï¿½ Å¬ï¿½ï¿½ ï¿½ï¿½ï¿½"
+  // ï¿½ï¿½ï¿½Â°ï¿½ ï¿½Æ´ï¿½ ï¿½ï¿½
+  // (ï¿½ï¿½ï¿½ï¿½ ï¿½Þ´ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½Ç´ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®Ã¢ ï¿½É¼ï¿½ ï¿½ï¿½ï¿½ï¿½, ï¿½Ç´ï¿½
+  // ï¿½Þ¸ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ È°ï¿½ï¿½È­)
+  // + ï¿½Ó±ï¿½ï¿½Ì°ï¿½ ï¿½ï¿½ï¿½ì½ºï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ È­ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
   bool bHardBlock =
       !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) ||
       (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor) || DX11Base::bShowSpecialtyInfoWin;
@@ -237,12 +237,12 @@ namespace DX11Base {
     g_Running = false;
     g_KillSwitch = true;
 
-    // ÇÁ·Î¼¼½º Á¾·á ½Ã¿¡´Â ½Ã½ºÅÛÀÌ ¸Þ¸ð¸®¸¦ ¾Ë¾Æ¼­ È¸¼öÇÏ¹Ç·Î,
-    // ÈÅÀ¸·Î ÀÎÇÑ Å©·¡½Ã¸¦ ¹æÁöÇÏ±â À§ÇØ °¡·ÎÃ¤±â¸¸ ÃÖ¼ÒÇÑÀ¸·Î ÇØÁ¦ÇÕ´Ï´Ù.
+    // ï¿½ï¿½ï¿½Î¼ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ã¿ï¿½ï¿½ï¿½ ï¿½Ã½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Þ¸ð¸®¸ï¿½ ï¿½Ë¾Æ¼ï¿½ È¸ï¿½ï¿½ï¿½Ï¹Ç·ï¿½,
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Å©ï¿½ï¿½ï¿½Ã¸ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï±ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Ã¤ï¿½â¸¸ ï¿½Ö¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Õ´Ï´ï¿½.
     if (isTerminating) {
       MH_DisableHook(MH_ALL_HOOKS);
       if (g_D3D11Window) {
-        // D3D ¸®¼Ò½º ÇØÁ¦(Release)¸¦ °Ç³Ê¶Ù°í À©µµ¿ì ÇÁ·Î½ÃÀú¸¸ º¹±¸ (°í¼Ó Á¾·á)
+        // D3D ï¿½ï¿½ï¿½Ò½ï¿½ ï¿½ï¿½ï¿½ï¿½(Release)ï¿½ï¿½ ï¿½Ç³Ê¶Ù°ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Î½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½)
         if (g_Engine && g_Engine->pGameWindow && g_D3D11Window->m_OldWndProc) {
           SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)g_D3D11Window->m_OldWndProc);
           g_D3D11Window->m_OldWndProc = nullptr;
@@ -251,7 +251,7 @@ namespace DX11Base {
       return;
     }
 
-    // ÀÏ¹ÝÀûÀÎ ¾ð·Îµå(FreeLibrary) »óÈ²¿¡¼­´Â ¸ðµç ¸®¼Ò½º¸¦ Á¤¼®´ë·Î ÇØÁ¦ÇÕ´Ï´Ù.
+    // ï¿½Ï¹ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Îµï¿½(FreeLibrary) ï¿½ï¿½È²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ò½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Õ´Ï´ï¿½.
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
@@ -266,28 +266,29 @@ namespace DX11Base {
 } // namespace DX11Base
 
 DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
-  // [½Å±Ô] °¡Àå ÃÊ±â¿¡ ¼öµ¿À¸·Î ·Î±×Ãâ·Â ÇÃ·¡±×¸¦ È®º¸ÇÏ¿© D3D ÈÅ µî ±ØÃÊ±â ¿À·ù¸¦ ÆÄÀÏ¿¡ ±â·Ï
+  // [ï¿½Å±ï¿½] ï¿½ï¿½ï¿½ï¿½ ï¿½Ê±â¿¡ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Î±ï¿½ï¿½ï¿½ï¿½ ï¿½Ã·ï¿½ï¿½×¸ï¿½ È®ï¿½ï¿½ï¿½Ï¿ï¿½ D3D ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½Ê±ï¿½
+  // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ï¿ï¿½ ï¿½ï¿½ï¿½
   DX11Base::LoadEarlyLogConfig();
 
-  // ÇöÀç DLL ÆÄÀÏ¸í È®ÀÎ
+  // ï¿½ï¿½ï¿½ï¿½ DLL ï¿½ï¿½ï¿½Ï¸ï¿½ È®ï¿½ï¿½
   char dllPath[MAX_PATH];
   GetModuleFileNameA((HMODULE)dwModule, dllPath, MAX_PATH);
   std::string dllName = std::filesystem::path(dllPath).filename().string();
 
-  // [Áß¿ä] ÃÊ±âÈ­ ¾ÈÁ¤¼ºÀ» À§ÇØ 5ÃÊ ´ë±â
+  // [ï¿½ß¿ï¿½] ï¿½Ê±ï¿½È­ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ 5ï¿½ï¿½ ï¿½ï¿½ï¿½
   Sleep(5000);
 
   DX11Base::AddLog(u8"========================================");
-  DX11Base::AddLog(u8"[System] Ä¡Æ® ·Îµå ¼º°ø (DLL: %s)", dllName.c_str());
-  DX11Base::AddLog(u8"[System] ¹öÀü: %s", SAM8_CHEAT_VERSION);
+  DX11Base::AddLog(u8"[System] Ä¡Æ® ï¿½Îµï¿½ ï¿½ï¿½ï¿½ï¿½ (DLL: %s)", dllName.c_str());
+  DX11Base::AddLog(u8"[System] ï¿½ï¿½ï¿½ï¿½: %s", SAM8_CHEAT_VERSION);
   DX11Base::AddLog(u8"========================================");
 
   UNREFERENCED_PARAMETER(dwModule);
   // quick debug popup removed
 
-  // ¿øº» °ÔÀÓÀÇ DPI ÀÎ½Ä »óÅÂ¸¦ °­Á¦·Î º¯°æÇÏ¸é ¸¶¿ì½º Æ÷ÀÎÅÍ ÁÂÇ¥(WM_MOUSEMOVE)¿Í
-  // ½ÇÁ¦ ·»´õ¸µµÈ GUI ÁÂÇ¥ »çÀÌ¿¡ ½É°¢ÇÑ ¿ÀÇÁ¼Â(¾î±ß³²)ÀÌ ¹ß»ýÇÕ´Ï´Ù.
-  // SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+  // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ DPI ï¿½Î½ï¿½ ï¿½ï¿½ï¿½Â¸ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ ï¿½ï¿½ï¿½ì½º ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ç¥(WM_MOUSEMOVE)ï¿½ï¿½
+  // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ GUI ï¿½ï¿½Ç¥ ï¿½ï¿½ï¿½Ì¿ï¿½ ï¿½É°ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½(ï¿½ï¿½ß³ï¿½)ï¿½ï¿½
+  // ï¿½ß»ï¿½ï¿½Õ´Ï´ï¿½. SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
   // -----------------------------------------------------------
 
   g_Engine = std::make_unique<Engine>();
@@ -309,10 +310,10 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   g_D3D11Window->HookD3D();
   g_Hooking->Initialize();
 
-  // 2. [Ãß°¡] ÈÅ ÃÊ±âÈ­ Á÷ÈÄ¿¡ ¿ì¸®¸¸ÀÇ ÁÂÇ¥ ¼ÓÀÌ±â ÈÅÀ» ¼³Ä¡ÇÕ´Ï´Ù.
-  // [¼öÁ¤] MH_EnableHook¿¡ IAT ½ºÅÓ(&GetCursorPos µî)À» Á÷Á¢ ³Ñ±â¸é
-  //        ÀÏºÎ PC¿¡¼­ Ãæµ¹ ¹ß»ý. MH_CreateHookApi µî·Ï ÈÄ MH_ALL_HOOKS·Î
-  //        ÇÑ²¨¹ø¿¡ È°¼ºÈ­ÇÏ´Â ¹æ½ÄÀ¸·Î º¯°æ.
+  // 2. [ï¿½ß°ï¿½] ï¿½ï¿½ ï¿½Ê±ï¿½È­ ï¿½ï¿½ï¿½Ä¿ï¿½ ï¿½ì¸®ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ç¥ ï¿½ï¿½ï¿½Ì±ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ä¡ï¿½Õ´Ï´ï¿½.
+  // [ï¿½ï¿½ï¿½ï¿½] MH_EnableHookï¿½ï¿½ IAT ï¿½ï¿½ï¿½ï¿½(&GetCursorPos ï¿½ï¿½)ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ñ±ï¿½ï¿½
+  //        ï¿½Ïºï¿½ PCï¿½ï¿½ï¿½ï¿½ ï¿½æµ¹ ï¿½ß»ï¿½. MH_CreateHookApi ï¿½ï¿½ï¿½ ï¿½ï¿½ MH_ALL_HOOKSï¿½ï¿½
+  //        ï¿½Ñ²ï¿½ï¿½ï¿½ï¿½ï¿½ È°ï¿½ï¿½È­ï¿½Ï´ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½.
   if (oGetCursorPos == NULL) {
     MH_CreateHookApi(L"user32.dll", "GetCursorPos", &hkGetCursorPos, (LPVOID *)&oGetCursorPos);
     MH_CreateHookApi(L"user32.dll", "GetAsyncKeyState", &hkGetAsyncKeyState, (LPVOID *)&oGetAsyncKeyState);
@@ -321,7 +322,7 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
     MH_CreateHookApi(L"user32.dll", "PeekMessageW", &hkPeekMessageW, (LPVOID *)&oPeekMessageW);
     MH_CreateHookApi(L"user32.dll", "PeekMessageA", &hkPeekMessageA, (LPVOID *)&oPeekMessageA);
 
-    // ¸ðµç µî·ÏµÈ ÈÅÀ» ÇÑ²¨¹ø¿¡ È°¼ºÈ­ (¾ÈÀü)
+    // ï¿½ï¿½ï¿½ ï¿½ï¿½Ïµï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½Ñ²ï¿½ï¿½ï¿½ï¿½ï¿½ È°ï¿½ï¿½È­ (ï¿½ï¿½ï¿½ï¿½)
     MH_EnableHook(MH_ALL_HOOKS);
   }
 
@@ -330,14 +331,14 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
 
   //  RENDER LOOP
   g_Running = true;
-  // [¼öÁ¤] int¸¦ ULONGLONGÀ¸·Î º¯°æ (64ºñÆ® Á¤¼öÇü)
+  // [ï¿½ï¿½ï¿½ï¿½] intï¿½ï¿½ ULONGLONGï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ (64ï¿½ï¿½Æ® ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
   static ULONGLONG LastTick = 0;
 
   while (g_Running) {
-    // ÅÇ Å° À§ÀÇ ` (¹°°á/¹éÆ½) Å°·Î º¯°æ
+    // ï¿½ï¿½ Å° ï¿½ï¿½ï¿½ï¿½ ` (ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½Æ½) Å°ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
     if ((GetAsyncKeyState(VK_OEM_3) & 0x8000) && ((GetTickCount64() - LastTick) > 500)) {
       DX11Base::bToggleMenuCollapseRequest = true;
-      g_Engine->bShowMenu = true; // ¹«Á¶°Ç ¸Þ´º´Â Ç¥½Ã»óÅÂ¸¦ À¯Áö
+      g_Engine->bShowMenu = true; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Þ´ï¿½ï¿½ï¿½ Ç¥ï¿½Ã»ï¿½ï¿½Â¸ï¿½ ï¿½ï¿½ï¿½ï¿½
       LastTick = GetTickCount64();
     }
 
@@ -349,9 +350,9 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   }
 
   //  EXIT
-  DX11Base::Shutdown(false); // ¿©±â´Â Á¤»ó ½º·¹µå Á¾·á »óÈ²
+  DX11Base::Shutdown(false); // ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È²
 
-  // join() ´ë±â¸¦ Á¦°ÅÇÏ¿© Á¾·á ½Ã ÇÁ¸®Â¡ ¹æÁö
+  // join() ï¿½ï¿½â¸¦ ï¿½ï¿½ï¿½ï¿½ï¿½Ï¿ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Â¡ ï¿½ï¿½ï¿½ï¿½
   // if (WCMUpdate.joinable())
   //     WCMUpdate.join();
 

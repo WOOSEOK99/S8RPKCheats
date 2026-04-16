@@ -5,13 +5,14 @@
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/Terrainignore.h"
-#include "NotificationManager.h"
 #include "Config.h"
 #include "Framework/imgui.h"
 #include "MenuState.h"
+#include "NotificationManager.h"
 #include <cstdint>
 #include <cstdio>
 #include <string>
+
 
 namespace DX11Base {
   namespace MenuSections {
@@ -569,29 +570,41 @@ namespace DX11Base {
           }
           if (ImGui::BeginTabItem(u8"건물강화")) {
             ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 방어 건물 강화 설정 ]");
-            ImGui::Checkbox(u8"건물 강화 활성화", &bDefBuilding);
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"※ 건물의 시야는 항상 사거리보다 커야 합니다.");
             ImGui::Separator();
 
-            auto DrawBuildingSection = [&](const char* label, int* dur, int* range, int* atk, int* sight) {
+            auto DrawBuildingSection = [&](const char *label, int *dur, int *range, int *atk, int *sight) {
               if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::Columns(2, nullptr, false);
                 ImGui::SetColumnWidth(0, 100 * scale);
 
-                ImGui::TextUnformatted(u8"내구도:"); ImGui::NextColumn();
-                ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Dur") + label).c_str(), dur, 100, 500); ImGui::NextColumn();
+                ImGui::TextUnformatted(u8"내구도:");
+                ImGui::NextColumn();
+                ImGui::SetNextItemWidth(150 * scale);
+                ImGui::InputInt((std::string("##Dur") + label).c_str(), dur, 100, 500);
+                ImGui::NextColumn();
 
                 if (range) {
-                  ImGui::TextUnformatted(u8"사거리:"); ImGui::NextColumn();
-                  ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Range") + label).c_str(), range, 1, 1); ImGui::NextColumn();
+                  ImGui::TextUnformatted(u8"사거리:");
+                  ImGui::NextColumn();
+                  ImGui::SetNextItemWidth(150 * scale);
+                  ImGui::InputInt((std::string("##Range") + label).c_str(), range, 1, 1);
+                  ImGui::NextColumn();
                 }
 
                 if (atk) {
-                  ImGui::TextUnformatted(u8"공격력:"); ImGui::NextColumn();
-                  ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Atk") + label).c_str(), atk, 1, 5); ImGui::NextColumn();
+                  ImGui::TextUnformatted(u8"공격력:");
+                  ImGui::NextColumn();
+                  ImGui::SetNextItemWidth(150 * scale);
+                  ImGui::InputInt((std::string("##Atk") + label).c_str(), atk, 1, 5);
+                  ImGui::NextColumn();
                 }
 
-                ImGui::TextUnformatted(u8"시야:"); ImGui::NextColumn();
-                ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt((std::string("##Sight") + label).c_str(), sight, 1, 1); ImGui::NextColumn();
+                ImGui::TextUnformatted(u8"시야:");
+                ImGui::NextColumn();
+                ImGui::SetNextItemWidth(150 * scale);
+                ImGui::InputInt((std::string("##Sight") + label).c_str(), sight, 1, 1);
+                ImGui::NextColumn();
 
                 ImGui::Columns(1);
               }
@@ -600,17 +613,27 @@ namespace DX11Base {
             DrawBuildingSection(u8"도시 (City)", &v_City_Dur, &v_City_Range, &v_City_Atk, &v_City_Sight);
             DrawBuildingSection(u8"관문 (Gate)", &v_Gate_Dur, &v_Gate_Range, &v_Gate_Atk, &v_Gate_Sight);
             DrawBuildingSection(u8"망루 (Tower)", &v_Tower_Dur, &v_Tower_Range, &v_Tower_Atk, &v_Tower_Sight);
-            DrawBuildingSection(u8"투석기 (Catapult)", &v_WallCatapult_Dur, &v_WallCatapult_Range, &v_WallCatapult_Atk, &v_WallCatapult_Sight);
-            
+            DrawBuildingSection(u8"투석기 (Catapult)", &v_WallCatapult_Dur, &v_WallCatapult_Range, &v_WallCatapult_Atk,
+                                &v_WallCatapult_Sight);
+
             if (ImGui::CollapsingHeader(u8"봉화대 (Signal Fire)", ImGuiTreeNodeFlags_DefaultOpen)) {
               ImGui::Columns(2, nullptr, false);
               ImGui::SetColumnWidth(0, 100 * scale);
-              ImGui::TextUnformatted(u8"내구도:"); ImGui::NextColumn();
-              ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt("##SignalDur", &v_Signal_Dur, 100, 500); ImGui::NextColumn();
-              ImGui::TextUnformatted(u8"전의증가:"); ImGui::NextColumn();
-              ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt("##SignalSpirit", &v_Signal_Spirit, 1, 5); ImGui::NextColumn();
-              ImGui::TextUnformatted(u8"시야:"); ImGui::NextColumn();
-              ImGui::SetNextItemWidth(150 * scale); ImGui::InputInt("##SignalSight", &v_Signal_Sight, 1, 1); ImGui::NextColumn();
+              ImGui::TextUnformatted(u8"내구도:");
+              ImGui::NextColumn();
+              ImGui::SetNextItemWidth(150 * scale);
+              ImGui::InputInt("##SignalDur", &v_Signal_Dur, 100, 500);
+              ImGui::NextColumn();
+              ImGui::TextUnformatted(u8"전의증가:");
+              ImGui::NextColumn();
+              ImGui::SetNextItemWidth(150 * scale);
+              ImGui::InputInt("##SignalSpirit", &v_Signal_Spirit, 1, 5);
+              ImGui::NextColumn();
+              ImGui::TextUnformatted(u8"시야:");
+              ImGui::NextColumn();
+              ImGui::SetNextItemWidth(150 * scale);
+              ImGui::InputInt("##SignalSight", &v_Signal_Sight, 1, 1);
+              ImGui::NextColumn();
               ImGui::Columns(1);
             }
 
