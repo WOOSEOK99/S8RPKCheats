@@ -149,10 +149,12 @@ namespace DX11Base {
     // ------------------------------------------------------------------------------------------------
     // 3. 수치 입력 및 메모리 동기화 (간소화 버전 - 한 줄 표시용)
     // ------------------------------------------------------------------------------------------------
-    static void DrawStatMini(const char *label, int *val, int offset, int size, uintptr_t baseAddr, float scale) {
+    static void DrawStatMini(const char *label, int *val, int offset, int size, uintptr_t baseAddr, int inputsize,
+                             float scale) {
+      ImGui::AlignTextToFramePadding();
       ImGui::TextUnformatted(label);
       ImGui::SameLine();
-      ImGui::SetNextItemWidth(60 * scale);
+      ImGui::SetNextItemWidth(inputsize * scale);
       ImGui::PushID(label);
       if (ImGui::InputInt("##val", val, 0, 0, ImGuiInputTextFlags_CharsDecimal)) {
         if (baseAddr > 0x10000)
@@ -179,26 +181,26 @@ namespace DX11Base {
         // DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
         // DrawStatRow(u8"우호의 증표", 0xF8, 2, &v_Token, 0, gameBase, scale);
 
-        DrawStatMini(u8"금", &v_Gold, 0x300, 2, p1, scale);
-        ImGui::SameLine(80 * scale);
-        DrawStatMini(u8"행동력", &v_AP, 0xEE, 1, p1, scale);
+        DrawStatMini(u8"금", &v_Gold, 0x300, 2, p1, 60, scale);
+        ImGui::SameLine(100 * scale);
+        DrawStatMini(u8"행동력", &v_AP, 0xEE, 1, p1, 40, scale);
         ImGui::SameLine(200 * scale);
-        DrawStatMini(u8"우호의 증표", &v_Token, 0xF8, 2, p1, scale);
+        DrawStatMini(u8"우호의 증표", &v_Token, 0xF8, 2, p1, 40, scale);
 
         ImGui::Spacing(); // 위아래 여백
         ImGui::Separator();
         ImGui::Spacing(); // 위아래 여백
 
-        if (ImGui::Checkbox(u8"[내정] 행동력 무한", &bInfiniteAP)) {
-          NotifyFeatureToggle(u8"[내정] 행동력 무한", bInfiniteAP);
+        if (ImGui::Checkbox(u8"행동력 무한", &bInfiniteAP)) {
+          NotifyFeatureToggle(u8"행동력 무한", bInfiniteAP);
           SaveConfig();
         }
 
         ImGui::SameLine(160.0f * scale);
 
-        if (ImGui::Checkbox(u8"[도시] 견문 시 민심 최대", &bAttitudeHack)) {
+        if (ImGui::Checkbox(u8"견문 시 민심 최대", &bAttitudeHack)) {
           ::DX11Base::SetInstantAttitude(bAttitudeHack);
-          NotifyFeatureToggle(u8"[도시] 견문 시 민심 최대", bAttitudeHack);
+          NotifyFeatureToggle(u8"견문 시 민심 최대", bAttitudeHack);
           SaveConfig();
         }
 
@@ -208,8 +210,8 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        if (ImGui::Checkbox(u8"[도시] 명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
-          NotifyFeatureToggle(u8"[도시] 명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
+        if (ImGui::Checkbox(u8"명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
+          NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
           SaveConfig();
         }
 
@@ -251,9 +253,9 @@ namespace DX11Base {
         bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
         if (wasBigCityRunning)
           ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"[도시] 기술도시로 전환", &bBigCity)) {
+        if (ImGui::Checkbox(u8"기술도시로 전환", &bBigCity)) {
           DX11Base::SetBigCityConvert(bBigCity);
-          NotifyFeatureToggle(u8"[도시] 기술도시로 전환", bBigCity);
+          NotifyFeatureToggle(u8"기술도시로 전환", bBigCity);
           SaveConfig();
         }
         if (wasBigCityRunning)
@@ -271,9 +273,9 @@ namespace DX11Base {
         bool wasBangmokRunning = DX11Base::g_bangmokThreadRunning.load();
         if (wasBangmokRunning)
           ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"[도시] 방목도시 황폐화", &bBangmokCity)) {
+        if (ImGui::Checkbox(u8"방목도시 황폐화", &bBangmokCity)) {
           DX11Base::SetBangmokCity(bBangmokCity);
-          NotifyFeatureToggle(u8"[도시] 방목도시 황폐화", bBangmokCity);
+          NotifyFeatureToggle(u8"방목도시 황폐화", bBangmokCity);
           SaveConfig();
         }
         if (wasBangmokRunning)
@@ -290,9 +292,9 @@ namespace DX11Base {
         bool wasNongRunning = DX11Base::g_nongCityThreadRunning.load();
         if (wasNongRunning)
           ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"[도시] 농경도시 버프", &bNonggyeongCity)) {
+        if (ImGui::Checkbox(u8"농경도시 버프", &bNonggyeongCity)) {
           DX11Base::SetNonggyeongCity(bNonggyeongCity);
-          NotifyFeatureToggle(u8"[도시] 농경도시 버프", bNonggyeongCity);
+          NotifyFeatureToggle(u8"농경도시 버프", bNonggyeongCity);
           SaveConfig();
         }
         if (wasNongRunning)
@@ -310,9 +312,9 @@ namespace DX11Base {
         bool wasSagRunning = DX11Base::g_sagCityThreadRunning.load();
         if (wasSagRunning)
           ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"[도시] 상업도시 버프", &bSangeopCity)) {
+        if (ImGui::Checkbox(u8"상업도시 버프", &bSangeopCity)) {
           DX11Base::SetSangeopCity(bSangeopCity);
-          NotifyFeatureToggle(u8"[도시] 상업도시 버프", bSangeopCity);
+          NotifyFeatureToggle(u8"상업도시 버프", bSangeopCity);
           SaveConfig();
         }
         if (wasSagRunning)
@@ -330,12 +332,13 @@ namespace DX11Base {
         BeginSection();
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 명성치 편집 ]");
 
-        DrawStatMini(u8"무명", &v_RepM, 0x106, 2, p1, scale);
+        DrawStatMini(u8"무명", &v_RepM, 0x106, 2, p1, 60, scale);
         ImGui::SameLine(100 * scale);
-        DrawStatMini(u8"문명", &v_RepL, 0x104, 2, p1, scale);
+        DrawStatMini(u8"문명", &v_RepL, 0x104, 2, p1, 60, scale);
         ImGui::SameLine(200 * scale);
-        DrawStatMini(u8"악명", &v_RepI, 0x108, 2, p1, scale);
+        DrawStatMini(u8"악명", &v_RepI, 0x108, 2, p1, 60, scale);
 
+        ImGui::SetCursorPosX(200 * scale); // '악명' 라벨이 시작되는 위치와 동일하게 설정
         if (ImGui::Checkbox(u8"악명 항상 0 유지", &bZeroInfamy)) {
           NotifyFeatureToggle(u8"악명 항상 0 유지", bZeroInfamy);
           SaveConfig();
@@ -349,19 +352,20 @@ namespace DX11Base {
         // DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
         // DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
 
-        DrawStatMini(u8"전략P", &v_SP, 0xED, 1, p1, scale);
-        ImGui::SameLine(100 * scale);
-        DrawStatMini(u8"공적", &v_Merit, 0x100, 2, p1, scale);
-        ImGui::SameLine(200 * scale);
-        DrawStatMini(u8"특권", &v_Priv, 0xEA, 1, p1, scale);
+        DrawStatMini(u8"전략P", &v_SP, 0xED, 1, p1, 60, scale);
+        ImGui::SameLine(110 * scale);
+        DrawStatMini(u8"공적", &v_Merit, 0x100, 2, p1, 60, scale);
+        ImGui::SameLine(210 * scale);
+        DrawStatMini(u8"특권", &v_Priv, 0xEA, 1, p1, 60, scale);
 
+        ImGui::Spacing(); // 위아래 여백
+        ImGui::Separator();
         ImGui::Spacing(); // 위아래 여백
 
         if (ImGui::Checkbox(u8"전기 발생 무제한", &bInfTengi)) {
           NotifyFeatureToggle(u8"전기 발생 무제한", bInfTengi);
           SaveConfig();
         }
-
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"매 평정 마다 새로운 전기가 발생합니다.");
@@ -371,6 +375,34 @@ namespace DX11Base {
         }
 
         ImGui::SameLine(160.0f * scale);
+
+        if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
+          NotifyFeatureToggle(u8"중지 성성 취소", bCancelCastleEvent);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"중지 성성이 발생하면 즉시 취소합니다.");
+          ImGui::EndTooltip();
+        }
+
+        if (ImGui::Button(u8"전기발생 취소", ImVec2(120, 26))) {
+          // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)
+          if (DX11Base::GetCapturedTengiAddr() != 0) {
+            DX11Base::CancelTengi();
+            DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
+          }
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"전기 발생을 즉시 취소합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::Spacing(); // 위아래 여백
+        ImGui::Separator();
+        ImGui::Spacing(); // 위아래 여백
 
         if (ImGui::Checkbox(u8"만병 습득 조건 해제", &bSkillCondition)) {
           DX11Base::ApplySkillCondition(bSkillCondition);
@@ -384,18 +416,8 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
-          NotifyFeatureToggle(u8"중지 성성 취소", bCancelCastleEvent);
-          SaveConfig();
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"중지 성성이 발생하면 즉시 취소합니다.");
-          ImGui::EndTooltip();
-        }
-
         ImGui::SameLine(160.0f * scale);
+
         if (ImGui::Checkbox(u8"상병 습득 조건 해제", &bSangbyeongCondition)) {
           DX11Base::ApplySangbyeongCondition(bSangbyeongCondition);
           NotifyFeatureToggle(u8"상병 습득 조건 해제", bSangbyeongCondition);
@@ -408,25 +430,6 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        float btnWidth = 120.0f * scale; // 버튼 간격 줄여서 빈공간 최소화
-        float btnHeight = 26.0f * scale;
-        float spacing = 10.0f * scale; // 버튼 사이의 여백
-
-        if (ImGui::Button(u8"전기발생 취소", ImVec2(btnWidth, btnHeight))) {
-          // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)
-          if (DX11Base::GetCapturedTengiAddr() != 0) {
-            DX11Base::CancelTengi();
-            DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
-          }
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"전기 발생을 즉시 취소합니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::SameLine(160.0f * scale);
         if (ImGui::Checkbox(u8"유목기병 습득 조건 해제", &bYumokCondition)) {
           DX11Base::ApplyYumokCondition(bYumokCondition);
           NotifyFeatureToggle(u8"유목기병 습득 조건 해제", bYumokCondition);
@@ -438,6 +441,10 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"유목기병 특기를 조건 없이 즉시 습득 가능한 상태로 변경합니다.");
           ImGui::EndTooltip();
         }
+
+        ImGui::Spacing(); // 위아래 여백
+        ImGui::Separator();
+        ImGui::Spacing(); // 위아래 여백
 
         if (ImGui::Checkbox(u8"능력치 한계돌파", &bAutoStatUp99)) {
           NotifyFeatureToggle(u8"능력치 한계돌파", bAutoStatUp99);
@@ -479,7 +486,7 @@ namespace DX11Base {
 
       if (p1 != 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
-        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, scale);
+        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, 60, scale);
         ImGui::SameLine(120 * scale);
         if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
           NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
@@ -521,15 +528,15 @@ namespace DX11Base {
           ImGui::EndDisabled();
       };
 
-      DrawLoveCheckbox(u8"[인연] 즉시 경애 맺기", &bLoveCave, LoveMode::Normal);
+      DrawLoveCheckbox(u8"즉시 경애 맺기", &bLoveCave, LoveMode::Normal);
       ImGui::SameLine(160.0f * scale);
-      DrawLoveCheckbox(u8"[인연] 혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
+      DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
 
       if (::DX11Base::g_resonanceThreadRunning)
         ImGui::BeginDisabled();
-      if (ImGui::Checkbox(u8"[담화] 무조건 공명 발생", &bResonance)) {
+      if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
         DX11Base::SetInstantResonance(bResonance);
-        NotifyFeatureToggle(u8"[담화] 무조건 공명 발생", bResonance);
+        NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
         SaveConfig();
       }
 
@@ -546,31 +553,31 @@ namespace DX11Base {
 
       ImGui::SameLine(160.0f * scale);
 
-      if (ImGui::Checkbox(u8"[담화] 경애 시 무조건 공명", &bFastRelationship)) {
+      if (ImGui::Checkbox(u8"경애 시 무조건 공명", &bFastRelationship)) {
         DX11Base::SetFastRelationship(bFastRelationship);
-        NotifyFeatureToggle(u8"[담화] 경애 시 무조건 공명", bFastRelationship);
+        NotifyFeatureToggle(u8"경애 시 무조건 공명", bFastRelationship);
         SaveConfig();
       }
 
-      if (ImGui::Checkbox(u8"[교류] 선물 기증 무제한", &bInfiniteGift)) {
+      if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
         DX11Base::SetInfiniteGift(bInfiniteGift);
-        NotifyFeatureToggle(u8"[교류] 선물 기증 무제한", bInfiniteGift);
+        NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
         SaveConfig();
       }
 
       ImGui::SameLine(160.0f * scale);
 
-      if (ImGui::Checkbox(u8"[교류] 담화 실행 무제한", &bInfiniteTalk)) {
+      if (ImGui::Checkbox(u8"담화 실행 무제한", &bInfiniteTalk)) {
         DX11Base::SetInfiniteTalk(bInfiniteTalk);
-        NotifyFeatureToggle(u8"[교류] 담화 실행 무제한", bInfiniteTalk);
+        NotifyFeatureToggle(u8"담화 실행 무제한", bInfiniteTalk);
         SaveConfig();
       }
 
       if (::DX11Base::g_loyaltyThreadRunning.load())
         ImGui::BeginDisabled();
-      if (ImGui::Checkbox(u8"[교류] 무장 충성도 100", &bLoyalty)) {
+      if (ImGui::Checkbox(u8"무장 충성도 100", &bLoyalty)) {
         DX11Base::SetInstantLoyalty(bLoyalty);
-        NotifyFeatureToggle(u8"[교류] 무장 충성도 100", bLoyalty);
+        NotifyFeatureToggle(u8"무장 충성도 100", bLoyalty);
         SaveConfig();
       }
 
@@ -584,8 +591,9 @@ namespace DX11Base {
         ImGui::EndDisabled();
       }
 
+      ImGui::SameLine(160.0f * scale);
       bool tempMarriage = ::DX11Base::marriageApplied;
-      if (ImGui::Checkbox(u8"[결혼] 결혼 무제한", &tempMarriage)) {
+      if (ImGui::Checkbox(u8"결혼 무제한", &tempMarriage)) {
         // [상호 배제] 결혼 무제한 켜지면 인연 기능 끄기
         if (tempMarriage) {
           if (bLoveCave || bHateCave) {
@@ -595,7 +603,7 @@ namespace DX11Base {
           }
         }
         ::DX11Base::SetMarriageCondition(tempMarriage);
-        NotifyFeatureToggle(u8"[결혼] 결혼 무제한", tempMarriage);
+        NotifyFeatureToggle(u8"결혼 무제한", tempMarriage);
         SaveConfig();
       }
 
@@ -643,7 +651,16 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::Spacing();
       ImGui::Separator();
+      ImGui::Spacing();
+
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 전법 및 건물 ]");
+      ImGui::SameLine();
+      if (ImGui::Button(u8"수정", ImVec2(100.0f * scale, 25.0f * scale))) {
+        bShowTacticsEditWin = !bShowTacticsEditWin;
+      }
 
       if (ImGui::Checkbox(u8"치료", &bSelfHeal)) {
         DX11Base::SetSelfHeal(bSelfHeal);
@@ -684,11 +701,6 @@ namespace DX11Base {
         DX11Base::SetDefBuildingBoost(bDefBuilding);
         NotifyFeatureToggle(u8"방어 건물 강화", bDefBuilding);
         SaveConfig();
-      }
-
-      ImGui::SameLine();
-      if (ImGui::Button(u8"수정", ImVec2(100.0f * scale, 25.0f * scale))) {
-        bShowTacticsEditWin = !bShowTacticsEditWin;
       }
 
       EndSection(); // 전쟁
@@ -764,7 +776,7 @@ namespace DX11Base {
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"관직 보너스");
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"관작 보너스");
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"황제 : 모든 능력치 +5, 병력 +5000");
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"왕 : 모든 능력치 +4, 병력 +3000");
