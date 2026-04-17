@@ -321,6 +321,7 @@ namespace DX11Base {
         ImGui::PopStyleColor(2);
 
         RenderStatRow(pBase, u8"공적", 0x100, 2, &v_Contr, scale);
+        RenderStatRow(pBase, u8"금전", 0xE8, 4, &v_Gold, scale); // [수정] 4바이트 적용
         RenderStatRow(pBase, u8"충성", 0xEC, 1, &v_Loyalty, scale);
         RenderStatRow(pBase, u8"전략포인트", 0xED, 1, &v_StrPoint, scale);
         RenderStatRow(pBase, u8"행동력", 0xEE, 1, &v_Action, scale);
@@ -358,6 +359,7 @@ namespace DX11Base {
         ImGui::PopStyleColor(2);
 
         RenderStatRow(pBase, u8"공적", 0x100, 2, &v_Contr, scale);
+        RenderStatRow(pBase, u8"금전", 0xE8, 4, &v_Gold, scale); // [수정] 4바이트 적용
         RenderStatRow(pBase, u8"충성", 0xEC, 1, &v_Loyalty, scale);
         RenderStatRow(pBase, u8"전략포인트", 0xED, 1, &v_StrPoint, scale);
         RenderStatRow(pBase, u8"행동력", 0xEE, 1, &v_Action, scale);

@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.735"
+#define SAM8_CHEAT_VERSION "V0.736"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -155,7 +155,7 @@ namespace DX11Base {
   extern uintptr_t g_savedHeroAddr; // [신규] 데모플레이 대비 주인공 주소 백업용
   extern bool bFileLog;             // 파일 로그 출력 변수
 
-  extern void* g_RangeTextures[12]; // ID3D11ShaderResourceView* 배열 (1~11번)
+  extern void *g_RangeTextures[12]; // ID3D11ShaderResourceView* 배열 (1~11번)
 
   bool IsAnyUIOpen(); // 모든 UI 창 활성화 여부 확인 함수
 } // namespace DX11Base

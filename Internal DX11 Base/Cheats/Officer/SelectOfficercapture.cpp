@@ -144,6 +144,9 @@ namespace DX11Base {
   }
 
   void DrawOfficerHeader(uintptr_t pGame, float scale, uintptr_t pViewSnap) {
+    LoadOfficerNames();   // [수정] 메타데이터 보장
+    LoadEffectDefinitions();
+
     const uintptr_t pR = (pViewSnap > 0x10000) ? pViewSnap : pGame;
     auto syncHdrSnap = [&]() {
       if (pViewSnap > 0x10000 && IsValidPtr(pGame, 0x3D0))
@@ -343,8 +346,8 @@ namespace DX11Base {
         static uintptr_t s_cachedBaseForCity = 0;
         static std::string s_cachedCityName = u8"정보 없음";
 
-        if (s_cachedBaseForCity != g_capturedOfficerBase) {
-          s_cachedBaseForCity = g_capturedOfficerBase;
+        if (s_cachedBaseForCity != pR) {
+          s_cachedBaseForCity = pR;
           s_cachedCityName = u8"정보 없음";
 
           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
@@ -710,6 +713,9 @@ namespace DX11Base {
   }
 
   void DrawOfficerTalents(uintptr_t pBase, float scale) {
+    LoadOfficerNames();     // [수정] 메타데이터 보장
+    LoadEffectDefinitions();
+
     if (ImGui::BeginTable("TraitHeaderTable", 1)) {
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -727,8 +733,8 @@ namespace DX11Base {
     static std::vector<std::string> s_cachedTalentLines[3];
     static bool s_forceTalentCacheRefresh = false;
 
-    if (s_cachedTalentBase != g_capturedOfficerBase || s_forceTalentCacheRefresh) {
-      s_cachedTalentBase = g_capturedOfficerBase;
+    if (s_cachedTalentBase != pBase || s_forceTalentCacheRefresh) {
+      s_cachedTalentBase = pBase;
       for (int i = 0; i < 3; i++) {
         TalentInfo info;
         s_cachedTalentValid[i] = GetOfficerTalentDetailed(pBase, i, info);

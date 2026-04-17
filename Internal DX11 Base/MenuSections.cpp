@@ -181,7 +181,7 @@ namespace DX11Base {
         // DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
         // DrawStatRow(u8"우호의 증표", 0xF8, 2, &v_Token, 0, gameBase, scale);
 
-        DrawStatMini(u8"금", &v_Gold, 0x300, 2, p1, 60, scale);
+        DrawStatMini(u8"금", &v_Gold, 0x300, 4, p1, 60, scale);
         ImGui::SameLine(100 * scale);
         DrawStatMini(u8"행동력", &v_AP, 0xEE, 1, p1, 40, scale);
         ImGui::SameLine(200 * scale);
