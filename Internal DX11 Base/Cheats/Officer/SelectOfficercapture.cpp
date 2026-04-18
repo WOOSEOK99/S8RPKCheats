@@ -1,17 +1,17 @@
 #include "SelectOfficercapture.h"
-#include "../../debug.h"
 #include "../../Cheats.h"
-#include "../Civilian/CityData.h"
-#include "../Social/InstantLoveCave.h"
 #include "../../MemoryUtils.h"
 #include "../../MenuState.h"
+#include "../../debug.h"
+#include "../../pch.h"
+#include "../../showcal.h"
+#include "../../showlog.h"
+#include "../Civilian/CityData.h"
+#include "../Social/InstantLoveCave.h"
 #include "OfficerData.h"
 #include "OfficerDetail.h"
 #include "OfficerRosterResolve.h"
 #include "RoninMonitor.h" // 알림 동기화용 추가
-#include "../../pch.h"
-#include "../../showcal.h"
-#include "../../showlog.h"
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <utility>
 #include <windows.h>
+
 
 namespace DX11Base {
   extern HMODULE g_hModule;
@@ -52,7 +53,8 @@ namespace DX11Base {
 
   static uintptr_t s_stableArrayBase = 0;
   static uintptr_t s_lastCapturedByUI = 0;
-  static int s_currentFilter = -1; // -1: 전부, 0x18 군사, 0x28 일반, 0x38 두령, 0x48 동지, 0x58 재야, 0x68 미발견(0x78 동류), 0x88 사망, 0x98 NPC, 0xD8 도독, 0xE8 태수, 0xC8 군주
+  static int s_currentFilter = -1; // -1: 전부, 0x18 군사, 0x28 일반, 0x38 두령, 0x48 동지, 0x58 재야, 0x68 미발견(0x78
+                                   // 동류), 0x88 사망, 0x98 NPC, 0xD8 도독, 0xE8 태수, 0xC8 군주
   static bool s_triggerReselection = false;            // [UX] 무장 상태 변경 시 자동으로 다음 무장 선택 여부
   static bool s_requestOfficerListRefresh = false;     // [최적화] 목록 캐시 재구축 요청 플래그
   static bool s_forceFilterRebuild = false;            // [UX] 캐시 변동 후 필터 리스트 즉각적인 재구축 요청 플래그
@@ -144,7 +146,7 @@ namespace DX11Base {
   }
 
   void DrawOfficerHeader(uintptr_t pGame, float scale, uintptr_t pViewSnap) {
-    LoadOfficerNames();   // [수정] 메타데이터 보장
+    LoadOfficerNames(); // [수정] 메타데이터 보장
     LoadEffectDefinitions();
 
     const uintptr_t pR = (pViewSnap > 0x10000) ? pViewSnap : pGame;
@@ -346,8 +348,11 @@ namespace DX11Base {
         static uintptr_t s_cachedBaseForCity = 0;
         static std::string s_cachedCityName = u8"정보 없음";
 
-        if (s_cachedBaseForCity != pR) {
-          s_cachedBaseForCity = pR;
+        if (s_cachedBaseForCity != pGame) {
+          s_cachedBaseForCity = pGame;
+
+          // if (s_cachedBaseForCity != pR) {
+          //   s_cachedBaseForCity = pR;
           s_cachedCityName = u8"정보 없음";
 
           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
@@ -713,7 +718,7 @@ namespace DX11Base {
   }
 
   void DrawOfficerTalents(uintptr_t pBase, float scale) {
-    LoadOfficerNames();     // [수정] 메타데이터 보장
+    LoadOfficerNames(); // [수정] 메타데이터 보장
     LoadEffectDefinitions();
 
     if (ImGui::BeginTable("TraitHeaderTable", 1)) {
@@ -775,11 +780,11 @@ namespace DX11Base {
       ImGui::BeginGroup();
       if (s_cachedTalentValid[i]) {
         info = s_cachedTalentInfo[i];
-        const char* tName = GetTalentName(info.id);
+        const char *tName = GetTalentName(info.id);
         if (tName && strcmp(tName, "Unknown") == 0) {
-            ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), u8"[*] 기재 %d : #%d (ID %d)", i + 1, info.id, info.id);
+          ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), u8"[*] 기재 %d : #%d (ID %d)", i + 1, info.id, info.id);
         } else {
-            ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), u8"[*] 기재 %d : %s (ID %d)", i + 1, tName, info.id);
+          ImGui::TextColored(ImVec4(0.2f, 0.9f, 1.0f, 1.0f), u8"[*] 기재 %d : %s (ID %d)", i + 1, tName, info.id);
         }
         ImGui::Indent(15.0f * scale);
         for (const auto &line : s_cachedTalentLines[i]) {
@@ -1265,8 +1270,8 @@ namespace DX11Base {
       {
         static float s_cachedTotalFilterWidth = 0.0f;
         if (s_cachedTotalFilterWidth <= 0.0f) {
-          const char *filterLabels[] = {u8"군사", u8"일반",   u8"두령", u8"동지", u8"태수", u8"도독", u8"군주",
-                                        u8"재야", u8"미발견", u8"사망", u8"NPC",  u8"전부"};
+          const char *filterLabels[] = {u8"군사", u8"일반", u8"두령",   u8"동지", u8"태수", u8"도독",
+                                        u8"군주", u8"재야", u8"미발견", u8"사망", u8"NPC",  u8"전부"};
           float fp = ImGui::GetStyle().FramePadding.x;
           for (auto *lbl : filterLabels) {
             s_cachedTotalFilterWidth += ImGui::CalcTextSize(lbl).x + fp * 2.0f;
