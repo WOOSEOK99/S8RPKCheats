@@ -47,7 +47,7 @@ namespace DX11Base {
   void DrawSelectedOfficerWindow(ImVec2 mPos, ImVec2 mSize, float scale, bool asChild = false);
 
   void DrawOfficerListWindow(uintptr_t p1, float scale);
-  void DrawOfficerTalents(uintptr_t pBase, float scale);
+  void DrawOfficerTalents(uintptr_t pBase, float scale, uintptr_t pGame = 0);
   void DrawOfficerHeader(uintptr_t pGame, float scale, uintptr_t pViewSnap = 0);
   
   void StartSpouseScannerAsync();

@@ -717,7 +717,7 @@ namespace DX11Base {
     }
   }
 
-  void DrawOfficerTalents(uintptr_t pBase, float scale) {
+  void DrawOfficerTalents(uintptr_t pBase, float scale, uintptr_t pGame) {
     LoadOfficerNames(); // [수정] 메타데이터 보장
     LoadEffectDefinitions();
 
@@ -738,8 +738,9 @@ namespace DX11Base {
     static std::vector<std::string> s_cachedTalentLines[3];
     static bool s_forceTalentCacheRefresh = false;
 
-    if (s_cachedTalentBase != pBase || s_forceTalentCacheRefresh) {
-      s_cachedTalentBase = pBase;
+    const uintptr_t cacheKey = (pGame > 0x10000) ? pGame : pBase;
+    if (s_cachedTalentBase != cacheKey || s_forceTalentCacheRefresh) {
+      s_cachedTalentBase = cacheKey;
       for (int i = 0; i < 3; i++) {
         TalentInfo info;
         s_cachedTalentValid[i] = GetOfficerTalentDetailed(pBase, i, info);
@@ -1020,7 +1021,7 @@ namespace DX11Base {
           currentTabIdx = 0;
         }
         DrawOfficerHeader(pBase, scale, pSnap);
-        DrawOfficerTalents(pSnap, scale);
+        DrawOfficerTalents(pSnap, scale, pBase);
         ImGui::EndTabItem();
       }
       if (ImGui::BeginTabItem(u8"능력/상태")) {

@@ -601,7 +601,7 @@ namespace DX11Base {
           //   currentTabIdx = 0;
           // }
           DrawOfficerHeader(p1, scale);
-          DrawOfficerTalents(p1, scale);
+          DrawOfficerTalents(p1, scale, p1);
           ImGui::EndTabItem();
         }
 
