@@ -125,15 +125,15 @@ BOOL WINAPI hkGetKeyboardState(PBYTE lpKeyState) {
   return result;
 }
 
-// OS�� �޽����� ������ �� Raw Input�� �����Ͽ� ����Ű ����, Ű
-// �޽����� ���� ��ȯ
+// OS ޽   Raw Input Ͽ Ű , Ű
+// ޽  ȯ
 void HandleMessageCapture(LPMSG lpMsg) {
   if (!DX11Base::g_Engine || !DX11Base::IsAnyUIOpen() || !ImGui::GetCurrentContext())
     return;
   ImGuiIO &io = ImGui::GetIO();
 
-  // 1. ����Ű ����: Raw Input ���ͼ�Ʈ
-  if (lpMsg->message == WM_INPUT && io.WantCaptureKeyboard) {
+  // 1. Raw Input 인터셉트 (마우스/키보드)
+  if (lpMsg->message == WM_INPUT) {
     UINT dwSize = 0;
     GetRawInputData((HRAWINPUT)lpMsg->lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
     if (dwSize > 0) {
@@ -141,7 +141,15 @@ void HandleMessageCapture(LPMSG lpMsg) {
       if (dwSize <= sizeof(buf) &&
           GetRawInputData((HRAWINPUT)lpMsg->lParam, RID_INPUT, buf, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
         RAWINPUT *raw = (RAWINPUT *)buf;
-        if (raw->header.dwType == RIM_TYPEKEYBOARD) {
+
+        // 마우스 차단: UI 위에서 마우스가 움직일 때 게임이 마우스를 읽지 못하게 함
+        if (raw->header.dwType == RIM_TYPEMOUSE && io.WantCaptureMouse) {
+          lpMsg->message = WM_NULL;
+          return;
+        }
+
+        // 키보드 차단
+        if (raw->header.dwType == RIM_TYPEKEYBOARD && io.WantCaptureKeyboard) {
           USHORT vkey = raw->data.keyboard.VKey;
           bool isModifier =
               (vkey == VK_SHIFT || vkey == VK_LSHIFT || vkey == VK_RSHIFT || vkey == VK_CONTROL ||
@@ -149,8 +157,6 @@ void HandleMessageCapture(LPMSG lpMsg) {
           bool isImeKey = (vkey == 0x15 || vkey == 0xA5 || vkey == VK_PROCESSKEY);
           bool isMenuToggle = (vkey == VK_OEM_3);
 
-          // �ؽ�Ʈ �Է� �߿��� ���� ����Ű�� ���� ���� �ʵ��� ���� ��� Ű�� ����.
-          // ��, IME/����Ű/�޴� ��� Ű�� �ý��� ó���� �ñ��.
           if (io.WantTextInput && !isModifier && !isImeKey && !isMenuToggle) {
             lpMsg->message = WM_NULL;
             return;
