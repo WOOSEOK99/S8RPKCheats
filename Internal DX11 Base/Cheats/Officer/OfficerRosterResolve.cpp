@@ -2,6 +2,7 @@
 #include "../../Cheats.h"
 #include "OfficerRosterResolve.h"
 #include "OfficerData.h"
+#include "../../showlog.h"
 
 namespace DX11Base {
 
@@ -11,7 +12,7 @@ constexpr std::uintptr_t kExeStaticPtrRva = 0x034C8630;
 // 각 단계: 이전 주소에서 *(base + offset) 로 다음 포인터를 읽음
 constexpr std::uintptr_t kChainAddends[] = {0x48, 0x8, 0x10, 0x0, 0x8};
 constexpr std::uintptr_t kSpecialtyAnchorRvas[] = {0x037B0000, 0x037FF430};
-constexpr std::uintptr_t kSpecialtyChainAddends[] = {0x20, 0x0};
+constexpr std::uintptr_t kSpecialtyChainAddends[] = {0x0, 0x20, 0x0};
 
 inline bool ReadPointer(std::uintptr_t addr, std::uintptr_t *out) {
   if (!out || !addr)
@@ -61,18 +62,28 @@ bool TryResolveSpecialtyArrayBase(std::uintptr_t exeBase, std::uintptr_t *outSpe
     std::uintptr_t p = 0;
     if (ReadPointer(exeBase + kExeStaticPtrRva, &p)) {
       bool chainOk = true;
+      int step = 0;
       for (std::uintptr_t add : kSpecialtyChainAddends) {
-        if (!ReadPointer(p + add, &p)) {
+        std::uintptr_t nextP = 0;
+        if (!ReadPointer(p + add, &nextP)) {
+          AddLog(u8"[명품체인] 단계 %d 실패 (Addr:%p, Offset:+%p)", step, (void*)p, (void*)add);
           chainOk = false;
           break;
         }
+        p = nextP;
+        step++;
       }
       if (chainOk && IsValidPtr(p, 0x38)) {
         *outSpecialtyBase = p;
+        AddLog(u8"[명품체인] 최종 주소 확보 성공: %p", (void*)p);
         return true;
       }
+
+    } else {
+        AddLog(u8"[명품체인] 루트 포인터 읽기 실패 (Addr:%p)", (void*)(exeBase + kExeStaticPtrRva));
     }
   }
+
 
   // 2) 구버전/대체 빌드 fallback: officerBase static anchor 기반
   for (std::uintptr_t anchorRva : kSpecialtyAnchorRvas) {

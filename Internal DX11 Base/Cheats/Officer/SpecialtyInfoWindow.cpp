@@ -15,8 +15,34 @@
 #include <set>
 #include <unordered_map>
 
-// 한블럭의 크기 0x40(64byte)
-// 명품 시작주소 0x1F1B30DC968
+// 명품(Specialty) 관련 오프셋 및 데이터 구조 정리
+/*
+    [명품 객체 구조 - Specialty Object (Size: 0x40)]
+    +0x08 : 명품 ID (uint16_t)
+    +0x0E : 종류/항목 (uint8_t) - 1:명마, 2:검, 3:도, 11:활, 12:병서, 24:옥새 등
+    +0x10 : 부여 특기 ID (uint8_t)
+    +0x20 : 특기 레벨 (uint8_t)
+    +0x22 : 상승 능력 종류 (uint8_t) - 1:통솔, 2:무력, 3:지력, 4:정치, 5:매력
+    +0x23 : 능력 상승치 (uint8_t)
+    +0x24 : 특수 효과 종류 (uint8_t) - 1:퇴각확실, 2:수명연장, 3:능력효과
+    +0x25 : 특수 효과 값 (uint8_t)
+    +0x26 : 명품 가치 (uint8_t)
+    +0x30 : 소유주 포인터 (uintptr_t) - 장수 또는 도시 객체 주소
+    +0x38 : 소유주 타입 (uint32_t) - 1: 장수(Officer), 2: 도시(City), 0: 없음/미정
+
+    [도시 명품 슬롯 구조 - City Specialty Slots]
+    - 도시 객체 베이스(Stride 0x2A0) 내 오프셋
+    - 슬롯 위치: 0x248, 0x260, 0x278 (총 3개 슬롯)
+    
+    * 슬롯 포인터 주소(SlotPtrAddr) 기준:
+      -0x08 : 슬롯 활성화 플래그 (uint32_t) - 1: 활성, 0: 비활성
+      +0x00 : 명품 객체 주소 (uintptr_t) - Specialty Object Pointer
+      +0x08 : 소유/구매 플래그 (uint32_t) - 1: 구매됨/장수소유, 0: 도시보유
+
+    [기타 관련 주소]
+    - 주인공(Hero) 주소: GetGameBase() + 0xE0 (포인터)
+*/
+
 
 namespace DX11Base {
   extern HMODULE g_hModule;
@@ -387,31 +413,59 @@ namespace DX11Base {
 
       // 1. 명품 베이스 주소 확보 (포인터 체인 우선)
       uintptr_t spBase = 0;
-      uintptr_t exeBase = GetGameBase();
-      if (exeBase > 0x10000) {
-        TryResolveSpecialtyArrayBase(exeBase, &spBase);
+      uint16_t checkId = 0;
+      uintptr_t modBase = (uintptr_t)GetModuleHandle(NULL);
+      if (modBase > 0x10000) {
+        TryResolveSpecialtyArrayBase(modBase, &spBase);
+      }
+      
+      // [보정] 사용자 데이터 분석 결과, 포인터 체인 결과값에 0x19AF60 오프셋을 더해야 실제 배열 시작점이 나옴
+      if (spBase > 0x10000) {
+          if (Read16(spBase + 0x08, &checkId) && checkId != 1) {
+              spBase += 0x19AF60; // 오프셋 보정
+              AddLog(u8"[명품] 포인터 체인 주소 보정 적용 (+0x19AF60)");
+          }
       }
 
-      // 포인터 체인이 실패하면 기존 역산 로직 사용
-      if (spBase <= 0x10000) {
+      // [안전한 주소 탐지 및 Stride 탐지] 
+      // 포인터 체인이 여전히 틀리거나, Stride를 확인하고 싶을 때 이미 상점에 있는 명품 주소를 대조
+      uintptr_t detectedStride = 0x40; // 기본값
+      {
         constexpr uintptr_t kCityStride = 0x2A0;
         const uintptr_t slotOffsets[3] = {0x248, 0x260, 0x278};
-        bool foundBase = false;
-        for (int c = 0; c < g_CityCount && !foundBase; c++) {
-          uintptr_t cityAddr = cityArrayBase + c * kCityStride;
-          for (int s = 0; s < 3 && !foundBase; s++) {
-            uintptr_t slotPtr = 0;
-            if (ReadPtr(cityAddr + slotOffsets[s], &slotPtr)) {
-              slotPtr = Ptr48(slotPtr);
-              if (slotPtr > 0x10000) {
-                uint16_t spId = 0;
-                if (Read16(slotPtr + 0x08, &spId) && spId > 0 && spId <= 300) {
-                  spBase = slotPtr - ((uintptr_t)(spId - 1) * 0x40);
-                  foundBase = true;
-                }
+        struct FoundSample { uintptr_t addr; uint16_t id; };
+        std::vector<FoundSample> samples;
+
+        for (int c = 0; c < g_CityCount && samples.size() < 2; c++) {
+          uintptr_t cityAddr = cityArrayBase + (uintptr_t)c * kCityStride;
+          for (int s = 0; s < 3 && samples.size() < 2; s++) {
+            uintptr_t slotPtrAddr = cityAddr + slotOffsets[s];
+            uintptr_t slotObjPtr = 0;
+            if (ReadPtr(slotPtrAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000) {
+              uint16_t spId = 0;
+              if (Read16(Ptr48(slotObjPtr) + 0x08, &spId) && spId > 0 && spId <= 1000) {
+                samples.push_back({Ptr48(slotObjPtr), spId});
               }
             }
           }
+        }
+
+        if (samples.size() >= 2 && samples[0].id != samples[1].id) {
+            // Stride 계산: (Addr2 - Addr1) / (ID2 - ID1)
+            int idDiff = (int)samples[1].id - (int)samples[0].id;
+            int64_t addrDiff = (int64_t)samples[1].addr - (int64_t)samples[0].addr;
+            detectedStride = (uintptr_t)(std::abs(addrDiff) / std::abs(idDiff));
+            AddLog(u8"[명품] Stride 동적 탐지 성공: 0x%X (기존 0x40)", (uint32_t)detectedStride);
+            
+            // 만약 포인터 체인 결과가 여전히 틀리다면 역산으로 보정
+            if (spBase <= 0x10000 || (Read16(spBase + 0x08, &checkId) && checkId != 1)) {
+                spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * detectedStride);
+                AddLog(u8"[명품] 역산 탐지로 베이스 주소 최종 교정: %p", (void*)spBase);
+            }
+        } else if (samples.size() == 1 && (spBase <= 0x10000 || (Read16(spBase + 0x08, &checkId) && checkId != 1))) {
+            // 샘플이 하나라도 있으면 최소한의 역산 시도
+            spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * 0x40);
+            AddLog(u8"[명품] 단일 샘플 역산 탐지 성공: %p", (void*)spBase);
         }
       }
 
@@ -435,47 +489,36 @@ namespace DX11Base {
           uintptr_t slotAddr = cityAddr + slotOffsets[s];
           uintptr_t slotObjPtr = 0;
           if (ReadPtr(slotAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000) {
-            uintptr_t p = Ptr48(slotObjPtr);
-            uint16_t spId = 0;
-            // 소모품(250~254)은 중복 배분 허용하므로 체크에서 제외
-            if (Read16(p + 0x08, &spId) && (spId < 250 || spId > 254)) {
-              alreadyAssigned.insert(p);
-            }
+              alreadyAssigned.insert(Ptr48(slotObjPtr));
           }
         }
       }
 
-      // 2. 소유주가 없는 명품 수집 (ID 1 ~ 300 범위 탐색)
-      std::vector<uintptr_t> unownedSpecialties;
+      // 2. 수집할 명품 풀 (ID 1 ~ 300 범위 탐색)
+      std::vector<uintptr_t> pool;
       for (int i = 1; i <= 300; i++) {
-        // 이름 정의가 없는 ID는 빈 슬롯/더미로 간주하여 제외
-        if (s_specialityNameById.find(i) == s_specialityNameById.end())
+        uintptr_t objPtr = spBase + ((uintptr_t)(i - 1) * detectedStride);
+
+        // 이미 어떤 도시 슬롯에라도 배치되어 있다면 제외 (중복 배분 방지)
+        if (alreadyAssigned.count(objPtr) > 0)
           continue;
-
-        uintptr_t objPtr = spBase + ((uintptr_t)(i - 1) * 0x40);
-
-        // 소모품(250~254)은 중복 사용이 가능하므로 이미 배치 여부 검사를 건너뜀
-        if (i < 250 || i > 254) {
-          if (alreadyAssigned.count(objPtr) > 0)
-            continue;
-        }
 
         uint16_t readId = 0;
         if (Read16(objPtr + 0x08, &readId) && readId == i) {
           uintptr_t ownerPtr = 0;
           if (ReadPtr(objPtr + 0x30, &ownerPtr)) {
             ownerPtr = Ptr48(ownerPtr);
-            // 소유주가 없거나(0), 소유주 포인터가 가리키는 대상이 무효할 때
+            // 소유주가 없는(0) 아이템 혹은 발견되지 않은 아이템을 배분 대상으로 함
             if (ownerPtr <= 0x10000) {
-              unownedSpecialties.push_back(objPtr);
+              pool.push_back(objPtr);
             }
           }
         }
       }
 
-      // (고유 명품이 없더라도 빈 슬롯/무효 아이템 정리를 위해 계속 진행)
-      if (unownedSpecialties.empty()) {
-        // AddLog(u8"[명품자동배분] 배분할 새 고유 명품이 없습니다. 빈자리 정리 모드로 진행합니다.");
+      if (pool.empty()) {
+        AddLog(u8"[명품자동배분] 배분할 수 있는 유효한 명품(주인 없는 물건)이 없습니다.");
+        return;
       }
 
       // 3. 비어있는 도시 슬롯 수집
@@ -492,25 +535,23 @@ namespace DX11Base {
           uintptr_t slotObjPtr = 0;
           uint32_t enabled = 0;
 
-          // 슬롯 포인터가 비어있거나, 활성화되지 않았거나, 이름이 없는 무효 아이템인 경우 빈 슬롯으로 간주
+          // 슬롯 포인터가 비어있거나, 활성화되지 않았거나, 품절된 경우 빈 슬롯으로 간주
           bool hasPtr = ReadPtr(slotAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000;
           bool okEnabled = Read32(slotAddr - 0x08, &enabled);
           bool isEnabled = okEnabled && enabled != 0;
+          
+          uint32_t bought = 0;
+          bool okBought = Read32(slotAddr + 0x08, &bought);
+          bool isBought = okBought && bought != 0;
 
-          bool hasName = false;
-          if (hasPtr && isEnabled) {
-            uint16_t spIdFromObj = 0;
-            if (Read16(Ptr48(slotObjPtr) + 0x08, &spIdFromObj)) {
-              hasName = (s_specialityNameById.find((int)spIdFromObj) != s_specialityNameById.end());
-            }
-          }
-
-          // 포인터가 없거나, 활성화가 꺼져있거나, 이름이 없는 경우 모두 빈 슬롯으로 취급
-          if (!hasPtr || !isEnabled || !hasName) {
+          // [개선] 품절된 슬롯(isBought)도 빈자리로 취급하여 새로 채웁니다.
+          if (!hasPtr || !isEnabled || isBought) {
             emptySlots.push_back({cityAddr, slotAddr, s});
           }
         }
       }
+
+      AddLog(u8"[명품배분] 가용 명품:%d개, 빈 슬롯:%d개", (int)pool.size(), (int)emptySlots.size());
 
       if (emptySlots.empty()) {
         AddLog(u8"[명품자동배분] 도시 슬롯에 남는 자리가 없습니다.");
@@ -520,51 +561,33 @@ namespace DX11Base {
       // 4. 랜덤 셔플 및 배분
       std::random_device rd;
       std::mt19937 g(rd());
-      std::shuffle(unownedSpecialties.begin(), unownedSpecialties.end(), g);
+      std::shuffle(pool.begin(), pool.end(), g);
       std::shuffle(emptySlots.begin(), emptySlots.end(), g);
 
-      int assignCount = (int)(std::min)(unownedSpecialties.size(), emptySlots.size());
+      int assignCount = (int)(std::min)(pool.size(), emptySlots.size());
       int successCount = 0;
       for (int i = 0; i < assignCount; i++) {
-        uintptr_t spObj = unownedSpecialties[i];
+        uintptr_t spObj = pool[i];
         EmptySlot &target = emptySlots[i];
 
         bool ok = true;
         // 도시 슬롯에 명품 주소 쓰기
         ok &= WritePtrSafe(target.slotPtrAddr, spObj);
-        // 명품 객체에 소유주(도시) 주소 쓰기
-        ok &= WritePtrSafe(spObj + 0x30, target.cityAddr);
-
-        // [수정] 소유주 타입 플래그 설정 (City=2) - 구매 시 프리징 해결 시도
-        ok &= Write32Safe(spObj + 0x38, 2);
+        
+        // [수정] 명품 객체 자체의 소유주 정보(0x30, 0x38)는 건드리지 않음
+        // 상점 상업 시스템은 소유주가 없는(0) 아이템을 구매 대상으로 처리하므로, 
+        // 여기서 도시 주소를 직접 써버리면 구매 버튼 클릭 시 시스템 충돌(프리징)이 발생할 수 있음.
 
         // 슬롯 활성화 플래그 (Enabled=1, Bought=0)
         ok &= Write32Safe(target.slotPtrAddr - 0x08, 1);
         ok &= Write32Safe(target.slotPtrAddr + 0x08, 0);
 
+
         if (ok)
           successCount++;
       }
 
-      // [추가] 남은 빈 슬롯이 있으면 소모품(251~254)으로 채우기
-      if (successCount < (int)emptySlots.size()) {
-        std::vector<int> consumableIds = {251, 252, 253, 254};
-        std::uniform_int_distribution<int> dist(0, (int)consumableIds.size() - 1);
-
-        for (int i = successCount; i < (int)emptySlots.size(); i++) {
-          EmptySlot &target = emptySlots[i];
-          int pickedId = consumableIds[dist(g)];
-          uintptr_t spObj = spBase + ((uintptr_t)(pickedId - 1) * 0x40);
-
-          WritePtrSafe(target.slotPtrAddr, spObj);
-          WritePtrSafe(spObj + 0x30, target.cityAddr);
-          Write32Safe(spObj + 0x38, 2);              // City Type
-          Write32Safe(target.slotPtrAddr - 0x08, 1); // Enabled
-          Write32Safe(target.slotPtrAddr + 0x08, 0); // Not Bought
-        }
-      }
-
-      AddLog(u8"[명품자동배분] 배분 결과: 총 %d개 명품을 빈 슬롯에 배치했습니다.", successCount);
+      AddLog(u8"[명품자동배분] 배분 완료: 총 %d개를 비어있던 도시 슬롯에 배치했습니다. (중복 배분 방지 적용)", successCount);
     }
   } // namespace
 
@@ -593,18 +616,13 @@ namespace DX11Base {
     }
 
     // 상단 수동 조작 영역
-    // ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.2f, 1.0f));
-    // if (ImGui::Button(u8"명품 강제 무작위 배분")) {
-    //   AssignRandomSpecialtiesToEmptySlots();
-    // }
-    // ImGui::PopStyleColor();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.2f, 1.0f));
+    if (ImGui::Button(u8"명품 즉시 자동 배분 실행")) {
+      AssignRandomSpecialtiesToEmptySlots();
+    }
+    ImGui::PopStyleColor();
 
-    // ImGui::SameLine();
-    // if (ImGui::Button(u8"명품 정보 캐시 초기화")) {
-    //   s_lastResolvedSpBase = 0;
-    //   AddLog(u8"[명품] 명품 베이스 주소 캐시를 초기화했습니다.");
-    // }
-    // ImGui::Separator();
+    ImGui::Separator();
 
     // ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 도시별 명품 보유 현황 ]");
 #if 0
@@ -698,8 +716,9 @@ namespace DX11Base {
         heroBase = Ptr48(heroBase);
         if (heroBase > 0x10000) {
           if (WritePtrSafe(s_selectedSpecialtyObj + 0x30, heroBase) &&
+              Write32Safe(s_selectedSpecialtyObj + 0x38, 1) &&
               (s_selectedSpecialtySlotAddr <= 0x10000 || Write32Safe(s_selectedSpecialtySlotAddr + 0x08, 1))) {
-            AddLog(u8"[명품] 주인공에게 소유 완료");
+            AddLog(u8"[명품] 주인공에게 소유 완료 (타입:장수)");
           } else {
             AddLog(u8"[명품] 주인공 소유 실패");
           }
@@ -972,8 +991,9 @@ namespace DX11Base {
           uintptr_t targetBase = ResolveOfficerBaseById((uint16_t)s_giveOfficerSelectedId);
           if (targetBase > 0x10000) {
             if (WritePtrSafe(s_selectedSpecialtyObj + 0x30, targetBase) &&
+                Write32Safe(s_selectedSpecialtyObj + 0x38, 1) &&
                 (s_selectedSpecialtySlotAddr <= 0x10000 || Write32Safe(s_selectedSpecialtySlotAddr + 0x08, 1))) {
-              AddLog(u8"[명품] %s(ID:%d)에게 수여 완료", g_officerNames[s_giveOfficerSelectedId].c_str(),
+              AddLog(u8"[명품] %s(ID:%d)에게 수여 완료 (타입:장수)", g_officerNames[s_giveOfficerSelectedId].c_str(),
                      s_giveOfficerSelectedId);
               s_showGiveOfficerListWindow = false;
             } else {
