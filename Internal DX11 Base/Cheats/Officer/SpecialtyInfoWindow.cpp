@@ -1,19 +1,19 @@
 #include "../../Cheats.h"
-#include "OfficerRosterResolve.h"
-#include "../Civilian/CityData.h"
 #include "../../MenuState.h"
-#include "OfficerData.h"
-#include "OfficerRosterResolve.h"
-#include "SelectOfficercapture.h"
 #include "../../debug.h"
 #include "../../pch.h"
 #include "../../showlog.h"
+#include "../Civilian/CityData.h"
+#include "OfficerData.h"
+#include "OfficerRosterResolve.h"
+#include "SelectOfficercapture.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <set>
 #include <unordered_map>
+
 
 // 명품(Specialty) 관련 오프셋 및 데이터 구조 정리
 /*
@@ -33,7 +33,7 @@
     [도시 명품 슬롯 구조 - City Specialty Slots]
     - 도시 객체 베이스(Stride 0x2A0) 내 오프셋
     - 슬롯 위치: 0x248, 0x260, 0x278 (총 3개 슬롯)
-    
+
     * 슬롯 포인터 주소(SlotPtrAddr) 기준:
       -0x08 : 슬롯 활성화 플래그 (uint32_t) - 1: 활성, 0: 비활성
       +0x00 : 명품 객체 주소 (uintptr_t) - Specialty Object Pointer
@@ -42,7 +42,6 @@
     [기타 관련 주소]
     - 주인공(Hero) 주소: GetGameBase() + 0xE0 (포인터)
 */
-
 
 namespace DX11Base {
   extern HMODULE g_hModule;
@@ -418,22 +417,25 @@ namespace DX11Base {
       if (modBase > 0x10000) {
         TryResolveSpecialtyArrayBase(modBase, &spBase);
       }
-      
+
       // [보정] 사용자 데이터 분석 결과, 포인터 체인 결과값에 0x19AF60 오프셋을 더해야 실제 배열 시작점이 나옴
       if (spBase > 0x10000) {
-          if (Read16(spBase + 0x08, &checkId) && checkId != 1) {
-              spBase += 0x19AF60; // 오프셋 보정
-              AddLog(u8"[명품] 포인터 체인 주소 보정 적용 (+0x19AF60)");
-          }
+        if (Read16(spBase + 0x08, &checkId) && checkId != 1) {
+          spBase += 0x19AF60; // 오프셋 보정
+          AddLog(u8"[명품] 포인터 체인 주소 보정 적용 (+0x19AF60)");
+        }
       }
 
-      // [안전한 주소 탐지 및 Stride 탐지] 
+      // [안전한 주소 탐지 및 Stride 탐지]
       // 포인터 체인이 여전히 틀리거나, Stride를 확인하고 싶을 때 이미 상점에 있는 명품 주소를 대조
       uintptr_t detectedStride = 0x40; // 기본값
       {
         constexpr uintptr_t kCityStride = 0x2A0;
         const uintptr_t slotOffsets[3] = {0x248, 0x260, 0x278};
-        struct FoundSample { uintptr_t addr; uint16_t id; };
+        struct FoundSample {
+          uintptr_t addr;
+          uint16_t id;
+        };
         std::vector<FoundSample> samples;
 
         for (int c = 0; c < g_CityCount && samples.size() < 2; c++) {
@@ -451,21 +453,21 @@ namespace DX11Base {
         }
 
         if (samples.size() >= 2 && samples[0].id != samples[1].id) {
-            // Stride 계산: (Addr2 - Addr1) / (ID2 - ID1)
-            int idDiff = (int)samples[1].id - (int)samples[0].id;
-            int64_t addrDiff = (int64_t)samples[1].addr - (int64_t)samples[0].addr;
-            detectedStride = (uintptr_t)(std::abs(addrDiff) / std::abs(idDiff));
-            AddLog(u8"[명품] Stride 동적 탐지 성공: 0x%X (기존 0x40)", (uint32_t)detectedStride);
-            
-            // 만약 포인터 체인 결과가 여전히 틀리다면 역산으로 보정
-            if (spBase <= 0x10000 || (Read16(spBase + 0x08, &checkId) && checkId != 1)) {
-                spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * detectedStride);
-                AddLog(u8"[명품] 역산 탐지로 베이스 주소 최종 교정: %p", (void*)spBase);
-            }
+          // Stride 계산: (Addr2 - Addr1) / (ID2 - ID1)
+          int idDiff = (int)samples[1].id - (int)samples[0].id;
+          int64_t addrDiff = (int64_t)samples[1].addr - (int64_t)samples[0].addr;
+          detectedStride = (uintptr_t)(std::abs(addrDiff) / std::abs(idDiff));
+          AddLog(u8"[명품] Stride 동적 탐지 성공: 0x%X (기존 0x40)", (uint32_t)detectedStride);
+
+          // 만약 포인터 체인 결과가 여전히 틀리다면 역산으로 보정
+          if (spBase <= 0x10000 || (Read16(spBase + 0x08, &checkId) && checkId != 1)) {
+            spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * detectedStride);
+            AddLog(u8"[명품] 역산 탐지로 베이스 주소 최종 교정: %p", (void *)spBase);
+          }
         } else if (samples.size() == 1 && (spBase <= 0x10000 || (Read16(spBase + 0x08, &checkId) && checkId != 1))) {
-            // 샘플이 하나라도 있으면 최소한의 역산 시도
-            spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * 0x40);
-            AddLog(u8"[명품] 단일 샘플 역산 탐지 성공: %p", (void*)spBase);
+          // 샘플이 하나라도 있으면 최소한의 역산 시도
+          spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * 0x40);
+          AddLog(u8"[명품] 단일 샘플 역산 탐지 성공: %p", (void *)spBase);
         }
       }
 
@@ -489,7 +491,7 @@ namespace DX11Base {
           uintptr_t slotAddr = cityAddr + slotOffsets[s];
           uintptr_t slotObjPtr = 0;
           if (ReadPtr(slotAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000) {
-              alreadyAssigned.insert(Ptr48(slotObjPtr));
+            alreadyAssigned.insert(Ptr48(slotObjPtr));
           }
         }
       }
@@ -509,8 +511,12 @@ namespace DX11Base {
           if (ReadPtr(objPtr + 0x30, &ownerPtr)) {
             ownerPtr = Ptr48(ownerPtr);
             // 소유주가 없는(0) 아이템 혹은 발견되지 않은 아이템을 배분 대상으로 함
-            if (ownerPtr <= 0x10000) {
-              pool.push_back(objPtr);
+            if (ownerPtr <= 0x10000 && HasSpecialtyAttributes(objPtr)) {
+              // 추가로 정의 파일에 이름이 있는 경우에만 배분 (예: 124, 130 등 빈 이름 제외)
+              auto it = s_specialityNameById.find((int)readId);
+              if (it != s_specialityNameById.end() && !it->second.empty()) {
+                pool.push_back(objPtr);
+              }
             }
           }
         }
@@ -539,7 +545,7 @@ namespace DX11Base {
           bool hasPtr = ReadPtr(slotAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000;
           bool okEnabled = Read32(slotAddr - 0x08, &enabled);
           bool isEnabled = okEnabled && enabled != 0;
-          
+
           uint32_t bought = 0;
           bool okBought = Read32(slotAddr + 0x08, &bought);
           bool isBought = okBought && bought != 0;
@@ -573,21 +579,21 @@ namespace DX11Base {
         bool ok = true;
         // 도시 슬롯에 명품 주소 쓰기
         ok &= WritePtrSafe(target.slotPtrAddr, spObj);
-        
+
         // [수정] 명품 객체 자체의 소유주 정보(0x30, 0x38)는 건드리지 않음
-        // 상점 상업 시스템은 소유주가 없는(0) 아이템을 구매 대상으로 처리하므로, 
+        // 상점 상업 시스템은 소유주가 없는(0) 아이템을 구매 대상으로 처리하므로,
         // 여기서 도시 주소를 직접 써버리면 구매 버튼 클릭 시 시스템 충돌(프리징)이 발생할 수 있음.
 
         // 슬롯 활성화 플래그 (Enabled=1, Bought=0)
         ok &= Write32Safe(target.slotPtrAddr - 0x08, 1);
         ok &= Write32Safe(target.slotPtrAddr + 0x08, 0);
 
-
         if (ok)
           successCount++;
       }
 
-      AddLog(u8"[명품자동배분] 배분 완료: 총 %d개를 비어있던 도시 슬롯에 배치했습니다. (중복 배분 방지 적용)", successCount);
+      AddLog(u8"[명품자동배분] 배분 완료: 총 %d개를 비어있던 도시 슬롯에 배치했습니다. (중복 배분 방지 적용)",
+             successCount);
     }
   } // namespace
 
@@ -616,13 +622,13 @@ namespace DX11Base {
     }
 
     // 상단 수동 조작 영역
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.2f, 1.0f));
-    if (ImGui::Button(u8"명품 즉시 자동 배분 실행")) {
-      AssignRandomSpecialtiesToEmptySlots();
-    }
-    ImGui::PopStyleColor();
+    // ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.2f, 1.0f));
+    // if (ImGui::Button(u8"명품 즉시 자동 배분 실행")) {
+    //   AssignRandomSpecialtiesToEmptySlots();
+    // }
+    // ImGui::PopStyleColor();
 
-    ImGui::Separator();
+    // ImGui::Separator();
 
     // ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 도시별 명품 보유 현황 ]");
 #if 0
@@ -715,8 +721,7 @@ namespace DX11Base {
           ReadPtr(gameBase + 0xE0, &heroBase);
         heroBase = Ptr48(heroBase);
         if (heroBase > 0x10000) {
-          if (WritePtrSafe(s_selectedSpecialtyObj + 0x30, heroBase) &&
-              Write32Safe(s_selectedSpecialtyObj + 0x38, 1) &&
+          if (WritePtrSafe(s_selectedSpecialtyObj + 0x30, heroBase) && Write32Safe(s_selectedSpecialtyObj + 0x38, 1) &&
               (s_selectedSpecialtySlotAddr <= 0x10000 || Write32Safe(s_selectedSpecialtySlotAddr + 0x08, 1))) {
             AddLog(u8"[명품] 주인공에게 소유 완료 (타입:장수)");
           } else {
@@ -791,7 +796,7 @@ namespace DX11Base {
 
               // 이름이 없는 경우 (fallback No.XXX 포함) ? 로 표시
               if (!nameResolved || specialityName.empty()) {
-                ImGui::TextDisabled("?");
+                ImGui::TextDisabled("No.%u ?", (unsigned)specialityNo);
                 continue;
               }
 
