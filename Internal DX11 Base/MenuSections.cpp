@@ -185,7 +185,7 @@ namespace DX11Base {
         ImGui::SameLine(100 * scale);
         DrawStatMini(u8"행동력", &v_AP, 0xEE, 1, p1, 40, scale);
         ImGui::SameLine(200 * scale);
-        DrawStatMini(u8"우호의 증표", &v_Token, 0xF8, 2, p1, 40, scale);
+        DrawStatMini(u8"우호의 증표", &v_Token, 0xF8, 2, gameBase, 40, scale);
 
         ImGui::Spacing(); // 위아래 여백
         ImGui::Separator();
