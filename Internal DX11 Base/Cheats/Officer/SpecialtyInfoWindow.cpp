@@ -13,6 +13,7 @@
 #include <random>
 #include <set>
 #include <unordered_map>
+#include "../../BattleMonitor.h"
 
 
 // 명품(Specialty) 관련 오프셋 및 데이터 구조 정리
@@ -605,8 +606,12 @@ namespace DX11Base {
 
     // 평정 종료 시점 감지 (Council: true -> false)
     if (!isCouncil && s_lastCouncil) {
-      AddLog(u8"[자동화] 평정 종료 감지 -> 남는 명품 자동 배분 시작");
-      AssignRandomSpecialtiesToEmptySlots();
+      if (IsInBattle()) {
+        AddLog(u8"[자동화] 평정 종료가 감지되었으나, 현재 전투 중이므로 명품 배분을 건너뜁니다.");
+      } else {
+        AddLog(u8"[자동화] 평정 종료 감지 -> 남는 명품 자동 배분 시작");
+        AssignRandomSpecialtiesToEmptySlots();
+      }
     }
     s_lastCouncil = isCouncil;
   }

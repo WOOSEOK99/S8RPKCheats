@@ -41,6 +41,7 @@
 #include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/System/TengiCave.h"
 #include "Cheats/War/Terrainignore.h"
+#include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/Civilian/DomesticsMult.h"
 #include "Cheats/System/SpeedHack.h"
 
@@ -84,6 +85,7 @@ namespace DX11Base {
   static bool s_appDefBuild = false;
   static bool s_appCatapult = false;
   static bool s_appCelestial = false;
+  static bool s_appSiege = false;
   static bool s_appBattleUnit = false;
   static bool s_appRoadBlock = false;
   static bool s_appRoadBlock2 = false;
@@ -122,6 +124,7 @@ namespace DX11Base {
       {"bDefBuilding", u8"전쟁: 방어건물 강화", &bDefBuilding, &s_appDefBuild, SetDefBuildingBoost, true, true},
       {"bCatapult", u8"전쟁: 투석기 강화", &bCatapult, &s_appCatapult, SetCatapultCheat, true, true},
       {"bCelestial", u8"전쟁: 천계 강화", &bCelestial, &s_appCelestial, SetCelestialMod, true, true},
+      {"bSiegeWarfare", u8"전쟁: 공성전(성주변 얕은여울 및 회복)", &bSiegeWarfare, &s_appSiege, SetSiegeWarfare, true, true},
       {"bAllAggressive", u8"전쟁: 모든 무장 성향 적극", &bAllAggressive, nullptr, nullptr, false, true},
       {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false, true},
       {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false, true},

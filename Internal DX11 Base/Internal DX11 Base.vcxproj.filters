@@ -176,6 +176,9 @@
     <ClInclude Include="Cheats\War\Selfheal.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\SiegeWarfare.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\Dongto.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -362,6 +365,9 @@
       <Filter>Cheats\Social</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\Selfheal.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\SiegeWarfare.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\Dongto.cpp">

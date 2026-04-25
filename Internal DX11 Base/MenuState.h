@@ -46,6 +46,7 @@ namespace DX11Base {
   extern bool bDefBuilding;
   extern bool bCatapult;
   extern bool bCelestial;
+  extern bool bSiegeWarfare;
   extern bool bAllAggressive;
   extern bool bBattleUnit;
 

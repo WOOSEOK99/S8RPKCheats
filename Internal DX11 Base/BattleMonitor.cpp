@@ -10,6 +10,7 @@
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/War/Selfheal.h"
+#include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/Officer/StatMonitor.h"
 #include "Cheats/System/SystemMonth.h"
 #include "Cheats/Civilian/Techpointcave.h"
@@ -38,12 +39,13 @@ namespace DX11Base {
       return;
     }
 
-    // 1. 현재 캡처된 주소 확인
+    // 1. 현재 캡처된 주소 또는 전쟁 날짜 주소 확인
     uintptr_t addr1 = DX11Base::g_battleUnitAddr1;
     uintptr_t addr2 = DX11Base::g_battleUnitAddr2;
+    bool battleActive = (addr1 != 0 || addr2 != 0) || DX11Base::IsSiegeBattleActive();
 
-    if (addr1 != 0 || addr2 != 0) {
-      // [전투 중] 주소가 포착됨
+    if (battleActive) {
+      // [전투 중] 주소가 포착됨 또는 날짜 주소 확인됨
       s_lastSeenTime = currentTime;
 
       // 아직 리프레시를 안 했다면 실행
@@ -75,16 +77,23 @@ namespace DX11Base {
           DX11Base::SetCelestialMod(false);
           DX11Base::SetCelestialMod(true);
         }
+        if (bSiegeWarfare) {
+          DX11Base::SetSiegeWarfare(false);
+          DX11Base::SetSiegeWarfare(true);
+        }
 
         s_isWarModsApplied = true;
       }
+
+      // [공성전 업데이트] 매 프레임/하트비트마다 호출
+      DX11Base::UpdateSiegeWarfare();
 
       // [핵심: 하트비트] 읽은 주소를 즉시 비웁니다.
       DX11Base::g_battleUnitAddr1 = 0;
       DX11Base::g_battleUnitAddr2 = 0;
 
     } else {
-      // [비전투 중] 주소가 0임
+      // [비전투 중] 주소가 0이고 날짜 주소도 없음
       if (s_isWarModsApplied && (currentTime - s_lastSeenTime > 3.0f)) {
         AddLog(u8"[자동화] 상태 초기화 (다음 전투 대기)");
         s_isWarModsApplied = false;
@@ -132,8 +141,8 @@ namespace DX11Base {
     float currentTime = (float)GetTickCount64() / 1000.0f;
     static float s_lastKnownSeenTime = 0.0f;
 
-    // Check global addr directly to update heartbeat if needed without MonitorBattleStatus side effects
-    if (DX11Base::g_battleUnitAddr1 != 0 || DX11Base::g_battleUnitAddr2 != 0) {
+    // Check global addr or day pointer directly to update heartbeat if needed without MonitorBattleStatus side effects
+    if (DX11Base::g_battleUnitAddr1 != 0 || DX11Base::g_battleUnitAddr2 != 0 || DX11Base::IsSiegeBattleActive()) {
       s_lastKnownSeenTime = currentTime;
       return true;
     }

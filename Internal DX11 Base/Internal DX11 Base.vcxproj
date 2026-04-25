@@ -201,6 +201,7 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="Cheats\Social\Resonancecave.h" />
     <ClInclude Include="Cheats\War\Selfheal.h" />
+    <ClInclude Include="Cheats\War\SiegeWarfare.h" />
     <ClInclude Include="Cheats\War\Dongto.h" />
     <ClInclude Include="Cheats\Officer\SelectOfficercapture.h" />
     <ClInclude Include="Cheats\Officer\OfficerRosterResolve.h" />
@@ -280,6 +281,7 @@
     </ClCompile>
     <ClCompile Include="Cheats\Social\Resonancecave.cpp" />
     <ClCompile Include="Cheats\War\Selfheal.cpp" />
+    <ClCompile Include="Cheats\War\SiegeWarfare.cpp" />
     <ClCompile Include="Cheats\War\Dongto.cpp" />
     <ClCompile Include="Cheats\Officer\SelectOfficercapture.cpp" />
     <ClCompile Include="Cheats\Officer\SpecialtyInfoWindow.cpp" />

@@ -150,7 +150,7 @@ namespace DX11Base {
 
     // 전쟁 자동화 (전쟁 관련 변수 중 하나라도 켜져 있으면 캡처 활성화)
     static bool s_autoCaptureStarted = false;
-    bool isAnyWarModActive = bSelfHeal || bDongto || bTerrainIgnore || bDefBuilding || bCatapult || bCelestial;
+    bool isAnyWarModActive = bSelfHeal || bDongto || bTerrainIgnore || bDefBuilding || bCatapult || bCelestial || bSiegeWarfare;
 
     if (isAnyWarModActive && !s_autoCaptureStarted) {
       if (!bBattleUnit) {

@@ -29,6 +29,7 @@
 #include "Cheats/War/FactionLordBonus.h"
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/War/Selfheal.h"
+#include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"
 #include "Framework/imgui.h"
@@ -651,6 +652,24 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      if (ImGui::Checkbox(u8"공성전", &bSiegeWarfare)) {
+        DX11Base::SetSiegeWarfare(bSiegeWarfare);
+        NotifyFeatureToggle(u8"공성전", bSiegeWarfare);
+        SaveConfig();
+      }
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"성 주변 1칸 여울로 변경");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"여울에 위치한 수비 부대는 매턴 총병력의 10% 회복됨. (단, 타세력 동맹군은 제외)");
+        ImGui::EndTooltip();
+      }
+
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::Spacing();
@@ -682,6 +701,7 @@ namespace DX11Base {
         NotifyFeatureToggle(u8"천계", bCelestial);
         SaveConfig();
       }
+
       ImGui::SameLine();
 
       if (ImGui::Checkbox(u8"투석", &bCatapult)) {
