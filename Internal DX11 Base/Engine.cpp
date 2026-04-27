@@ -10,16 +10,15 @@
 #include "debug.h"
 #include <map>
 
+#include "TextureLoader.h"
+
 // ImGui Win32 Handler
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-// Forward declaration of RoninMonitor_Draw and LoadTextureFromResource
+// Forward declaration of RoninMonitor_Draw
 namespace DX11Base {
   extern void RoninMonitor_Draw();
 }
-extern bool LoadTextureFromResource(ID3D11Device *pDevice, int resource_id, ID3D11ShaderResourceView **out_srv,
-                                    int *out_width, int *out_height);
-extern std::map<int, void *> g_RangeTextures;
 
 namespace DX11Base {
   Engine::Engine() {
@@ -483,6 +482,16 @@ namespace DX11Base {
 
       ImGui_ImplWin32_Init(g_Engine->pGameWindow);
       ImGui_ImplDX11_Init(m_Device, m_DeviceContext);
+
+      // [추가] 범위 이미지 로드 (resource 방식)
+      for (int i = 1; i <= 11; i++) {
+          ID3D11ShaderResourceView* srv = nullptr;
+          int w, h;
+          if (DX11Base::LoadTextureFromResource(m_Device, IDR_PNG_RANGE1 + (i - 1), &srv, &w, &h)) {
+              DX11Base::g_RangeTextures[i] = (void*)srv;
+          }
+      }
+      AddLog(u8"[Success] 리소스 이미지 로드 완료");
     } else {
       // DX12 Init
       D3D12_DESCRIPTOR_HEAP_DESC srvDesc = {};
