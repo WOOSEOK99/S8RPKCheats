@@ -223,7 +223,7 @@ void ClientBGThread() {
     Menu::Loops();
 
     if (g_KillSwitch) {
-      g_D3D11Window->UnhookD3D();
+      g_RenderManager->UnhookD3D();
       g_Hooking->Shutdown();
       g_Engine.release(); //  releases all created class instances
       g_Running = false;
@@ -247,11 +247,11 @@ namespace DX11Base {
     // ������ ���� ũ���ø� �����ϱ� ���� ����ä�⸸ �ּ������� �����մϴ�.
     if (isTerminating) {
       MH_DisableHook(MH_ALL_HOOKS);
-      if (g_D3D11Window) {
+      if (g_RenderManager) {
         // D3D ���ҽ� ����(Release)�� �ǳʶٰ� ������ ���ν����� ���� (���� ����)
-        if (g_Engine && g_Engine->pGameWindow && g_D3D11Window->m_OldWndProc) {
-          SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)g_D3D11Window->m_OldWndProc);
-          g_D3D11Window->m_OldWndProc = nullptr;
+        if (g_Engine && g_Engine->pGameWindow && g_RenderManager->m_OldWndProc) {
+          SetWindowLongPtr(g_Engine->pGameWindow, GWLP_WNDPROC, (LONG_PTR)g_RenderManager->m_OldWndProc);
+          g_RenderManager->m_OldWndProc = nullptr;
         }
       }
       return;
@@ -261,8 +261,8 @@ namespace DX11Base {
     MH_DisableHook(MH_ALL_HOOKS);
     MH_Uninitialize();
 
-    if (g_D3D11Window) {
-      g_D3D11Window->UnhookD3D();
+    if (g_RenderManager) {
+      g_RenderManager->UnhookD3D();
     }
 
     if (g_Hooking) {
@@ -313,7 +313,7 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
 
   // Config Loading and Initial AutoLoad is now deferred to Menu::Loops() when p1 becomes valid
 
-  g_D3D11Window->HookD3D();
+  g_RenderManager->HookD3D();
   g_Hooking->Initialize();
 
   // 2. [�߰�] �� �ʱ�ȭ ���Ŀ� �츮���� ��ǥ ���̱� ���� ��ġ�մϴ�.

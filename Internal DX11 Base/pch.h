@@ -24,7 +24,11 @@
 
 // DIRECTX
 #include <d3d11.h>
+#include <d3d12.h>
+#include <dxgi1_4.h>
 #pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "dxgi.lib")
 
 //	GAMEPAD
 #include <XInput.h>
@@ -42,5 +46,6 @@
 #include "Framework/imgui.h"
 #include "Framework/imgui_internal.h"
 #include "Framework/imgui_Impl_dx11.h"
+#include "Framework/imgui_Impl_dx12.h"
 #include "Framework/imgui_Impl_Win32.h"
 #endif //PCH_H

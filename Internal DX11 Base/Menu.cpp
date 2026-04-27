@@ -2,33 +2,34 @@
 #pragma comment(lib, "Shcore.lib")
 #include "BattleMonitor.h"
 #include "Cheats.h"
-#include "Cheats/War/Battleunitcapture.h"
-#include "Cheats/War/Defbuildingboost.h"
-#include "Cheats/System/MonthCapture.h"
+#include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/Officer/OfficerDetail.h"
 #include "Cheats/Officer/RoninMonitor.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
+#include "Cheats/Officer/StatMonitor.h"
+#include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/System/SystemMonth.h"
-#include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/System/TengiCave.h"
+#include "Cheats/War/Battleunitcapture.h"
+#include "Cheats/War/Defbuildingboost.h"
 #include "Config.h"
 #include "Engine.h"
-#include "Cheats/Officer/StatMonitor.h"
 #include "Menu.h"
 #include "MenuSections.h"
 #include "MenuState.h"
+#include "NotificationManager.h"
+#include "TacticsEditWindow.h"
 #include "debug.h"
 #include "showcal.h"
 #include "showlog.h"
-#include "NotificationManager.h"
-#include "TacticsEditWindow.h"
 #include <functional>
 
 namespace DX11Base {
 
   static void DrawMemoryNotepadWindow(float scale) {
-    if (!bShowMemoryNotepadWin) return;
+    if (!bShowMemoryNotepadWin)
+      return;
 
     static char s_noteBuf[32768] = {};
     ImGui::SetNextWindowSize(ImVec2(720 * scale, 500 * scale), ImGuiCond_FirstUseEver);
@@ -150,7 +151,8 @@ namespace DX11Base {
 
     // 전쟁 자동화 (전쟁 관련 변수 중 하나라도 켜져 있으면 캡처 활성화)
     static bool s_autoCaptureStarted = false;
-    bool isAnyWarModActive = bSelfHeal || bDongto || bTerrainIgnore || bDefBuilding || bCatapult || bCelestial || bSiegeWarfare;
+    bool isAnyWarModActive =
+        bSelfHeal || bDongto || bTerrainIgnore || bDefBuilding || bCatapult || bCelestial || bSiegeWarfare;
 
     if (isAnyWarModActive && !s_autoCaptureStarted) {
       if (!bBattleUnit) {
@@ -319,17 +321,19 @@ namespace DX11Base {
     int pushColorCount = 0;
 
     if (bMenuCollapsedLastFrame) {
-      // 접힌 상태: 배경 투명화 + 둥근 황금색 테두리
+      // 접힌 상태: 배경 투명화 + 둥근 황금색 테두리 + 제목 좌측 정렬(간격 축소)
       ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f * scale);
       ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.5f);
-      pushStyleCount = 2;
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowTitleAlign, ImVec2(0.0f, 0.5f)); // ▶ 버튼과 글자 사이 간격 좁히기
+      ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0.0f, 0.0f)); // 추가로 아이템 간 간격도 0으로
+      pushStyleCount = 4;
 
       ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.88f, 0.0f, 0.8f));          // 황금색 테두리
       ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImVec4(0.0f, 0.0f, 0.0f, 0.4f)); // 투명 배경 (살짝 어둡게)
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.88f, 0.0f, 1.0f));            // 황금색 텍스트
       pushColorCount = 3;
     } else {
-      // 펼쳐진 상태: 기존처럼 테두리 제거
+      // 펼쳐진 상태: 기존처럼 테두리 제거 (글자는 중앙 정렬 유지)
       ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
       pushStyleCount = 1;
     }
@@ -446,7 +450,6 @@ namespace DX11Base {
 
       // 🔥 모드 선택 추가 (핵심)
       // 모드 선택 제거 (QPC 필터링 적용으로 통합됨)
-
 
       // [-] 버튼
       if (ImGui::Button("-##SpeedMinus", ImVec2(25 * scale, 0))) {

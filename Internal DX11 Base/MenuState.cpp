@@ -1,4 +1,5 @@
 #include "MenuState.h"
+#include "Engine.h"
 #include "pch.h"
 
 // 글로벌 변수 정의 (Flags)
@@ -149,4 +150,17 @@ namespace DX11Base {
   uintptr_t g_savedHeroAddr = 0;
   bool bFileLog = false;
   void *g_RangeTextures[12] = {nullptr};
+
+  bool IsAnyUIOpen() {
+    return (g_Engine && g_Engine->bShowMenu) ||
+           bShowOfficerDetail ||
+           bShowSelectedOfficerWin ||
+           bShowOfficerListWin ||
+           bShowSpouseListWin ||
+           bShowSpecialtyInfoWin ||
+           bShowMemoryNotepadWin ||
+           bShowNotificationLog ||
+           bShowTacticsEditWin ||
+           bShowPasswordPopup;
+  }
 } // namespace DX11Base

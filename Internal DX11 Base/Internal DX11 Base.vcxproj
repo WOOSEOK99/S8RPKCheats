@@ -169,6 +169,7 @@
     <ClInclude Include="Framework\imconfig.h" />
     <ClInclude Include="Framework\imgui.h" />
     <ClInclude Include="Framework\imgui_impl_dx11.h" />
+    <ClInclude Include="Framework\imgui_impl_dx12.h" />
     <ClInclude Include="Framework\imgui_impl_win32.h" />
     <ClInclude Include="Framework\imgui_internal.h" />
     <ClInclude Include="Framework\imstb_rectpack.h" />
@@ -252,6 +253,7 @@
     <ClCompile Include="Framework\imgui_demo.cpp" />
     <ClCompile Include="Framework\imgui_draw.cpp" />
     <ClCompile Include="Framework\imgui_impl_dx11.cpp" />
+    <ClCompile Include="Framework\imgui_impl_dx12.cpp" />
     <ClCompile Include="Framework\imgui_impl_win32.cpp" />
     <ClCompile Include="Framework\imgui_tables.cpp" />
     <ClCompile Include="Framework\imgui_widgets.cpp" />
