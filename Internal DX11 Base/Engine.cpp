@@ -523,9 +523,17 @@ namespace DX11Base {
 
       ImGui_ImplWin32_Init(g_Engine->pGameWindow);
 
-      ImGui_ImplDX12_Init(m_pd3dDevice12, bufferCount, Desc.BufferDesc.Format, m_pd3dSrvDescHeap,
-                          m_pd3dSrvDescHeap->GetCPUDescriptorHandleForHeapStart(),
-                          m_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart());
+      ImGui_ImplDX12_InitInfo init_info = {};
+      init_info.Device = m_pd3dDevice12;
+      init_info.CommandQueue = m_pd3dCommandQueue;
+      init_info.NumFramesInFlight = bufferCount;
+      init_info.RTVFormat = Desc.BufferDesc.Format;
+      init_info.DSVFormat = DXGI_FORMAT_UNKNOWN;
+      init_info.SrvDescriptorHeap = m_pd3dSrvDescHeap;
+      init_info.LegacySingleSrvCpuDescriptor = m_pd3dSrvDescHeap->GetCPUDescriptorHandleForHeapStart();
+      init_info.LegacySingleSrvGpuDescriptor = m_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart();
+
+      ImGui_ImplDX12_Init(&init_info);
 
       for (UINT i = 0; i < bufferCount; i++) {
         m_pd3dDevice12->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, __uuidof(ID3D12CommandAllocator),
