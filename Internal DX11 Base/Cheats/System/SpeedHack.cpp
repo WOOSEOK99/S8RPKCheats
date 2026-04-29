@@ -3,8 +3,8 @@
 #include "../../MenuState.h"
 #include "../../showlog.h"
 #include <atomic>
-#include <windows.h>
 #include <intrin.h>
+#include <windows.h>
 
 #pragma intrinsic(_ReturnAddress)
 #pragma comment(lib, "winmm.lib")
@@ -17,7 +17,6 @@ namespace DX11Base {
   namespace {
     static bool s_installed = false;
 
-    // 원본 API 포인터들
     typedef DWORD(WINAPI *PtimeGetTime)();
     static PtimeGetTime otimeGetTime = nullptr;
 
@@ -30,7 +29,6 @@ namespace DX11Base {
     typedef BOOL(WINAPI *PQueryPerformanceCounter)(LARGE_INTEGER *);
     static PQueryPerformanceCounter oQueryPerformanceCounter = nullptr;
 
-    // 베이스 시간 기록용
     static std::atomic<DWORD> s_tgtReal{0};
     static std::atomic<DWORD> s_tgtFake{0};
 
@@ -42,49 +40,36 @@ namespace DX11Base {
 
     static std::atomic<LONGLONG> s_qpcReal{0};
     static std::atomic<LONGLONG> s_qpcFake{0};
-    
+
     static std::atomic<float> s_multiplier{1.0f};
 
-    // 속도 변경 시 끊김(점프) 방지를 위해 기준시간을 현재 시간으로 재설정
+    // [MOD BEGIN] 안정화 파라미터
+    static constexpr LONGLONG MAX_DELTA_QPC = 33000;        // 약 33ms
+    static constexpr float MAX_MULTIPLIER = 3.0f;           // 최대 배속
+    static constexpr LONGLONG SAFE_DELTA_THRESHOLD = 50000; // 50ms 이상이면 보호
+    // [MOD END]
+
     void ResetBases(float currentMul, float desiredMul) {
-      if (otimeGetTime) {
-        DWORD real = otimeGetTime();
-        DWORD fake = s_tgtFake.load() + (DWORD)((real - s_tgtReal.load()) * currentMul);
-        s_tgtReal.store(real);
-        s_tgtFake.store(fake);
-      }
-      if (oGetTickCount) {
-        DWORD real = oGetTickCount();
-        DWORD fake = s_gtcFake.load() + (DWORD)((real - s_gtcReal.load()) * currentMul);
-        s_gtcReal.store(real);
-        s_gtcFake.store(fake);
-      }
-      if (oGetTickCount64) {
-        ULONGLONG real = oGetTickCount64();
-        ULONGLONG fake = s_gtc64Fake.load() + (ULONGLONG)((real - s_gtc64Real.load()) * currentMul);
-        s_gtc64Real.store(real);
-        s_gtc64Fake.store(fake);
-      }
       if (oQueryPerformanceCounter) {
         LARGE_INTEGER li;
         oQueryPerformanceCounter(&li);
-        LONGLONG fake = s_qpcFake.load() + (LONGLONG)((li.QuadPart - s_qpcReal.load()) * currentMul);
+
+        // [MOD BEGIN] QPC 기준 초기화 (정상적인 시작점)
         s_qpcReal.store(li.QuadPart);
-        s_qpcFake.store(fake);
+        s_qpcFake.store(li.QuadPart);
+        // [MOD END]
       }
-      
       s_multiplier.store(desiredMul);
     }
 
-    // 호출자가 게임 실행 파일 내부인지 확인 (RTSS, 스팀 오버레이 등과의 충돌 방지)
-    bool __forceinline IsCallerGame(void* caller) {
+    bool __forceinline IsCallerGame(void *caller) {
       static uintptr_t s_exeBase = 0;
       static uintptr_t s_exeEnd = 0;
       if (s_exeBase == 0) {
         HMODULE hExe = GetModuleHandle(NULL);
         if (hExe) {
           PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)hExe;
-          PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((uint8_t*)hExe + dosHeader->e_lfanew);
+          PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((uint8_t *)hExe + dosHeader->e_lfanew);
           s_exeBase = (uintptr_t)hExe;
           s_exeEnd = s_exeBase + ntHeaders->OptionalHeader.SizeOfImage;
         }
@@ -94,96 +79,84 @@ namespace DX11Base {
     }
   } // namespace
 
-  // -----------------------------------------
-  // Time API Hooks
-  // -----------------------------------------
-  DWORD WINAPI hktimeGetTime() {
-    void* caller = _ReturnAddress();
-    DWORD real = otimeGetTime();
-    float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack || mul == 1.0f || !IsCallerGame(caller)) 
-      return real;
-    return s_tgtFake.load(std::memory_order_relaxed) + (DWORD)((real - s_tgtReal.load(std::memory_order_relaxed)) * mul);
-  }
-
-  DWORD WINAPI hkGetTickCount() {
-    void* caller = _ReturnAddress();
-    DWORD real = oGetTickCount();
-    float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack || mul == 1.0f || !IsCallerGame(caller)) 
-      return real;
-    return s_gtcFake.load(std::memory_order_relaxed) + (DWORD)((real - s_gtcReal.load(std::memory_order_relaxed)) * mul);
-  }
-
-  ULONGLONG WINAPI hkGetTickCount64() {
-    void* caller = _ReturnAddress();
-    ULONGLONG real = oGetTickCount64();
-    float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack || mul == 1.0f || !IsCallerGame(caller)) 
-      return real;
-    return s_gtc64Fake.load(std::memory_order_relaxed) + (ULONGLONG)((real - s_gtc64Real.load(std::memory_order_relaxed)) * mul);
-  }
-
   BOOL WINAPI hkQueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
-    void* caller = _ReturnAddress();
+    void *caller = _ReturnAddress();
     BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
-    if (ret) {
-      float mul = s_multiplier.load(std::memory_order_relaxed);
-      if (bSpeedHack && mul != 1.0f && IsCallerGame(caller)) {
-        LONGLONG real = lpPerformanceCount->QuadPart;
-        LONGLONG delta = real - s_qpcReal.load(std::memory_order_relaxed);
-        lpPerformanceCount->QuadPart = s_qpcFake.load(std::memory_order_relaxed) + (LONGLONG)(delta * mul);
-      }
-    }
+
+    if (!ret)
+      return ret;
+
+    float mul = s_multiplier.load(std::memory_order_relaxed);
+    if (mul > MAX_MULTIPLIER)
+      mul = MAX_MULTIPLIER;
+
+    if (!bSpeedHack || mul == 1.0f || !IsCallerGame(caller))
+      return ret;
+
+    // [MOD BEGIN] 안정화된 QPC 처리 핵심
+    LONGLONG real = lpPerformanceCount->QuadPart;
+    LONGLONG prevReal = s_qpcReal.load(std::memory_order_relaxed);
+
+    LONGLONG delta = real - prevReal;
+
+    // 비정상 값 방지
+    if (delta < 0)
+      delta = 0;
+
+    // 큰 끊김 보호
+    if (delta > SAFE_DELTA_THRESHOLD)
+      mul = 1.0f;
+
+    delta = (LONGLONG)(delta * mul);
+
+    // delta 상한 제한
+    if (delta > MAX_DELTA_QPC)
+      delta = MAX_DELTA_QPC;
+
+    // 🔥 핵심: 누적 방식
+    LONGLONG fake = s_qpcFake.load(std::memory_order_relaxed) + delta;
+
+    // 상태 업데이트
+    s_qpcReal.store(real, std::memory_order_relaxed);
+    s_qpcFake.store(fake, std::memory_order_relaxed);
+
+    lpPerformanceCount->QuadPart = fake;
+    // [MOD END]
+
     return ret;
   }
 
-  // -----------------------------------------
-  // 설치 함수 (Engine.cpp 에서 호출)
-  // -----------------------------------------
   void SpeedHack_Sleep_Install() {
     if (s_installed)
       return;
 
-    HMODULE hWinmm = GetModuleHandle(L"winmm.dll");
-    if (!hWinmm) hWinmm = LoadLibrary(L"winmm.dll");
-    
-    // Create Hooks (QueryPerformanceCounter가 현대 게임 속도의 핵심)
-    MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", &hkQueryPerformanceCounter, (LPVOID *)&oQueryPerformanceCounter);
-    MH_CreateHookApi(L"kernel32.dll", "GetTickCount", &hkGetTickCount, (LPVOID *)&oGetTickCount);
-    MH_CreateHookApi(L"kernel32.dll", "GetTickCount64", &hkGetTickCount64, (LPVOID *)&oGetTickCount64);
-    if (hWinmm) {
-      MH_CreateHookApi(L"winmm.dll", "timeGetTime", &hktimeGetTime, (LPVOID *)&otimeGetTime);
-    }
-
+    MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", &hkQueryPerformanceCounter,
+                     (LPVOID *)&oQueryPerformanceCounter);
     MH_EnableHook(MH_ALL_HOOKS);
 
-    // 초기 기준값 캡처 (배율 1.0f인 상태로)
     ResetBases(1.0f, g_speedMultiplier);
 
     s_installed = true;
   }
 
-  void SpeedHack_Init() {
-    SpeedHack_Sleep_Install();
-  }
-  
+  void SpeedHack_Init() { SpeedHack_Sleep_Install(); }
+
   void SpeedHack_Update(uintptr_t p1) {
     if (!s_installed) {
       SpeedHack_Init();
     }
-    
-    // p1이 0x10000 이상일 때만 (즉 인게임 진입 후) 작동 허용, 그 외엔 기본 속도.
+
     float desired = (bSpeedHack && p1 > 0x10000) ? g_speedMultiplier : 1.0f;
+
+    // [MOD BEGIN] 배율 제한
+    if (desired > MAX_MULTIPLIER)
+      desired = MAX_MULTIPLIER;
+    // [MOD END]
+
     float current = s_multiplier.load();
-    
+
     if (current != desired) {
-      if (bSpeedHack && p1 <= 0x10000 && desired == 1.0f) {
-        AddLog(u8"[SpeedHack] 배속 적용 대기 중 (원인: 주인공 데이터(p1) 미확보)");
-      } else {
-        AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx (활성화: %s)", current, desired, bSpeedHack ? "ON" : "OFF");
-      }
-      // 속도가 바뀔 때 시공간의 끊김을 막기 위해 기준시간을 현재 시간으로 재설정
+      AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx", current, desired);
       ResetBases(current, desired);
     }
   }
