@@ -72,7 +72,8 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IntDir>$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(ProxyType)'==''">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(ProxyType)'!=''">$(Platform)\$(Configuration)\$(ProxyType)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -240,12 +241,16 @@
     <ClCompile Include="debug.cpp" />
     <ClCompile Include="Cheats\War\Defbuildingboost.cpp" />
     <ClCompile Include="dllmain.cpp">
-      <!-- ProxyType이 dxgi가 아닐 때 이 파일 포함 -->
-      <ExcludedFromBuild Condition="'$(ProxyType)'=='dxgi'">true</ExcludedFromBuild>
+      <!-- ProxyType이 dinput8일 때만 이 파일 포함 (기본값) -->
+      <ExcludedFromBuild Condition="'$(ProxyType)'!='' and '$(ProxyType)'!='dinput8'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="dllmain_dxgi.cpp">
       <!-- ProxyType=dxgi 일 때만 이 파일 포함 -->
       <ExcludedFromBuild Condition="'$(ProxyType)'!='dxgi'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="dllmain_hid.cpp">
+      <!-- ProxyType=hid 일 때만 이 파일 포함 -->
+      <ExcludedFromBuild Condition="'$(ProxyType)'!='hid'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Engine.cpp" />
     <ClCompile Include="Cheats\Social\Fastrelationship.cpp" />

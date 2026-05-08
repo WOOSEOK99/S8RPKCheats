@@ -1,7 +1,6 @@
-﻿# SAM8RPK Ingame Cheat Build Script (PowerShell)
+# SAM8RPK Ingame Cheat Build Script (PowerShell)
 param (
-    [Parameter(Mandatory = $true)]
-    [ValidateSet("dinput8", "dxgi", "all")]
+    [ValidateSet("dinput8", "dxgi", "hid", "all")]
     [string]$Type
 )
 
@@ -58,7 +57,7 @@ $env:PYTHONIOENCODING = "utf-8"
 # 2. 빌드 실행
 $targets = @()
 if ($Type -eq "all") {
-    $targets = @("dinput8", "dxgi")
+    $targets = @("dinput8", "dxgi", "hid")
 }
 else {
     $targets = @($Type)
