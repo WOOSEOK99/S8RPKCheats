@@ -44,6 +44,7 @@ namespace DX11Base {
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"간단 변경", &bWeatherSkillSimple)) {
           if (bWeatherSkillSimple) bWeatherSkillComplex = false;
+          SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
@@ -54,6 +55,7 @@ namespace DX11Base {
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"상시 15일", &bDateAlways15)) {
           if (bDateAlways15) bDateDynamic = false;
+          SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
@@ -64,6 +66,7 @@ namespace DX11Base {
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"공방만", &bTerrainAbilityAtkDef)) {
           if (bTerrainAbilityAtkDef) bTerrainAbilityAll = false;
+          SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
@@ -96,6 +99,7 @@ namespace DX11Base {
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"대폭 변경", &bWeatherSkillComplex)) {
           if (bWeatherSkillComplex) bWeatherSkillSimple = false;
+          SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
@@ -109,6 +113,7 @@ namespace DX11Base {
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"유동 조절", &bDateDynamic)) {
           if (bDateDynamic) bDateAlways15 = false;
+          SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
@@ -125,6 +130,7 @@ namespace DX11Base {
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"공방/무력/지력", &bTerrainAbilityAll)) {
           if (bTerrainAbilityAll) bTerrainAbilityAtkDef = false;
+          SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();

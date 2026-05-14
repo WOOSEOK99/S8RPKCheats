@@ -86,6 +86,7 @@ namespace DX11Base {
   static bool s_appCatapult = false;
   static bool s_appCelestial = false;
   static bool s_appSiege = false;
+  static bool s_appSiege2 = false;
   static bool s_appBattleUnit = false;
   static bool s_appRoadBlock = false;
   static bool s_appRoadBlock2 = false;
@@ -125,6 +126,13 @@ namespace DX11Base {
       {"bCatapult", u8"전쟁: 투석기 강화", &bCatapult, &s_appCatapult, SetCatapultCheat, true, true},
       {"bCelestial", u8"전쟁: 천계 강화", &bCelestial, &s_appCelestial, SetCelestialMod, true, true},
       {"bSiegeWarfare", u8"전쟁: 공성전(성주변 얕은여울 및 회복)", &bSiegeWarfare, &s_appSiege, SetSiegeWarfare, true, true},
+      {"bSiegeWarfare2", u8"전쟁: 공성전(성주변 2칸여울 및 회복)", &bSiegeWarfare2, &s_appSiege2, SetSiegeWarfare2, true, true},
+      {"bWeatherSkillSimple", u8"전쟁: 날씨 간단 변경", &bWeatherSkillSimple, nullptr, nullptr, false, true},
+      {"bWeatherSkillComplex", u8"전쟁: 날씨 대폭 변경", &bWeatherSkillComplex, nullptr, nullptr, false, true},
+      {"bDateAlways15", u8"전쟁: 전투 일자 15일 고정", &bDateAlways15, nullptr, nullptr, false, true},
+      {"bDateDynamic", u8"전쟁: 전투 일자 유동 조절", &bDateDynamic, nullptr, nullptr, false, true},
+      {"bTerrainAbilityAtkDef", u8"전쟁: 지형 능력 공방만", &bTerrainAbilityAtkDef, nullptr, nullptr, false, true},
+      {"bTerrainAbilityAll", u8"전쟁: 지형 능력 전체", &bTerrainAbilityAll, nullptr, nullptr, false, true},
       {"bAllAggressive", u8"전쟁: 모든 무장 성향 적극", &bAllAggressive, nullptr, nullptr, false, true},
       {"bBattleUnit", u8"전쟁: 유닛 정보 캡처", &bBattleUnit, &s_appBattleUnit, SetBattleUnitCapture, false, true},
       {"bBattleMapShuffle", u8"기타: 평정 시 전투맵 셔플", &bBattleMapShuffle, nullptr, nullptr, false, true},
@@ -578,7 +586,8 @@ namespace DX11Base {
       }
 
       for (auto &entry : g_Entries) {
-        if (line.find(entry.key) != std::string::npos) {
+        std::string quotedKey = "\"" + std::string(entry.key) + "\"";
+        if (line.find(quotedKey) != std::string::npos) {
           *entry.flag = (line.find("true") != std::string::npos);
           break;
         }
