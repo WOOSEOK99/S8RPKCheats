@@ -228,11 +228,13 @@
     <ClInclude Include="TextureLoader.h" />
     <ClInclude Include="Cheats\System\SkillCountManager.h" />
     <ClInclude Include="Cheats\War\SpecialAbility.h" />
+    <ClInclude Include="Cheats\War\BattleEnvironment.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BattleMonitor.cpp" />
     <ClCompile Include="Cheats\Civilian\BangmokCity.cpp" />
+    <ClCompile Include="Cheats\War\BattleEnvironment.cpp" />
     <ClCompile Include="Cheats\War\BattleMapShuffle.cpp" />
     <ClCompile Include="Cheats\War\Battleunitcapture.cpp" />
     <ClCompile Include="Cheats\Civilian\Bigcityconvert.cpp" />

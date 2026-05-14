@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.741"
+#define SAM8_CHEAT_VERSION "V0.750"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -49,6 +49,17 @@ namespace DX11Base {
   extern bool bSiegeWarfare;
   extern bool bAllAggressive;
   extern bool bBattleUnit;
+  extern bool bBattleMapShuffle;
+
+  // 전투 환경 / 조건 설정
+  extern bool bWeatherSkillSimple;
+  extern bool bWeatherSkillComplex;
+  extern bool bDateAlways15;
+  extern bool bDateDynamic;
+  extern bool bTerrainAbilityAtkDef;
+  extern bool bTerrainAbilityAll;
+  extern bool bSiegeWarfare2;
+  extern bool bShowBattleEnvWin;
 
   // 특수 능력 (SpecialAbility)
   extern bool bGunakdae;         // 군악대

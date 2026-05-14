@@ -652,21 +652,12 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"공성전", &bSiegeWarfare)) {
-        DX11Base::SetSiegeWarfare(bSiegeWarfare);
-        NotifyFeatureToggle(u8"공성전", bSiegeWarfare);
-        SaveConfig();
+      if (ImGui::Button(u8"전투 환경 및 조건 설정", ImVec2(180 * scale, 30 * scale))) {
+        bShowBattleEnvWin = !bShowBattleEnvWin;
       }
-
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"성 주변 1칸 여울로 변경");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"여울에 위치한 수비 부대는 매턴 총병력의 10% 회복됨. (단, 타세력 동맹군은 제외)");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"클릭하여 날씨, 일자, 지형, 여울(공성전) 등의 상세 설정을 엽니다.");
         ImGui::EndTooltip();
       }
 

@@ -13,6 +13,7 @@
 #include "Cheats/System/TengiCave.h"
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Defbuildingboost.h"
+#include "Cheats/War/SiegeWarfare.h"
 #include "Config.h"
 #include "Engine.h"
 #include "Menu.h"
@@ -26,6 +27,139 @@
 #include <functional>
 
 namespace DX11Base {
+
+  static void DrawBattleEnvWindow(float scale) {
+    if (!bShowBattleEnvWin)
+      return;
+
+    ImGui::SetNextWindowSize(ImVec2(750 * scale, 150 * scale), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(u8"전투 환경 및 조건 설정###BattleEnvWin", &bShowBattleEnvWin)) {
+      if (ImGui::BeginTable("BattleEnvTable", 4, ImGuiTableFlags_None)) {
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 날씨 전법 변경");
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 전투일자 변경");
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 지형 능력 변경");
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 성벽 여울 변경");
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"간단 변경", &bWeatherSkillSimple)) {
+          if (bWeatherSkillSimple) bWeatherSkillComplex = false;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"악천후시 열화, 화시, 화전을 사용할 수 없습니다. 우천시 격류를 지형 제약 없이 사용할 수 있습니다.");
+          ImGui::EndTooltip();
+        }
+        
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"상시 15일", &bDateAlways15)) {
+          if (bDateAlways15) bDateDynamic = false;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"15일차에 전투가 종료되고 수비측이 승리합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"공방만", &bTerrainAbilityAtkDef)) {
+          if (bTerrainAbilityAtkDef) bTerrainAbilityAll = false;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"-- 보병 : 삼림, 여울, 황무지, 암석에서 +10%.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"-- 만병은 삼림 +20%로 증가, 습지 +10% 추가 적용");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"-- 기병 : 가도, 다리, 초원에서 +10%. 삼림, 암석에서 -10%. 습지, 산에서 -20%.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"-- 유목기병은 평지 10% 추가 적용");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"-- 궁병 : 산지, 암석에서 +10%. 삼림, 습지에서 -10%.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"-- 연노병은 산지 +20%로 증가. 삼림 페널티 제거.");
+
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"성 주변 1칸 여울", &bSiegeWarfare)) {
+          if (bSiegeWarfare) bSiegeWarfare2 = false;
+          DX11Base::SetSiegeWarfare(bSiegeWarfare);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울에 위치한 수비 부대는 매턴 총병력의 10%가 회복됨. (단, 타세력 동맹군은 제외)");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"대폭 변경", &bWeatherSkillComplex)) {
+          if (bWeatherSkillComplex) bWeatherSkillSimple = false;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"간단 변경 모두 적용");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"강풍시 낙석을 지형 제약 없이 사용할 수 있습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"호우, 눈때 요격을 지형 제약 없이 사용할 수 있습니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"유동 조절", &bDateDynamic)) {
+          if (bDateDynamic) bDateAlways15 = false;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"총참전 부대수에 따라 전투기한이 달라집니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"20부대 미만: 15일 / 20~29부대: 20일 / 30부대 이상: 25일");
+          ImGui::EndTooltip();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"총 참전 부대 수에 따라 전투 종료일이 변경됩니다. 20부대 미만 : 15일 , 20~29부대 : 20일, 30부대 이상 : 25일");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"공방/무력/지력", &bTerrainAbilityAll)) {
+          if (bTerrainAbilityAll) bTerrainAbilityAtkDef = false;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"[공방만] 의 모든 효과 적용 + 무력/지력 추가");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지형에 따른 보정이 부대 전투력(공방)뿐 아니라");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"장수의 무력(데미지)과 지력(책략 성공률)에도 함께 적용됩니다.");
+          ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), u8"예: 황무지의 보병 +10% -> 전투력/무력/지력 모두 110%");
+          ImGui::EndTooltip();
+        }
+        
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(u8"성 주변 2칸 여울", &bSiegeWarfare2)) {
+          if (bSiegeWarfare2) {
+              bSiegeWarfare = false;
+              DX11Base::SetSiegeWarfare(false); // 1칸 모드 끄기
+              DX11Base::SetSiegeWarfare2(true);
+          } else {
+              DX11Base::SetSiegeWarfare2(false);
+          }
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울에 위치한 수비 부대는 매턴 총병력의 10%가 회복됨. (단, 타세력 동맹군은 제외)");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
+      }
+    }
+    ImGui::End();
+  }
 
   static void DrawMemoryNotepadWindow(float scale) {
     if (!bShowMemoryNotepadWin)
@@ -56,6 +190,9 @@ namespace DX11Base {
 
     if (g_Engine->bShowMenu)
       DrawMenu();
+
+    DrawBattleEnvWindow(scale);
+    DrawMemoryNotepadWindow(scale);
 
     // 상단 마퀴 알림 (치트메뉴와 독립적으로 항상 실행)
     DrawMarqueeNotifications(scale);

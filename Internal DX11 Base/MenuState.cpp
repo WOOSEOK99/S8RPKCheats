@@ -46,6 +46,16 @@ namespace DX11Base {
   bool bBattleUnit = false;
   bool bBattleMapShuffle = false;
 
+  // 전투 환경 / 조건 설정
+  bool bWeatherSkillSimple = false;
+  bool bWeatherSkillComplex = false;
+  bool bDateAlways15 = false;
+  bool bDateDynamic = false;
+  bool bTerrainAbilityAtkDef = false;
+  bool bTerrainAbilityAll = false;
+  bool bSiegeWarfare2 = false;
+  bool bShowBattleEnvWin = false;
+
   // 특수 능력 (SpecialAbility)
   bool bGunakdae        = false; // 군악대
   bool bMusangBomyeong  = false; // 무쌍 보명

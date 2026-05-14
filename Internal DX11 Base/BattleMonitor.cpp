@@ -1,6 +1,7 @@
 #include "BattleMonitor.h"
 #include "Cheats.h"
 #include "Cheats/War/BattleMapShuffle.h"
+#include "Cheats/War/BattleEnvironment.h"
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Catapult.h"
 #include "Cheats/War/Celestia.h"
@@ -211,8 +212,12 @@ namespace DX11Base {
           s_lastAppliedDay = currentDay;
       }
 
+      // [전투 환경 업데이트 - 날씨/일자/지형 등]
+      DX11Base::UpdateBattleEnvironment();
+
       // [공성전 업데이트] 매 프레임/하트비트마다 호출
       DX11Base::UpdateSiegeWarfare();
+      DX11Base::UpdateSiegeWarfare2();
 
       // [특수 기능 실시간 체크] 
       uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
