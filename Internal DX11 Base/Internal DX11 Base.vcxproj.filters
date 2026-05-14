@@ -230,6 +230,9 @@
     <ClInclude Include="Cheats\War\FactionLordBonus.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\System\SkillCountManager.h">
+      <Filter>Cheats\System</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\Officer\StatMonitor.h">
       <Filter>Cheats\Officer</Filter>
     </ClInclude>
@@ -432,6 +435,9 @@
     </ClCompile>
     <ClCompile Include="Cheats\Officer\StatMonitor.cpp">
       <Filter>Cheats\Officer</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\System\SkillCountManager.cpp">
+      <Filter>Cheats\System</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

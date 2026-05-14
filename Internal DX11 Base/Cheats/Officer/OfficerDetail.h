@@ -21,6 +21,7 @@ namespace DX11Base {
   void RenderBasicTab(uintptr_t pBase, float scale, bool isCaptured);
   void RenderResearchTab(uintptr_t pBase, float scale);
   void RenderExpTab(uintptr_t pBase, float scale);
+  void RenderSpecialAbilityTab(uintptr_t pBase, float scale);
   
   void DrawOfficerDetailWindow(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale);
 }    

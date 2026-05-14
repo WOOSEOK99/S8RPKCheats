@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "Cheats/System/SkillCountManager.h"
+
 namespace DX11Base {
 
     static uintptr_t s_gameBasePtrAddr = 0;
@@ -150,6 +152,9 @@ namespace DX11Base {
         uintptr_t foundAddr = FindPattern(exeBase, imgEnd, gameBasePat);
         if (foundAddr)
             s_gameBasePtrAddr = ResolveRelAddr(foundAddr, 3, 7);
+
+        // 저장된 전법 횟수 설정 불러오기 (S8RPK_skill_counts.json)
+        LoadSkillCounts();
 
         return (s_gameBasePtrAddr != 0);
     }

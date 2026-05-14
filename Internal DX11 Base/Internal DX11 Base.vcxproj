@@ -24,7 +24,8 @@
     <ProjectGuid>{d08e3ab2-8e59-43be-ab5b-2128f9ddb8eb}</ProjectGuid>
     <RootNamespace>InternalDX11Base</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>dinput8</ProjectName>
+    <ProjectName>hid</ProjectName>
+    <ProxyType>hid</ProxyType>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -72,8 +73,10 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ProxyType>hid</ProxyType>
     <IntDir Condition="'$(ProxyType)'==''">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <IntDir Condition="'$(ProxyType)'!=''">$(Platform)\$(Configuration)\$(ProxyType)\</IntDir>
+    <TargetName>hid</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -223,6 +226,8 @@
     <ClInclude Include="NotificationManager.h" />
     <ClInclude Include="TacticsEditWindow.h" />
     <ClInclude Include="TextureLoader.h" />
+    <ClInclude Include="Cheats\System\SkillCountManager.h" />
+    <ClInclude Include="Cheats\War\SpecialAbility.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
@@ -309,6 +314,8 @@
     <ClCompile Include="Cheats\Officer\StatMonitor.cpp" />
     <ClCompile Include="NotificationManager.cpp" />
     <ClCompile Include="TacticsEditWindow.cpp" />
+    <ClCompile Include="Cheats\System\SkillCountManager.cpp" />
+    <ClCompile Include="Cheats\War\SpecialAbility.cpp" />
     <ClCompile Include="TextureLoader.cpp" />
   </ItemGroup>
   <ItemGroup>

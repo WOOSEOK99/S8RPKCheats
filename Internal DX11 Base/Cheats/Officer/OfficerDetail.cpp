@@ -1,13 +1,18 @@
+#include "../../pch.h"
+#include <string>
+#include <vector>
+#include <mutex>
+#include <iomanip>
+#include <cstring>
 #include "OfficerDetail.h"
 #include "../../Cheats.h"
 #include "../../MenuState.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
 #include "../Civilian/CityData.h"
-#include "../../pch.h"
-#include <cstring>
 #include "../../Framework/imgui.h"
 #include "../../showlog.h"
+#include "../System/SkillCountManager.h"
 
 extern ImGuiWindowFlags Flags;
 
@@ -168,8 +173,15 @@ namespace DX11Base {
     if (pR > 0x10000)
       *val = (int)(*(unsigned char *)(pR + offset));
 
+    // 무장 ID 가져오기 (0x139 등의 오프셋은 무장별 전법 데이터)
+    int officerID = 0;
+    if (pR > 0x10000) {
+        officerID = (int)(*(unsigned short*)(pR + 0x08));
+    }
+
     ImGui::PushID(label);
 
+    // --- [ 왼쪽: 레벨 버튼 ] ---
     // 레벨에 따른 색상 정의 (0:기본, 1:파랑, 2:초록, 3:주황)
     bool hasCustomColor = false;
     if (*val == 1) {
@@ -195,24 +207,51 @@ namespace DX11Base {
     ImGui::TextUnformatted(label);
     ImGui::SameLine(0, 3);
 
-    char btnLabel[16];
-    snprintf(btnLabel, sizeof(btnLabel), "%d##btn", *val);
+    char btnLabelLvl[16];
+    snprintf(btnLabelLvl, sizeof(btnLabelLvl), "%d##lvl", *val);
 
-    // 버튼 크기를 체크박스 정도로 키움 (25x25)
-    if (ImGui::Button(btnLabel, ImVec2(25 * scale, 25 * scale))) {
+    if (ImGui::Button(btnLabelLvl, ImVec2(30 * scale, 25 * scale))) {
       *val = (*val + 1) % 4; // 0, 1, 2, 3 순환
       DX11Base::ModifyStat(p1, offset, *val, 1);
       SyncInlineReadBufFromWrite(p1);
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 순환 (0->1->2->3)");
+      ImGui::EndTooltip();
     }
 
     if (hasCustomColor) {
       ImGui::PopStyleColor(4);
     }
 
-    if (ImGui::IsItemHovered()) {
-      ImGui::BeginTooltip();
-      ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"클릭하여 레벨 순환 (0->1->2->3)");
-      ImGui::EndTooltip();
+    // --- [ 오른쪽: 횟수 버튼 ] ---
+    // 전법(Tactics)일 때만 횟수 버튼 표시 (특기는 횟수 개념이 없음)
+    // 전법 오프셋 범위: 0x139 ~ 0x15B
+    if (offset >= 0x139 && offset <= 0x15B) {
+        ImGui::SameLine(0, 4);
+        
+        int targetCount = GetTargetSkillCount(officerID, offset);
+        if (targetCount < 0) targetCount = 0;
+
+        char btnLabelCnt[32];
+        if (targetCount == 0) snprintf(btnLabelCnt, sizeof(btnLabelCnt), "-##cnt");
+        else snprintf(btnLabelCnt, sizeof(btnLabelCnt), "%d##cnt", targetCount);
+
+        // 아주 연한 회색 (배경과 조화되도록)
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.4f, 0.4f, 0.4f, 0.4f));
+        if (ImGui::Button(btnLabelCnt, ImVec2(30 * scale, 25 * scale))) {
+            targetCount = (targetCount + 1) % 10;
+            SetTargetSkillCount(officerID, offset, targetCount);
+        }
+        ImGui::PopStyleColor();
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"전법 사용 횟수 설정");
+            ImGui::Text(u8"설정된 값은 전투 시작 시 자동으로 적용됩니다.");
+            ImGui::EndTooltip();
+        }
     }
 
     ImGui::PopID();
@@ -221,14 +260,19 @@ namespace DX11Base {
   // --- [공용 헬퍼 함수 3: 전법/특기 행 그리기] ---
   void RenderResearchRow(uintptr_t pBase, const char *catLabel, const char *items[], uintptr_t offsets[], int *vars[],
                          int count, float scale, int expOffset) {
+    if (!items || !offsets || !vars) return;
+
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(catLabel);
+    if (catLabel && catLabel[0] != '\0') {
+        ImGui::Text(u8"%s", catLabel);
+    }
 
     for (int i = 0; i < count; i++) {
-      ImGui::TableSetColumnIndex(i + 1);
-      RenderCompactSkill(pBase, items[i], offsets[i], vars[i], scale);
+        if (!items[i] || !vars[i]) continue;
+        ImGui::TableSetColumnIndex(i + 1);
+        RenderCompactSkill(pBase, items[i], offsets[i], vars[i], scale);
     }
   }
 
@@ -283,9 +327,10 @@ namespace DX11Base {
   // --- [공용 탭 렌더링 함수군] ---
 
   void RenderBasicTab(uintptr_t pBase, float scale, bool isCaptured) {
-    if (ImGui::BeginTable("BasicStatTable", 2, ImGuiTableFlags_BordersInnerH)) {
-      ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
-      ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthFixed, 160.0f * scale);
+    static ImGuiTableFlags tflags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchSame;
+    if (ImGui::BeginTable("BasicStatTable", 2, tflags)) {
+      ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 100.0f * scale);
+      ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthStretch);
 
       if (isCaptured) {
         // [선택 무장 전용 오프셋]
@@ -384,24 +429,20 @@ namespace DX11Base {
   }
 
   void RenderResearchTab(uintptr_t pBase, float scale) {
-    static ImGuiTableFlags tflags =
-        ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
-    if (ImGui::BeginTable("ResearchTreeTable", 7, tflags)) {
+    // --- [ 1. 전법 (Tactics) 테이블 ] ---
+    static ImGuiTableFlags tflags_tac = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchSame;
+    if (ImGui::BeginTable("ResearchTacticsTable", 6, tflags_tac)) {
       ImGui::TableSetupColumn(u8"분류", ImGuiTableColumnFlags_WidthFixed, 60.0f * scale);
-      for (int i = 0; i < 6; i++)
+      for (int i = 0; i < 5; i++)
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch);
 
-      // --- [ 전법 (Tactics) ] ---
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
-      // 배경색을 살짝 깔고 전체 열을 차지하게 함 (잘림 방지)
       ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0f, 0.5f, 0.7f, 0.2f));
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.9f, 1.0f, 1.0f));
       ImGui::Selectable(u8" [ 전법 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
       ImGui::PopStyleColor(2);
-      ImGui::TableNextRow();
 
-      // 전법 상세
       {
         const char *s[] = {u8"강격", u8"난격", u8"교란", u8"맹돌", u8"창금"};
         uintptr_t o[] = {0x139, 0x13A, 0x13B, 0x13C, 0x13D};
@@ -444,6 +485,19 @@ namespace DX11Base {
         int *v[] = {&v_S_Mag1, &v_S_Mag2, &v_S_Mag3, &v_S_Mag4, &v_S_Mag5};
         RenderResearchRow(pBase, u8"둔갑", s, o, v, 5, scale);
       }
+      ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // --- [ 2. 특기 (Trait) 테이블 ] ---
+    static ImGuiTableFlags tflags_tra = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchSame;
+    if (ImGui::BeginTable("ResearchTraitTable", 7, tflags_tra)) {
+      ImGui::TableSetupColumn(u8"분류", ImGuiTableColumnFlags_WidthFixed, 60.0f * scale);
+      for (int i = 0; i < 6; i++)
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch);
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -451,9 +505,7 @@ namespace DX11Base {
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.2f, 1.0f));
       ImGui::Selectable(u8" [ 특기 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
       ImGui::PopStyleColor(2);
-      ImGui::TableNextRow();
 
-      // 특기 상세 (Sam8 Remake 기준 4대 분류)
       {
         const char *s[] = {u8"경작", u8"상재", u8"축성", u8"경비", u8"발명", u8"천성"};
         uintptr_t o[] = {0x1D0, 0x1D1, 0x1D2, 0x1D3, 0x1D4, 0x1D5};
@@ -483,9 +535,10 @@ namespace DX11Base {
   }
 
   void RenderExpTab(uintptr_t pBase, float scale) {
-    if (ImGui::BeginTable("ExpTable", 2, ImGuiTableFlags_BordersInnerH)) {
-      ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
-      ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthFixed, 160.0f * scale);
+    static ImGuiTableFlags tflags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchSame;
+    if (ImGui::BeginTable("ExpTable", 2, tflags)) {
+      ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 100.0f * scale);
+      ImGui::TableSetupColumn(u8"편집", ImGuiTableColumnFlags_WidthStretch);
 
       // --- [ 전법 ] ---
       ImGui::TableNextRow();
@@ -510,15 +563,14 @@ namespace DX11Base {
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.7f, 0.4f, 0.0f, 0.2f));
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.2f, 1.0f));
-      ImGui::Selectable(u8" [ 특기 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
-      ImGui::PopStyleColor(2);
+        ImGui::Selectable(u8" [ 특기 ]", true, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled);
+        ImGui::PopStyleColor(2);
 
-      RenderStatRow(pBase, u8"임무소양", 0xCB, 1, &v_Exp_Task, scale);
-      RenderStatRow(pBase, u8"지모소양", 0xCC, 1, &v_Exp_Intel, scale);
-      RenderStatRow(pBase, u8"병과소양", 0xCD, 1, &v_Exp_War, scale);
-      RenderStatRow(pBase, u8"군사소양", 0xCE, 1, &v_Exp_Mil, scale);
-      ImGui::EndTable();
+        RenderStatRow(pBase, u8"임무소양", 0xCB, 1, &v_Exp_Task, scale);
+        RenderStatRow(pBase, u8"지모소양", 0xCC, 1, &v_Exp_Intel, scale);
+        RenderStatRow(pBase, u8"병과소양", 0xCD, 1, &v_Exp_War, scale);
+        RenderStatRow(pBase, u8"군사소양", 0xCE, 1, &v_Exp_Mil, scale);
+        ImGui::EndTable();
     }
   }
 
@@ -575,7 +627,13 @@ namespace DX11Base {
     char titleBuf[128];
     sprintf_s(titleBuf, u8"주인공 무장 상세 편집%s###OffDetailWin", s_cachedTitleCity.c_str());
 
-    if (ImGui::Begin(titleBuf, &bShowOfficerDetail, Flags)) {
+    static ImGuiWindowFlags OffDetailFlags = 
+    ImGuiWindowFlags_AlwaysAutoResize |ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings;
+
+    // 기본 가로 크기 설정 (원하시는 대로 숫자를 키우시면 됩니다)
+    ImGui::SetNextWindowSize(ImVec2(800 * scale, 0), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin(titleBuf, &bShowOfficerDetail, OffDetailFlags)) {
       if (p1 == 0) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"캡처된 주인공 데이터가 없습니다.");
         ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");
@@ -614,6 +672,10 @@ namespace DX11Base {
           RenderResearchTab(p1, scale);
           ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem(u8"특수 기능")) {
+          RenderSpecialAbilityTab(p1, scale);
+          ImGui::EndTabItem();
+        }
         if (ImGui::BeginTabItem(u8"소양(EXP)")) {
           RenderExpTab(p1, scale);
           ImGui::EndTabItem();
@@ -622,6 +684,71 @@ namespace DX11Base {
       }
       ImGui::End();
     }
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  특수 기능 탭 렌더링
+  //  군악대 / 무쌍보명 / 불꽃기병 / 원격궁병 /
+  //  등갑군 / 총사령관 / 기습부대 / 대군사
+  // ══════════════════════════════════════════════════════
+  void RenderSpecialAbilityTab(uintptr_t pBase, float scale) {
+    if (!IsValidPtr(pBase, 0x10)) return;
+    int currentID = *(unsigned short*)(pBase + 0x08);
+
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.0f, 1.0f), u8"[ 특수 능력 설정 ]");
+    ImGui::SameLine();
+    ImGui::TextDisabled(u8"(선택 무장에게 특수 유닛 능력을 부여합니다)");
+    ImGui::TextDisabled(u8"해당 무장이 전투에 참여를 하면 아군/적군 모두에게 적용됩니다.");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    struct AbilityEntry {
+      const char* label;
+      const char* desc;
+      uintptr_t   vOffset;
+    };
+
+    AbilityEntry abilities[] = {
+      { u8"군악대",    u8"분기/고무 효율 증가 1,2레벨 효과 +5. 3레벨 광역기",    0x1000 },
+      { u8"무쌍 보병", u8"강격 관통 공격, 맹돌이 난격처럼 주변 동시 타격",       0x1001 },
+      { u8"불꽃 기병", u8"연격/기사 공격시 50, 70, 100% 확률로 점화",           0x1002 },
+      { u8"원격 궁병", u8"궁병 전법 최대 사거리 1증가. 시람은 최소 사거리도 증가",0x1003 },
+      { u8"등갑군",    u8"턴이 올때 해당 부대가 염상 상태면 즉시 병력 -1000, 전의 -10이 감소합니다. 이후 실제 게임상 염상 피해는 별도 적용됩니다.", 0x1004 },
+      { u8"총사령관",  u8"자신 턴에 모든 병종 통상 사거리 2칸이 됨 (무반격, 원호 효율 급등)",             0x1005 },
+      { u8"기습부대",  u8"교란, 급습, 요격 상태이상 확률 대폭 증가(전법 레벨에 따라 50, 70, 100%)",       0x1006 },
+      { u8"대군사",    u8"군사 보주와 동일한 광역 군략계 사용 (단, 동토 제외)",   0x1007 },
+    };
+
+    constexpr int COLS = 2;
+    if (ImGui::BeginTable("SpecialAbilityTable", COLS,
+        ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) {
+
+      for (int i = 0; i < (int)(sizeof(abilities) / sizeof(abilities[0])); i++) {
+        ImGui::TableNextColumn();
+
+        bool isEnabled = GetTargetSkillCount(currentID, abilities[i].vOffset) > 0;
+        char checkId[64];
+        snprintf(checkId, sizeof(checkId), "%s##sa_%d", abilities[i].label, i);
+
+        if (ImGui::Checkbox(checkId, &isEnabled)) {
+          // 체크 시 1, 해제 시 0 저장 (0일 경우 SkillCountManager에서 자동 삭제됨)
+          SetTargetSkillCount(currentID, abilities[i].vOffset, isEnabled ? 1 : 0);
+          AddLog(u8"[특수기능] 무장[%d] %s %s", currentID, abilities[i].label,
+                 isEnabled ? u8"활성화 (저장됨)" : u8"비활성화 (삭제됨)");
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(abilities[i].desc);
+          ImGui::EndTooltip();
+        }
+      }
+
+      ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"※ 설정값은 S8RPK_skill_counts.json 파일에 전법 횟수와 함께 저장/불러오기 됩니다.");
   }
 
 } // namespace DX11Base

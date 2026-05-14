@@ -175,9 +175,9 @@ namespace DX11Base {
     uintptr_t forceAddr = *(uintptr_t *)(pR + 0x18);
     unsigned char vtableByte = *(unsigned char *)(pR + 0x10);
 
-    if (ImGui::BeginTable("DetailInfoTable", 2, ImGuiTableFlags_BordersInnerH)) {
+    if (ImGui::BeginTable("DetailInfoTable", 2, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_SizingStretchSame)) {
       ImGui::TableSetupColumn(u8"항목", ImGuiTableColumnFlags_WidthFixed, 130.0f * scale);
-      ImGui::TableSetupColumn(u8"내용", ImGuiTableColumnFlags_WidthFixed, 500.0f * scale);
+      ImGui::TableSetupColumn(u8"내용", ImGuiTableColumnFlags_WidthStretch);
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -1035,6 +1035,13 @@ namespace DX11Base {
         RenderResearchTab(pBase, scale);
         ImGui::EndTabItem();
       }
+      if (ImGui::BeginTabItem(u8"특수 기능")) {
+        if (currentTabIdx != 3) {
+          currentTabIdx = 3;
+        }
+        RenderSpecialAbilityTab(pBase, scale);
+        ImGui::EndTabItem();
+      }
       if (isHeroOfficer) {
         if (ImGui::BeginTabItem(u8"소양(EXP)")) {
           if (currentTabIdx != 2) {
@@ -1127,8 +1134,8 @@ namespace DX11Base {
       ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     }
 
-    // 최소 세로 길이를 700으로 상향하여 상세 정보가 스크롤 없이 시원하게 보이게 합니다.
-    ImGui::SetNextWindowSizeConstraints(ImVec2(820 * scale, 700 * scale), ImVec2(1400 * scale, 1000 * scale));
+    // 최소 세로 가로 크기 제한을 넉넉하게 하여 상세 정보가 잘리지 않게 합니다.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(1000 * scale, 700 * scale), ImVec2(1920 * scale, 1200 * scale));
 
     // 리스트 창의 크기를 수동으로 조절 가능하게 하고, AlwaysAutoResize를 제거하여 레이아웃 부하를 없앱니다.
     if (ImGui::Begin(u8"모든 무장 편집 리스트###OfficerListWin", &bShowOfficerListWin, ImGuiWindowFlags_None)) {
@@ -1661,7 +1668,7 @@ namespace DX11Base {
 
       ImGui::SameLine();
 
-      ImGui::BeginChild("OfficerDetailPane", ImVec2(520 * scale, 0), true);
+      ImGui::BeginChild("OfficerDetailPane", ImVec2(0, 0), true);
 
       if (isSearchBoxActive) {
         ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), u8"검색 입력 중...");

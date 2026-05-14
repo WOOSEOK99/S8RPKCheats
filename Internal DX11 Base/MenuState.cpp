@@ -46,6 +46,16 @@ namespace DX11Base {
   bool bBattleUnit = false;
   bool bBattleMapShuffle = false;
 
+  // 특수 능력 (SpecialAbility)
+  bool bGunakdae        = false; // 군악대
+  bool bMusangBomyeong  = false; // 무쌍 보명
+  bool bFlameKnight     = false; // 불꽃기병
+  bool bRangedArcher    = false; // 원격 궁병
+  bool bRattanArmor     = false; // 등갑군
+  bool bGeneralissimo   = false; // 총사령관
+  bool bAmbushUnit      = false; // 기습부대
+  bool bGrandStrategist = false; // 대군사
+
   // 4. 기타 UI 상태 초기화 (DX11Base 네임스페이스)
   std::string currentLabelValue = ""; // (사용되지 않을 수도 있음)
   std::string currentLabel = "";

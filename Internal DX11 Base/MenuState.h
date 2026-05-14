@@ -50,6 +50,16 @@ namespace DX11Base {
   extern bool bAllAggressive;
   extern bool bBattleUnit;
 
+  // 특수 능력 (SpecialAbility)
+  extern bool bGunakdae;         // 군악대
+  extern bool bMusangBomyeong;   // 무쌍 보명
+  extern bool bFlameKnight;      // 불꽃기병
+  extern bool bRangedArcher;     // 원격 궁병
+  extern bool bRattanArmor;      // 등갑군
+  extern bool bGeneralissimo;    // 총사령관
+  extern bool bAmbushUnit;       // 기습부대
+  extern bool bGrandStrategist;  // 대군사
+
   // 4. 기타 UI 상태
   extern std::string currentLabel;
   extern int *pSelectedVar;
