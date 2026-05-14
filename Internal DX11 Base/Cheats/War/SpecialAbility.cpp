@@ -113,31 +113,30 @@ namespace DX11Base {
       bool hasSneakAttack = false;
       bool hasTactician = false;
 
-      // 1. 전장에 켜진 무장이 한 명이라도 있는지 스캔
-      if (unitCountTotal > 0 && unitListBase > 0) {
-          for (int i = 0; i < unitCountTotal; i++) {
-              uintptr_t unitData = *(uintptr_t*)(unitListBase + 0x08 + i * 0x10);
-              if (!IsValidPtr(unitData, 0x600)) continue;
-
-              uintptr_t memberPtr = *(uintptr_t*)(unitData + 0x18);
-              if (!IsValidPtr(memberPtr, 0x100)) continue;
-
-              for (uintptr_t moff : { (uintptr_t)0x08, (uintptr_t)0x10, (uintptr_t)0x18 }) {
-                  uintptr_t offPtr = *(uintptr_t*)(memberPtr + moff);
-                  if (IsValidPtr(offPtr, 0x10)) {
-                      int officerID = (int)(*(unsigned short*)(offPtr + 0x08));
-                      if (officerID > 0) {
-                          if (GetTargetSkillCount(officerID, 0x1000) > 0) hasGunakdae = true;
-                          if (GetTargetSkillCount(officerID, 0x1001) > 0) hasMussang = true;
-                          if (GetTargetSkillCount(officerID, 0x1002) > 0) hasFireCavalry = true;
-                          if (GetTargetSkillCount(officerID, 0x1003) > 0) hasArcher = true;
-                          if (GetTargetSkillCount(officerID, 0x1005) > 0) hasCommander = true;
-                          if (GetTargetSkillCount(officerID, 0x1006) > 0) hasSneakAttack = true;
-                          if (GetTargetSkillCount(officerID, 0x1007) > 0) hasTactician = true;
+      // 1. 현재 선택/행동 중인 부대(Active Unit) 스캔
+      // 루아 스크립트 작성 의도: 포인팅된 유닛에 대상 무장이 있을 때만 글로벌 모디파이어를 켜고, 다른 부대면 끈다.
+      uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+      if (exeBase) {
+          uintptr_t activeUnitPtr = SAResolveChain(exeBase + 0x03510578, { 0x100, 0x78, 0, 0x50, 0x108, 0x50, 0x8, 0 });
+          if (activeUnitPtr) {
+              uintptr_t memberPtr = *(uintptr_t*)(activeUnitPtr + 0x18);
+              if (IsValidPtr(memberPtr, 0x100)) {
+                  for (uintptr_t moff : { (uintptr_t)0x08, (uintptr_t)0x10, (uintptr_t)0x18 }) {
+                      uintptr_t offPtr = *(uintptr_t*)(memberPtr + moff);
+                      if (IsValidPtr(offPtr, 0x10)) {
+                          int officerID = (int)(*(unsigned short*)(offPtr + 0x08));
+                          if (officerID > 0) {
+                              if (GetTargetSkillCount(officerID, 0x1000) > 0) hasGunakdae = true;
+                              if (GetTargetSkillCount(officerID, 0x1001) > 0) hasMussang = true;
+                              if (GetTargetSkillCount(officerID, 0x1002) > 0) hasFireCavalry = true;
+                              if (GetTargetSkillCount(officerID, 0x1003) > 0) hasArcher = true;
+                              if (GetTargetSkillCount(officerID, 0x1005) > 0) hasCommander = true;
+                              if (GetTargetSkillCount(officerID, 0x1006) > 0) hasSneakAttack = true;
+                              if (GetTargetSkillCount(officerID, 0x1007) > 0) hasTactician = true;
+                          }
                       }
                   }
               }
-              if (hasGunakdae && hasMussang && hasFireCavalry && hasArcher && hasCommander && hasSneakAttack && hasTactician) break; // 모두 찾았으면 조기 종료
           }
       }
 
@@ -195,7 +194,6 @@ namespace DX11Base {
       };
 
       // 2. 버프 메모리 주입 (기존 0x02ED7A10 체인 그룹)
-      uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
       if (exeBase) {
           uintptr_t p = SAResolveChain(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
           if (p) {
@@ -352,11 +350,76 @@ namespace DX11Base {
               }
           }
       }
-      
+
+      // 4. 무신 (부대 전용 - 해당 장수 소속 부대의 전법 병종 제약 해제)
+      // 실시간 지속 감시: 게임이 포진 종료 후 전투 시작 시(Day 1 전환점) 구조체를 엎어치기하는 것을 방지
+      if (unitCountTotal > 0 && unitListBase > 0) {
+          const uintptr_t SKILL_PTR_OFF   = 0x5D8;
+          const uintptr_t SKILL_REC_SIZE  = 0x28;
+          const uintptr_t SKILL_LIMIT_OFF = 0x14; // 병종 제한 필드
+          const uintptr_t INDEX_OFF       = 0x0C;
+          const int       MAX_SKILLS      = 45;
+
+          int totalChanged = 0;
+          for (int i = 0; i < unitCountTotal; i++) {
+              uintptr_t unitData = *(uintptr_t*)(unitListBase + 0x08 + i * 0x10);
+              if (!IsValidPtr(unitData, 0x600)) continue;
+
+              uintptr_t memberPtr = *(uintptr_t*)(unitData + 0x18);
+              if (!IsValidPtr(memberPtr, 0x100)) continue;
+
+              // 무신(0x1008) 체크
+              bool hasMusin = false;
+              int leaderID = 0; // 로깅을 위한 부대장 ID
+              for (uintptr_t moff : { (uintptr_t)0x08, (uintptr_t)0x10, (uintptr_t)0x18 }) {
+                  uintptr_t offPtr = *(uintptr_t*)(memberPtr + moff);
+                  if (IsValidPtr(offPtr, 0x10)) {
+                      int subID = (int)(*(unsigned short*)(offPtr + 0x08));
+                      if (moff == 0x08) leaderID = subID;
+                      if (subID > 0 && GetTargetSkillCount(subID, 0x1008) > 0) {
+                          hasMusin = true;
+                      }
+                  }
+              }
+
+              if (!hasMusin) continue;
+
+              // 전법 레코드 순회 → 제약이 걸려있으면(미해제) 실시간 해제
+              uintptr_t skillStart = *(uintptr_t*)(unitData + SKILL_PTR_OFF);
+              if (!IsValidPtr(skillStart, SKILL_REC_SIZE)) continue;
+
+              int skillCount = 0;
+              for (int j = 0; j < MAX_SKILLS; j++) {
+                  uintptr_t skillRec = skillStart + j * SKILL_REC_SIZE;
+                  uint32_t recIdx = *(uint32_t*)(skillRec + INDEX_OFF);
+                  if ((int)recIdx != j) break;
+                  uint8_t firstByte = *(uint8_t*)(skillRec);
+                  if (firstByte != 0x58 && firstByte != 0xD8) break;
+
+                  uint8_t currentLimit = *(uint8_t*)(skillRec + SKILL_LIMIT_OFF);
+                  if (currentLimit != 0) {
+                      DWORD old;
+                      if (VirtualProtect((LPVOID)(skillRec + SKILL_LIMIT_OFF), 1, PAGE_EXECUTE_READWRITE, &old)) {
+                          *(uint8_t*)(skillRec + SKILL_LIMIT_OFF) = 0;
+                          VirtualProtect((LPVOID)(skillRec + SKILL_LIMIT_OFF), 1, old, &old);
+                          skillCount++;
+                      }
+                  }
+              }
+
+              if (skillCount > 0) {
+                  AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 지속 해제적용", leaderID, skillCount);
+              }
+          }
+      }
+
       s_lastGunakdaeState = hasGunakdae;
       s_lastMussangState = hasMussang;
       s_lastFireCavalryState = hasFireCavalry;
       s_lastArcherState = hasArcher;
+      s_lastCommanderState = hasCommander;
+      s_lastSneakAttackState = hasSneakAttack;
+      s_lastTacticianState = hasTactician;
   }
 
 } // namespace DX11Base

@@ -699,7 +699,7 @@ namespace DX11Base {
     ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.0f, 1.0f), u8"[ 특수 능력 설정 ]");
     ImGui::SameLine();
     ImGui::TextDisabled(u8"(선택 무장에게 특수 유닛 능력을 부여합니다)");
-    ImGui::TextDisabled(u8"해당 무장이 전투에 참여를 하면 아군/적군 모두에게 적용됩니다.");
+    ImGui::TextDisabled(u8"해당 무장이 전투에 참여를 하면 해당 부대에 적용이 됩니다.");
     ImGui::Separator();
     ImGui::Spacing();
 
@@ -745,6 +745,20 @@ namespace DX11Base {
       }
 
       ImGui::EndTable();
+    }
+
+    {
+      bool isMusinEnabled = (GetTargetSkillCount(currentID, 0x1008) > 0);
+      if (ImGui::Checkbox(u8"만능의 군세! 무신(병종 제약 무시)##musin", &isMusinEnabled)) {
+        SetTargetSkillCount(currentID, 0x1008, isMusinEnabled ? 1 : 0);
+        AddLog(u8"[특수기능] 무장[%d] 무신(병종제약무시) %s", currentID,
+               isMusinEnabled ? u8"활성화 (저장됨)" : u8"비활성화 (삭제됨)");
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"해당 장수가 포함된 부대는 병종과 관계없이 모든 전법을 구사합니다");
+        ImGui::EndTooltip();
+      }
     }
 
     ImGui::Spacing();
