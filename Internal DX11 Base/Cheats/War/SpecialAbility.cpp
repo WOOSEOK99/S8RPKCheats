@@ -104,7 +104,7 @@ namespace DX11Base {
   // 전장에 배치된 무장들을 스캔하여 특수 능력을 활성화/비활성화합니다.
   struct STarget { uintptr_t off; uint8_t normal; uint8_t active; };
 
-  void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase) {
+  void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase) {
       bool hasGunakdae = false;
       bool hasMussang = false;
       bool hasFireCavalry = false;
@@ -114,8 +114,6 @@ namespace DX11Base {
       bool hasTactician = false;
 
       // 1. 현재 선택/행동 중인 부대(Active Unit) 스캔
-      // 루아 스크립트 작성 의도: 포인팅된 유닛에 대상 무장이 있을 때만 글로벌 모디파이어를 켜고, 다른 부대면 끈다.
-      uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
       if (exeBase) {
           uintptr_t activeUnitPtr = SAResolveChain(exeBase + 0x03510578, { 0x100, 0x78, 0, 0x50, 0x108, 0x50, 0x8, 0 });
           if (activeUnitPtr) {
@@ -172,10 +170,15 @@ namespace DX11Base {
 
           for (int i=0; i<count; ++i) {
               auto& t = targets[i];
-              DWORD old;
               uintptr_t targetAddr = baseAddr + t.off;
+              uint8_t targetVal = isActive ? t.active : t.normal;
+
+              // 성능 최적화: 현재 값이 이미 목표값과 같으면 VirtualProtect 및 쓰기 건너뜀
+              if (*(uint8_t*)targetAddr == targetVal) continue;
+
+              DWORD old;
               if (VirtualProtect((LPVOID)targetAddr, 1, PAGE_EXECUTE_READWRITE, &old)) {
-                  *(uint8_t*)targetAddr = isActive ? t.active : t.normal;
+                  *(uint8_t*)targetAddr = targetVal;
                   VirtualProtect((LPVOID)targetAddr, 1, old, &old);
               } else {
                   allSuccess = false;
@@ -396,12 +399,12 @@ namespace DX11Base {
                   uint8_t firstByte = *(uint8_t*)(skillRec);
                   if (firstByte != 0x58 && firstByte != 0xD8) break;
 
-                  uint8_t currentLimit = *(uint8_t*)(skillRec + SKILL_LIMIT_OFF);
-                  if (currentLimit != 0) {
+                  uintptr_t limitAddr = skillRec + SKILL_LIMIT_OFF;
+                  if (*(uint8_t*)limitAddr != 0) {
                       DWORD old;
-                      if (VirtualProtect((LPVOID)(skillRec + SKILL_LIMIT_OFF), 1, PAGE_EXECUTE_READWRITE, &old)) {
-                          *(uint8_t*)(skillRec + SKILL_LIMIT_OFF) = 0;
-                          VirtualProtect((LPVOID)(skillRec + SKILL_LIMIT_OFF), 1, old, &old);
+                      if (VirtualProtect((LPVOID)limitAddr, 1, PAGE_EXECUTE_READWRITE, &old)) {
+                          *(uint8_t*)limitAddr = 0;
+                          VirtualProtect((LPVOID)limitAddr, 1, old, &old);
                           skillCount++;
                       }
                   }

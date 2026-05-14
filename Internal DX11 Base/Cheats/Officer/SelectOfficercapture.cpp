@@ -146,7 +146,8 @@ namespace DX11Base {
   }
 
   void DrawOfficerHeader(uintptr_t pGame, float scale, uintptr_t pViewSnap) {
-    LoadOfficerNames(); // [수정] 메타데이터 보장
+    RefreshStableOfficerArrayBase(pGame); // [추가] 마스터 배열 베이스 주소 확보 보장
+    LoadOfficerNames(); 
     LoadEffectDefinitions();
 
     const uintptr_t pR = (pViewSnap > 0x10000) ? pViewSnap : pGame;
@@ -270,22 +271,30 @@ namespace DX11Base {
       }
 
       {
-        ImGui::SameLine();
-
-        // ImGui::TableNextRow();
-        // ImGui::TableSetColumnIndex(0);
-        // ImGui::AlignTextToFramePadding();
-        // ImGui::TextUnformatted(u8"성별");
-        // ImGui::TableSetColumnIndex(1);
-        // ImGui::AlignTextToFramePadding();
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(u8"성별");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::AlignTextToFramePadding();
 
         v_Gender = *(unsigned char *)(pR + 0x30);
-        if (v_Gender == 1) {
-          ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), u8"여성");
-        } else if (v_Gender == 0) {
-          ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"남성");
-        } else {
-          ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), u8"알 수 없음 (%d)", v_Gender);
+        const char* genderItems[] = { u8"남성", u8"여성" };
+        int currentGender = (v_Gender == 1) ? 1 : 0; // 1이면 여성, 그외(0 등)는 남성으로 처리
+        
+        ImGui::SetNextItemWidth(80.0f * scale);
+        if (ImGui::Combo(u8"##GenderCombo", &currentGender, genderItems, IM_ARRAYSIZE(genderItems))) {
+            uint8_t newGender = (uint8_t)currentGender;
+            DX11Base::ModifyStat(pGame, 0x30, newGender, 1);
+            
+            // 전역 마스터 데이터도 함께 패치 (다른 UI와 동기화 보장)
+            unsigned short offID = *(unsigned short*)(pR + 0x08);
+            PatchMasterData(offID, [&](uintptr_t base) {
+                DX11Base::ModifyStat(base, 0x30, newGender, 1);
+            });
+
+            syncHdrSnap(); // UI 스냅샷 즉시 동기화
+            AddLog(u8"[신상] 무장[%d] 성별 변경: %s", (int)offID, genderItems[newGender]);
         }
       }
 
@@ -709,6 +718,47 @@ namespace DX11Base {
       RenderStatRow(pGame, u8"얼굴 번호", 0x2E, 2, &v_OfficerID, scale);
       RenderStatRow(pGame, u8"모델 번호", 0xA5, 1, &v_ModelNo, scale);
       RenderStatRow(pGame, u8"모델 색상", 0xA6, 1, &v_ModelColor, scale);
+      
+      // --- [추가] 목소리 (Voice) 설정 (Offset: 0x6C) ---
+      {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::AlignTextToFramePadding();
+          ImGui::TextUnformatted(u8"목소리");
+          ImGui::TableSetColumnIndex(1);
+          ImGui::AlignTextToFramePadding();
+
+          static const char* voiceNames[] = {
+              u8"없음", // 0 (기본값)
+              u8"난폭남", u8"탐욕남", u8"호걸남", u8"정열남", u8"노장남", u8"용장남", u8"과묵남", u8"성숙남", u8"청년", u8"중년",
+              u8"소심남", u8"정중남", u8"우유부단남", u8"책사남", u8"거만남", u8"교활남", // 1~16
+              u8"호방녀", u8"용감녀", u8"보통녀", u8"현명녀", u8"요염녀", u8"거만녀"
+          };
+
+          // --- [수정] 목소리 주소: 0x68 과 0x70 두 군데를 동시에 변경해야 함 (1바이트) ---
+          uint8_t voiceIdx = *(uint8_t*)(pR + 0x68); 
+          int currentVoice = (int)voiceIdx;
+          if (currentVoice < 0 || currentVoice >= IM_ARRAYSIZE(voiceNames)) currentVoice = 0;
+
+          ImGui::SetNextItemWidth(150.0f * scale);
+          if (ImGui::Combo(u8"##VoiceCombo", &currentVoice, voiceNames, IM_ARRAYSIZE(voiceNames))) {
+              uint8_t newVoice = (uint8_t)currentVoice;
+              
+              // 1. 0x68 패치
+              DX11Base::ModifyStat(pGame, 0x68, newVoice, 1);
+              // 2. 0x70 패치
+              DX11Base::ModifyStat(pGame, 0x70, newVoice, 1);
+              
+              PatchMasterData(*(unsigned short*)(pR + 0x08), [&](uintptr_t base) {
+                  DX11Base::ModifyStat(base, 0x68, newVoice, 1);
+                  DX11Base::ModifyStat(base, 0x70, newVoice, 1);
+              });
+
+              syncHdrSnap();
+              AddLog(u8"[외형] 무장[%d] 목소리 변경(0x68, 0x70): %s", (int)(*(unsigned short*)(pR + 0x08)), voiceNames[newVoice]);
+          }
+      }
+
       RenderStatRow(pGame, u8"등장년도", 0x32, 2, &v_Appear, scale);
       RenderStatRow(pGame, u8"생년", 0x34, 2, &v_Birth, scale);
       RenderStatRow(pGame, u8"몰년(수명)", 0x36, 2, &v_Death, scale);

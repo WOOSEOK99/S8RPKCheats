@@ -156,7 +156,23 @@ namespace DX11Base {
       s_lastSeenTime = currentTime;
 
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-      uintptr_t dayAddr = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0x28 });
+      
+      // 1. 공통 포인터 중앙 집중 해결 (성능 최적화: 시스템 호출 최소화)
+      uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
+      uintptr_t dayBaseAddr  = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0 });
+      uintptr_t dayAddr      = dayBaseAddr ? (dayBaseAddr + 0x28) : 0;
+      
+      int unitCountTotal = 0;
+      if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
+          unitCountTotal = *(unsigned char*)(unitListBase - 0x08);
+      }
+
+      uint8_t defenderForce = 0;
+      uintptr_t defenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
+      if (defenderAddr && IsValidPtr(defenderAddr, 1)) {
+          defenderForce = *(uint8_t*)defenderAddr;
+      }
+
       int currentDay = -1;
       if (dayAddr && IsValidPtr(dayAddr, 1)) {
           currentDay = (int)(*(unsigned char*)dayAddr);
@@ -213,19 +229,14 @@ namespace DX11Base {
       }
 
       // [전투 환경 업데이트 - 날씨/일자/지형 등]
-      DX11Base::UpdateBattleEnvironment();
+      DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
 
       // [공성전 업데이트] 매 프레임/하트비트마다 호출
-      DX11Base::UpdateSiegeWarfare();
-      DX11Base::UpdateSiegeWarfare2();
+      DX11Base::UpdateSiegeWarfare(dayAddr, unitCountTotal, defenderForce, unitListBase);
+      DX11Base::UpdateSiegeWarfare2(dayAddr, unitCountTotal, defenderForce, unitListBase);
 
       // [특수 기능 실시간 체크] 
-      uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
-      int unitCountTotal = 0;
-      if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
-          unitCountTotal = *(unsigned char*)(unitListBase - 0x08);
-      }
-      UpdateSpecialAbilities(unitCountTotal, unitListBase);
+      UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
 
       // [핵심: 하트비트] 읽은 주소를 즉시 비웁니다.
       DX11Base::g_battleUnitAddr1 = 0;
@@ -240,7 +251,7 @@ namespace DX11Base {
         s_lastAppliedDay = -1;
         
         // 전투가 끝나면 특수능력 룰을 원래 데이터(normal)로 안전하게 복구합니다.
-        UpdateSpecialAbilities(0, 0);
+        UpdateSpecialAbilities(0, 0, (uintptr_t)GetModuleHandle(NULL));
       }
     }
   }

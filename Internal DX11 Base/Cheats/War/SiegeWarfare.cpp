@@ -163,17 +163,15 @@ namespace DX11Base {
     }
   }
 
-  void UpdateSiegeWarfare() {
+  void UpdateSiegeWarfare(uintptr_t dayAddr, int unitCount, uint8_t defenderForce, uintptr_t unitListBase) {
     if (!bSiegeWarfare)
       return;
 
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
 
-    // dayExpr = '[[[[[[[["SAN8RPK.exe"+02E99460]+28]+250]+218]+0]+3D8]+478]+0]+28'
-    uintptr_t dayAddr = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0x28});
     if (!dayAddr || !IsValidPtr(dayAddr, 1)) {
       if (g_siegePrevDay != -2) {
-        AddLog(u8"[공성전] 날짜 주소를 찾을 수 없습니다. (전투 중이 아닐 수 있음)");
+        AddLog(u8"[공성전] 날짜 주소가 유효하지 않습니다.");
         g_siegePrevDay = -2;
       }
       g_siegeMoveCostApplied = false;
@@ -214,43 +212,16 @@ namespace DX11Base {
       return;
     g_siegePrevDay = dayVal;
 
-    // Healing logic
-    // countExpr = '[[[[[["SAN8RPK.exe"+02E99460]+28]+250]+1D8]+0]+180]-8'
-    uintptr_t countAddr = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
-    if (!countAddr) {
-      AddLog(u8"[DEBUG] countAddr 해석 실패");
-      return;
-    }
-    countAddr -= 8;
-    if (!IsValidPtr(countAddr, 1))
-      return;
-    uint8_t unitCount = *(uint8_t *)countAddr;
     int healedCount = 0;
-
-    // defenderExpr = '[[[[[[[["SAN8RPK.exe"+03510578]+100]+80]+0]+8]+C8]+8]+18]+8'
-    uintptr_t defenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
-    if (!defenderAddr || !IsValidPtr(defenderAddr, 1)) {
-      AddLog(u8"[DEBUG] defenderAddr 해석 실패");
-      return;
-    }
-    uint8_t defenderForce = *(uint8_t *)defenderAddr;
-
-    // unitListBase offsets: {0, 0x28, 0x250, 0x1D8, 0, 0x180}
-    uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
 
     // [DEBUG] 루프 진입 전 핵심 수치 로그 (날짜 업데이트 전으로 이동)
     static int s_lastDebugDay = -1;
     if (dayVal != s_lastDebugDay) {
       AddLog(u8"[DEBUG] %d일차 회복 루틴 진입: 부대수=%d, 수비군ID=%d", (int)dayVal, (int)unitCount, (int)defenderForce);
-      AddLog(u8"[DEBUG] 주소 확인: countAddr=%p, defenderAddr=%p, unitListBase=%p", (void *)countAddr,
-             (void *)defenderAddr, (void *)unitListBase);
       s_lastDebugDay = dayVal;
     }
 
-    if (!unitListBase) {
-      AddLog(u8"[DEBUG] unitListBase 해석 실패");
-      return;
-    }
+    if (!unitListBase) return;
 
     for (int i = 0; i < unitCount; ++i) {
       uintptr_t varOffset = 0x8 + (i * 0x10);
@@ -297,7 +268,9 @@ namespace DX11Base {
           if (newCur > (int)maxVal)
             newCur = (int)maxVal;
 
-          *(uint16_t *)curAddr = (uint16_t)newCur;
+          if (*(uint16_t *)curAddr != (uint16_t)newCur) {
+            *(uint16_t *)curAddr = (uint16_t)newCur;
+          }
           healedCount++;
         }
       }
@@ -414,11 +387,9 @@ namespace DX11Base {
     }
   }
 
-  void UpdateSiegeWarfare2() {
+  void UpdateSiegeWarfare2(uintptr_t dayAddr, int unitCount, uint8_t defenderForce, uintptr_t unitListBase) {
     if (!bSiegeWarfare2) return;
 
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    uintptr_t dayAddr = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0x28});
     if (!dayAddr || !IsValidPtr(dayAddr, 1)) {
       g_siege2MoveCostApplied = false;
       g_siege2ShallowApplied  = false;
@@ -451,18 +422,6 @@ namespace DX11Base {
     if (dayVal == g_siege2PrevDay) return;
     g_siege2PrevDay = dayVal;
 
-    // 1칸 버전과 동일한 회복 로직
-    uintptr_t countAddr = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
-    if (!countAddr) return;
-    countAddr -= 8;
-    if (!IsValidPtr(countAddr, 1)) return;
-    uint8_t unitCount = *(uint8_t*)countAddr;
-
-    uintptr_t defenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
-    if (!defenderAddr || !IsValidPtr(defenderAddr, 1)) return;
-    uint8_t defenderForce = *(uint8_t*)defenderAddr;
-
-    uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
     if (!unitListBase) return;
 
     int healedCount = 0;
@@ -488,7 +447,9 @@ namespace DX11Base {
           if (heal < 1) heal = 1;
           int newCur = (int)curVal + heal;
           if (newCur > (int)maxVal) newCur = (int)maxVal;
-          *(uint16_t*)curAddr = (uint16_t)newCur;
+          if (*(uint16_t*)curAddr != (uint16_t)newCur) {
+            *(uint16_t*)curAddr = (uint16_t)newCur;
+          }
           ++healedCount;
         }
       }

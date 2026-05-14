@@ -84,12 +84,9 @@ namespace DX11Base {
       }
   }
 
-  void UpdateBattleEnvironment() {
-      // 1. 전투 중인지 확인을 위한 날짜 체크 (1~30일)
-      uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+  void UpdateBattleEnvironment(uintptr_t exeBase, uintptr_t dayBaseAddr, uintptr_t unitListBase) {
       if (!exeBase) return;
 
-      uintptr_t dayBaseAddr = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0 });
       if (!dayBaseAddr) return;
       uintptr_t battleDayAddr = dayBaseAddr + 0x28;
       uintptr_t finalDayAddr  = dayBaseAddr + 0x2C;
@@ -103,7 +100,6 @@ namespace DX11Base {
       if (bDateAlways15) {
           WriteByteIfDiff(finalDayAddr, 15);
       } else if (bDateDynamic) {
-          uintptr_t unitListBase = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
           if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
               uint8_t totalUnits = *(uint8_t*)(unitListBase - 0x08);
               uint8_t targetDay = 25;
@@ -244,7 +240,6 @@ namespace DX11Base {
       static bool s_terrainBonusActive = false;
       if (bTerrainAbilityAtkDef || bTerrainAbilityAll) {
           s_terrainBonusActive = true;
-          uintptr_t unitListBase = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
           if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
               uint8_t unitCount = *(uint8_t*)(unitListBase - 0x08);
               for (int i = 0; i < unitCount; i++) {
@@ -296,7 +291,6 @@ namespace DX11Base {
       } else if (s_terrainBonusActive) {
           s_terrainBonusActive = false;
           // 비활성 시 원상 복구 (공방, 무력, 지력 모두)
-          uintptr_t unitListBase = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
           if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
               uint8_t unitCount = *(uint8_t*)(unitListBase - 0x08);
               for (int i = 0; i < unitCount; i++) {

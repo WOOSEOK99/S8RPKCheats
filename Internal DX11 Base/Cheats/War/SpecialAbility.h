@@ -43,6 +43,6 @@ namespace DX11Base {
 
   // ── 런타임 갱신 ──────────────────────────────────────
   // 전장에 배치된 무장들을 스캔하여 특수 능력을 활성화/비활성화합니다.
-  void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase);
+  void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase);
 
 } // namespace DX11Base

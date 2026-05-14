@@ -448,7 +448,7 @@ namespace DX11Base {
             case 0xAE: return u8"매력 (byte)";
             case 0xA5: return u8"모델 번호 (byte)";
             case 0xA6: return u8"모델 색상 (byte)";
-            case 0xE8: return u8"금전 (int?)";
+            case 0xE8: return u8"봉록 (int?)";
             case 0xEC: return u8"충성 (byte)";
             case 0xED: return u8"전략포인트 (byte)";
             case 0xEE: return u8"행동력 (byte)";

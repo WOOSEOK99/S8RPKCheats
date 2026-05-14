@@ -108,6 +108,18 @@ namespace DX11Base {
     }
   }
 
+  // --- [추가] 정적 스냅샷 갱신 헬퍼 ---
+  static void UpdateOfficerSnapshot(uintptr_t p1) {
+    if (p1 != 0 && IsValidPtr(p1, 0x3D0)) {
+      memcpy(s_officerSnapshot, (void *)p1, 0x3D0);
+      s_lastCapturedAddress  = p1;
+      s_hasSnapshot          = true;
+      g_officerInlineReadPtr = (uintptr_t)s_officerSnapshot;
+    } else {
+      s_hasSnapshot          = false;
+    }
+  }
+
   void RenderStatRow(uintptr_t p1, const char *label, uintptr_t offset, int size, int *inputVal, float scale) {
     // [수정] 목록 창의 전역 스냅샷(g_officerInlineReadPtr) 또는 로컬 창 스냅샷(s_officerSnapshot) 중 적절한 리드 버퍼 선택
     uintptr_t pR = 0;
@@ -366,7 +378,7 @@ namespace DX11Base {
         ImGui::PopStyleColor(2);
 
         RenderStatRow(pBase, u8"공적", 0x100, 2, &v_Contr, scale);
-        RenderStatRow(pBase, u8"금전", 0xE8, 4, &v_Gold, scale); // [수정] 4바이트 적용
+        RenderStatRow(pBase, u8"봉록", 0xE8, 4, &v_Gold, scale); // [수정] 4바이트 적용
         RenderStatRow(pBase, u8"충성", 0xEC, 1, &v_Loyalty, scale);
         RenderStatRow(pBase, u8"전략포인트", 0xED, 1, &v_StrPoint, scale);
         RenderStatRow(pBase, u8"행동력", 0xEE, 1, &v_Action, scale);
@@ -404,7 +416,7 @@ namespace DX11Base {
         ImGui::PopStyleColor(2);
 
         RenderStatRow(pBase, u8"공적", 0x100, 2, &v_Contr, scale);
-        RenderStatRow(pBase, u8"금전", 0xE8, 4, &v_Gold, scale); // [수정] 4바이트 적용
+        RenderStatRow(pBase, u8"봉록", 0xE8, 4, &v_Gold, scale); // [수정] 4바이트 적용
         RenderStatRow(pBase, u8"충성", 0xEC, 1, &v_Loyalty, scale);
         RenderStatRow(pBase, u8"전략포인트", 0xED, 1, &v_StrPoint, scale);
         RenderStatRow(pBase, u8"행동력", 0xEE, 1, &v_Action, scale);
@@ -578,17 +590,13 @@ namespace DX11Base {
     if (!bShowOfficerDetail)
       return;
 
-    // [최적화] 무장이 변경되었을 때만 딱 한 번 스냅샷 읽기
-    if (p1 != s_lastCapturedAddress || !s_hasSnapshot) {
-        if (p1 != 0 && IsValidPtr(p1, 0x3D0)) {
-            memcpy(s_officerSnapshot, (void *)p1, 0x3D0);
-            s_lastCapturedAddress = p1;
-            s_hasSnapshot = true;
-            // 전역 스냅샷 포인터도 업데이트 (고객 요청 대응용 하위 호환성)
-            g_officerInlineReadPtr = (uintptr_t)s_officerSnapshot;
-        } else {
-            s_hasSnapshot = false;
-        }
+    // [최적화] 무장이 변경되었거나, 창이 새로 열렸을 때만 스냅샷 읽기
+    static bool s_prevVisible = false;
+    bool bJustOpened = (bShowOfficerDetail && !s_prevVisible);
+    s_prevVisible = bShowOfficerDetail;
+
+    if (p1 != s_lastCapturedAddress || !s_hasSnapshot || bJustOpened) {
+        UpdateOfficerSnapshot(p1);
     }
 
     ImGui::SetNextItemWidth(580 * scale);
@@ -635,15 +643,25 @@ namespace DX11Base {
 
     if (ImGui::Begin(titleBuf, &bShowOfficerDetail, OffDetailFlags)) {
       if (p1 == 0) {
-        ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"캡처된 주인공 데이터가 없습니다.");
-        ImGui::BulletText(u8"인게임(전략 화면 등)으로 진입해야 활성화됩니다.");
-        ImGui::Spacing();
-        if (ImGui::Button(u8"닫기")) {
+        if (ImGui::Button(u8"새로고침", ImVec2(80 * scale, 0))) {
+          UpdateOfficerSnapshot(p1);
+          AddLog(u8"[정보] 주인공 데이터 강제 갱신 완료.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"닫기", ImVec2(80 * scale, 0))) {
           bShowOfficerDetail = false;
         }
         ImGui::End();
         return;
       }
+
+      // 우측 상단 혹은 탭 이전에 새로고침 버튼 배치
+      ImGui::SetCursorPosX(ImGui::GetWindowWidth() - 100 * scale);
+      if (ImGui::Button(u8"새로고침", ImVec2(80 * scale, 0))) {
+        UpdateOfficerSnapshot(p1);
+        AddLog(u8"[정보] 주인공 데이터 갱신 완료.");
+      }
+      ImGui::Spacing();
 
       unsigned short currentID = *(unsigned short *)(p1 + 0x08);
       std::string nameValue = u8"주인공";
