@@ -1,15 +1,14 @@
 #include "Terrainignore.h"
 #include "../../Cheats.h"
+#include "../../MenuState.h"
 #include "../../pch.h"
 #include "../../showlog.h"
-#include "../../MenuState.h"
 #include "../Social/Fastrelationship.h"
 #include "../Social/Infinitetalk.h"
 #include "../Social/InstantLoveCave.h"
 #include "../Social/Loyaltycave.h"
 #include "../Social/Resonancecave.h"
 #include "Selfheal.h"
-
 
 #include <cstdint>
 #include <cstdio>
@@ -64,7 +63,7 @@ namespace DX11Base {
       {0xD0A, 5, 0, false},
       {0xD0B, 100, 0, false},
       // stone1
-      {0xD2E, 28, 27, false}, // 효과1(조건), 디폴트 28 , 27로 하면 강풍 조건 필요함. (고정값)
+      {0xD2E, 11, 27, false}, // 효과1(조건), 디폴트 11 , 27로 하면 강풍 조건 필요함. (고정값)
       {0xD32, 60, 120, true}, // 위력1   의미없는듯. (위력2와 같은값)
       {0xD3C, 27, 0, false},  // 효과2,  27 낙석 (고정값)
       {0xD3E, 1, 0, false},   // 대상2,  1 적부대 (고정값)
@@ -128,15 +127,15 @@ namespace DX11Base {
 
     // Water
     // Level 1
-    *(uint8_t *)(p + 0xCAE) = (uint8_t)(enable ? 11 : 9); // Condition
+    *(uint8_t *)(p + 0xCAE) = (uint8_t)(enable ? 11 : 9);                    // Condition
     *(uint16_t *)(p + 0xCB2) = (uint16_t)(enable ? v_WaterLv1_Amount : 120); // Amount1
-    *(uint16_t *)(p + 0xCC0) = (uint16_t)(enable ? v_WaterLv1_Amount : 0); // Amount2
-    *(uint8_t *)(p + 0xCC6) = (uint8_t)(enable ? v_WaterLv1_Range : 0); // Range2
+    *(uint16_t *)(p + 0xCC0) = (uint16_t)(enable ? v_WaterLv1_Amount : 0);   // Amount2
+    *(uint8_t *)(p + 0xCC6) = (uint8_t)(enable ? v_WaterLv1_Range : 0);      // Range2
     if (enable) {
-        *(uint8_t *)(p + 0xCBC) = 9; // Effect2
-        *(uint8_t *)(p + 0xCBE) = 1; // Target2
-        *(uint8_t *)(p + 0xCC2) = 3; // Special2
-        *(uint8_t *)(p + 0xCC7) = 100; // Prob2
+      *(uint8_t *)(p + 0xCBC) = 9;   // Effect2
+      *(uint8_t *)(p + 0xCBE) = 1;   // Target2
+      *(uint8_t *)(p + 0xCC2) = 3;   // Special2
+      *(uint8_t *)(p + 0xCC7) = 100; // Prob2
     }
 
     // Level 2
@@ -145,10 +144,10 @@ namespace DX11Base {
     *(uint16_t *)(p + 0xCE2) = (uint16_t)(enable ? v_WaterLv2_Amount : 0);
     *(uint8_t *)(p + 0xCE8) = (uint8_t)(enable ? v_WaterLv2_Range : 0);
     if (enable) {
-        *(uint8_t *)(p + 0xCDE) = 9;
-        *(uint8_t *)(p + 0xCE0) = 1;
-        *(uint8_t *)(p + 0xCE4) = 3;
-        *(uint8_t *)(p + 0xCE9) = 100;
+      *(uint8_t *)(p + 0xCDE) = 9;
+      *(uint8_t *)(p + 0xCE0) = 1;
+      *(uint8_t *)(p + 0xCE4) = 3;
+      *(uint8_t *)(p + 0xCE9) = 100;
     }
 
     // Level 3
@@ -157,10 +156,10 @@ namespace DX11Base {
     *(uint16_t *)(p + 0xD04) = (uint16_t)(enable ? v_WaterLv3_Amount : 0);
     *(uint8_t *)(p + 0xD0A) = (uint8_t)(enable ? v_WaterLv3_Range : 0);
     if (enable) {
-        *(uint8_t *)(p + 0xD00) = 9;
-        *(uint8_t *)(p + 0xD02) = 1;
-        *(uint8_t *)(p + 0xD06) = 3;
-        *(uint8_t *)(p + 0xD0B) = 100;
+      *(uint8_t *)(p + 0xD00) = 9;
+      *(uint8_t *)(p + 0xD02) = 1;
+      *(uint8_t *)(p + 0xD06) = 3;
+      *(uint8_t *)(p + 0xD0B) = 100;
     }
 
     // Stone
@@ -170,10 +169,10 @@ namespace DX11Base {
     *(uint16_t *)(p + 0xD40) = (uint16_t)(enable ? v_StoneLv1_Amount : 0);
     *(uint8_t *)(p + 0xD46) = (uint8_t)(enable ? v_StoneLv1_Range : 0);
     if (enable) {
-        *(uint8_t *)(p + 0xD3C) = 27; // Effect2
-        *(uint8_t *)(p + 0xD3E) = 1; // Target2
-        *(uint8_t *)(p + 0xD42) = 3; // Special2
-        *(uint8_t *)(p + 0xD47) = 100; // Prob2
+      *(uint8_t *)(p + 0xD3C) = 27;  // Effect2
+      *(uint8_t *)(p + 0xD3E) = 1;   // Target2
+      *(uint8_t *)(p + 0xD42) = 3;   // Special2
+      *(uint8_t *)(p + 0xD47) = 100; // Prob2
     }
 
     // Level 2
@@ -182,10 +181,10 @@ namespace DX11Base {
     *(uint16_t *)(p + 0xD62) = (uint16_t)(enable ? v_StoneLv2_Amount : 0);
     *(uint8_t *)(p + 0xD68) = (uint8_t)(enable ? v_StoneLv2_Range : 0);
     if (enable) {
-        *(uint8_t *)(p + 0xD5E) = 27;
-        *(uint8_t *)(p + 0xD60) = 1;
-        *(uint8_t *)(p + 0xD64) = 3;
-        *(uint8_t *)(p + 0xD69) = 100;
+      *(uint8_t *)(p + 0xD5E) = 27;
+      *(uint8_t *)(p + 0xD60) = 1;
+      *(uint8_t *)(p + 0xD64) = 3;
+      *(uint8_t *)(p + 0xD69) = 100;
     }
 
     // Level 3
@@ -194,10 +193,10 @@ namespace DX11Base {
     *(uint16_t *)(p + 0xD84) = (uint16_t)(enable ? v_StoneLv3_Amount : 0);
     *(uint8_t *)(p + 0xD8A) = (uint8_t)(enable ? v_StoneLv3_Range : 0);
     if (enable) {
-        *(uint8_t *)(p + 0xD80) = 27;
-        *(uint8_t *)(p + 0xD82) = 1;
-        *(uint8_t *)(p + 0xD86) = 3;
-        *(uint8_t *)(p + 0xD8B) = 100;
+      *(uint8_t *)(p + 0xD80) = 27;
+      *(uint8_t *)(p + 0xD82) = 1;
+      *(uint8_t *)(p + 0xD86) = 3;
+      *(uint8_t *)(p + 0xD8B) = 100;
     }
 
     VirtualProtect((LPVOID)p, 0xD8C, old, &tmp);
