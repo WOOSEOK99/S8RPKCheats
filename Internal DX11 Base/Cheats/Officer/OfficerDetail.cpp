@@ -783,6 +783,18 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      bool isShipWeaponEnabled = (GetTargetSkillCount(currentID, 0x1009) > 0);
+      if (ImGui::Checkbox(u8"함선 병기화 (지상에서 함선전법 활성화)##shipw", &isShipWeaponEnabled)) {
+        SetTargetSkillCount(currentID, 0x1009, isShipWeaponEnabled ? 1 : 0);
+        AddLog(u8"[특수기능] 무장[%d] 함선 병기화 %s", currentID,
+               isShipWeaponEnabled ? u8"활성화 (저장됨)" : u8"비활성화 (삭제됨)");
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"이 무장이 속한 부대가 지상에 있을 때 함선 전법을 사용할 수 있게 합니다.");
+        ImGui::EndTooltip();
+      }
+
     }
 
     ImGui::Spacing();

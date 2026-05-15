@@ -7,7 +7,6 @@
 #include "../../showlog.h"
 #include "BattleEnvironment.h"
 #include "../System/SkillCountManager.h"
-#include <vector>
 
 namespace DX11Base {
 
@@ -62,11 +61,11 @@ namespace DX11Base {
       }
   }
 
-  // --- [신규] 함선 병기화 (지상에서 함선전법 활성화) ---
-#if 0
-  static void ApplyShipWeaponization(uintptr_t exeBase, uintptr_t tacticBase) {
-      if (!tacticBase) return;
-
+  // ── [함선 병기화] 체크박스(0x1009 플래그) 기반 작동 ─────────────────────
+  //   active unit의 무장 중 0x1009 플래그가 설정된 무장이 있고,
+  //   그 부대가 물(11,12) 지형이 아닌 경우 함선전법(값=8) 활성화
+  // ─────────────────────────────────────────────────────────────────────
+  static void ApplyShipWeaponization(uintptr_t exeBase) {
       static DWORD lastShipTick = 0;
       DWORD currentTick = GetTickCount();
       if (currentTick - lastShipTick < 300) return;
@@ -74,79 +73,67 @@ namespace DX11Base {
 
       static uint8_t s_lastAppliedVal = 0xFF;
 
-      // 1. 트리거 지형 확인 (Lua: SAN8RPK.exe+03510578 + ...)
-      uintptr_t terrainPtr = SAResolveChainLocal(exeBase + 0x03510578, { 0x100, 0x78, 0x0, 0x50, 0x108, 0x50, 0x8, 0x40, 0x10, 0x8 });
-      if (!IsValidPtr(terrainPtr, 1)) {
-          static bool log1 = false; if(!log1) { AddLog(u8"[함선 디버그] 접근 실패: terrainPtr invalid"); log1 = true; }
+      // tacticBase 직접 획득
+      uintptr_t tacticBase = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
+      if (!tacticBase) {
+          static bool logTactic = false;
+          if (!logTactic) { AddLog(u8"[함선병기] tacticBase 포인터 없음"); logTactic = true; }
           return;
       }
-      uint8_t terrain = *(uint8_t*)terrainPtr;
+
+      // Active unit 포인터 획득 (trailing 0 필수)
+      uintptr_t activeUnitPtr = SAResolveChainLocal(exeBase + 0x03510578,
+          { 0x100, 0x78, 0x0, 0x50, 0x108, 0x50, 0x8, 0 });
+
+      static bool logNoUnit = false;
+      if (!IsValidPtr(activeUnitPtr, 0x50)) {
+          if (!logNoUnit) { AddLog(u8"[함선병기] activeUnitPtr 없음"); logNoUnit = true; }
+          return;
+      }
+      logNoUnit = false;
+
+      // 지형 확인
+      uintptr_t ptr40   = *(uintptr_t*)(activeUnitPtr + 0x40);
+      if (!IsValidPtr(ptr40, 0x20)) return;
+      uintptr_t ptr40_10 = *(uintptr_t*)(ptr40 + 0x10);
+      if (!IsValidPtr(ptr40_10, 0x10)) return;
+      uint8_t terrain = *(uint8_t*)(ptr40_10 + 0x8);
 
       if (terrain == 11 || terrain == 12) {
-          uintptr_t targets[] = { 0x9A4, 0xA24, 0xAA4, 0xB24, 0xBA4 };
-          for (int k = 0; k < 5; k++) WriteByteIfDiff(tacticBase + targets[k], 4);
-          if (s_lastAppliedVal != 4) {
-              AddLog(u8"[함선 디버그] 현재 지형 = 물(%d). 전법 4 복구", terrain);
-              s_lastAppliedVal = 4;
-          }
+          uintptr_t tgts[] = { 0x9A4, 0xA24, 0xAA4, 0xB24, 0xBA4 };
+          for (int k = 0; k < 5; k++) WriteByteIfDiff(tacticBase + tgts[k], 4);
+          if (s_lastAppliedVal != 4) { s_lastAppliedVal = 4; }
           return;
       }
 
-      // 2. 트리거 무장 확인 (Lua: side.base = SAN8RPK.exe+03510578)
-      uintptr_t sideRootAddr = SAResolveChainLocal(exeBase + 0x03510578, { 0x100, 0x78, 0x0, 0x50, 0x108, 0x50, 0x8, 0x18 });
+      uintptr_t memberPtr = *(uintptr_t*)(activeUnitPtr + 0x18);
+      if (!IsValidPtr(memberPtr, 0x20)) return;
+
       bool triggered = false;
       int foundOfficerID = 0;
+      uintptr_t officerSlots[] = { 0x8, 0x10, 0x18 };
 
-      if (!IsValidPtr(sideRootAddr, 8)) {
-          static bool log2 = false; if(!log2) { AddLog(u8"[함선 디버그] 접근 실패: sideRootAddr invalid"); log2 = true; }
-      } else {
-          uintptr_t sideRootDeref = *(uintptr_t*)sideRootAddr;
-          if (!IsValidPtr(sideRootDeref, 0x20)) {
-              static bool log3 = false; if(!log3) { AddLog(u8"[함선 디버그] 접근 실패: sideRootDeref invalid"); log3 = true; }
-          } else {
-              uintptr_t moffs[] = { 0x08, 0x10, 0x18 };
-              for (int k = 0; k < 3; k++) {
-                  uintptr_t offPtr = *(uintptr_t*)(sideRootDeref + moffs[k]);
-                  if (IsValidPtr(offPtr, 0x10)) {
-                      int officerID = (int)(*(unsigned short*)(offPtr + 0x08));
-                      if (officerID > 0) {
-                          // 매번 새로운 무장을 Hover/Select 할 때마다 무조건 1회 로깅!
-                          static int lastLogHoverOff = 0;
-                          int checkboxState = GetTargetSkillCount(officerID, 0x1009);
-                          
-                          if (lastLogHoverOff != officerID) {
-                              AddLog(u8"[함선 디버그] UI 스캔 완료 -> 무장ID: %d, 체크박스: %d, 현재지형: %d", officerID, checkboxState, terrain);
-                              lastLogHoverOff = officerID;
-                          }
-
-                          if (checkboxState > 0) {
-                              triggered = true;
-                              foundOfficerID = officerID;
-                              break;
-                          }
-                      }
-                  }
-              }
-          }
+      for (int k = 0; k < 3 && !triggered; k++) {
+          uintptr_t offPtr = *(uintptr_t*)(memberPtr + officerSlots[k]);
+          if (!IsValidPtr(offPtr, 0x10)) continue;
+          int officerID = (int)(*(unsigned short*)(offPtr + 0x8));
+          if (officerID <= 0) continue;
+          int flag = GetTargetSkillCount(officerID, 0x1009);
+          if (flag > 0) { triggered = true; foundOfficerID = officerID; }
       }
 
-      // 3. 값 대입
       uint8_t targetVal = triggered ? 8 : 4;
       if (triggered && s_lastAppliedVal != 8) {
-          AddLog(u8"[함선병기] 지상 발동! (무장:%d, 지형:%d)", foundOfficerID, terrain);
+          AddLog(u8"[함선병기] 지상 발동! (무장ID:%d, 지형:%d)", foundOfficerID, terrain);
           s_lastAppliedVal = 8;
       } else if (!triggered && s_lastAppliedVal == 8) {
-          AddLog(u8"[함선병기] 해제 (조건 무장 아님, 지형:%d)", terrain);
+          AddLog(u8"[함선병기] 해제");
           s_lastAppliedVal = 4;
       }
 
-      uintptr_t targets[] = { 0x9A4, 0xA24, 0xAA4, 0xB24, 0xBA4 };
-      for (int k = 0; k < 5; k++) {
-          WriteByteIfDiff(tacticBase + targets[k], targetVal);
-      }
-
+      uintptr_t tgts[] = { 0x9A4, 0xA24, 0xAA4, 0xB24, 0xBA4 };
+      for (int k = 0; k < 5; k++) WriteByteIfDiff(tacticBase + tgts[k], targetVal);
   }
-#endif
 
   void UpdateBattleEnvironment(uintptr_t exeBase, uintptr_t dayBaseAddr, uintptr_t unitListBase) {
       if (!exeBase) return;
@@ -155,6 +142,9 @@ namespace DX11Base {
       DWORD currentTick = GetTickCount();
       if (currentTick - lastEnvTick < 200) return;
       lastEnvTick = currentTick;
+
+      // 1. 함선 병기화 처리 (tacticBase 내부에서 자체 획득, 다른 게이트에 막히지 않도록 최상단 배치)
+      ApplyShipWeaponization(exeBase);
 
       if (!dayBaseAddr) return;
       uintptr_t battleDayAddr = dayBaseAddr + 0x28;
@@ -181,12 +171,14 @@ namespace DX11Base {
           WriteByteIfDiff(finalDayAddr, 30); // 기본값 복구
       }
 
-      // 2. 책략/마스터 파라미터 구조체 베이스 주소
+      // 4. 책략/마스터 파라미터 구조체 베이스 주소
+      static bool logTacticGate = false;
       uintptr_t tacticBase = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
-      if (!tacticBase) return;
-
-      // 3. 함선 병기화 처리 (유저 요청으로 임시 비활성화)
-      // ApplyShipWeaponization(exeBase, tacticBase);
+      if (!tacticBase) {
+          if (!logTacticGate) { AddLog(u8"[BattleEnv] tacticBase 없음 - 날씨 처리 스킵"); logTacticGate = true; }
+          return;
+      }
+      logTacticGate = false;
 
       //--------------------------------------------------
       // 날씨 전법 변경 처리 (공통 / 대폭)
