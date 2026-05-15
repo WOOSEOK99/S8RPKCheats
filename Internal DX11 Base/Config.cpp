@@ -249,7 +249,17 @@ namespace DX11Base {
     file << "  \"v_WallCatapult_Sight\": " << v_WallCatapult_Sight << ",\n";
     file << "  \"v_Signal_Dur\": " << v_Signal_Dur << ",\n";
     file << "  \"v_Signal_Spirit\": " << v_Signal_Spirit << ",\n";
-    file << "  \"v_Signal_Sight\": " << v_Signal_Sight << "\n";
+    file << "  \"v_Signal_Sight\": " << v_Signal_Sight << ",\n";
+
+    // 지형 보너스 테이블 저장
+    static const int terrainIndices[] = { 1, 2, 3, 4, 5, 6, 7, 10, 15, 16, 17 };
+    for (int i = 1; i <= 12; i++) {
+        for (int j = 0; j < 11; j++) {
+            int tidx = terrainIndices[j];
+            file << "  \"TB_" << i << "_" << tidx << "\": " << g_TerrainBonusTable[i][tidx] << ",\n";
+        }
+    }
+    file << "  \"config_end\": true\n";
     file << "}";
     file.close();
   }
@@ -582,6 +592,24 @@ namespace DX11Base {
       if (line.find("v_Signal_Sight") != std::string::npos) {
           size_t colonPos = line.find(":");
           if (colonPos != std::string::npos) { try { v_Signal_Sight = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+
+      // 지형 보너스 테이블 로드 (TB_병종_지형)
+      if (line.find("\"TB_") != std::string::npos) {
+          size_t firstUnderscore = line.find("_");
+          size_t secondUnderscore = line.find("_", firstUnderscore + 1);
+          size_t colonPos = line.find(":");
+          if (firstUnderscore != std::string::npos && secondUnderscore != std::string::npos && colonPos != std::string::npos) {
+              try {
+                  int tr = std::stoi(line.substr(firstUnderscore + 1, secondUnderscore - firstUnderscore - 1));
+                  int gr = std::stoi(line.substr(secondUnderscore + 1, colonPos - secondUnderscore - 1));
+                  int val = std::stoi(line.substr(colonPos + 1));
+                  if (tr >= 1 && tr <= 12 && gr >= 1 && gr <= 17) {
+                      g_TerrainBonusTable[tr][gr] = (short)val;
+                  }
+              } catch (...) {}
+          }
           continue;
       }
 

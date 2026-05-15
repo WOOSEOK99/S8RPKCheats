@@ -15,7 +15,7 @@ namespace DX11Base {
 
   // ── 공용 헬퍼 ──────────────────────────────────────
   // 포인터 체인을 따라 최종 주소를 반환합니다.
-  static uintptr_t SAResolveChain(uintptr_t base, const std::vector<int>& offsets) {
+  static uintptr_t SAResolveChain(uintptr_t base, std::initializer_list<int> offsets) {
       uintptr_t current = base;
       for (int offset : offsets) {
           if (!IsValidPtr(current, 8)) return 0;
@@ -42,7 +42,7 @@ namespace DX11Base {
   // ══════════════════════════════════════════════════════
   static bool g_musangBomyeongApplied = false;
   void SetMusangBomyeong(bool enable) {
-      AddLog(enable ? u8"[무쌍보명] 활성화" : u8"[무쌍보명] 비활성화");
+      AddLog(enable ? u8"[무쌍보병] 활성화" : u8"[무쌍보병] 비활성화");
       g_musangBomyeongApplied = enable;
   }
 
@@ -105,6 +105,14 @@ namespace DX11Base {
   struct STarget { uintptr_t off; uint8_t normal; uint8_t active; };
 
   void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase) {
+      if (!exeBase) return;
+
+      static DWORD lastUpdateTick = 0;
+      DWORD currentTick = GetTickCount();
+      // 전체 부대 스캔(무신 등)은 매우 무거우므로 500ms 주기로만 수행
+      bool runGlobalScan = (unitCountTotal > 0 && currentTick - lastUpdateTick >= 500);
+      if (runGlobalScan) lastUpdateTick = currentTick;
+
       bool hasGunakdae = false;
       bool hasMussang = false;
       bool hasFireCavalry = false;
@@ -113,8 +121,10 @@ namespace DX11Base {
       bool hasSneakAttack = false;
       bool hasTactician = false;
 
-      // 1. 현재 선택/행동 중인 부대(Active Unit) 스캔
-      if (exeBase) {
+      // 1. 현재 선택/행동 중인 부대(Active Unit) 스캔 (200ms 스로틀)
+      static DWORD lastActiveScanTick = 0;
+      if (currentTick - lastActiveScanTick >= 200) {
+          lastActiveScanTick = currentTick;
           uintptr_t activeUnitPtr = SAResolveChain(exeBase + 0x03510578, { 0x100, 0x78, 0, 0x50, 0x108, 0x50, 0x8, 0 });
           if (activeUnitPtr) {
               uintptr_t memberPtr = *(uintptr_t*)(activeUnitPtr + 0x18);
@@ -155,7 +165,7 @@ namespace DX11Base {
       bool stateChangedTactician = (hasTactician != s_lastTacticianState);
       
       if (stateChangedGunakdae) AddLog(u8"[특수기능] 군악대 배치 스캔 방금 됨 -> %s", hasGunakdae ? u8"활성(ON)" : u8"비활성(OFF)");
-      if (stateChangedMussang) AddLog(u8"[특수기능] 무쌍보명 배치 스캔 방금 됨 -> %s", hasMussang ? u8"활성(ON)" : u8"비활성(OFF)");
+      if (stateChangedMussang) AddLog(u8"[특수기능] 무쌍보병 배치 스캔 방금 됨 -> %s", hasMussang ? u8"활성(ON)" : u8"비활성(OFF)");
       if (stateChangedFireCavalry) AddLog(u8"[특수기능] 불꽃기병 배치 스캔 방금 됨 -> %s", hasFireCavalry ? u8"활성(ON)" : u8"비활성(OFF)");
       if (stateChangedArcher) AddLog(u8"[특수기능] 원격궁병 배치 스캔 방금 됨 -> %s", hasArcher ? u8"활성(ON)" : u8"비활성(OFF)");
       if (stateChangedCommander) AddLog(u8"[특수기능] 총사령관 배치 스캔 방금 됨 -> %s", hasCommander ? u8"활성(ON)" : u8"비활성(OFF)");
@@ -213,7 +223,7 @@ namespace DX11Base {
                   { 0x3B8, 1, 5 }, { 0x3C6, 1, 5 }, { 0x3DA, 1, 5 },
                   { 0x3E8, 1, 5 }, { 0x3FC, 1, 5 }, { 0x40A, 1, 5 }
               };
-              applyBuffTargets(p, u8"무쌍보명", hasMussang, stateChangedMussang, mussangTargets, sizeof(mussangTargets)/sizeof(STarget));
+              applyBuffTargets(p, u8"무쌍보병", hasMussang, stateChangedMussang, mussangTargets, sizeof(mussangTargets)/sizeof(STarget));
 
               // --- (C) 불꽃기병 타겟 (연격, 기사 불지르기) ---
               STarget fireCavalryTargets[] = {
@@ -355,8 +365,8 @@ namespace DX11Base {
       }
 
       // 4. 무신 (부대 전용 - 해당 장수 소속 부대의 전법 병종 제약 해제)
-      // 실시간 지속 감시: 게임이 포진 종료 후 전투 시작 시(Day 1 전환점) 구조체를 엎어치기하는 것을 방지
-      if (unitCountTotal > 0 && unitListBase > 0) {
+      // [성능 최적화] 500ms 주기로만 실행하여 CPU 점유율 대폭 완화
+      if (runGlobalScan && unitCountTotal > 0 && unitListBase > 0) {
           const uintptr_t SKILL_PTR_OFF   = 0x5D8;
           const uintptr_t SKILL_REC_SIZE  = 0x28;
           const uintptr_t SKILL_LIMIT_OFF = 0x14; // 병종 제한 필드

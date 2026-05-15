@@ -44,6 +44,7 @@ namespace DX11Base {
   static int v_S_Str1 = 0, v_S_Str2 = 0, v_S_Str3 = 0, v_S_Str4 = 0, v_S_Str5 = 0;
   static int v_S_Sup1 = 0, v_S_Sup2 = 0, v_S_Sup3 = 0, v_S_Sup4 = 0, v_S_Sup5 = 0;
   static int v_S_Mag1 = 0, v_S_Mag2 = 0, v_S_Mag3 = 0, v_S_Mag4 = 0, v_S_Mag5 = 0;
+  static int v_S_Wep1 = 0, v_S_Wep2 = 0, v_S_Wep3 = 0, v_S_Wep4 = 0, v_S_Wep5 = 0;
 
   // 특기 변수
   static int v_A_M1 = 0, v_A_M2 = 0, v_A_M3 = 0, v_A_M4 = 0, v_A_M5 = 0, v_A_M6 = 0;
@@ -193,54 +194,52 @@ namespace DX11Base {
 
     ImGui::PushID(label);
 
-    // --- [ 왼쪽: 레벨 버튼 ] ---
-    // 레벨에 따른 색상 정의 (0:기본, 1:파랑, 2:초록, 3:주황)
-    bool hasCustomColor = false;
-    if (*val == 1) {
-      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.8f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.5f, 1.0f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.3f, 0.6f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // 흰색 글씨
-      hasCustomColor = true;
-    } else if (*val == 2) {
-      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.6f, 0.1f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.8f, 0.2f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.4f, 0.0f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // 흰색 글씨
-      hasCustomColor = true;
-    } else if (*val == 3) {
-      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.4f, 0.0f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.6f, 0.0f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.6f, 0.3f, 0.0f, 1.0f));
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f)); // 흰색 글씨
-      hasCustomColor = true;
-    }
-
     ImGui::TextUnformatted(label);
     ImGui::SameLine(0, 3);
 
-    char btnLabelLvl[16];
-    snprintf(btnLabelLvl, sizeof(btnLabelLvl), "%d##lvl", *val);
+    // --- [ 왼쪽: 레벨 버튼 ] ---
+    // 병기 전법(0x15C~0x160)만 레벨 버튼을 숨기고, 나머지는(일반 전법 & 특기) 표시합니다.
+    bool isWeaponTactic = (offset >= 0x15C && offset <= 0x160);
+    if (!isWeaponTactic) {
+        bool hasCustomColor = false;
+        if (*val == 1) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.4f, 0.8f, 1.0f));
+            hasCustomColor = true;
+        } else if (*val == 2) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.6f, 0.1f, 1.0f));
+            hasCustomColor = true;
+        } else if (*val == 3) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.4f, 0.0f, 1.0f));
+            hasCustomColor = true;
+        }
+        
+        if (hasCustomColor) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+        }
 
-    if (ImGui::Button(btnLabelLvl, ImVec2(30 * scale, 25 * scale))) {
-      *val = (*val + 1) % 4; // 0, 1, 2, 3 순환
-      DX11Base::ModifyStat(p1, offset, *val, 1);
-      SyncInlineReadBufFromWrite(p1);
-    }
-    if (ImGui::IsItemHovered()) {
-      ImGui::BeginTooltip();
-      ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 순환 (0->1->2->3)");
-      ImGui::EndTooltip();
-    }
+        char btnLabelLvl[16];
+        snprintf(btnLabelLvl, sizeof(btnLabelLvl), "%d##lvl", *val);
+        if (ImGui::Button(btnLabelLvl, ImVec2(30 * scale, 25 * scale))) {
+            *val = (*val + 1) % 4;
+            DX11Base::ModifyStat(p1, offset, *val, 1);
+            SyncInlineReadBufFromWrite(p1);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"레벨 순환 (0->1->2->3)");
+            ImGui::EndTooltip();
+        }
 
-    if (hasCustomColor) {
-      ImGui::PopStyleColor(4);
+        if (hasCustomColor) {
+            ImGui::PopStyleColor(2);
+        }
+        ImGui::SameLine(0, 4);
     }
 
     // --- [ 오른쪽: 횟수 버튼 ] ---
     // 전법(Tactics)일 때만 횟수 버튼 표시 (특기는 횟수 개념이 없음)
-    // 전법 오프셋 범위: 0x139 ~ 0x15B
-    if (offset >= 0x139 && offset <= 0x15B) {
+    // 전법 오프셋 범위: 0x139 ~ 0x160 (일반 전법 + 병기 전법)
+    if (offset >= 0x139 && offset <= 0x160) {
         ImGui::SameLine(0, 4);
         
         int targetCount = GetTargetSkillCount(officerID, offset);
@@ -497,6 +496,12 @@ namespace DX11Base {
         int *v[] = {&v_S_Mag1, &v_S_Mag2, &v_S_Mag3, &v_S_Mag4, &v_S_Mag5};
         RenderResearchRow(pBase, u8"둔갑", s, o, v, 5, scale);
       }
+      {
+        const char *s[] = {u8"충차", u8"정란", u8"투석", u8"운제", u8"상병"};
+        uintptr_t o[] = {0x15C, 0x15D, 0x15E, 0x15F, 0x160};
+        int *v[] = {&v_S_Wep1, &v_S_Wep2, &v_S_Wep3, &v_S_Wep4, &v_S_Wep5};
+        RenderResearchRow(pBase, u8"병기", s, o, v, 5, scale);
+      }
       ImGui::EndTable();
     }
 
@@ -706,7 +711,7 @@ namespace DX11Base {
 
   // ══════════════════════════════════════════════════════
   //  특수 기능 탭 렌더링
-  //  군악대 / 무쌍보명 / 불꽃기병 / 원격궁병 /
+  //  군악대 / 무쌍보병 / 불꽃기병 / 원격궁병 /
   //  등갑군 / 총사령관 / 기습부대 / 대군사
   // ══════════════════════════════════════════════════════
   void RenderSpecialAbilityTab(uintptr_t pBase, float scale) {
@@ -775,6 +780,18 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(u8"해당 장수가 포함된 부대는 병종과 관계없이 모든 전법을 구사합니다");
+        ImGui::EndTooltip();
+      }
+
+      bool isShipWeaponEnabled = (GetTargetSkillCount(currentID, 0x1009) > 0);
+      if (ImGui::Checkbox(u8"함선 병기화(지상에서 함선전법 활성화)##shipw", &isShipWeaponEnabled)) {
+        SetTargetSkillCount(currentID, 0x1009, isShipWeaponEnabled ? 1 : 0);
+        AddLog(u8"[특수기능] 무장[%d] 함선 병기화 %s", currentID,
+               isShipWeaponEnabled ? u8"활성화 (저장됨)" : u8"비활성화 (삭제됨)");
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"해당 장수가 지상 부대인 경우에도 함선 전법을 병기처럼 사용할 수 있게 합니다");
         ImGui::EndTooltip();
       }
     }

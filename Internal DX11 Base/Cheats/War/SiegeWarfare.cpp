@@ -17,7 +17,7 @@ namespace DX11Base {
   // ───────────────────────────────────────────────
   //  포인터 해석 헬퍼
   // ───────────────────────────────────────────────
-  static uintptr_t ResolveChain(uintptr_t base, const std::vector<int> &offsets) {
+  static uintptr_t ResolveChain(uintptr_t base, std::initializer_list<int> offsets) {
     uintptr_t current = base;
     for (int offset : offsets) {
       if (!IsValidPtr(current, 8))
@@ -187,25 +187,38 @@ namespace DX11Base {
       return;
     }
 
+    static DWORD lastSiegeAttemptTick = 0;
+    DWORD currentTick = GetTickCount();
+
     if (!g_siegeMoveCostApplied) {
-      if (ApplyMoveCostOnce()) {
-        g_siegeMoveCostApplied = true;
-        AddLog(u8"[공성전] 이동력 소모(60)가 성공적으로 적용되었습니다.");
+      if (currentTick - lastSiegeAttemptTick >= 1000) {
+          lastSiegeAttemptTick = currentTick;
+          if (ApplyMoveCostOnce()) {
+            g_siegeMoveCostApplied = true;
+            AddLog(u8"[공성전] 이동력 소모(60)가 성공적으로 적용되었습니다.");
+          } else {
+            // AddLog(u8"[공성전] 이동력 주소를 찾을 수 없습니다."); // 스팸 방지를 위해 주석 처리
+            return;
+          }
       } else {
-        AddLog(u8"[공성전] 이동력 주소를 찾을 수 없습니다.");
-        return;
+          return; // 아직 1초가 지나지 않았다면 대기
       }
     }
 
     if (!g_siegeShallowApplied) {
-      if (ApplyShallowTerrainOnce()) {
-        g_siegeShallowApplied = true;
-        g_siegePrevDay = dayVal;
-        AddLog(u8"[공성전] 성 주변 지형이 여울로 변경되었습니다.");
+      if (currentTick - lastSiegeAttemptTick >= 1000) {
+          lastSiegeAttemptTick = currentTick;
+          if (ApplyShallowTerrainOnce()) {
+            g_siegeShallowApplied = true;
+            g_siegePrevDay = dayVal;
+            AddLog(u8"[공성전] 성 주변 지형이 여울로 변경되었습니다.");
+          } else {
+            // AddLog(u8"[DEBUG] 지형 변경 시도 실패 (성 주소를 찾지 못함)"); // 스팸 방지
+            return;
+          }
       } else {
-        AddLog(u8"[DEBUG] 지형 변경 시도 실패 (성 주소를 찾지 못함)");
+          return;
       }
-      // return; // 제거: 지형 변경 시도 후에도 회복 로직이 돌 수 있도록 함
     }
 
     if (dayVal == g_siegePrevDay)
@@ -404,18 +417,31 @@ namespace DX11Base {
       return;
     }
 
+    static DWORD lastSiege2AttemptTick = 0;
+    DWORD currentTick2 = GetTickCount();
+
     if (!g_siege2MoveCostApplied) {
-      if (ApplyMoveCostOnce()) {
-        g_siege2MoveCostApplied = true;
-        AddLog(u8"[2칸 공성전] 이동력 소모(60) 적용 완료");
-      } else return;
+      if (currentTick2 - lastSiege2AttemptTick >= 1000) {
+          lastSiege2AttemptTick = currentTick2;
+          if (ApplyMoveCostOnce()) {
+            g_siege2MoveCostApplied = true;
+            AddLog(u8"[2칸 공성전] 이동력 소모(60) 적용 완료");
+          } else return;
+      } else {
+          return;
+      }
     }
 
     if (!g_siege2ShallowApplied) {
-      if (ApplyShallowTerrain2Once()) {
-        g_siege2ShallowApplied = true;
-        g_siege2PrevDay        = dayVal;
-        AddLog(u8"[2칸 공성전] 성 주변 2칸 지형이 여울로 변경되었습니다.");
+      if (currentTick2 - lastSiege2AttemptTick >= 1000) {
+          lastSiege2AttemptTick = currentTick2;
+          if (ApplyShallowTerrain2Once()) {
+            g_siege2ShallowApplied = true;
+            g_siege2PrevDay        = dayVal;
+            AddLog(u8"[2칸 공성전] 성 주변 2칸 지형이 여울로 변경되었습니다.");
+          } else return;
+      } else {
+          return;
       }
     }
 

@@ -24,7 +24,7 @@
 namespace DX11Base {
 
   // 헬퍼: 포인터 체인 풀기 (SiegeWarfare.cpp와 로직 통일)
-  static uintptr_t ResolveChain(uintptr_t base, const std::vector<int>& offsets) {
+  static uintptr_t ResolveChain(uintptr_t base, std::initializer_list<int> offsets) {
       uintptr_t current = base;
       for (int offset : offsets) {
           if (!IsValidPtr(current, 8)) return 0;
@@ -66,8 +66,9 @@ namespace DX11Base {
 
           // 무장 ID 읽기 (Lua: readOfficerId, readSmallInteger(ptr+0x08))
           int officerID = -1;
-          for (uintptr_t moff : { (uintptr_t)0x08, (uintptr_t)0x10, (uintptr_t)0x18 }) {
-              uintptr_t offPtr = *(uintptr_t*)(memberPtr + moff);
+          uintptr_t moffs[] = { 0x08, 0x10, 0x18 };
+          for (int k = 0; k < 3; k++) {
+              uintptr_t offPtr = *(uintptr_t*)(memberPtr + moffs[k]);
               if (IsValidPtr(offPtr, 0x10)) {
                   officerID = (int)(*(unsigned short*)(offPtr + 0x08));
                   break; 
@@ -157,7 +158,7 @@ namespace DX11Base {
 
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
       
-      // 1. 공통 포인터 중앙 집중 해결 (성능 최적화: 시스템 호출 최소화)
+      // 1. 공통 포인터 중앙 집중 해결 
       uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
       uintptr_t dayBaseAddr  = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0 });
       uintptr_t dayAddr      = dayBaseAddr ? (dayBaseAddr + 0x28) : 0;
@@ -215,7 +216,7 @@ namespace DX11Base {
         s_isWarModsApplied = true;
         // 커스텀 전법 횟수 적용 (전투 리프레시 시 1회 수행)
         UpdateBattleUnitSkills(false);
-        if (currentDay != -1) s_lastAppliedDay = currentDay;
+        s_lastAppliedDay = currentDay;
       }
 
       // [추가] 1일차가 시작될 때 한 번 더 적용 (포진 등이 끝나고 실제 전투 시작 시 초기화 대응)
@@ -241,7 +242,6 @@ namespace DX11Base {
       // [핵심: 하트비트] 읽은 주소를 즉시 비웁니다.
       DX11Base::g_battleUnitAddr1 = 0;
       DX11Base::g_battleUnitAddr2 = 0;
-
     } else {
       // [비전투 중] 주소가 0이고 날짜 주소도 없음
       if (s_isWarModsApplied && (currentTime - s_lastSeenTime > 3.0f)) {

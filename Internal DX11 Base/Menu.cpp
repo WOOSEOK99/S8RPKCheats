@@ -32,7 +32,7 @@ namespace DX11Base {
     if (!bShowBattleEnvWin)
       return;
 
-    ImGui::SetNextWindowSize(ImVec2(750 * scale, 150 * scale), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(550 * scale, 150 * scale), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(u8"전투 환경 및 조건 설정###BattleEnvWin", &bShowBattleEnvWin)) {
       if (ImGui::BeginTable("BattleEnvTable", 4, ImGuiTableFlags_None)) {
         ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 날씨 전법 변경");
@@ -79,7 +79,7 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"-- 연노병은 산지 +20%로 증가. 삼림 페널티 제거.");
 
           ImGui::EndTooltip();
-        }
+        }   
 
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"성 주변 1칸 여울", &bSiegeWarfare)) {
@@ -141,7 +141,13 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), u8"예: 황무지의 보병 +10% -> 전투력/무력/지력 모두 110%");
           ImGui::EndTooltip();
         }
-        
+
+        // 지형 보너스 설정 버튼 추가
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.0f * scale);
+        if (ImGui::Button(u8"지형 보너스 설정")) {
+            bShowTerrainBonusWin = true;
+        }
+
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"성 주변 2칸 여울", &bSiegeWarfare2)) {
           if (bSiegeWarfare2) {
@@ -162,6 +168,98 @@ namespace DX11Base {
         }
 
         ImGui::EndTable();
+      }
+    }
+    ImGui::End();
+  }
+
+  static void DrawTerrainBonusSettingsWin(float scale) {
+    if (!bShowTerrainBonusWin) return;
+
+    ImGui::SetNextWindowSize(ImVec2(980 * scale, 520 * scale), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(u8"지형 보너스 설정 (-30 ~ +30)###TerrainBonusWin", &bShowTerrainBonusWin)) {
+      ImGui::Text(u8"각 칸은 -30 ~ +30 범위. 지형 순서별 개별 입력. 저장 후 지형 보정 코드는 껐다가 다시 켜야 반영됨.");
+
+      static const char* troopNames[] = {
+          u8"경보병", u8"중보병", u8"정예보병", u8"만병", 
+          u8"경기병", u8"중기병", u8"정예기병", u8"유목기병", 
+          u8"궁병", u8"노병", u8"정예궁병", u8"연노병"
+      };
+
+      static const char* terrainNames[] = {
+          u8"가도", u8"평지", u8"황무지", u8"초원", u8"삼림", u8"습지", u8"산지", u8"여울", u8"다리", u8"도하", u8"암석"
+      };
+      
+      // 스크린샷과 동일한 지형 인덱스 매핑
+      static const int terrainIndices[] = { 1, 2, 3, 4, 5, 6, 7, 10, 15, 16, 17 };
+
+      if (ImGui::BeginTable("TerrainBonusTable", 12, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        // 헤더
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); // 첫 칸은 비움
+        for (int j = 0; j < 11; j++) {
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(terrainNames[j]);
+        }
+
+        // 행 데이터
+        for (int i = 0; i < 12; i++) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(troopNames[i]);
+
+            int troopIdx = i + 1; // 병종 1~12
+            for (int j = 0; j < 11; j++) {
+                ImGui::TableNextColumn();
+                int terrainIdx = terrainIndices[j];
+                
+                char id[32];
+                sprintf_s(id, "##v_%d_%d", troopIdx, terrainIdx);
+                
+                int val = (int)g_TerrainBonusTable[troopIdx][terrainIdx];
+                ImGui::SetNextItemWidth(60.0f * scale);
+                if (ImGui::InputInt(id, &val, 0, 0)) {
+                    if (val > 30) val = 30;
+                    if (val < -30) val = -30;
+                    g_TerrainBonusTable[troopIdx][terrainIdx] = (short)val;
+                }
+            }
+        }
+        ImGui::EndTable();
+      }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      if (ImGui::Button(u8"기본값 복원", ImVec2(120 * scale, 35 * scale))) {
+          // 기본값 재설정 (Lua 스크립트 기반 초기값)
+          short defaultTable[13][18] = {
+              {0},
+              {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+              {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+              {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+              {0, 0, 0, 10, 0, 20, 10, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+              {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+              {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+              {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+              {0, 10, 10, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+              {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
+              {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
+              {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
+              {0, 0, 0, 0, 0, 0, -10, 20, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}
+          };
+          memcpy(g_TerrainBonusTable, defaultTable, sizeof(g_TerrainBonusTable));
+      }
+
+      ImGui::SameLine(ImGui::GetWindowWidth() - 260.0f * scale);
+      if (ImGui::Button(u8"저장 후 닫기", ImVec2(120 * scale, 35 * scale))) {
+          SaveConfig();
+          bShowTerrainBonusWin = false;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"닫기", ImVec2(80 * scale, 35 * scale))) {
+          bShowTerrainBonusWin = false;
       }
     }
     ImGui::End();
@@ -198,6 +296,7 @@ namespace DX11Base {
       DrawMenu();
 
     DrawBattleEnvWindow(scale);
+    DrawTerrainBonusSettingsWin(scale);
     DrawMemoryNotepadWindow(scale);
 
     // 상단 마퀴 알림 (치트메뉴와 독립적으로 항상 실행)
