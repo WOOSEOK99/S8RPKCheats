@@ -53,11 +53,23 @@ namespace DX11Base {
       if (oQueryPerformanceCounter) {
         LARGE_INTEGER li;
         oQueryPerformanceCounter(&li);
-
-        // [MOD BEGIN] QPC 기준 초기화 (정상적인 시작점)
         s_qpcReal.store(li.QuadPart);
         s_qpcFake.store(li.QuadPart);
-        // [MOD END]
+      }
+      if (oGetTickCount) {
+        DWORD t = oGetTickCount();
+        s_gtcReal.store(t);
+        s_gtcFake.store(t);
+      }
+      if (oGetTickCount64) {
+        ULONGLONG t = oGetTickCount64();
+        s_gtc64Real.store(t);
+        s_gtc64Fake.store(t);
+      }
+      if (otimeGetTime) {
+        DWORD t = otimeGetTime();
+        s_tgtReal.store(t);
+        s_tgtFake.store(t);
       }
       s_multiplier.store(desiredMul);
     }
@@ -90,7 +102,7 @@ namespace DX11Base {
     if (mul > MAX_MULTIPLIER)
       mul = MAX_MULTIPLIER;
 
-    if (!bSpeedHack || mul == 1.0f || !IsCallerGame(caller))
+    if (!bSpeedHack || mul == 1.0f)
       return ret;
 
     // [MOD BEGIN] 안정화된 QPC 처리 핵심
@@ -126,12 +138,65 @@ namespace DX11Base {
     return ret;
   }
 
+  DWORD WINAPI hkGetTickCount() {
+    DWORD real = oGetTickCount();
+    float mul = s_multiplier.load(std::memory_order_relaxed);
+    if (!bSpeedHack || mul == 1.0f) return real;
+
+    DWORD prevReal = s_gtcReal.load(std::memory_order_relaxed);
+    DWORD delta = real - prevReal;
+    if ((int)delta < 0) delta = 0;
+    if (delta > 50) mul = 1.0f; // 급격한 스파이크 방지
+    delta = (DWORD)((float)delta * mul);
+
+    DWORD fake = s_gtcFake.load(std::memory_order_relaxed) + delta;
+    s_gtcReal.store(real, std::memory_order_relaxed);
+    s_gtcFake.store(fake, std::memory_order_relaxed);
+    return fake;
+  }
+
+  ULONGLONG WINAPI hkGetTickCount64() {
+    ULONGLONG real = oGetTickCount64();
+    float mul = s_multiplier.load(std::memory_order_relaxed);
+    if (!bSpeedHack || mul == 1.0f) return real;
+
+    ULONGLONG prevReal = s_gtc64Real.load(std::memory_order_relaxed);
+    ULONGLONG delta = real - prevReal;
+    if (delta > 50) mul = 1.0f;
+    delta = (ULONGLONG)((float)delta * mul);
+
+    ULONGLONG fake = s_gtc64Fake.load(std::memory_order_relaxed) + delta;
+    s_gtc64Real.store(real, std::memory_order_relaxed);
+    s_gtc64Fake.store(fake, std::memory_order_relaxed);
+    return fake;
+  }
+
+  DWORD WINAPI hktimeGetTime() {
+    DWORD real = otimeGetTime();
+    float mul = s_multiplier.load(std::memory_order_relaxed);
+    if (!bSpeedHack || mul == 1.0f) return real;
+
+    DWORD prevReal = s_tgtReal.load(std::memory_order_relaxed);
+    DWORD delta = real - prevReal;
+    if ((int)delta < 0) delta = 0;
+    if (delta > 50) mul = 1.0f;
+    delta = (DWORD)((float)delta * mul);
+
+    DWORD fake = s_tgtFake.load(std::memory_order_relaxed) + delta;
+    s_tgtReal.store(real, std::memory_order_relaxed);
+    s_tgtFake.store(fake, std::memory_order_relaxed);
+    return fake;
+  }
+
   void SpeedHack_Sleep_Install() {
     if (s_installed)
       return;
 
-    MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", &hkQueryPerformanceCounter,
-                     (LPVOID *)&oQueryPerformanceCounter);
+    MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", &hkQueryPerformanceCounter, (LPVOID *)&oQueryPerformanceCounter);
+    MH_CreateHookApi(L"kernel32.dll", "GetTickCount", &hkGetTickCount, (LPVOID *)&oGetTickCount);
+    MH_CreateHookApi(L"kernel32.dll", "GetTickCount64", &hkGetTickCount64, (LPVOID *)&oGetTickCount64);
+    MH_CreateHookApi(L"winmm.dll", "timeGetTime", &hktimeGetTime, (LPVOID *)&otimeGetTime);
+    
     MH_EnableHook(MH_ALL_HOOKS);
 
     ResetBases(1.0f, g_speedMultiplier);
@@ -146,7 +211,8 @@ namespace DX11Base {
       SpeedHack_Init();
     }
 
-    float desired = (bSpeedHack && p1 > 0x10000) ? g_speedMultiplier : 1.0f;
+    // 전투 중에는 주인공 주소(p1)가 0으로 풀리므로 조건에서 p1 검사를 해제하여 배속 유지
+    float desired = bSpeedHack ? g_speedMultiplier : 1.0f;
 
     // [MOD BEGIN] 배율 제한
     if (desired > MAX_MULTIPLIER)

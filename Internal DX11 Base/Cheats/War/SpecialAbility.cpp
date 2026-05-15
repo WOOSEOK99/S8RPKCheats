@@ -207,7 +207,9 @@ namespace DX11Base {
       };
 
       // 2. 버프 메모리 주입 (기존 0x02ED7A10 체인 그룹)
-      if (exeBase) {
+      static DWORD lastBuffInjectionTick = 0;
+      if (exeBase && currentTick - lastBuffInjectionTick >= 500) {
+          lastBuffInjectionTick = currentTick;
           uintptr_t p = SAResolveChain(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
           if (p) {
               // --- (A) 군악대 타겟 (분기, 고무) ---
@@ -302,9 +304,11 @@ namespace DX11Base {
       static int s_prevBurnLeader = -1;
       
       // 전투가 종료되면(파라미터가 0으로 들어옴) 리더 트래커 초기화
+      static DWORD lastBurnTick = 0;
       if (unitCountTotal == 0) {
           s_prevBurnLeader = -1;
-      } else if (exeBase) {
+      } else if (exeBase && currentTick - lastBurnTick >= 300) {
+          lastBurnTick = currentTick;
           uintptr_t activeUnitPtr = SAResolveChain(exeBase + 0x03510578, { 0x100, 0x78, 0, 0x50, 0x108, 0x50, 0x8, 0 });
           if (activeUnitPtr) {
               uintptr_t memberPtr = *(uintptr_t*)(activeUnitPtr + 0x18);
