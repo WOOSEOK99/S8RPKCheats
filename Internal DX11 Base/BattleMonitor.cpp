@@ -23,14 +23,23 @@
 
 namespace DX11Base {
 
-  // 헬퍼: 포인터 체인 풀기 (SiegeWarfare.cpp와 로직 통일)
+  // 프리징 방지를 위한 SEH(예외 처리) 기반의 안전한 포인터 체인 추적
   static uintptr_t ResolveChain(uintptr_t base, std::initializer_list<int> offsets) {
+      if (base == 0) return 0;
       uintptr_t current = base;
-      for (int offset : offsets) {
-          if (!IsValidPtr(current, 8)) return 0;
-          uintptr_t next = *(uintptr_t*)current;
-          if (!next) return 0;
-          current = next + offset;
+      
+      __try {
+          for (int offset : offsets) {
+              if (current == 0 || current < 0x10000) return 0; // 널 포인터 및 비정상 주소 방어
+              if (!IsValidPtr(current, 8)) return 0;
+              
+              uintptr_t next = *(uintptr_t*)current;
+              if (next == 0 || next < 0x10000) return 0;
+              current = next + offset;
+          }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+          // 메모리 접근 위반 발생 시 즉시 탈출하여 프리징/크래시 방지
+          return 0;
       }
       return current;
   }
@@ -150,7 +159,16 @@ namespace DX11Base {
     // 1. 현재 캡처된 주소 또는 전쟁 날짜 주소 확인
     uintptr_t addr1 = DX11Base::g_battleUnitAddr1;
     uintptr_t addr2 = DX11Base::g_battleUnitAddr2;
-    bool battleActive = (addr1 != 0 || addr2 != 0) || DX11Base::IsSiegeBattleActive();
+    
+    // [방어 코드 2] IsSiegeBattleActive 같이 무거운 함수 캐싱 및 예외 방지
+    bool isSiegeActive = false;
+    __try {
+        isSiegeActive = DX11Base::IsSiegeBattleActive();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        isSiegeActive = false;
+    }
+    
+    bool battleActive = (addr1 != 0 || addr2 != 0) || isSiegeActive;
 
     if (battleActive) {
       // [전투 중] 주소가 포착됨 또는 날짜 주소 확인됨
@@ -158,64 +176,85 @@ namespace DX11Base {
 
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
       
-      // 1. 공통 포인터 중앙 집중 해결 
-      uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
-      uintptr_t dayBaseAddr  = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0 });
+      // [방어 코드 3] 극심한 CPU 스로틀 방지를 위한 체인 주소 500ms 갱신 지연 캐시
+      static uintptr_t s_cachedUnitListBase = 0;
+      static uintptr_t s_cachedDayBaseAddr = 0;
+      static uintptr_t s_cachedDefenderAddr = 0;
+      static DWORD s_lastResolveTick = 0;
+      DWORD currentTick = GetTickCount();
+
+      if (currentTick - s_lastResolveTick >= 500 || !s_cachedUnitListBase) {
+          s_lastResolveTick = currentTick;
+          s_cachedUnitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
+          s_cachedDayBaseAddr  = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0 });
+          s_cachedDefenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
+      }
+      
+      uintptr_t unitListBase = s_cachedUnitListBase;
+      uintptr_t dayBaseAddr  = s_cachedDayBaseAddr;
+      uintptr_t defenderAddr = s_cachedDefenderAddr;
       uintptr_t dayAddr      = dayBaseAddr ? (dayBaseAddr + 0x28) : 0;
       
       int unitCountTotal = 0;
-      if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
-          unitCountTotal = *(unsigned char*)(unitListBase - 0x08);
-      }
+      __try {
+          if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
+              unitCountTotal = *(unsigned char*)(unitListBase - 0x08);
+          }
+      } __except(EXCEPTION_EXECUTE_HANDLER) { unitCountTotal = 0; }
 
       uint8_t defenderForce = 0;
-      uintptr_t defenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
-      if (defenderAddr && IsValidPtr(defenderAddr, 1)) {
-          defenderForce = *(uint8_t*)defenderAddr;
-      }
+      __try {
+          if (defenderAddr && IsValidPtr(defenderAddr, 1)) {
+              defenderForce = *(uint8_t*)defenderAddr;
+          }
+      } __except(EXCEPTION_EXECUTE_HANDLER) { defenderForce = 0; }
 
       int currentDay = -1;
-      if (dayAddr && IsValidPtr(dayAddr, 1)) {
-          currentDay = (int)(*(unsigned char*)dayAddr);
-      }
+      __try {
+          if (dayAddr && IsValidPtr(dayAddr, 1)) {
+              currentDay = (int)(*(unsigned char*)dayAddr);
+          }
+      } __except(EXCEPTION_EXECUTE_HANDLER) { currentDay = -1; }
 
       // 아직 리프레시를 안 했다면 실행
       if (!s_isWarModsApplied) {
         AddLog(u8"[자동화] 전투 감지(%llX) -> 모든 전쟁 모드 리프레시", addr1);
 
-        // 켜져 있는 기능들에 대해 원본 복구 후 다시 적용 (Refresh)
-        if (bSelfHeal) {
-          DX11Base::SetSelfHeal(false);
-          DX11Base::SetSelfHeal(true);
-        }
-        if (bDongto) {
-          DX11Base::SetDongto(false);
-          DX11Base::SetDongto(true);
-        }
-        if (bTerrainIgnore) {
-          DX11Base::SetTerrainIgnore(false);
-          DX11Base::SetTerrainIgnore(true);
-        }
-        if (bDefBuilding) {
-          DX11Base::SetDefBuildingBoost(false);
-          DX11Base::SetDefBuildingBoost(true);
-        }
-        if (bCatapult) {
-          DX11Base::SetCatapultCheat(false);
-          DX11Base::SetCatapultCheat(true);
-        }
-        if (bCelestial) {
-          DX11Base::SetCelestialMod(false);
-          DX11Base::SetCelestialMod(true);
-        }
-        if (bSiegeWarfare) {
-          DX11Base::SetSiegeWarfare(false);
-          DX11Base::SetSiegeWarfare(true);
-        }
+        __try {
+            // 켜져 있는 기능들에 대해 원본 복구 후 다시 적용 (Refresh)
+            if (bSelfHeal) {
+              DX11Base::SetSelfHeal(false);
+              DX11Base::SetSelfHeal(true);
+            }
+            if (bDongto) {
+              DX11Base::SetDongto(false);
+              DX11Base::SetDongto(true);
+            }
+            if (bTerrainIgnore) {
+              DX11Base::SetTerrainIgnore(false);
+              DX11Base::SetTerrainIgnore(true);
+            }
+            if (bDefBuilding) {
+              DX11Base::SetDefBuildingBoost(false);
+              DX11Base::SetDefBuildingBoost(true);
+            }
+            if (bCatapult) {
+              DX11Base::SetCatapultCheat(false);
+              DX11Base::SetCatapultCheat(true);
+            }
+            if (bCelestial) {
+              DX11Base::SetCelestialMod(false);
+              DX11Base::SetCelestialMod(true);
+            }
+            if (bSiegeWarfare) {
+              DX11Base::SetSiegeWarfare(false);
+              DX11Base::SetSiegeWarfare(true);
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
         s_isWarModsApplied = true;
         // 커스텀 전법 횟수 적용 (전투 리프레시 시 1회 수행)
-        UpdateBattleUnitSkills(false);
+        __try { UpdateBattleUnitSkills(false); } __except(EXCEPTION_EXECUTE_HANDLER) {}
         s_lastAppliedDay = currentDay;
       }
 
@@ -229,15 +268,32 @@ namespace DX11Base {
           s_lastAppliedDay = currentDay;
       }
 
-      // [전투 환경 업데이트 - 날씨/일자/지형 등]
-      DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
+      // [실시간 기능 타임 슬라이싱 (부하 분산)]
+      // MonitorBattleStatus가 100ms 주기로 호출되므로, 
+      // 한 틱에 하나씩만 번갈아 실행하여 CPU 스파이크(렉)를 1/3로 줄입니다.
+      static int s_tickPhase = 0;
+      
+      if (s_tickPhase == 0) {
+          // [전투 환경 업데이트 - 날씨/일자/지형 등]
+          __try {
+              DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
+          } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      } 
+      else if (s_tickPhase == 1) {
+          // [공성전 업데이트]
+          __try {
+              DX11Base::UpdateSiegeWarfare(dayAddr, unitCountTotal, defenderForce, unitListBase);
+              DX11Base::UpdateSiegeWarfare2(dayAddr, unitCountTotal, defenderForce, unitListBase);
+          } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      } 
+      else if (s_tickPhase == 2) {
+          // [특수 기능 실시간 체크] 
+          __try {
+              UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
+          } __except(EXCEPTION_EXECUTE_HANDLER) {}
+      }
 
-      // [공성전 업데이트] 매 프레임/하트비트마다 호출
-      DX11Base::UpdateSiegeWarfare(dayAddr, unitCountTotal, defenderForce, unitListBase);
-      DX11Base::UpdateSiegeWarfare2(dayAddr, unitCountTotal, defenderForce, unitListBase);
-
-      // [특수 기능 실시간 체크] 
-      UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
+      s_tickPhase = (s_tickPhase + 1) % 3;
 
       // [핵심: 하트비트] 읽은 주소를 즉시 비웁니다.
       DX11Base::g_battleUnitAddr1 = 0;

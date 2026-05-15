@@ -93,49 +93,30 @@ namespace DX11Base {
     Match first = castleMatches[0];
     int firstRow = first.index / 20;
 
-    auto writeShallow = [&](uintptr_t baseAddr, int delta) {
-      uintptr_t target = baseAddr + (delta * 0x40);
+    // Lua shallowOdd / shallowEven: firstBaseAddr(castleMatches[0]) 기준 단일 적용
+    auto writeShallow = [&](int delta) {
+      uintptr_t target = first.addr + (delta * 0x40);
       if (IsValidPtr(target, 8)) {
         *(uintptr_t *)target = shallowAddrValue;
       }
     };
 
-    if (firstRow % 2 == 1) { // 홀수줄
-      std::vector<int> firstIndices = {-21, -20, -19, -18, -17, -16, -1, 5};
-      for (int idx : firstIndices)
-        writeShallow(first.addr, idx);
-
-      if (castleMatches.size() >= 23) {
-        Match last = castleMatches[22]; // Lua 23rd match is index 22
-        std::vector<int> lastIndices = {-5, 1, 15, 16, 17, 18, 19, 20};
-        for (int idx : lastIndices)
-          writeShallow(last.addr, idx);
-      }
-    } else { // 짝수줄
-      std::vector<int> firstIndices = {-20, -19, -18, -17, -16, -15, -1, 5};
-      for (int idx : firstIndices)
-        writeShallow(first.addr, idx);
-
-      if (castleMatches.size() >= 23) {
-        Match last = castleMatches[22];
-        std::vector<int> lastIndices = {-5, 1, 16, 17, 18, 19, 20, 21};
-        for (int idx : lastIndices)
-          writeShallow(last.addr, idx);
-      }
-    }
-
-    // 추가 룰
-    struct Rule {
-      int order;
-      int delta;
-    };
-    Rule rules[] = {{5, -1}, {9, -1}, {14, -1}, // Lua order 6, 10, 15 -> Index 5, 9, 14
-                    {5, 4},  {9, 5},  {14, 4}};
-
-    for (auto &r : rules) {
-      if (castleMatches.size() > (size_t)r.order) {
-        writeShallow(castleMatches[r.order].addr, r.delta);
-      }
+    if (firstRow % 2 == 1) { // 홀수줄 (shallowOdd)
+      static const int shallowOdd[] = {
+        -21, -20, -19, -18, -17, -16,
+        -1, 5, 19, 24, 39, 45, 59, 64, 79, 85,
+        99, 100, 101, 102, 103, 104
+      };
+      for (int idx : shallowOdd)
+        writeShallow(idx);
+    } else { // 짝수줄 (shallowEven)
+      static const int shallowEven[] = {
+        -20, -19, -18, -17, -16, -15,
+        -1, 5, 20, 25, 39, 45, 60, 65, 79, 85,
+        100, 101, 102, 103, 104, 105
+      };
+      for (int idx : shallowEven)
+        writeShallow(idx);
     }
 
     return true;
@@ -336,45 +317,32 @@ namespace DX11Base {
         *(uintptr_t*)target = shallowAddrValue;
     };
 
-    // 2칸 = 1칸 인덱스 + 추가 외곽 인덱스
-    if (firstRow % 2 == 1) { // 홀수줄
-      std::vector<int> firstIndices = {
-        -21, -20, -19, -18, -17, -16, -1, 5,  // 1칸
-        -41, -40, -39, -38, -37, -36, -35, -22, -2, 6, 11, 25, 26 // 2칸 추가
+    // Lua shallowOdd / shallowEven 배열을 firstBaseAddr 기준으로 전부 적용
+    // (castleMatches[0].addr 하나를 기준으로 모든 delta 적용)
+    if (firstRow % 2 == 1) { // 홀수줄 (shallowOdd)
+      static const int shallowOdd[] = {
+        -41, -40, -39, -38, -37, -36, -35,          // 최외곽 상단
+        -22, -21, -20, -19, -18, -17, -16, -15,     // 외곽 상단
+        -2, -1, 5, 6, 18, 19, 24, 25,               // 성 좌우 인접
+        38, 39, 45, 46, 58, 59, 64, 65,             // 중단 좌우
+        78, 79, 85, 86,                              // 하단 좌우
+        98, 99, 100, 101, 102, 103, 104, 105,       // 외곽 하단
+        119, 120, 121, 122, 123, 124, 125            // 최외곽 하단
       };
-      for (int idx : firstIndices) writeShallow(first.addr, idx);
-
-      if (castleMatches.size() >= 23) {
-        Match last = castleMatches[22];
-        std::vector<int> lastIndices = {
-          -5, 1, 15, 16, 17, 18, 19, 20,   // 1칸
-          -10, -4, 2, 21, 22, 35, 36, 37, 38, 39, 40, 41  // 2칸 추가
-        };
-        for (int idx : lastIndices) writeShallow(last.addr, idx);
-      }
-    } else { // 짝수줄
-      std::vector<int> firstIndices = {
-        -20, -19, -18, -17, -16, -15, -1, 5,  // 1칸
-        -40, -39, -38, -37, -36, -35, -34, -21, -2, 6, 10, 24, 25 // 2칸 추가
+      for (int idx : shallowOdd)
+        writeShallow(first.addr, idx);
+    } else { // 짝수줄 (shallowEven)
+      static const int shallowEven[] = {
+        -41, -40, -39, -38, -37, -36, -35,          // 최외곽 상단
+        -21, -20, -19, -18, -17, -16, -15, -14,     // 외곽 상단
+        -2, -1, 5, 6, 19, 20, 25, 26,               // 성 좌우 인접
+        38, 39, 45, 46, 59, 60, 65, 66,             // 중단 좌우
+        78, 79, 85, 86,                              // 하단 좌우
+        99, 100, 101, 102, 103, 104, 105, 106,      // 외곽 하단
+        119, 120, 121, 122, 123, 124, 125            // 최외곽 하단
       };
-      for (int idx : firstIndices) writeShallow(first.addr, idx);
-
-      if (castleMatches.size() >= 23) {
-        Match last = castleMatches[22];
-        std::vector<int> lastIndices = {
-          -5, 1, 16, 17, 18, 19, 20, 21,   // 1칸
-          -10, -4, 2, 22, 23, 36, 37, 38, 39, 40, 41, 42  // 2칸 추가
-        };
-        for (int idx : lastIndices) writeShallow(last.addr, idx);
-      }
-    }
-
-    // 추가 룰 (1칸과 동일)
-    struct Rule { int order; int delta; };
-    Rule rules[] = {{5, -1}, {9, -1}, {14, -1}, {5, 4}, {9, 5}, {14, 4}};
-    for (auto& r : rules) {
-      if (castleMatches.size() > (size_t)r.order)
-        writeShallow(castleMatches[r.order].addr, r.delta);
+      for (int idx : shallowEven)
+        writeShallow(first.addr, idx);
     }
 
     return true;
