@@ -41,7 +41,11 @@ namespace DX11Base {
   // 대군사 권한 강화: 전법 강화 / 특수 지시 등
   void SetGrandStrategist(bool enable);
 
-  // ── 런타임 갱신 ──────────────────────────────────────
+  // ── 런타임 갱신 ──────────────────────────────────────────────
+  // [쾐싱 아키텍처] 전투 진입 시 1회 스캔하여 부대 정보를 메모리에 캐싱합니다.
+  void InitializeBattleCache(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase);
+  // 전투 종료 시 캐시를 해제합니다.
+  void ClearBattleCache();
   // 전장에 배치된 무장들을 스캔하여 특수 능력을 활성화/비활성화합니다.
   void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase);
 

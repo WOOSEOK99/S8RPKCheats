@@ -253,6 +253,8 @@ namespace DX11Base {
         } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
         s_isWarModsApplied = true;
+        // 캐싱 빌드: 전투 진입 시 1회 전체 부대 스캔 → 이후 UpdateSpecialAbilities는 캐시 매칭만 수행
+        __try { DX11Base::InitializeBattleCache((int)unitCountTotal, unitListBase, exeBase); } __except(EXCEPTION_EXECUTE_HANDLER) {}
         // 커스텀 전법 횟수 적용 (전투 리프레시 시 1회 수행)
         __try { UpdateBattleUnitSkills(false); } __except(EXCEPTION_EXECUTE_HANDLER) {}
         s_lastAppliedDay = currentDay;
@@ -306,6 +308,8 @@ namespace DX11Base {
         s_lastSeenTime = 0;
         s_lastAppliedDay = -1;
         
+        // 캐시 해제
+        __try { DX11Base::ClearBattleCache(); } __except(EXCEPTION_EXECUTE_HANDLER) {}
         // 전투가 끝나면 특수능력 룰을 원래 데이터(normal)로 안전하게 복구합니다.
         UpdateSpecialAbilities(0, 0, (uintptr_t)GetModuleHandle(NULL));
       }
