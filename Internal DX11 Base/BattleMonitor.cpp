@@ -22,6 +22,11 @@
 #include "showlog.h"
 
 namespace DX11Base {
+  // 전역 캐시 주소 (모든 함수에서 공유)
+  static uintptr_t s_cachedUnitListBase = 0;
+  static uintptr_t s_cachedDayBaseAddr = 0;
+  static uintptr_t s_cachedDefenderAddr = 0;
+  static DWORD s_lastResolveTick = 0;
 
   // 프리징 방지를 위한 SEH(예외 처리) 기반의 안전한 포인터 체인 추적
   static uintptr_t ResolveChain(uintptr_t base, std::initializer_list<int> offsets) {
@@ -182,10 +187,6 @@ namespace DX11Base {
     uintptr_t addr2 = DX11Base::g_battleUnitAddr2;
 
     // 2. 극심한 CPU 스로틀 방지를 위한 체인 주소 500ms 갱신 지연 캐시
-    static uintptr_t s_cachedUnitListBase = 0;
-    static uintptr_t s_cachedDayBaseAddr = 0;
-    static uintptr_t s_cachedDefenderAddr = 0;
-    static DWORD s_lastResolveTick = 0;
     DWORD currentTick = GetTickCount();
 
     if (currentTick - s_lastResolveTick >= 500 || (!s_cachedUnitListBase && !s_cachedDayBaseAddr)) {
@@ -270,6 +271,10 @@ namespace DX11Base {
           if (bSiegeWarfare) {
             DX11Base::SetSiegeWarfare(false);
             DX11Base::SetSiegeWarfare(true);
+          }
+          else if (bSiegeWarfare2) {
+            DX11Base::SetSiegeWarfare2(false);
+            DX11Base::SetSiegeWarfare2(true);
           }
         } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
@@ -425,6 +430,24 @@ namespace DX11Base {
       return true;
     }
     return false;
+  }
+
+  int GetBattleDay() {
+    if (!s_cachedDayBaseAddr) return -1;
+    uintptr_t dayAddr = s_cachedDayBaseAddr + 0x28;
+    if (IsValidPtr(dayAddr, 1)) {
+        return (int)(*(uint8_t*)dayAddr);
+    }
+    return -1;
+  }
+
+  int GetFinalDay() {
+    if (!s_cachedDayBaseAddr) return -1;
+    uintptr_t finalAddr = s_cachedDayBaseAddr + 0x2C;
+    if (IsValidPtr(finalAddr, 1)) {
+        return (int)(*(uint8_t*)finalAddr);
+    }
+    return -1;
   }
 
 } // namespace DX11Base
