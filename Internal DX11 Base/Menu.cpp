@@ -32,7 +32,7 @@ namespace DX11Base {
     if (!bShowBattleEnvWin)
       return;
 
-    ImGui::SetNextWindowSize(ImVec2(550 * scale, 150 * scale), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(670 * scale, 150 * scale), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(u8"전투 환경 및 조건 설정###BattleEnvWin", &bShowBattleEnvWin)) {
       if (ImGui::BeginTable("BattleEnvTable", 4, ImGuiTableFlags_None)) {
         ImGui::TableNextColumn();
@@ -107,7 +107,8 @@ namespace DX11Base {
                              u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                             u8"여울에 위치한 수비 부대는 매턴 총병력의 %d%%가 회복됨. (단, 타세력 동맹군은 제외)", iSiegeHealRate);
+                             u8"여울에 위치한 수비 부대는 매턴 총병력의 %d%%가 회복됨. (단, 타세력 동맹군은 제외)",
+                             iSiegeHealRate);
           ImGui::EndTooltip();
         }
 
@@ -181,25 +182,26 @@ namespace DX11Base {
                              u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                             u8"여울에 위치한 수비 부대는 매턴 총병력의 %d%%가 회복됨. (단, 타세력 동맹군은 제외)", iSiegeHealRate);
+                             u8"여울에 위치한 수비 부대는 매턴 총병력의 %d%%가 회복됨. (단, 타세력 동맹군은 제외)",
+                             iSiegeHealRate);
           ImGui::EndTooltip();
         }
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(u8"부대회복 비율 :");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.0f * scale);
+        if (ImGui::InputInt("##SiegeHealRate", &iSiegeHealRate, 1, 5)) {
+          if (iSiegeHealRate < 0)
+            iSiegeHealRate = 0;
+          if (iSiegeHealRate > 100)
+            iSiegeHealRate = 100;
+          SaveConfig();
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(u8"%");
 
         ImGui::EndTable();
       }
-      ImGui::Separator();
-      ImGui::Spacing();
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(u8"부대회복 비율 :");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(80.0f * scale);
-      if (ImGui::InputInt("##SiegeHealRate", &iSiegeHealRate, 1, 5)) {
-        if (iSiegeHealRate < 0) iSiegeHealRate = 0;
-        if (iSiegeHealRate > 100) iSiegeHealRate = 100;
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      ImGui::TextUnformatted(u8"%");
     }
     ImGui::End();
   }
@@ -470,7 +472,6 @@ namespace DX11Base {
       }
     }
   }
-
 
   void Menu::DrawMenu() {
     ImGuiIO &io = ImGui::GetIO();
@@ -934,6 +935,5 @@ namespace DX11Base {
 
       ImGui::EndPopup();
     }
-
   }
 } // namespace DX11Base

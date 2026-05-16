@@ -159,12 +159,12 @@ namespace DX11Base {
       for (int k = 0; k < 5; k++) WriteByteIfDiff(tacticBase + tgts[k], targetVal);
   }
 
-  void UpdateBattleEnvironment(uintptr_t exeBase, uintptr_t dayBaseAddr, uintptr_t unitListBase) {
+  void UpdateBattleEnvironment(uintptr_t exeBase, uintptr_t dayBaseAddr, uintptr_t unitListBase, bool force) {
       if (!exeBase) return;
 
       static DWORD lastEnvTick = 0;
       DWORD currentTick = GetTickCount();
-      if (currentTick - lastEnvTick < 200) return;
+      if (!force && currentTick - lastEnvTick < 200) return;
       lastEnvTick = currentTick;
 
       // 1. 함선 병기화 처리 (tacticBase 내부에서 자체 획득, 다른 게이트에 막히지 않도록 최상단 배치)

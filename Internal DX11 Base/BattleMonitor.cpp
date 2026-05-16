@@ -291,7 +291,7 @@ namespace DX11Base {
 
         // 전투 진입 즉시 환경(날짜 등) 업데이트 실행하여 알림에 정확한 데이터 반영
         __try {
-            DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
+            DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase, true);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         s_isWarModsApplied = true;
@@ -350,6 +350,14 @@ namespace DX11Base {
       // [추가] 날짜 변경 시 알림 팝업 출력
       // s_tickPhase 로직 이후에 배치하여 UpdateBattleEnvironment가 적용된 후의 정확한 날짜를 가져옵니다.
       if (currentDay > 0 && currentDay != s_lastNotifiedDay) {
+          // [중요] 유동 날짜 기능 사용 시 부대 정보가 아직 로드되지 않았으면 다음 틱으로 미룸 (첫날 29일 오류 방지)
+          if (bDateDynamic && (!unitListBase || !IsValidPtr(unitListBase - 0x08, 1))) {
+              return; 
+          }
+
+          // 알림 발송 전 강제로 환경 업데이트 실행 (정확한 기한 계산 보장)
+          DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase, true);
+
           int finalDay = GetFinalDay();
           int remain = (finalDay >= currentDay) ? (finalDay - currentDay) : 0;
           NotifyBattleDay(remain);
