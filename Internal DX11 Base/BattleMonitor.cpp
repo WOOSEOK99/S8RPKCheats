@@ -13,6 +13,7 @@
 #include "Cheats/War/SpecialAbility.h"
 #include "Cheats/Officer/StatMonitor.h"
 #include "Cheats/System/SystemMonth.h"
+#include "Cheats/System/TengiCave.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Cheats/System/SkillCountManager.h"
 #include "MenuState.h"
@@ -317,6 +318,7 @@ namespace DX11Base {
 
   void MonitorTechStatus() {
     static uint8_t s_lastAppliedMonth = 0xFF;
+    static bool s_wasCouncil = false;
 
     uint8_t sm = GetSystemMonthValue();
     uint8_t rm = GetCurrentMonth();
@@ -344,6 +346,30 @@ namespace DX11Base {
         s_lastAppliedMonth = 0xFF;
       }
     }
+
+    // 평정 -> 도시 생활(내정 등) 전환 시점 감지
+    if (!isCouncil && s_wasCouncil) {
+      if (bCancelCastleEvent) {
+        uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
+        if (captAddr != 0) {
+          uintptr_t addr80 = captAddr - 0x10;
+          uintptr_t addr90 = captAddr;
+          uintptr_t addrA0 = captAddr + 0x10;
+
+          // 포인터 유효성 검사
+          if (DX11Base::IsValidPtr(addr80, 2) && DX11Base::IsValidPtr(addr90, 1) && DX11Base::IsValidPtr(addrA0, 2)) {
+            if (*(uint8_t *)(addr80) == 0x90 && *(uint8_t *)(addr80 + 1) == 0xE0 && *(uint8_t *)(addr90) == 0xE0 &&
+                *(uint8_t *)(addrA0) == 0x28 && *(uint8_t *)(addrA0 + 1) == 0xCB) {
+
+              // 조건 일치시 전기 취소와 동일하게 완전히 초기화
+              DX11Base::CancelTengi();
+              AddLog(u8"[자동화] 평정 종료: 중지 성성 전기를 취소했습니다.");
+            }
+          }
+        }
+      }
+    }
+    s_wasCouncil = isCouncil;
 
     UpdateBattleMapAuto(isCouncil);
     UpdateAutoSpecialtyDistribution(isCouncil);

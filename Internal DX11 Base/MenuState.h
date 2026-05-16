@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.753"
+#define SAM8_CHEAT_VERSION "V0.754"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -178,7 +178,7 @@ namespace DX11Base {
   extern bool bFileLog;             // 파일 로그 출력 변수
 
   extern short g_TerrainBonusTable[13][18]; // 지형 보너스 테이블 [병종1~12][지형1~17]
-  extern bool bShowTerrainBonusWin;        // 지형 보너스 설정 창 표시 여부
+  extern bool bShowTerrainBonusWin;         // 지형 보너스 설정 창 표시 여부
 
   extern void *g_RangeTextures[12]; // ID3D11ShaderResourceView* 배열 (1~11번)
 

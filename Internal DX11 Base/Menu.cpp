@@ -371,25 +371,7 @@ namespace DX11Base {
       }
     }
 
-    // 중지 성성 취소 무조건 취소 모니터링 루프
-    if (bCancelCastleEvent) {
-      uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
-      if (captAddr != 0) {
-        uintptr_t addr80 = captAddr - 0x10;
-        uintptr_t addr90 = captAddr;
-        uintptr_t addrA0 = captAddr + 0x10;
 
-        // 포인터 유효성 검사
-        if (DX11Base::IsValidPtr(addr80, 2) && DX11Base::IsValidPtr(addr90, 1) && DX11Base::IsValidPtr(addrA0, 2)) {
-          if (*(uint8_t *)(addr80) == 0x90 && *(uint8_t *)(addr80 + 1) == 0xE0 && *(uint8_t *)(addr90) == 0xE0 &&
-              *(uint8_t *)(addrA0) == 0x28 && *(uint8_t *)(addrA0 + 1) == 0xCB) {
-
-            // 조건 일치시 전기 취소와 동일하게 완전히 초기화 (0x18, 0x08, 0x10 초기화)
-            DX11Base::CancelTengi();
-          }
-        }
-      }
-    }
 
     // 전쟁 자동화 (전쟁 관련 변수 중 하나라도 켜져 있으면 캡처 활성화)
     static bool s_autoCaptureStarted = false;

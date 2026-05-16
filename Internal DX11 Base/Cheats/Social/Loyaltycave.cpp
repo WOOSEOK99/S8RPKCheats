@@ -76,9 +76,7 @@ namespace DX11Base {
           nullptr, 0,
           [](LPVOID) -> DWORD {
             uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-            MODULEINFO mi;
-            GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi));
-            uintptr_t searchEnd = exeBase + mi.SizeOfImage;
+            uintptr_t searchEnd = exeBase + 0x3000000; // 게임의 .text(코드) 영역 크기 내외로 제한 (약 48MB)
 
             if (!g_loyaltyHookAddr) {
               uintptr_t found = FindPattern(exeBase, searchEnd, "0F B6 86 EC 00 00 00");
