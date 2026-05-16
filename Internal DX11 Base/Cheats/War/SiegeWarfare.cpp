@@ -12,7 +12,7 @@ namespace DX11Base {
   static int g_siegePrevDay = -1;
 
   const int SHALLOW_TERRAIN_VALUE = 10;
-  const float HEAL_RATE = 0.10f;
+  // HEAL_RATE는 전역 변수 iSiegeHealRate를 사용합니다.
 
   // ───────────────────────────────────────────────
   //  포인터 해석 헬퍼
@@ -261,7 +261,7 @@ namespace DX11Base {
         uint8_t terrainVal = *(uint8_t *)terrainAddr;
 
         if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE) {
-          int heal = (int)(maxVal * HEAL_RATE);
+          int heal = (int)(maxVal * ((float)iSiegeHealRate / 100.0f));
           if (heal < 1) heal = 1;
 
           int newCur = (int)curVal + heal;
@@ -454,7 +454,7 @@ namespace DX11Base {
           uint8_t terrainVal = *(uint8_t *)terrainAddr;
 
           if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE) {
-            int heal = (int)(maxVal * HEAL_RATE);
+            int heal = (int)(maxVal * ((float)iSiegeHealRate / 100.0f));
             if (heal < 1) heal = 1;
             int newCur = (int)curVal + heal;
             if (newCur > (int)maxVal) newCur = (int)maxVal;

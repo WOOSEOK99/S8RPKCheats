@@ -59,6 +59,7 @@ namespace DX11Base {
   extern bool bTerrainAbilityAtkDef;
   extern bool bTerrainAbilityAll;
   extern bool bSiegeWarfare2;
+  extern int iSiegeHealRate;
   extern bool bShowBattleEnvWin;
 
   // 특수 능력 (SpecialAbility)

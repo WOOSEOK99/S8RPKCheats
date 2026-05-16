@@ -54,6 +54,7 @@ namespace DX11Base {
   bool bTerrainAbilityAtkDef = false;
   bool bTerrainAbilityAll = false;
   bool bSiegeWarfare2 = false;
+  int iSiegeHealRate = 10;
   bool bShowBattleEnvWin = false;
 
   // 특수 능력 (SpecialAbility)
