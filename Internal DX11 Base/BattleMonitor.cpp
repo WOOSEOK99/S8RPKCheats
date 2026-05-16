@@ -173,6 +173,7 @@ namespace DX11Base {
 
   void MonitorBattleStatus() {
     static bool s_isWarModsApplied = false;
+    static bool s_isCacheBuilt = false;
     static float s_lastSeenTime = 0.0f;
     static int s_lastAppliedDay = -1;
     static int s_lastNotifiedDay = -1;
@@ -183,6 +184,7 @@ namespace DX11Base {
     if (gameBase == 0) {
       if (s_isWarModsApplied) {
         s_isWarModsApplied = false;
+        s_isCacheBuilt = false;
         s_lastSeenTime = 0;
         s_lastAppliedDay = -1;
         DX11Base::g_battleUnitAddr1 = 0;
@@ -210,8 +212,24 @@ namespace DX11Base {
     }
 
     uintptr_t dayAddr = s_cachedDayBaseAddr ? (s_cachedDayBaseAddr + 0x28) : 0;
-    bool isSiegeActive = (dayAddr != 0 && IsValidPtr(dayAddr, 1));
-    bool battleActive = (addr1 != 0 || addr2 != 0) || isSiegeActive;
+    
+    // 날짜 데이터 유효성 검사 (1일~30일 사이인지 확인)
+    bool isDateValid = false;
+    if (dayAddr > 0x10000 && IsValidPtr(dayAddr, 1)) {
+        uint8_t d = *(uint8_t*)dayAddr;
+        if (d > 0 && d <= 30) isDateValid = true;
+    }
+
+    // 부대 리스트 유효성 검사 (부대 수가 1~60 사이인지 확인)
+    bool isUnitListValid = false;
+    if (s_cachedUnitListBase > 0x10000 && IsValidPtr(s_cachedUnitListBase - 0x08, 1)) {
+        uint8_t count = *(uint8_t*)(s_cachedUnitListBase - 0x08);
+        if (count > 0 && count <= 60) isUnitListValid = true;
+    }
+    
+    // 전투 활성화 조건: 훅 포착 OR 올바른 날짜 유효 OR 올바른 부대 리스트 유효
+    // (날짜 주소가 일시적으로 사라지더라도 부대 리스트가 있으면 전투 유지)
+    bool battleActive = (addr1 != 0 || addr2 != 0) || isDateValid || isUnitListValid;
 
     if (battleActive) {
       // [전투 중] 주소가 포착됨 또는 날짜 주소 확인됨
@@ -224,7 +242,7 @@ namespace DX11Base {
 
       int unitCountTotal = 0;
       __try {
-        if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
+        if (unitListBase > 0x10000 && IsValidPtr(unitListBase - 0x08, 1)) {
           unitCountTotal = *(unsigned char *)(unitListBase - 0x08);
         }
       } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -233,7 +251,7 @@ namespace DX11Base {
 
       uint8_t defenderForce = 0;
       __try {
-        if (defenderAddr && IsValidPtr(defenderAddr, 1)) {
+        if (defenderAddr > 0x10000 && IsValidPtr(defenderAddr, 1)) {
           defenderForce = *(uint8_t *)defenderAddr;
         }
       } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -242,7 +260,7 @@ namespace DX11Base {
 
       int currentDay = -1;
       __try {
-        if (dayAddr && IsValidPtr(dayAddr, 1)) {
+        if (dayAddr > 0x10000 && IsValidPtr(dayAddr, 1)) {
           currentDay = (int)(*(unsigned char *)dayAddr);
         }
       } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -297,18 +315,21 @@ namespace DX11Base {
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         s_isWarModsApplied = true;
-        // 캐싱 빌드: 전투 진입 시 1회 전체 부대 스캔 → 이후 UpdateSpecialAbilities는 캐시 매칭만 수행
+        // 환경 변수 캐싱
         __try {
-          DX11Base::InitializeBattleCache((int)unitCountTotal, unitListBase, exeBase);
           DX11Base::InitBattleEnvCache(exeBase);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
-        // 커스텀 전법 횟수 적용 (전투 리프레시 시 1회 수행)
-        __try {
-          UpdateBattleUnitSkills(false);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-        }
         s_lastAppliedDay = currentDay;
+      }
+
+      // 부대가 스폰된 시점에 1회 한정으로 캐시 빌드 및 커스텀 전법 횟수 주입
+      if (!s_isCacheBuilt && unitCountTotal > 0) {
+          __try {
+            DX11Base::InitializeBattleCache((int)unitCountTotal, unitListBase, exeBase);
+            UpdateBattleUnitSkills(false);
+            s_isCacheBuilt = true;
+          } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
 
       // [추가] 1일차가 시작될 때 한 번 더 적용 (포진 등이 끝나고 실제 전투 시작 시 초기화 대응)
@@ -321,49 +342,50 @@ namespace DX11Base {
         s_lastAppliedDay = currentDay;
       }
 
-      // [실시간 기능 타임 슬라이싱 (부하 분산)]
-      // MonitorBattleStatus가 100ms 주기로 호출되므로,
-      // 한 틱에 하나씩만 번갈아 실행하여 CPU 스파이크(렉)를 1/3로 줄입니다.
-      static int s_tickPhase = 0;
+      // [특수 기능 실시간 체크] (반응속도를 위해 틱 분산 없이 매 틱(100ms) 실행)
+      if (unitListBase > 0x10000) {
+          __try {
+            UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
+          } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
 
+      // 만약 unitListBase나 dayBaseAddr가 비정상이라면(예: 전투 종료 직후), 
+      // 하위 함수에서 수많은 예외가 터져 렉을 유발하므로 즉시 실행을 차단합니다.
+      static int s_tickPhase = 0;
+      
       if (s_tickPhase == 0) {
         // [전투 환경 업데이트 - 날씨/일자/지형 등]
-        __try {
-          DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (unitListBase > 0x10000 && dayBaseAddr > 0x10000) {
+            __try {
+              DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
       } else if (s_tickPhase == 1) {
         // [공성전 업데이트]
-        __try {
-          DX11Base::UpdateSiegeWarfare(dayAddr, unitCountTotal, defenderForce, unitListBase);
-          DX11Base::UpdateSiegeWarfare2(dayAddr, unitCountTotal, defenderForce, unitListBase);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-        }
-      } else if (s_tickPhase == 2) {
-        // [특수 기능 실시간 체크]
-        __try {
-          UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (unitListBase > 0x10000 && dayBaseAddr > 0x10000) {
+            __try {
+              DX11Base::UpdateSiegeWarfare(dayAddr, unitCountTotal, defenderForce, unitListBase);
+              DX11Base::UpdateSiegeWarfare2(dayAddr, unitCountTotal, defenderForce, unitListBase);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
       }
-
-      s_tickPhase = (s_tickPhase + 1) % 3;
+      s_tickPhase = (s_tickPhase + 1) % 2;
 
       // [추가] 날짜 변경 시 알림 팝업 출력
       // s_tickPhase 로직 이후에 배치하여 UpdateBattleEnvironment가 적용된 후의 정확한 날짜를 가져옵니다.
       if (currentDay > 0 && currentDay != s_lastNotifiedDay) {
           // [중요] 유동 날짜 기능 사용 시 부대 정보가 아직 로드되지 않았으면 다음 틱으로 미룸 (첫날 29일 오류 방지)
           if (bDateDynamic && (!unitListBase || !IsValidPtr(unitListBase - 0x08, 1))) {
-              return; 
+              // 부대 데이터가 로드될 때까지 알림을 보류합니다. (return으로 함수를 강제 종료하지 않아 하트비트를 유지합니다)
+          } else {
+              // 알림 발송 전 강제로 환경 업데이트 실행 (정확한 기한 계산 보장)
+              DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase, true);
+
+              int finalDay = GetFinalDay();
+              int remain = (finalDay >= currentDay) ? (finalDay - currentDay) : 0;
+              NotifyBattleDay(remain);
+              s_lastNotifiedDay = currentDay;
           }
-
-          // 알림 발송 전 강제로 환경 업데이트 실행 (정확한 기한 계산 보장)
-          DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase, true);
-
-          int finalDay = GetFinalDay();
-          int remain = (finalDay >= currentDay) ? (finalDay - currentDay) : 0;
-          NotifyBattleDay(remain);
-          s_lastNotifiedDay = currentDay;
       }
 
       // [핵심: 하트비트] 읽은 주소를 즉시 비웁니다.
@@ -374,6 +396,7 @@ namespace DX11Base {
       if (s_isWarModsApplied && (currentTime - s_lastSeenTime > 3.0f)) {
         AddLog(u8"[자동화] 상태 초기화 (다음 전투 대기)");
         s_isWarModsApplied = false;
+        s_isCacheBuilt = false;
         s_lastSeenTime = 0;
         s_lastAppliedDay = -1;
         s_lastNotifiedDay = -1;

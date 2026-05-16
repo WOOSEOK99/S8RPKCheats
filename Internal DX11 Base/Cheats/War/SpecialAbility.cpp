@@ -232,6 +232,10 @@ namespace DX11Base {
     if (stateChangedTactician)
       AddLog(u8"[특수기능] 대군사 배치 스캔 방금 됨 -> %s", hasTactician ? u8"활성(ON)" : u8"비활성(OFF)");
 
+    // 상태가 변경되었으면 타이머(runGlobalScan)를 기다리지 않고 즉시 버프를 주입합니다.
+    bool injectBuffs = (runGlobalScan || stateChangedGunakdae || stateChangedMussang || stateChangedFireCavalry ||
+                        stateChangedArcher || stateChangedCommander || stateChangedSneakAttack || stateChangedTactician);
+
     // 인젝터 유틸리티 람다 (공용)
     auto applyBuffTargets = [&](uintptr_t baseAddr, const char *name, bool isActive, bool isChanged, STarget *targets,
                                 int count) {
@@ -269,8 +273,8 @@ namespace DX11Base {
     };
 
     // 2. 버프 메모리 주입 (기존 0x02ED7A10 체인 그룹)
-    //    runGlobalScan과 동일 조건으로 진입 (별도 타이머 제거로 600ms 밀림 해소)
-    if (exeBase && runGlobalScan) {
+    //    타이머(runGlobalScan)에 도달했거나, 활성 부대가 바뀌어 상태가 변경(injectBuffs)되었을 때 즉시 실행
+    if (exeBase && injectBuffs) {
       uintptr_t p = SAResolveChain(exeBase + 0x02ED7A10, {0x110, 0x120, 0x40, 0x168, 0});
       if (p) {
         // --- (A) 군악대 타겟 (분기, 고무) ---
