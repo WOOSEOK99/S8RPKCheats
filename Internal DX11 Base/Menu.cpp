@@ -458,56 +458,6 @@ namespace DX11Base {
     }
   }
 
-  static void DrawBattleTurnOverlay(float scale) {
-    if (!IsInBattle())
-      return;
-
-    int curDay = GetBattleDay();
-    int finalDay = GetFinalDay();
-    if (curDay <= 0 || finalDay <= 0)
-      return;
-
-    int remain = (finalDay >= curDay) ? (finalDay - curDay) : 0;
-
-    // 텍스트 생성
-    char buf[128];
-    sprintf_s(buf, u8"남은 전투 일자 : %d 일", remain);
-
-    ImGuiViewport *viewport = ImGui::GetMainViewport();
-    // 화면 중앙(0.5)과 좌측 끝(0.0)의 사이 지점 = 0.20
-    ImVec2 pos = ImVec2(viewport->Pos.x + viewport->Size.x * 0.15f, viewport->Pos.y + 12.0f * scale);
-
-    // 투명 창 설정
-    ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(0.5f, 0.0f)); // 중앙 정렬용 Pivot
-    ImGui::SetNextWindowBgAlpha(0.0f);
-    ImGui::Begin("##BattleTurnOverlay", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
-                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
-
-    // 폰트 및 텍스트 렌더링
-    ImGui::SetWindowFontScale(2.0f); // 폰트 크기 2배
-
-    // 그림자 효과로 굵게 표현 (검은색으로 여러 방향에 그림)
-    ImVec2 cursorPos = ImGui::GetCursorPos();
-    float shadowOffset = 1.0f;
-    ImVec4 black = ImVec4(0, 0, 0, 1);
-
-    ImGui::SetCursorPos(ImVec2(cursorPos.x + shadowOffset, cursorPos.y + shadowOffset));
-    ImGui::TextColored(black, buf);
-    ImGui::SetCursorPos(ImVec2(cursorPos.x - shadowOffset, cursorPos.y + shadowOffset));
-    ImGui::TextColored(black, buf);
-    ImGui::SetCursorPos(ImVec2(cursorPos.x + shadowOffset, cursorPos.y - shadowOffset));
-    ImGui::TextColored(black, buf);
-    ImGui::SetCursorPos(ImVec2(cursorPos.x - shadowOffset, cursorPos.y - shadowOffset));
-    ImGui::TextColored(black, buf);
-
-    // 메인 텍스트 (밝은 노란색)
-    ImGui::SetCursorPos(cursorPos);
-    ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), buf);
-
-    ImGui::SetWindowFontScale(1.0f); // 원복
-    ImGui::End();
-  }
 
   void Menu::DrawMenu() {
     ImGuiIO &io = ImGui::GetIO();
@@ -972,7 +922,5 @@ namespace DX11Base {
       ImGui::EndPopup();
     }
 
-    // [추가] 전투 남은 일자 오버레이 표시
-    DrawBattleTurnOverlay(scale);
   }
 } // namespace DX11Base

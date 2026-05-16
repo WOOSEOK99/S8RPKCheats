@@ -19,6 +19,7 @@
 #include "Cheats/War/Terrainignore.h"
 #include "MenuState.h"
 #include "pch.h"
+#include "NotificationManager.h"
 #include "showlog.h"
 
 namespace DX11Base {
@@ -163,10 +164,18 @@ namespace DX11Base {
     }
   }
 
+  // [C2712 오류 해결용 헬퍼] __try가 있는 함수에서 std::string 객체 생성을 피하기 위해 분리
+  static void NotifyBattleDay(int remain) {
+      char nbuf[128];
+      sprintf_s(nbuf, u8"남은 전투 일자 : %d 일", remain);
+      AddNotification(std::string(nbuf));
+  }
+
   void MonitorBattleStatus() {
     static bool s_isWarModsApplied = false;
     static float s_lastSeenTime = 0.0f;
     static int s_lastAppliedDay = -1;
+    static int s_lastNotifiedDay = -1;
     float currentTime = (float)GetTickCount64() / 1000.0f;
 
     // 0. 기반 주소 체크 (게임 로딩/메뉴 시 자동 초기화)
@@ -238,6 +247,7 @@ namespace DX11Base {
         currentDay = -1;
       }
 
+
       // 아직 리프레시를 안 했다면 실행
       if (!s_isWarModsApplied) {
         AddLog(u8"[자동화] 전투 감지(%llX) -> 모든 전쟁 모드 리프레시", addr1);
@@ -278,6 +288,11 @@ namespace DX11Base {
           }
         } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
+
+        // 전투 진입 즉시 환경(날짜 등) 업데이트 실행하여 알림에 정확한 데이터 반영
+        __try {
+            DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         s_isWarModsApplied = true;
         // 캐싱 빌드: 전투 진입 시 1회 전체 부대 스캔 → 이후 UpdateSpecialAbilities는 캐시 매칭만 수행
@@ -332,6 +347,15 @@ namespace DX11Base {
 
       s_tickPhase = (s_tickPhase + 1) % 3;
 
+      // [추가] 날짜 변경 시 알림 팝업 출력
+      // s_tickPhase 로직 이후에 배치하여 UpdateBattleEnvironment가 적용된 후의 정확한 날짜를 가져옵니다.
+      if (currentDay > 0 && currentDay != s_lastNotifiedDay) {
+          int finalDay = GetFinalDay();
+          int remain = (finalDay >= currentDay) ? (finalDay - currentDay) : 0;
+          NotifyBattleDay(remain);
+          s_lastNotifiedDay = currentDay;
+      }
+
       // [핵심: 하트비트] 읽은 주소를 즉시 비웁니다.
       DX11Base::g_battleUnitAddr1 = 0;
       DX11Base::g_battleUnitAddr2 = 0;
@@ -342,6 +366,7 @@ namespace DX11Base {
         s_isWarModsApplied = false;
         s_lastSeenTime = 0;
         s_lastAppliedDay = -1;
+        s_lastNotifiedDay = -1;
 
         // 캐시 해제
         __try {

@@ -185,9 +185,9 @@ namespace DX11Base {
       } else if (bDateDynamic) {
           if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
               uint8_t totalUnits = *(uint8_t*)(unitListBase - 0x08);
-              uint8_t targetDay = 25;
-              if (totalUnits < 20) targetDay = 15;
-              else if (totalUnits < 30) targetDay = 20;
+              uint8_t targetDay = 25; // 20부대 이상 기본 25일
+              if (totalUnits < 15) targetDay = 15;
+              else if (totalUnits < 20) targetDay = 20;
 
               WriteByteIfDiff(finalDayAddr, targetDay);
           }
