@@ -173,9 +173,8 @@ namespace DX11Base {
 
     uint8_t dayVal = *(uint8_t *)dayAddr;
     if (dayVal < 1 || dayVal > 30) {
-      g_siegePrevDay = -1;
-      g_siegeMoveCostApplied = false;
-      g_siegeShallowApplied = false;
+      // 날짜값이 일시적으로 0이나 255(엉망)가 되더라도 지형 적용 상태를 초기화하지 않음
+      // 초기화는 SetSiegeWarfare(false)에서 수행됨
       return;
     }
 
@@ -202,7 +201,7 @@ namespace DX11Base {
           lastSiegeAttemptTick = currentTick;
           if (ApplyShallowTerrainOnce()) {
             g_siegeShallowApplied = true;
-            g_siegePrevDay = dayVal;
+            // g_siegePrevDay = dayVal; // 여기서 설정하면 당일 회복 루틴이 스킵되므로 제거
             AddLog(u8"[공성전] 성 주변 지형이 여울로 변경되었습니다.");
           } else {
             // AddLog(u8"[DEBUG] 지형 변경 시도 실패 (성 주소를 찾지 못함)"); // 스팸 방지
@@ -260,18 +259,28 @@ namespace DX11Base {
         uint16_t curVal = *(uint16_t *)curAddr;
         uint8_t terrainVal = *(uint8_t *)terrainAddr;
 
-        if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE) {
+        if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE && curVal < maxVal) {
           int heal = (int)(maxVal * ((float)iSiegeHealRate / 100.0f));
           if (heal < 1) heal = 1;
 
           int newCur = (int)curVal + heal;
           if (newCur > (int)maxVal) newCur = (int)maxVal;
 
-          // 힐링 지역에 있는 부대 정보 출력
-          if (*(uint16_t *)curAddr != (uint16_t)newCur) {
+          if (curVal != (uint16_t)newCur) {
             *(uint16_t *)curAddr = (uint16_t)newCur;
+            healedCount++;
           }
-          healedCount++;
+        } else {
+            // [DEBUG] 조건 불일치 시 로그 (첫 3부대만, 5초 주기)
+            static DWORD lastMismatchLog = 0;
+            if (i < 3 && GetTickCount() - lastMismatchLog > 5000) {
+                // terrainVal이 10이 아니거나 force가 다를 때
+                if (terrainVal == SHALLOW_TERRAIN_VALUE || forceVal == defenderForce) {
+                     AddLog(u8"[DEBUG-MISMATCH] 부대[%d] 세력:%d(수비:%d), 지형:%d(목표:%d)", 
+                            i, (int)forceVal, (int)defenderForce, (int)terrainVal, SHALLOW_TERRAIN_VALUE);
+                     lastMismatchLog = GetTickCount();
+                }
+            }
         }
       }
     }
@@ -397,9 +406,7 @@ namespace DX11Base {
 
     uint8_t dayVal = *(uint8_t*)dayAddr;
     if (dayVal < 1 || dayVal > 30) {
-      g_siege2PrevDay         = -1;
-      g_siege2MoveCostApplied = false;
-      g_siege2ShallowApplied  = false;
+      // 날짜값이 불안정해도 지형 적용 상태를 유지 (SetSiegeWarfare2에서 초기화 관리)
       return;
     }
 
@@ -423,7 +430,7 @@ namespace DX11Base {
           lastSiege2AttemptTick = currentTick2;
           if (ApplyShallowTerrain2Once()) {
             g_siege2ShallowApplied = true;
-            g_siege2PrevDay        = dayVal;
+            // g_siege2PrevDay        = dayVal; // 당일 회복을 위해 제거
             AddLog(u8"[2칸 공성전] 성 주변 2칸 지형이 여울로 변경되었습니다.");
           } else return;
       } else {
@@ -448,23 +455,25 @@ namespace DX11Base {
       uintptr_t curAddr     = unitPtr + 0x38;
       uintptr_t terrainAddr = ResolveChain(unitPtr + 0x40, {0x10, 0x8});
 
+      if (IsValidPtr(forceAddr, 1) && IsValidPtr(maxAddr, 2) && IsValidPtr(curAddr, 2) && IsValidPtr(terrainAddr, 1)) {
           uint8_t forceVal = *(uint8_t *)forceAddr;
           uint16_t maxVal = *(uint16_t *)maxAddr;
           uint16_t curVal = *(uint16_t *)curAddr;
           uint8_t terrainVal = *(uint8_t *)terrainAddr;
 
-          if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE) {
+          if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE && curVal < maxVal) {
             int heal = (int)(maxVal * ((float)iSiegeHealRate / 100.0f));
             if (heal < 1) heal = 1;
             int newCur = (int)curVal + heal;
             if (newCur > (int)maxVal) newCur = (int)maxVal;
 
-            if (*(uint16_t*)curAddr != (uint16_t)newCur) {
+            if (curVal != (uint16_t)newCur) {
               *(uint16_t*)curAddr = (uint16_t)newCur;
+              ++healedCount;
             }
-            ++healedCount;
           }
       }
+    }
 
       if (healedCount > 0)
         AddLog(u8"[2칸 공성전] %d일차: 수비군 %d부대 체력 회복 완료.", dayVal, healedCount);

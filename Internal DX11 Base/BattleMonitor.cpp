@@ -197,9 +197,11 @@ namespace DX11Base {
 
     // 2. 극심한 CPU 스로틀 방지를 위한 체인 주소 500ms 갱신 지연 캐시
     DWORD currentTick = GetTickCount();
+    static bool s_initialResolveDone = false;
 
-    if (currentTick - s_lastResolveTick >= 500 || (!s_cachedUnitListBase && !s_cachedDayBaseAddr)) {
+    if (currentTick - s_lastResolveTick >= 500 || !s_initialResolveDone) {
       s_lastResolveTick = currentTick;
+      s_initialResolveDone = true;
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
       // [루아 대조] unitListBase: 6단계([] 6개), dayAddr: 8단계([] 8개), defender: 8단계([] 8개)
       s_cachedUnitListBase = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
