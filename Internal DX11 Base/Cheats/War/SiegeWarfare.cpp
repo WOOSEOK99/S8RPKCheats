@@ -32,16 +32,22 @@ namespace DX11Base {
 
   bool IsSiegeBattleActive() {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    uintptr_t dayAddr = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0x28});
-    return (dayAddr != 0 && IsValidPtr(dayAddr, 1));
+    // [루아 대조] dayAddr: 8단계([] 8개)
+    uintptr_t p8 = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0 });
+    if (!p8) return false;
+    
+    uintptr_t dayAddr = p8 + 0x28;
+    return IsValidPtr(dayAddr, 1);
   }
 
   static bool ApplyMoveCostOnce() {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
     // resolvePointer('"SAN8RPK.exe"+034C8630', {0, 0x8, 0x10, 0, 0x4B2F18})
     uintptr_t startAddr = ResolveChain(exeBase + 0x034C8630, {0, 0x8, 0x10, 0, 0x4B2F18});
-    if (!startAddr)
+    if (!startAddr) {
+      AddLog(u8"[DEBUG-ADDR] ApplyMoveCost: startAddr 실패");
       return false;
+    }
 
     for (int i = 0; i < 12; ++i) {
       uintptr_t target = startAddr + (i * 0x28);
@@ -57,19 +63,13 @@ namespace DX11Base {
 
     // castleAddr = resolvePointer('"SAN8RPK.exe"+034C8630', {0, 0x8, 0x10, 0, 0x1AA510})
     uintptr_t castleAddr = ResolveChain(exeBase + 0x034C8630, {0, 0x8, 0x10, 0, 0x1AA510});
-    AddLog(u8"[DEBUG] 지형변경 시도 - castleAddr=%p", (void *)castleAddr);
-    if (!castleAddr)
-      return false;
+    if (!castleAddr) { AddLog(u8"[DEBUG] ApplyShallow: castleAddr 실패"); return false; }
 
-    // startAddr = resolvePointer('"SAN8RPK.exe"+035100B8', {0, 0x78, 0, 0x50, 0x18, 0x1A0, 0x10})
     uintptr_t startAddr = ResolveChain(exeBase + 0x035100B8, {0, 0x78, 0, 0x50, 0x18, 0x1A0, 0x10});
-    if (!startAddr)
-      return false;
+    if (!startAddr) { AddLog(u8"[DEBUG] ApplyShallow: startAddr 실패"); return false; }
 
-    // shallowAddr = resolvePointer('"SAN8RPK.exe"+034C8630', {0, 0x8, 0x10, 0, 0x1AA4B0})
     uintptr_t shallowAddrValue = ResolveChain(exeBase + 0x034C8630, {0, 0x8, 0x10, 0, 0x1AA4B0});
-    if (!shallowAddrValue)
-      return false;
+    if (!shallowAddrValue) { AddLog(u8"[DEBUG] ApplyShallow: shallowAddrValue 실패"); return false; }
 
     struct Match {
       uintptr_t addr;
@@ -87,8 +87,10 @@ namespace DX11Base {
       }
     }
 
-    if (castleMatches.empty())
+    if (castleMatches.empty()) {
+      AddLog(u8"[DEBUG] ApplyShallow: 성 매칭 결과 없음");
       return false;
+    }
 
     Match first = castleMatches[0];
     int firstRow = first.index / 20;
@@ -147,6 +149,15 @@ namespace DX11Base {
   void UpdateSiegeWarfare(uintptr_t dayAddr, int unitCount, uint8_t defenderForce, uintptr_t unitListBase) {
     if (!bSiegeWarfare)
       return;
+
+    // [입구 로그] 날짜값과 내부 상태 포함 (5초 주기)
+    static DWORD lastEntryLogTick1 = 0;
+    if (GetTickCount() - lastEntryLogTick1 > 5000) {
+        uint8_t currentDay = IsValidPtr(dayAddr, 1) ? *(uint8_t*)dayAddr : 0;
+        AddLog(u8"[DEBUG-ENTRY-1] 날짜:%d, 부대수:%d, 수비군:%d, 지형적용:%d, 이동력적용:%d", 
+               (int)currentDay, unitCount, (int)defenderForce, (int)g_siegeShallowApplied, (int)g_siegeMoveCostApplied);
+        lastEntryLogTick1 = GetTickCount();
+    }
 
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
 
@@ -226,20 +237,22 @@ namespace DX11Base {
       if (!unitPtr)
         continue;
 
-      // force: [[unitPtr + 0x18] + 0x8] + 0x18] + 0x8
+      // force: [[[unitPtr + 0x18] + 0x8] + 0x18] + 0x8
       uintptr_t forceAddr = ResolveChain(unitPtr + 0x18, {0x8, 0x18, 0x8});
       // max: [[unitPtr + 0x18] + 0x0
       uintptr_t maxAddr = ResolveChain(unitPtr + 0x18, {0});
-      // cur: [unitPtr + 0x38
+      // cur: [unitPtr + 0x38]
       uintptr_t curAddr = unitPtr + 0x38;
       // terrain: [[unitPtr + 0x40] + 0x10] + 0x8
       uintptr_t terrainAddr = ResolveChain(unitPtr + 0x40, {0x10, 0x8});
 
-      // [DEBUG] 조건문 진입 전 개별 주소 확인 (날짜가 바뀌었을 때만 앞의 3부대 출력)
+      // [DEBUG] 조건문 진입 전 개별 주소 확인 (필요 시 주석 해제)
+      /*
       if (dayVal == s_lastDebugDay && i < 3) {
         AddLog(u8"[DEBUG] 부대[%d] 개별주소: force=%p, max=%p, cur=%p, terrain=%p", i, (void *)forceAddr,
                (void *)maxAddr, (void *)curAddr, (void *)terrainAddr);
       }
+      */
 
       if (IsValidPtr(forceAddr, 1) && IsValidPtr(maxAddr, 2) && IsValidPtr(curAddr, 2) && IsValidPtr(terrainAddr, 1)) {
         uint8_t forceVal = *(uint8_t *)forceAddr;
@@ -247,21 +260,14 @@ namespace DX11Base {
         uint16_t curVal = *(uint16_t *)curAddr;
         uint8_t terrainVal = *(uint8_t *)terrainAddr;
 
-        // 매일 첫 업데이트 시 모든 부대 상태 출력 (디버깅)
-        if (dayVal != g_siegePrevDay) {
-          AddLog(u8"[DEBUG] 부대[%d]: 세력=%d(수비군:%d), 지형=%d(여울:10)", 
-                 i, (int)forceVal, (int)defenderForce, (int)terrainVal);
-        }
-
         if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE) {
           int heal = (int)(maxVal * HEAL_RATE);
-          if (heal < 1)
-            heal = 1;
+          if (heal < 1) heal = 1;
 
           int newCur = (int)curVal + heal;
-          if (newCur > (int)maxVal)
-            newCur = (int)maxVal;
+          if (newCur > (int)maxVal) newCur = (int)maxVal;
 
+          // 힐링 지역에 있는 부대 정보 출력
           if (*(uint16_t *)curAddr != (uint16_t)newCur) {
             *(uint16_t *)curAddr = (uint16_t)newCur;
           }
@@ -286,13 +292,13 @@ namespace DX11Base {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
 
     uintptr_t castleAddr = ResolveChain(exeBase + 0x034C8630, {0, 0x8, 0x10, 0, 0x1AA510});
-    if (!castleAddr) return false;
+    if (!castleAddr) { AddLog(u8"[DEBUG] ApplyShallow2: castleAddr 실패"); return false; }
 
     uintptr_t startAddr = ResolveChain(exeBase + 0x035100B8, {0, 0x78, 0, 0x50, 0x18, 0x1A0, 0x10});
-    if (!startAddr) return false;
+    if (!startAddr) { AddLog(u8"[DEBUG] ApplyShallow2: startAddr 실패"); return false; }
 
     uintptr_t shallowAddrValue = ResolveChain(exeBase + 0x034C8630, {0, 0x8, 0x10, 0, 0x1AA4B0});
-    if (!shallowAddrValue) return false;
+    if (!shallowAddrValue) { AddLog(u8"[DEBUG] ApplyShallow2: shallowAddrValue 실패"); return false; }
 
     struct Match { uintptr_t addr; int index; };
     std::vector<Match> castleMatches;
@@ -306,7 +312,10 @@ namespace DX11Base {
       }
     }
 
-    if (castleMatches.empty()) return false;
+    if (castleMatches.empty()) {
+      AddLog(u8"[DEBUG] ApplyShallow2: 성 매칭 결과 없음");
+      return false;
+    }
 
     Match first    = castleMatches[0];
     int   firstRow = first.index / 20;
@@ -371,6 +380,15 @@ namespace DX11Base {
   void UpdateSiegeWarfare2(uintptr_t dayAddr, int unitCount, uint8_t defenderForce, uintptr_t unitListBase) {
     if (!bSiegeWarfare2) return;
 
+    // [입구 로그] 날짜값과 내부 상태 포함 (5초 주기)
+    static DWORD lastEntryLogTick2 = 0;
+    if (GetTickCount() - lastEntryLogTick2 > 5000) {
+        uint8_t currentDay = IsValidPtr(dayAddr, 1) ? *(uint8_t*)dayAddr : 0;
+        AddLog(u8"[DEBUG-ENTRY-2] 날짜:%d, 부대수:%d, 수비군:%d, 지형적용:%d, 이동력적용:%d", 
+               (int)currentDay, unitCount, (int)defenderForce, (int)g_siege2ShallowApplied, (int)g_siege2MoveCostApplied);
+        lastEntryLogTick2 = GetTickCount();
+    }
+
     if (!dayAddr || !IsValidPtr(dayAddr, 1)) {
       g_siege2MoveCostApplied = false;
       g_siege2ShallowApplied  = false;
@@ -430,27 +448,26 @@ namespace DX11Base {
       uintptr_t curAddr     = unitPtr + 0x38;
       uintptr_t terrainAddr = ResolveChain(unitPtr + 0x40, {0x10, 0x8});
 
-      if (IsValidPtr(forceAddr,1) && IsValidPtr(maxAddr,2) && IsValidPtr(curAddr,2) && IsValidPtr(terrainAddr,1)) {
-        uint8_t  forceVal   = *(uint8_t*)forceAddr;
-        uint16_t maxVal     = *(uint16_t*)maxAddr;
-        uint16_t curVal     = *(uint16_t*)curAddr;
-        uint8_t  terrainVal = *(uint8_t*)terrainAddr;
+          uint8_t forceVal = *(uint8_t *)forceAddr;
+          uint16_t maxVal = *(uint16_t *)maxAddr;
+          uint16_t curVal = *(uint16_t *)curAddr;
+          uint8_t terrainVal = *(uint8_t *)terrainAddr;
 
-        if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE) {
-          int heal = (int)(maxVal * HEAL_RATE);
-          if (heal < 1) heal = 1;
-          int newCur = (int)curVal + heal;
-          if (newCur > (int)maxVal) newCur = (int)maxVal;
-          if (*(uint16_t*)curAddr != (uint16_t)newCur) {
-            *(uint16_t*)curAddr = (uint16_t)newCur;
+          if (forceVal == defenderForce && terrainVal == SHALLOW_TERRAIN_VALUE) {
+            int heal = (int)(maxVal * HEAL_RATE);
+            if (heal < 1) heal = 1;
+            int newCur = (int)curVal + heal;
+            if (newCur > (int)maxVal) newCur = (int)maxVal;
+
+            if (*(uint16_t*)curAddr != (uint16_t)newCur) {
+              *(uint16_t*)curAddr = (uint16_t)newCur;
+            }
+            ++healedCount;
           }
-          ++healedCount;
-        }
       }
-    }
 
-    if (healedCount > 0)
-      AddLog(u8"[2칸 공성전] %d일차: 수비군 %d부대 체력 회복 완료.", dayVal, healedCount);
+      if (healedCount > 0)
+        AddLog(u8"[2칸 공성전] %d일차: 수비군 %d부대 체력 회복 완료.", dayVal, healedCount);
   }
 
 } // namespace DX11Base

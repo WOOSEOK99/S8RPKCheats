@@ -655,7 +655,7 @@ namespace DX11Base {
         ImGui::SameLine();
         if (ImGui::Button(u8"로그 복사", ImVec2(160, 30))) {
           ImGui::SetClipboardText(GetFullLogs().c_str());
-          AddLog(u8"[Debug] 모든 로그가 클립보드에 복사되었습니다.");
+          AddLog(u8"[Debug] 로그가 클립보드에 복사되었습니다. (필터 적용됨)");
         }
 
         ImGui::Separator();

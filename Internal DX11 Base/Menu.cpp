@@ -35,26 +35,34 @@ namespace DX11Base {
     ImGui::SetNextWindowSize(ImVec2(550 * scale, 150 * scale), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(u8"전투 환경 및 조건 설정###BattleEnvWin", &bShowBattleEnvWin)) {
       if (ImGui::BeginTable("BattleEnvTable", 4, ImGuiTableFlags_None)) {
-        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 날씨 전법 변경");
-        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 전투일자 변경");
-        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 지형 능력 변경");
-        ImGui::TableNextColumn(); ImGui::TextUnformatted(u8"[택일] 성벽 여울 변경");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(u8"[택일] 날씨 전법 변경");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(u8"[택일] 전투일자 변경");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(u8"[택일] 지형 능력 변경");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(u8"[택일] 성벽 여울 변경");
 
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"간단 변경", &bWeatherSkillSimple)) {
-          if (bWeatherSkillSimple) bWeatherSkillComplex = false;
+          if (bWeatherSkillSimple)
+            bWeatherSkillComplex = false;
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"악천후시 열화, 화시, 화전을 사용할 수 없습니다. 우천시 격류를 지형 제약 없이 사용할 수 있습니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+              u8"악천후시 열화, 화시, 화전을 사용할 수 없습니다. 우천시 격류를 지형 제약 없이 사용할 수 있습니다.");
           ImGui::EndTooltip();
         }
-        
+
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"상시 15일", &bDateAlways15)) {
-          if (bDateAlways15) bDateDynamic = false;
+          if (bDateAlways15)
+            bDateDynamic = false;
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
@@ -65,7 +73,8 @@ namespace DX11Base {
 
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"공방만", &bTerrainAbilityAtkDef)) {
-          if (bTerrainAbilityAtkDef) bTerrainAbilityAll = false;
+          if (bTerrainAbilityAtkDef)
+            bTerrainAbilityAll = false;
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
@@ -79,26 +88,30 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"-- 연노병은 산지 +20%로 증가. 삼림 페널티 제거.");
 
           ImGui::EndTooltip();
-        }   
+        }
 
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"성 주변 1칸 여울", &bSiegeWarfare)) {
-          if (bSiegeWarfare) bSiegeWarfare2 = false;
+          if (bSiegeWarfare)
+            bSiegeWarfare2 = false;
           DX11Base::SetSiegeWarfare(bSiegeWarfare);
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울에 위치한 수비 부대는 매턴 총병력의 10%가 회복됨. (단, 타세력 동맹군은 제외)");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"여울에 위치한 수비 부대는 매턴 총병력의 10%가 회복됨. (단, 타세력 동맹군은 제외)");
           ImGui::EndTooltip();
         }
 
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"대폭 변경", &bWeatherSkillComplex)) {
-          if (bWeatherSkillComplex) bWeatherSkillSimple = false;
+          if (bWeatherSkillComplex)
+            bWeatherSkillSimple = false;
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
@@ -112,24 +125,29 @@ namespace DX11Base {
 
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"유동 조절", &bDateDynamic)) {
-          if (bDateDynamic) bDateAlways15 = false;
+          if (bDateDynamic)
+            bDateAlways15 = false;
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"총참전 부대수에 따라 전투기한이 달라집니다.");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"20부대 미만: 15일 / 20~29부대: 20일 / 30부대 이상: 25일");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"20부대 미만: 15일 / 20~29부대: 20일 / 30부대 이상: 25일");
           ImGui::EndTooltip();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"총 참전 부대 수에 따라 전투 종료일이 변경됩니다. 20부대 미만 : 15일 , 20~29부대 : 20일, 30부대 이상 : 25일");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"총 참전 부대 수에 따라 전투 종료일이 변경됩니다. 20부대 미만 : 15일 , 20~29부대 : "
+                             u8"20일, 30부대 이상 : 25일");
           ImGui::EndTooltip();
         }
 
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"공방/무력/지력", &bTerrainAbilityAll)) {
-          if (bTerrainAbilityAll) bTerrainAbilityAtkDef = false;
+          if (bTerrainAbilityAll)
+            bTerrainAbilityAtkDef = false;
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
@@ -137,7 +155,8 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"[공방만] 의 모든 효과 적용 + 무력/지력 추가");
           ImGui::Separator();
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지형에 따른 보정이 부대 전투력(공방)뿐 아니라");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"장수의 무력(데미지)과 지력(책략 성공률)에도 함께 적용됩니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"장수의 무력(데미지)과 지력(책략 성공률)에도 함께 적용됩니다.");
           ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), u8"예: 황무지의 보병 +10% -> 전투력/무력/지력 모두 110%");
           ImGui::EndTooltip();
         }
@@ -145,25 +164,27 @@ namespace DX11Base {
         // 지형 보너스 설정 버튼 추가
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.0f * scale);
         if (ImGui::Button(u8"지형 보너스 설정")) {
-            bShowTerrainBonusWin = true;
+          bShowTerrainBonusWin = true;
         }
 
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"성 주변 2칸 여울", &bSiegeWarfare2)) {
           if (bSiegeWarfare2) {
-              bSiegeWarfare = false;
-              DX11Base::SetSiegeWarfare(false); // 1칸 모드 끄기
-              DX11Base::SetSiegeWarfare2(true);
+            bSiegeWarfare = false;
+            DX11Base::SetSiegeWarfare(false); // 1칸 모드 끄기
+            DX11Base::SetSiegeWarfare2(true);
           } else {
-              DX11Base::SetSiegeWarfare2(false);
+            DX11Base::SetSiegeWarfare2(false);
           }
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"지형 보정치 적용할 경우 여울에서 보병 10%, 궁병 20% 보정 적용");
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울 소모 이동력은 60 (이동력 풀로 써야만 진입 가능)");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"여울에 위치한 수비 부대는 매턴 총병력의 10%가 회복됨. (단, 타세력 동맹군은 제외)");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"여울에 위치한 수비 부대는 매턴 총병력의 10%가 회복됨. (단, 타세력 동맹군은 제외)");
           ImGui::EndTooltip();
         }
 
@@ -174,56 +195,55 @@ namespace DX11Base {
   }
 
   static void DrawTerrainBonusSettingsWin(float scale) {
-    if (!bShowTerrainBonusWin) return;
+    if (!bShowTerrainBonusWin)
+      return;
 
     ImGui::SetNextWindowSize(ImVec2(980 * scale, 520 * scale), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(u8"지형 보너스 설정 (-30 ~ +30)###TerrainBonusWin", &bShowTerrainBonusWin)) {
       ImGui::Text(u8"각 칸은 -30 ~ +30 범위. 지형 순서별 개별 입력. 저장 후 지형 보정 코드는 껐다가 다시 켜야 반영됨.");
 
-      static const char* troopNames[] = {
-          u8"경보병", u8"중보병", u8"정예보병", u8"만병", 
-          u8"경기병", u8"중기병", u8"정예기병", u8"유목기병", 
-          u8"궁병", u8"노병", u8"정예궁병", u8"연노병"
-      };
+      static const char *troopNames[] = {u8"경보병",   u8"중보병",   u8"정예보병", u8"만병", u8"경기병",   u8"중기병",
+                                         u8"정예기병", u8"유목기병", u8"궁병",     u8"노병", u8"정예궁병", u8"연노병"};
 
-      static const char* terrainNames[] = {
-          u8"가도", u8"평지", u8"황무지", u8"초원", u8"삼림", u8"습지", u8"산지", u8"여울", u8"다리", u8"도하", u8"암석"
-      };
-      
+      static const char *terrainNames[] = {u8"가도", u8"평지", u8"황무지", u8"초원", u8"삼림", u8"습지",
+                                           u8"산지", u8"여울", u8"다리",   u8"도하", u8"암석"};
+
       // 스크린샷과 동일한 지형 인덱스 매핑
-      static const int terrainIndices[] = { 1, 2, 3, 4, 5, 6, 7, 10, 15, 16, 17 };
+      static const int terrainIndices[] = {1, 2, 3, 4, 5, 6, 7, 10, 15, 16, 17};
 
       if (ImGui::BeginTable("TerrainBonusTable", 12, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
         // 헤더
         ImGui::TableNextRow();
         ImGui::TableNextColumn(); // 첫 칸은 비움
         for (int j = 0; j < 11; j++) {
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(terrainNames[j]);
+          ImGui::TableNextColumn();
+          ImGui::TextUnformatted(terrainNames[j]);
         }
 
         // 행 데이터
         for (int i = 0; i < 12; i++) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(troopNames[i]);
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn();
+          ImGui::TextUnformatted(troopNames[i]);
 
-            int troopIdx = i + 1; // 병종 1~12
-            for (int j = 0; j < 11; j++) {
-                ImGui::TableNextColumn();
-                int terrainIdx = terrainIndices[j];
-                
-                char id[32];
-                sprintf_s(id, "##v_%d_%d", troopIdx, terrainIdx);
-                
-                int val = (int)g_TerrainBonusTable[troopIdx][terrainIdx];
-                ImGui::SetNextItemWidth(60.0f * scale);
-                if (ImGui::InputInt(id, &val, 0, 0)) {
-                    if (val > 30) val = 30;
-                    if (val < -30) val = -30;
-                    g_TerrainBonusTable[troopIdx][terrainIdx] = (short)val;
-                }
+          int troopIdx = i + 1; // 병종 1~12
+          for (int j = 0; j < 11; j++) {
+            ImGui::TableNextColumn();
+            int terrainIdx = terrainIndices[j];
+
+            char id[32];
+            sprintf_s(id, "##v_%d_%d", troopIdx, terrainIdx);
+
+            int val = (int)g_TerrainBonusTable[troopIdx][terrainIdx];
+            ImGui::SetNextItemWidth(60.0f * scale);
+            if (ImGui::InputInt(id, &val, 0, 0)) {
+              if (val > 30)
+                val = 30;
+              if (val < -30)
+                val = -30;
+              g_TerrainBonusTable[troopIdx][terrainIdx] = (short)val;
             }
+          }
         }
         ImGui::EndTable();
       }
@@ -233,33 +253,31 @@ namespace DX11Base {
       ImGui::Spacing();
 
       if (ImGui::Button(u8"기본값 복원", ImVec2(120 * scale, 35 * scale))) {
-          // 기본값 재설정 (Lua 스크립트 기반 초기값)
-          short defaultTable[13][18] = {
-              {0},
-              {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
-              {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
-              {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
-              {0, 0, 0, 10, 0, 20, 10, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
-              {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
-              {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
-              {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
-              {0, 10, 10, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
-              {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
-              {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
-              {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
-              {0, 0, 0, 0, 0, 0, -10, 20, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}
-          };
-          memcpy(g_TerrainBonusTable, defaultTable, sizeof(g_TerrainBonusTable));
+        // 기본값 재설정 (Lua 스크립트 기반 초기값)
+        short defaultTable[13][18] = {{0},
+                                      {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+                                      {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+                                      {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+                                      {0, 0, 0, 10, 0, 20, 10, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10},
+                                      {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+                                      {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+                                      {0, 10, 0, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+                                      {0, 10, 10, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10},
+                                      {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
+                                      {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
+                                      {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10},
+                                      {0, 0, 0, 0, 0, 0, -10, 20, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}};
+        memcpy(g_TerrainBonusTable, defaultTable, sizeof(g_TerrainBonusTable));
       }
 
       ImGui::SameLine(ImGui::GetWindowWidth() - 260.0f * scale);
       if (ImGui::Button(u8"저장 후 닫기", ImVec2(120 * scale, 35 * scale))) {
-          SaveConfig();
-          bShowTerrainBonusWin = false;
+        SaveConfig();
+        bShowTerrainBonusWin = false;
       }
       ImGui::SameLine();
       if (ImGui::Button(u8"닫기", ImVec2(80 * scale, 35 * scale))) {
-          bShowTerrainBonusWin = false;
+        bShowTerrainBonusWin = false;
       }
     }
     ImGui::End();
@@ -370,8 +388,6 @@ namespace DX11Base {
         }
       }
     }
-
-
 
     // 전쟁 자동화 (전쟁 관련 변수 중 하나라도 켜져 있으면 캡처 활성화)
     static bool s_autoCaptureStarted = false;

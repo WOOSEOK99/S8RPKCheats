@@ -37,7 +37,7 @@ namespace DX11Base {
     // UI 디버그용 메모리 저장
     if (bShowDebug) {
       g_loveLogs.push_back(buf);
-      if (g_loveLogs.size() > 50) {
+      if (g_loveLogs.size() > 1000) { // 로그 저장 개수 상향 (50 -> 1000)
         g_loveLogs.erase(g_loveLogs.begin());
       }
     }
@@ -66,6 +66,8 @@ namespace DX11Base {
     }
   }
 
+  static char logFilter[256] = "";
+
   void showLoveLogs() {
     // 1. 현재 배율 가져오기
     float scale = ImGui::GetIO().FontGlobalScale;
@@ -77,10 +79,19 @@ namespace DX11Base {
     // ImGui::Text(u8"실행 로그");
     // ImGui::PopStyleColor();
 
-    // 3. 로그 창 너비와 높이 결정
-    // 너비 0은 현재 사용 가능한 가로 폭 전체를 채웁니다 (정렬된 버튼 라인에 맞춰짐)
-    // 높이는 배율에 맞게 조절 (기본 150 * scale 정도면 적당합니다)
-    float logWindowHeight = 300.0f * scale;
+    // 3. 필터 입력란
+    ImGui::Text(u8"필터:"); ImGui::SameLine();
+    ImGui::SetNextItemWidth(-100.0f * scale);
+    ImGui::InputText(u8"##LogFilter", logFilter, IM_ARRAYSIZE(logFilter));
+    
+    ImGui::SameLine();
+    if (ImGui::Button(u8"지우기", ImVec2(-1, 0))) {
+        logFilter[0] = '\0';
+    }
+
+    // 4. 로그 창 높이 결정 (남은 영역 전체 사용)
+    float logWindowHeight = ImGui::GetContentRegionAvail().y;
+    if (logWindowHeight < 100.0f) logWindowHeight = 100.0f; // 최소 높이 보장
 
     ImGui::BeginChild("LoveLogWindow", ImVec2(0, logWindowHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -89,14 +100,20 @@ namespace DX11Base {
       if (g_loveLogs.empty()) {
         ImGui::TextDisabled(u8"대기 중...");
       } else {
-        // 최신 로그가 아래로 쌓이는 구조라면 그대로 출력
+        std::string filterStr = logFilter;
+        bool useFilter = !filterStr.empty();
+
         for (const auto &log : g_loveLogs) {
+          // 필터링 로직 (대소문자 구분함)
+          if (useFilter && log.find(filterStr) == std::string::npos)
+              continue;
+
           ImGui::TextUnformatted(log.c_str());
         }
       }
     }
 
-    // 4. 자동 스크롤 로직 (최하단 고정)
+    // 5. 자동 스크롤 로직 (최하단 고정)
     // 로그가 추가될 때마다 자동으로 바닥으로 내려줍니다.
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
       ImGui::SetScrollHereY(1.0f);
@@ -107,11 +124,16 @@ namespace DX11Base {
 
   std::string GetFullLogs() {
     std::lock_guard<std::mutex> lock(g_logMutex);
-    std::string fullLog;
+    std::string result;
+    std::string filterStr = logFilter;
+    bool useFilter = !filterStr.empty();
+
     for (const auto &log : g_loveLogs) {
-      fullLog += log + "\n";
+      if (!useFilter || log.find(filterStr) != std::string::npos) {
+        result += log + "\n";
+      }
     }
-    return fullLog;
+    return result;
   }
 
   void SaveMemoryLog(uintptr_t p1) {
