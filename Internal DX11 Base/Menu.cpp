@@ -339,15 +339,15 @@ namespace DX11Base {
       DX11Base::AddLog(u8"[System] GameBase 설정 준비 완료. 사용자 설정 불러오기 시작.");
     }
 
-    // 무한 행동력
+    // 무한 행동력 (매 프레임 VirtualQuery 낭비 방지: p1Ready가 0x200까지 보장)
     if (bInfiniteAP) {
-      if (p1Ready && IsValidPtr(p1 + 0xEE, 1))
+      if (p1Ready)
         *(unsigned char *)(p1 + 0xEE) = 200;
     }
 
-    // 보주 무한
+    // 보주 무한 (매 프레임 VirtualQuery 낭비 방지: gameBaseReady가 0x6000까지 보장)
     if (bFastJewel) {
-      if (gameBaseReady && IsValidPtr(gameBase + 0x5C49, 1))
+      if (gameBaseReady)
         *(unsigned char *)(gameBase + 0x5C49) = 0;
     }
 
