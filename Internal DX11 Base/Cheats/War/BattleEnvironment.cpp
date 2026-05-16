@@ -21,6 +21,26 @@ namespace DX11Base {
       return current;
   }
 
+  // ──────────────────────────────────────────────────────
+  // [포인터 캐시] tacticBase, terrainBase
+  // 전투 중 고정되는 베이스 주소를 진입 1회만 해소하여 저장.
+  // UpdateBattleEnvironment와 ApplyShipWeaponization는 이 지역 변수를 바로 사용.
+  // ──────────────────────────────────────────────────────
+  static uintptr_t g_cachedTacticBase  = 0;
+  static uintptr_t g_cachedTerrainBase = 0;
+
+  void InitBattleEnvCache(uintptr_t exeBase) {
+      g_cachedTacticBase  = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
+      g_cachedTerrainBase = SAResolveChainLocal(exeBase + 0x034C8630, { 0, 8, 0x10, 0, 0 });
+      AddLog(u8"[BattleEnv 캐시] tacticBase=0x%llX terrainBase=0x%llX",
+             g_cachedTacticBase, g_cachedTerrainBase);
+  }
+
+  void ClearBattleEnvCache() {
+      g_cachedTacticBase  = 0;
+      g_cachedTerrainBase = 0;
+  }
+
   static void WriteByteIfDiff(uintptr_t addr, uint8_t val) {
       if (!addr) return;
       if (*(uint8_t*)addr != val) {
@@ -73,12 +93,16 @@ namespace DX11Base {
 
       static uint8_t s_lastAppliedVal = 0xFF;
 
-      // tacticBase 직접 획득
-      uintptr_t tacticBase = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
+      // 캐시된 tacticBase 사용 (SAResolveChainLocal 제거)
+      uintptr_t tacticBase = g_cachedTacticBase;
       if (!tacticBase) {
-          static bool logTactic = false;
-          if (!logTactic) { AddLog(u8"[함선병기] tacticBase 포인터 없음"); logTactic = true; }
-          return;
+          // 아직 캐시가 준비되지 않았으면 폴백 해소 시도
+          tacticBase = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
+          if (!tacticBase) {
+              static bool logTactic = false;
+              if (!logTactic) { AddLog(u8"[함선병기] tacticBase 포인터 없음"); logTactic = true; }
+              return;
+          }
       }
 
       // Active unit 포인터 획득 (trailing 0 필수)
@@ -171,12 +195,15 @@ namespace DX11Base {
           WriteByteIfDiff(finalDayAddr, 30); // 기본값 복구
       }
 
-      // 4. 책략/마스터 파라미터 구조체 베이스 주소
+      // 캐시된 tacticBase 사용, 없으면 폴백 해소 시도
       static bool logTacticGate = false;
-      uintptr_t tacticBase = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
+      uintptr_t tacticBase = g_cachedTacticBase;
       if (!tacticBase) {
-          if (!logTacticGate) { AddLog(u8"[BattleEnv] tacticBase 없음 - 날씨 처리 스킵"); logTacticGate = true; }
-          return;
+          tacticBase = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
+          if (!tacticBase) {
+              if (!logTacticGate) { AddLog(u8"[BattleEnv] tacticBase 없음 - 날씨 처리 스킵"); logTacticGate = true; }
+              return;
+          }
       }
       logTacticGate = false;
 
@@ -202,7 +229,9 @@ namespace DX11Base {
           WriteByteIfDiff(tacticBase + 0xC50, fireEffTarget);
           WriteByteIfDiff(tacticBase + 0xC72, fireEffTarget);
 
-          uintptr_t terrainBase = SAResolveChainLocal(exeBase + 0x034C8630, { 0, 8, 0x10, 0, 0 });
+          // 캐시된 terrainBase 사용, 없으면 폴백
+          uintptr_t terrainBase = g_cachedTerrainBase;
+          if (!terrainBase) terrainBase = SAResolveChainLocal(exeBase + 0x034C8630, { 0, 8, 0x10, 0, 0 });
           if (terrainBase) {
               WriteByteIfDiff(terrainBase + 0x1AA3A1, igniteTarget); // ROAD
               WriteByteIfDiff(terrainBase + 0x1AA3E1, igniteTarget); // WASTELAND
@@ -255,7 +284,9 @@ namespace DX11Base {
           WriteByteIfDiff(tacticBase + 0xDD0, 26);
           WriteByteIfDiff(tacticBase + 0xDF2, 26);
 
-          uintptr_t terrainBase = SAResolveChainLocal(exeBase + 0x034C8630, { 0, 8, 0x10, 0, 0 });
+          // 캐시된 terrainBase 사용, 없으면 폴백
+          uintptr_t terrainBase = g_cachedTerrainBase;
+          if (!terrainBase) terrainBase = SAResolveChainLocal(exeBase + 0x034C8630, { 0, 8, 0x10, 0, 0 });
           if (terrainBase) {
               WriteByteIfDiff(terrainBase + 0x1AA3A1, 0); 
               WriteByteIfDiff(terrainBase + 0x1AA3E1, 0); 

@@ -156,44 +156,37 @@ namespace DX11Base {
       return;
     }
 
-    // 1. 현재 캡처된 주소 또는 전쟁 날짜 주소 확인
+    // 1. 현재 캡처된 주소 확인
     uintptr_t addr1 = DX11Base::g_battleUnitAddr1;
     uintptr_t addr2 = DX11Base::g_battleUnitAddr2;
     
-    // [방어 코드 2] IsSiegeBattleActive 같이 무거운 함수 캐싱 및 예외 방지
-    bool isSiegeActive = false;
-    __try {
-        isSiegeActive = DX11Base::IsSiegeBattleActive();
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        isSiegeActive = false;
+    // 2. 극심한 CPU 스로틀 방지를 위한 체인 주소 500ms 갱신 지연 캐시
+    static uintptr_t s_cachedUnitListBase = 0;
+    static uintptr_t s_cachedDayBaseAddr = 0;
+    static uintptr_t s_cachedDefenderAddr = 0;
+    static DWORD s_lastResolveTick = 0;
+    DWORD currentTick = GetTickCount();
+
+    if (currentTick - s_lastResolveTick >= 500 || (!s_cachedUnitListBase && !s_cachedDayBaseAddr)) {
+        s_lastResolveTick = currentTick;
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        s_cachedUnitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
+        s_cachedDayBaseAddr  = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0 });
+        s_cachedDefenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
     }
-    
+
+    uintptr_t dayAddr = s_cachedDayBaseAddr ? (s_cachedDayBaseAddr + 0x28) : 0;
+    bool isSiegeActive = (dayAddr != 0 && IsValidPtr(dayAddr, 1));
     bool battleActive = (addr1 != 0 || addr2 != 0) || isSiegeActive;
 
     if (battleActive) {
       // [전투 중] 주소가 포착됨 또는 날짜 주소 확인됨
       s_lastSeenTime = currentTime;
-
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-      
-      // [방어 코드 3] 극심한 CPU 스로틀 방지를 위한 체인 주소 500ms 갱신 지연 캐시
-      static uintptr_t s_cachedUnitListBase = 0;
-      static uintptr_t s_cachedDayBaseAddr = 0;
-      static uintptr_t s_cachedDefenderAddr = 0;
-      static DWORD s_lastResolveTick = 0;
-      DWORD currentTick = GetTickCount();
-
-      if (currentTick - s_lastResolveTick >= 500 || !s_cachedUnitListBase) {
-          s_lastResolveTick = currentTick;
-          s_cachedUnitListBase = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0, 0x180, 0 });
-          s_cachedDayBaseAddr  = ResolveChain(exeBase + 0x02E99460, { 0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0 });
-          s_cachedDefenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
-      }
       
       uintptr_t unitListBase = s_cachedUnitListBase;
       uintptr_t dayBaseAddr  = s_cachedDayBaseAddr;
       uintptr_t defenderAddr = s_cachedDefenderAddr;
-      uintptr_t dayAddr      = dayBaseAddr ? (dayBaseAddr + 0x28) : 0;
       
       int unitCountTotal = 0;
       __try {
@@ -254,7 +247,10 @@ namespace DX11Base {
 
         s_isWarModsApplied = true;
         // 캐싱 빌드: 전투 진입 시 1회 전체 부대 스캔 → 이후 UpdateSpecialAbilities는 캐시 매칭만 수행
-        __try { DX11Base::InitializeBattleCache((int)unitCountTotal, unitListBase, exeBase); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        __try { 
+            DX11Base::InitializeBattleCache((int)unitCountTotal, unitListBase, exeBase); 
+            DX11Base::InitBattleEnvCache(exeBase);
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
         // 커스텀 전법 횟수 적용 (전투 리프레시 시 1회 수행)
         __try { UpdateBattleUnitSkills(false); } __except(EXCEPTION_EXECUTE_HANDLER) {}
         s_lastAppliedDay = currentDay;
@@ -309,7 +305,10 @@ namespace DX11Base {
         s_lastAppliedDay = -1;
         
         // 캐시 해제
-        __try { DX11Base::ClearBattleCache(); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        __try { 
+            DX11Base::ClearBattleCache(); 
+            DX11Base::ClearBattleEnvCache();
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
         // 전투가 끝나면 특수능력 룰을 원래 데이터(normal)로 안전하게 복구합니다.
         UpdateSpecialAbilities(0, 0, (uintptr_t)GetModuleHandle(NULL));
       }
