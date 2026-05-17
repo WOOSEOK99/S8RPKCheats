@@ -92,11 +92,12 @@ namespace DX11Base {
       lastShipTick = currentTick;
 
       static uint8_t s_lastAppliedVal = 0xFF;
+      // 활성 유닛이 바뀌었을 때만 GetTargetSkillCount(mutex) 호용 → 300ms 매 mutex 경합 제거
+      static uintptr_t s_lastActiveUnit = 0;
+      static bool s_lastTriggered = false;
 
-      // 캐시된 tacticBase 사용 (SAResolveChainLocal 제거)
       uintptr_t tacticBase = g_cachedTacticBase;
       if (!tacticBase) {
-          // 아직 캐시가 준비되지 않았으면 폴백 해소 시도
           tacticBase = SAResolveChainLocal(exeBase + 0x02ED7A10, { 0x110, 0x120, 0x40, 0x168, 0 });
           if (!tacticBase) {
               static bool logTactic = false;
@@ -105,7 +106,6 @@ namespace DX11Base {
           }
       }
 
-      // Active unit 포인터 획득 (trailing 0 필수)
       uintptr_t activeUnitPtr = SAResolveChainLocal(exeBase + 0x03510578,
           { 0x100, 0x78, 0x0, 0x50, 0x108, 0x50, 0x8, 0 });
 
@@ -116,7 +116,6 @@ namespace DX11Base {
       }
       logNoUnit = false;
 
-      // 지형 확인
       uintptr_t ptr40   = *(uintptr_t*)(activeUnitPtr + 0x40);
       if (!IsValidPtr(ptr40, 0x20)) return;
       uintptr_t ptr40_10 = *(uintptr_t*)(ptr40 + 0x10);
@@ -127,28 +126,35 @@ namespace DX11Base {
           uintptr_t tgts[] = { 0x9A4, 0xA24, 0xAA4, 0xB24, 0xBA4 };
           for (int k = 0; k < 5; k++) WriteByteIfDiff(tacticBase + tgts[k], 4);
           if (s_lastAppliedVal != 4) { s_lastAppliedVal = 4; }
+          s_lastActiveUnit = activeUnitPtr;
+          s_lastTriggered = false;
           return;
       }
 
-      uintptr_t memberPtr = *(uintptr_t*)(activeUnitPtr + 0x18);
-      if (!IsValidPtr(memberPtr, 0x20)) return;
-
-      bool triggered = false;
-      int foundOfficerID = 0;
-      uintptr_t officerSlots[] = { 0x8, 0x10, 0x18 };
-
-      for (int k = 0; k < 3 && !triggered; k++) {
-          uintptr_t offPtr = *(uintptr_t*)(memberPtr + officerSlots[k]);
-          if (!IsValidPtr(offPtr, 0x10)) continue;
-          int officerID = (int)(*(unsigned short*)(offPtr + 0x8));
-          if (officerID <= 0) continue;
-          int flag = GetTargetSkillCount(officerID, 0x1009);
-          if (flag > 0) { triggered = true; foundOfficerID = officerID; }
+      // 활성 유닛이 전 틱과 다를 때만 스캔 (무장 비교)
+      bool triggered;
+      if (activeUnitPtr == s_lastActiveUnit) {
+          triggered = s_lastTriggered;
+      } else {
+          s_lastActiveUnit = activeUnitPtr;
+          triggered = false;
+          uintptr_t memberPtr = *(uintptr_t*)(activeUnitPtr + 0x18);
+          if (IsValidPtr(memberPtr, 0x20)) {
+              uintptr_t officerSlots[] = { 0x8, 0x10, 0x18 };
+              for (int k = 0; k < 3 && !triggered; k++) {
+                  uintptr_t offPtr = *(uintptr_t*)(memberPtr + officerSlots[k]);
+                  if (!IsValidPtr(offPtr, 0x10)) continue;
+                  int officerID = (int)(*(unsigned short*)(offPtr + 0x8));
+                  if (officerID <= 0) continue;
+                  if (GetTargetSkillCount(officerID, 0x1009) > 0) triggered = true;
+              }
+          }
+          s_lastTriggered = triggered;
       }
 
       uint8_t targetVal = triggered ? 8 : 4;
       if (triggered && s_lastAppliedVal != 8) {
-          AddLog(u8"[함선병기] 지상 발동! (무장ID:%d, 지형:%d)", foundOfficerID, terrain);
+          AddLog(u8"[함선병기] 지상 발동! (지형:%d)", terrain);
           s_lastAppliedVal = 8;
       } else if (!triggered && s_lastAppliedVal == 8) {
           AddLog(u8"[함선병기] 해제");
@@ -335,7 +341,13 @@ namespace DX11Base {
       static bool s_terrainBonusActive = false;
       if (bTerrainAbilityAtkDef || bTerrainAbilityAll) {
           s_terrainBonusActive = true;
-          if (unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
+          // 300ms 독립 타이머: 유닛 이동은 턴당 1회이므로 200ms보다 느린 주기로 충분
+          static DWORD s_lastTerrainTick = 0;
+          DWORD nowTerrainTick = GetTickCount();
+          if (nowTerrainTick - s_lastTerrainTick >= 300 &&
+              unitListBase && IsValidPtr(unitListBase - 0x08, 1)) {
+              s_lastTerrainTick = nowTerrainTick;
+              {
               uint8_t unitCount = *(uint8_t*)(unitListBase - 0x08);
               for (int i = 0; i < unitCount; i++) {
                   uintptr_t unitPtr = *(uintptr_t*)(unitListBase + 0x8 + i * 0x10);
@@ -381,6 +393,7 @@ namespace DX11Base {
                           WriteInt16IfDiff(unitPtr + 0x608, baseInt);
                       }
                   }
+              }
               }
           }
       } else if (s_terrainBonusActive) {

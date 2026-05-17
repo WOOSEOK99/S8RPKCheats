@@ -342,17 +342,18 @@ namespace DX11Base {
         s_lastAppliedDay = currentDay;
       }
 
-      // [특수 기능 실시간 체크] (반응속도를 위해 틱 분산 없이 매 틱(100ms) 실행)
+      // [특수 기능 실시간 체크] 매 틱(100ms) 실행
+      // ScanActiveUnitAbilities = 캐시 O(n) 매칭으로 경량 탐지
+      // VirtualProtect(버프 주입)는 부대 상태 변경 시에만 발생 → 부하 최소화
       if (unitListBase > 0x10000) {
           __try {
             UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
 
-      // 만약 unitListBase나 dayBaseAddr가 비정상이라면(예: 전투 종료 직후), 
-      // 하위 함수에서 수많은 예외가 터져 렉을 유발하므로 즉시 실행을 차단합니다.
+      // [환경/공성전] 2-phase 분산 (100ms 틱 기준)
+      // unitListBase나 dayBaseAddr가 비정상이면 하위 함수에서 예외 폭발 → 즉시 차단
       static int s_tickPhase = 0;
-      
       if (s_tickPhase == 0) {
         // [전투 환경 업데이트 - 날씨/일자/지형 등]
         if (unitListBase > 0x10000 && dayBaseAddr > 0x10000) {

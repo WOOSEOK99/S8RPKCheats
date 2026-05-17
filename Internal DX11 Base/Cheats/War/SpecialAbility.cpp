@@ -273,11 +273,17 @@ namespace DX11Base {
     };
 
     // 2. 버프 메모리 주입 (기존 0x02ED7A10 체인 그룹)
-    //    타이머(runGlobalScan)에 도달했거나, 활성 부대가 바뀌어 상태가 변경(injectBuffs)되었을 때 즉시 실행
+    //    전투 진입 후 1회 해소 후 재사용 — 상태 변경 시마다 5단계 체인 해소 제거
     if (exeBase && injectBuffs) {
-      uintptr_t p = SAResolveChain(exeBase + 0x02ED7A10, {0x110, 0x120, 0x40, 0x168, 0});
+      static uintptr_t s_cachedP  = 0;
+      static uintptr_t s_cachedP2 = 0;
+      if (!s_cachedP)
+        s_cachedP  = SAResolveChain(exeBase + 0x02ED7A10, {0x110, 0x120, 0x40, 0x168, 0});
+      if (!s_cachedP2)
+        s_cachedP2 = SAResolveChain(exeBase + 0x034C8630, {0x0, 0x8, 0x10, 0x0, 0});
+      uintptr_t p  = s_cachedP;
+      uintptr_t p2 = s_cachedP2;
       if (p) {
-        // --- (A) 군악대 타겟 (분기, 고무) ---
         STarget gunakdaeTargets[] = {{0xEB2, 10, 15}, {0xED4, 15, 20}, {0xEFC, 1, 9},
                                      {0xF32, 5, 10},  {0xF54, 10, 15}, {0xF7C, 1, 9}};
         applyBuffTargets(p, u8"군악대", hasGunakdae, stateChangedGunakdae, gunakdaeTargets,
@@ -392,8 +398,7 @@ namespace DX11Base {
         }
       }
 
-      // 2-2. 총사령관 버프 메모리 주입 (새로운 0x034C8630 체인 그룹)
-      uintptr_t p2 = SAResolveChain(exeBase + 0x034C8630, {0x0, 0x8, 0x10, 0x0, 0});
+      // 2-2. 총사령관 버프 메모리 주입 (캐시된 p2 재사용)
       if (p2) {
         // --- (E) 총사령관 타겟 ---
         STarget commanderTargets[] = {{0x4B2F0C, 0, 1}, {0x4B2F34, 0, 1}, {0x4B2F5C, 0, 1}, {0x4B2F84, 0, 1},
