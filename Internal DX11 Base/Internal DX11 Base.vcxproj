@@ -319,6 +319,7 @@
     <ClCompile Include="TacticsEditWindow.cpp" />
     <ClCompile Include="Cheats\System\SkillCountManager.cpp" />
     <ClCompile Include="Cheats\War\SpecialAbility.cpp" />
+    <ClCompile Include="Cheats\System\FactionTechEditor.cpp" />
     <ClCompile Include="TextureLoader.cpp" />
   </ItemGroup>
   <ItemGroup>

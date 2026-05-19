@@ -125,6 +125,7 @@ namespace DX11Base {
   extern bool bShowNotificationLog;       // 알림 기록 창 표시 여부
   extern bool bShowTacticsEditWin;        // 전법 수정 창 표시 여부
   extern bool bShowBatchOfficerEditWin;  // 모든 무장 일괄 편집 창 표시 여부
+  extern bool bShowFactionTechEditor;     // 세력별 기술력 편집 창 표시 여부
 
   struct BatchUnitSetting {
     bool enabled = false;

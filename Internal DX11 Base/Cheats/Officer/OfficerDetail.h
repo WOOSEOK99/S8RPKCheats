@@ -25,4 +25,5 @@ namespace DX11Base {
   
   void DrawOfficerDetailWindow(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale);
   void DrawBatchOfficerEditWindow(float scale);
+  void DrawFactionTechEditor(float scale);
 }

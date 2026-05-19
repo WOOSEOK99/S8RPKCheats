@@ -101,6 +101,7 @@ namespace DX11Base {
   bool bAutoLoadMenu = false;
 
   bool bShowWidgetTengi = false;
+  // bool bShowWidgetNotif = false; // Already defined in NotificationManager.cpp
   bool bShowWidgetHero = false;
   bool bShowWidgetAllOfficers = false;
 
@@ -116,8 +117,10 @@ namespace DX11Base {
 
   bool bToggleMenuCollapseRequest = false;
   bool bShowPasswordPopup = false;
+  // bool bShowNotificationLog = false; // Already defined in NotificationManager.cpp
   bool bShowTacticsEditWin = false;
   bool bShowBatchOfficerEditWin = false;
+  bool bShowFactionTechEditor = false;
 
   BatchUnitSetting g_batchTraits[24] = {};
   BatchUnitSetting g_batchTactics[35] = {};
@@ -178,7 +181,7 @@ namespace DX11Base {
   // 지형 보너스 테이블 초기값 (Lua 원본 스크립트 기반)
   short g_TerrainBonusTable[13][18] = {
       {0}, // 0 (사용 안 함)
-      {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10}, // 1: 경보병 [3]=10, [5]=10, [10]=10, [17]=10
+      {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10}, // 1: 경보병
       {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10}, // 2: 중보병
       {0, 0, 0, 10, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10}, // 3: 정예보병
       {0, 0, 0, 10, 0, 20, 10, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0, 10}, // 4: 만병
@@ -188,8 +191,8 @@ namespace DX11Base {
       {0, 10, 10, 0, 10, -10, -20, -20, 0, 0, 0, 0, 0, 0, 0, 10, 0, -10}, // 8: 유목기병
       {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}, // 9: 궁병
       {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}, // 10: 노병
-      {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}, // 11: 정예궁병
-      {0, 0, 0, 0, 0, 0, -10, 20, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}  // 12: 연노병 [6]=-10, [7]=20, [10]=20, [17]=10
+      {0, 0, 0, 0, 0, -10, -10, 10, 0, 0, 20, 0, 0, 0, 0, 0, 10}, // 11: 정예궁병
+      {0, 0, 0, 0, 0, 0, -10, 20, 0, 0, 20, 0, 0, 0, 0, 0, 0, 10}  // 12: 연노병
   };
   bool bShowTerrainBonusWin = false;
 
@@ -201,7 +204,9 @@ namespace DX11Base {
            bShowSelectedOfficerWin ||
            bShowOfficerListWin ||
            bShowSpouseListWin ||
-           bShowSpecialtyInfoWin ||
+           bShowSpecialtyInfoWin || 
+           bShowBatchOfficerEditWin || 
+           bShowFactionTechEditor ||
            bShowMemoryNotepadWin ||
            bShowNotificationLog ||
            bShowTacticsEditWin ||

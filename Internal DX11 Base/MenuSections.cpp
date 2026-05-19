@@ -19,6 +19,7 @@
 #include "Cheats/System/SkillCondition.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/Officer/OfficerDetail.h"
+#include "Cheats/System/FactionTechEditor.h"
 #include "Cheats/System/StartSetting.h"
 #include "Cheats/System/TengiCave.h"
 #include "Cheats/War/BattleMapShuffle.h"
@@ -657,10 +658,16 @@ namespace DX11Base {
         bShowBattleEnvWin = !bShowBattleEnvWin;
       }
       ImGui::SameLine();
-      if (ImGui::Button(u8"모든 무장 일괄 편집", ImVec2(150 * scale, 30 * scale))) {
-        ::DX11Base::bShowBatchOfficerEditWin = !::DX11Base::bShowBatchOfficerEditWin;
+      if (ImGui::Button(u8"모든 무장 일괄 편집", ImVec2(-1, 30 * scale))) {
+        bShowBatchOfficerEditWin = !bShowBatchOfficerEditWin;
+      }
+
+      if (ImGui::Button(u8"세력별 기술력 편집", ImVec2(-1, 30 * scale))) {
+        bShowFactionTechEditor = !bShowFactionTechEditor;
       }
       ::DX11Base::DrawBatchOfficerEditWindow(scale);
+      ::DX11Base::DrawFactionTechEditor(scale);
+
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"클릭하여 날씨, 일자, 지형, 여울(공성전) 등의 상세 설정을 엽니다.");
