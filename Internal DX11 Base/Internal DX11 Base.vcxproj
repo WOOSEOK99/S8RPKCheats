@@ -314,6 +314,7 @@
     <ClCompile Include="Cheats\System\StartSetting.cpp" />
     <ClCompile Include="Cheats\War\FactionLordBonus.cpp" />
     <ClCompile Include="Cheats\Officer\StatMonitor.cpp" />
+    <ClCompile Include="Cheats\Officer\BatchOfficerEditor.cpp" />
     <ClCompile Include="NotificationManager.cpp" />
     <ClCompile Include="TacticsEditWindow.cpp" />
     <ClCompile Include="Cheats\System\SkillCountManager.cpp" />

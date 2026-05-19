@@ -18,6 +18,7 @@
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SkillCondition.h"
 #include "Cheats/System/SpeedHack.h"
+#include "Cheats/Officer/OfficerDetail.h"
 #include "Cheats/System/StartSetting.h"
 #include "Cheats/System/TengiCave.h"
 #include "Cheats/War/BattleMapShuffle.h"
@@ -652,9 +653,14 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Button(u8"전투 환경 및 조건 설정", ImVec2(180 * scale, 30 * scale))) {
+      if (ImGui::Button(u8"전투 환경 및 조건 설정", ImVec2(150 * scale, 30 * scale))) {
         bShowBattleEnvWin = !bShowBattleEnvWin;
       }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"모든 무장 일괄 편집", ImVec2(150 * scale, 30 * scale))) {
+        ::DX11Base::bShowBatchOfficerEditWin = !::DX11Base::bShowBatchOfficerEditWin;
+      }
+      ::DX11Base::DrawBatchOfficerEditWindow(scale);
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"클릭하여 날씨, 일자, 지형, 여울(공성전) 등의 상세 설정을 엽니다.");

@@ -1,6 +1,6 @@
 #pragma once
-#include "Framework/imgui.h"
-#include "pch.h"
+#include "../../Framework/imgui.h"
+#include "../../pch.h"
 #include <string>
 
 namespace DX11Base {
@@ -24,4 +24,5 @@ namespace DX11Base {
   void RenderSpecialAbilityTab(uintptr_t pBase, float scale);
   
   void DrawOfficerDetailWindow(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale);
-}    
+  void DrawBatchOfficerEditWindow(float scale);
+}

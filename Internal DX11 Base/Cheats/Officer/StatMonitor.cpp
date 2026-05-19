@@ -4,6 +4,7 @@
 #include "../../MenuState.h"
 #include "../../NotificationManager.h"
 #include "../../showlog.h"
+#include "../System/SkillCountManager.h"
 #include "OfficerData.h"
 #include "OfficerRosterResolve.h"
 #include <string>
@@ -198,5 +199,96 @@ namespace DX11Base {
                 }
             }
         }
+    }
+
+    void ApplyBatchOfficerEdit() {
+        uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+        uintptr_t arrayBase = 0;
+
+        if (exe && DX11Base::TryResolveOfficerRosterArrayBase(exe, &arrayBase) && arrayBase > 0x10000) {
+        } else if (g_savedHeroAddr > 0x10000 && IsValidPtr(g_savedHeroAddr + 0x08, sizeof(unsigned short))) {
+            unsigned short heroID = *(unsigned short*)(g_savedHeroAddr + 0x08);
+            if (heroID >= 1 && heroID <= 5102)
+                arrayBase = g_savedHeroAddr - (uintptr_t)(heroID - 1) * 0x3D0;
+        }
+
+        if (arrayBase <= 0x10000 || !IsValidPtr(arrayBase, 0x3D0)) {
+            AddLog(u8"[일괄변경] 무장 배열 베이스 주소를 찾을 수 없어 취소합니다.");
+            return;
+        }
+
+        int changeCount = 0;
+        int validObjCount = 0;
+
+        const uintptr_t traitOffsets[] = {
+            0x1D0, 0x1D1, 0x1D2, 0x1D3, 0x1D4, 0x1D5, // 임무
+            0x1D6, 0x1D7, 0x1D8, 0x1D9, 0x1DA, 0x1DB, // 지모
+            0x1DC, 0x1DD, 0x1DE, 0x1DF, 0x1E0, 0x1E1, // 병과
+            0x1E2, 0x1E3, 0x1E4, 0x1E5, 0x1E6, 0x1E7  // 군사
+        };
+
+        const uintptr_t tacticOffsets[] = {
+            0x139, 0x13A, 0x13B, 0x13C, 0x13D, // 보병
+            0x13E, 0x13F, 0x140, 0x141, 0x142, // 기병
+            0x143, 0x144, 0x145, 0x146, 0x147, // 궁병
+            0x148, 0x149, 0x14A, 0x14B, 0x14C, // 함선
+            0x14D, 0x14E, 0x14F, 0x150, 0x151, // 군략
+            0x152, 0x153, 0x154, 0x155, 0x156, // 보조
+            0x157, 0x158, 0x159, 0x15A, 0x15B  // 둔갑
+        };
+
+        for (int i = 0; i < 5102; i++) {
+            uintptr_t pBase = arrayBase + (i * 0x3D0);
+            if (!IsValidPtr(pBase, 0x3D0)) continue;
+
+            RosterStats rs = SafeReadRosterStats(pBase);
+            if (!rs.valid) continue;
+
+            unsigned short id = rs.id_08;
+            if (id != (unsigned short)(i + 1)) continue;
+
+            uint8_t status = *(uint8_t*)(pBase + 0x10);
+            bool isValidObj = (status == 0x18 || status == 0x28 || status == 0x38 || status == 0x48 || status == 0x58 ||
+                               status == 0x68 || status == 0x78 || status == 0x88 || status == 0xE8 || status == 0xD8 ||
+                               status == 0xC8);
+            if (!isValidObj) continue;
+
+            validObjCount++;
+            bool modified = false;
+
+            // 특기 변경
+            for (int t = 0; t < 24; t++) {
+                if (g_batchTraits[t].enabled) {
+                    uint8_t* pVal = (uint8_t*)(pBase + traitOffsets[t]);
+                    if (*pVal != (uint8_t)g_batchTraits[t].level) {
+                        DWORD old;
+                        if (VirtualProtect(pVal, 1, PAGE_READWRITE, &old)) {
+                            *pVal = (uint8_t)g_batchTraits[t].level;
+                            VirtualProtect(pVal, 1, old, &old);
+                            modified = true;
+                        }
+                    }
+                }
+            }
+
+            // 전법 변경
+            for (int tc = 0; tc < 35; tc++) {
+                if (g_batchTactics[tc].enabled) {
+                    uint8_t* pVal = (uint8_t*)(pBase + tacticOffsets[tc]);
+                    if (*pVal != (uint8_t)g_batchTactics[tc].level) {
+                        DWORD old;
+                        if (VirtualProtect(pVal, 1, PAGE_READWRITE, &old)) {
+                            *pVal = (uint8_t)g_batchTactics[tc].level;
+                            VirtualProtect(pVal, 1, old, &old);
+                            modified = true;
+                        }
+                    }
+                }
+            }
+
+            if (modified) changeCount++;
+        }
+
+        AddLog(u8"[일괄변경] 완료: 유효 무장 %d명 중 %d명의 데이터가 수정되었습니다.", validObjCount, changeCount);
     }
 }

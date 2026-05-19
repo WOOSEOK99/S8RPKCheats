@@ -117,6 +117,10 @@ namespace DX11Base {
   bool bToggleMenuCollapseRequest = false;
   bool bShowPasswordPopup = false;
   bool bShowTacticsEditWin = false;
+  bool bShowBatchOfficerEditWin = false;
+
+  BatchUnitSetting g_batchTraits[24] = {};
+  BatchUnitSetting g_batchTactics[35] = {};
 
   // 전법 수정 세부 설정 (치료)
   bool bHealLv1_Self = true;
