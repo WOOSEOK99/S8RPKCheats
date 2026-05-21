@@ -2,6 +2,7 @@
 #pragma comment(lib, "Shcore.lib")
 #include "BattleMonitor.h"
 #include "Cheats.h"
+#include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/Officer/OfficerDetail.h"
 #include "Cheats/Officer/RoninMonitor.h"
@@ -891,6 +892,7 @@ namespace DX11Base {
     DrawOfficerListWindow(p1, scale);
     DrawSpouseListWindow(scale);
     DrawSpecialtyInfoWindow(scale);
+    DrawCityInfoWindow(p1, scale);
     DrawMemoryNotepadWindow(scale);
     DrawNotificationHistoryWindow(scale);
     MenuSections::DrawTacticsEditWindow(scale);

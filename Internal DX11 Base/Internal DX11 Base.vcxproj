@@ -162,6 +162,7 @@
     <ClInclude Include="Cheats\War\Catapult.h" />
     <ClInclude Include="Cheats\War\Celestia.h" />
     <ClInclude Include="Cheats.h" />
+    <ClInclude Include="Cheats\Civilian\CityInfoWindow.h" />
     <ClInclude Include="Cheats\Civilian\DomesticsMult.h" />
     <ClInclude Include="Config.h" />
     <ClInclude Include="debug.h" />
@@ -243,6 +244,7 @@
     <ClCompile Include="Cheats\War\Catapult.cpp" />
     <ClCompile Include="Cheats\War\Celestia.cpp" />
     <ClCompile Include="Cheats.cpp" />
+    <ClCompile Include="Cheats\Civilian\CityInfoWindow.cpp" />
     <ClCompile Include="Cheats\Civilian\DomesticsMult.cpp" />
     <ClCompile Include="Config.cpp" />
     <ClCompile Include="debug.cpp" />

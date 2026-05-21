@@ -149,6 +149,9 @@
     <ClInclude Include="Cheats\War\Celestia.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\Civilian\CityInfoWindow.h">
+      <Filter>Cheats\Civilian</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\Civilian\DomesticsMult.h">
       <Filter>Cheats\Civilian</Filter>
     </ClInclude>
@@ -321,6 +324,9 @@
     </ClCompile>
     <ClCompile Include="Cheats.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Civilian\CityInfoWindow.cpp">
+      <Filter>Cheats\Civilian</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\Civilian\DomesticsMult.cpp">
       <Filter>Cheats\Civilian</Filter>

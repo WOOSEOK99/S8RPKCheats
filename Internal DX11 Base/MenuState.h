@@ -98,6 +98,7 @@ namespace DX11Base {
   extern bool bSangbyeongCondition; // 상병 습득 조건 해제
   extern bool bFactionLordBonus;    // 세력 군주 보너스 자동 배정
 
+  extern bool bShowCityInfoWin;          // 도시 정보 창
   extern bool bShowSelectedOfficerWin;
   extern bool bShowOfficerListWin;
   extern bool bShowSpouseListWin;

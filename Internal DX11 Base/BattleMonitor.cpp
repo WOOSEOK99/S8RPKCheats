@@ -6,6 +6,7 @@
 #include "Cheats/System/SkillCountManager.h"
 #include "Cheats/System/SystemMonth.h"
 #include "Cheats/System/TengiCave.h"
+#include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/War/BattleEnvironment.h"
 #include "Cheats/War/BattleMapShuffle.h"
 #include "Cheats/War/Battleunitcapture.h"
@@ -437,6 +438,7 @@ namespace DX11Base {
           SetDefBuildingBoost(true);
         }
         UpdateOfficerStats99To100();
+        DX11Base::RunAutoCityExchange();
         s_lastAppliedMonth = sm;
       }
     } else {

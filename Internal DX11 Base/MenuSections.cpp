@@ -2,6 +2,7 @@
 #include "Cheats.h"
 #include "Cheats/Civilian/BangmokCity.h"
 #include "Cheats/Civilian/Bigcityconvert.h"
+#include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/DomesticsMult.h"
 #include "Cheats/Civilian/NonggyeongCity.h"
 #include "Cheats/Civilian/SangeopCity.h"
@@ -227,8 +228,19 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"내정 배율 적용", bDomestics);
           SaveConfig();
         }
+        bool domesticsHov = ImGui::IsItemHovered(); // SameLine 전에 캡처
 
-        if (ImGui::IsItemHovered()) {
+        // [도시 정보] 버튼 – 내정 배율 체크박스 오른쪽
+        ImGui::SameLine(160.0f * scale);
+        ImGui::PushStyleColor(ImGuiCol_Button,
+          bShowCityInfoWin ? ImVec4(0.18f, 0.55f, 0.18f, 1.f)
+                           : ImVec4(0.15f, 0.30f, 0.55f, 1.f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.80f, 1.f));
+        if (ImGui::Button(u8"도시 정보", ImVec2(70.f * scale, 0.f)))
+          bShowCityInfoWin = !bShowCityInfoWin;
+        ImGui::PopStyleColor(2);
+
+        if (domesticsHov) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"내정(개발, 보수 등) 시 배율을 적용합니다.");
           ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"현재 선택된 무장이 플레이어로 자동 등록됩니다.");

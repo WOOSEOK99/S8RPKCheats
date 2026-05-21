@@ -86,6 +86,7 @@ namespace DX11Base {
   bool bSangbyeongCondition = false; // 상병 습득 조건 해제
   bool bFactionLordBonus = false;    // 세력 군주 보너스 자동 배정
   bool bCancelTengi = false;         // 2026-04-05 전기발생 취소
+  bool bShowCityInfoWin = false;
   bool bShowSelectedOfficerWin = false;
   bool bShowOfficerListWin = false;
   bool bShowSpouseListWin = false;
@@ -204,8 +205,9 @@ namespace DX11Base {
            bShowSelectedOfficerWin ||
            bShowOfficerListWin ||
            bShowSpouseListWin ||
-           bShowSpecialtyInfoWin || 
-           bShowBatchOfficerEditWin || 
+           bShowSpecialtyInfoWin ||
+           bShowCityInfoWin ||
+           bShowBatchOfficerEditWin ||
            bShowFactionTechEditor ||
            bShowMemoryNotepadWin ||
            bShowNotificationLog ||
