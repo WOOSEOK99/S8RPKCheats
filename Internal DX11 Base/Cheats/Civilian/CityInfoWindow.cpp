@@ -7,6 +7,7 @@
 #include "../../MenuState.h"
 #include "../../pch.h"
 #include "../../showlog.h"
+#include "../../Config.h"
 #include "CityData.h"
 #include <windows.h>
 
@@ -112,7 +113,7 @@ namespace DX11Base {
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 90.f * sc), true);
+      ImGui::BeginChild("##CityTop", ImVec2(0.f, 125.f * sc), true);
 
       ImGui::TextColored(ImVec4(1.f, 0.82f, 0.28f, 1.f), u8"[ 자동 환전 설정 ]");
       // ImGui::SameLine(0.f, 20.f * sc);
@@ -120,10 +121,14 @@ namespace DX11Base {
       ImGui::Separator();
 
       float fw = 95.f * sc;
+
+      ImGui::TextUnformatted(u8"군량 한도");
+      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
       ImGui::SetNextItemWidth(fw);
-      ImGui::InputInt(u8"군량 한도##gl", &g_cityMaxGrainLimit, 0, 0);
-      if (g_cityMaxGrainLimit < 0)
-        g_cityMaxGrainLimit = 0;
+      if (ImGui::InputInt(u8"##gl", &g_cityMaxGrainLimit, 0, 0)) {
+        if (g_cityMaxGrainLimit < 0) g_cityMaxGrainLimit = 0;
+        SaveConfig();
+      }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(u8"군량이 이 값을 초과하면 자동으로 금으로 환전합니다.");
@@ -131,10 +136,13 @@ namespace DX11Base {
       }
       ImGui::SameLine();
 
+      ImGui::TextUnformatted(u8"남길 군량");
+      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
       ImGui::SetNextItemWidth(fw);
-      ImGui::InputInt(u8"남길 군량##kg", &g_cityKeepGrain, 0, 0);
-      if (g_cityKeepGrain < 0)
-        g_cityKeepGrain = 0;
+      if (ImGui::InputInt(u8"##kg", &g_cityKeepGrain, 0, 0)) {
+        if (g_cityKeepGrain < 0) g_cityKeepGrain = 0;
+        SaveConfig();
+      }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(u8"환전 시 이 수치만큼은 남기고 초과분만 환전합니다.");
@@ -142,10 +150,13 @@ namespace DX11Base {
       }
       ImGui::SameLine();
 
+      ImGui::TextUnformatted(u8"환전 비율");
+      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
       ImGui::SetNextItemWidth(fw);
-      ImGui::InputInt(u8"환전 비율##er", &g_cityExchangeRate, 0, 0);
-      if (g_cityExchangeRate < 1)
-        g_cityExchangeRate = 1;
+      if (ImGui::InputInt(u8"##er", &g_cityExchangeRate, 0, 0)) {
+        if (g_cityExchangeRate < 1) g_cityExchangeRate = 1;
+        SaveConfig();
+      }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(u8"군량 N개당 1금으로 환전합니다. (예: 10 입력 시 10군량 -> 1금)");
@@ -153,21 +164,47 @@ namespace DX11Base {
       }
       ImGui::SameLine(0.f, 18.f * sc);
 
+      if (ImGui::Checkbox(u8"자동 환전##autoex", &g_cityAutoExchangeEnabled)) {
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"매 턴 내정이 끝나고 평정이 시작될 때 위 조건에 따라 자동 환전합니다.");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::Separator();
+
       // 일괄 제어 버튼
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.2f, 0.2f, 1.f));
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.3f, 0.3f, 1.f));
       if (ImGui::Button(u8"모든 도시 군량/금 최대화##maxall", ImVec2(200.f * sc, 0.f))) {
         MaximizeAllCityResources();
       }
-      ImGui::PopStyleColor(2);
-      ImGui::SameLine();
-
-      ImGui::Checkbox(u8"자동 환전##autoex", &g_cityAutoExchangeEnabled);
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(u8"매 턴 내정이 끝나고 평정이 시작될 때 위 조건에 따라 자동 환전합니다.");
-        ImGui::EndTooltip();
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (ImGui::Button(u8"모든 도시 병사 최대화##maxsol", ImVec2(180.f * sc, 0.f))) {
+        MaximizeAllCitySoldierMax();
       }
+      
+      ImGui::Spacing();
+      
+      float limitBtnW = 135.f * sc;
+      if (ImGui::Button(u8"모든 개발 최대화##maxdev", ImVec2(limitBtnW, 0.f))) {
+        MaximizeAllCityDevMax();
+      }
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (ImGui::Button(u8"모든 상업 최대화##maxcom", ImVec2(limitBtnW, 0.f))) {
+        MaximizeAllCityComMax();
+      }
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (ImGui::Button(u8"모든 방어 최대화##maxdef", ImVec2(limitBtnW, 0.f))) {
+        MaximizeAllCityDefMax();
+      }
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (ImGui::Button(u8"모든 기술 최대화##maxtec", ImVec2(limitBtnW, 0.f))) {
+        MaximizeAllCityTecMax();
+      }
+      ImGui::PopStyleColor(2);
 
       ImGui::EndChild();
       ImGui::PopStyleColor();
@@ -208,8 +245,8 @@ namespace DX11Base {
 
       ImGui::Spacing();
       ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.85f, 1.f), u8"[ 도시 리스트 ]");
-      ImGui::SameLine();
-      ImGui::TextDisabled(u8"– Base: 0x%llX  Stride: 0x2A0", (unsigned long long)cityBase);
+      // ImGui::SameLine();
+      // ImGui::TextDisabled(u8"– Base: 0x%llX  Stride: 0x2A0", (unsigned long long)cityBase);
       ImGui::SameLine(0.f, 20.f * sc);
       if (ImGui::SmallButton(u8"새로고침")) {
         s_snapDirty = true;
@@ -378,7 +415,7 @@ namespace DX11Base {
     if (!bShowCityInfoWin)
       return;
 
-    ImGui::SetNextWindowSize(ImVec2(1060.f * scale, 560.f * scale), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(750.f * scale, 760.f * scale), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(500.f * scale, 300.f * scale), ImVec2(1400.f * scale, 900.f * scale));
 
     if (!ImGui::Begin(u8"도시 정보###CityInfoWin", &bShowCityInfoWin, ImGuiWindowFlags_NoSavedSettings)) {
@@ -453,6 +490,66 @@ namespace DX11Base {
     // Refresh snapshot so UI updates immediately
     s_snapDirty = true;
     AddLog(u8"[도시정보] 모든 도시의 금과 군량을 최대치로 설정했습니다.");
+  }
+
+  void MaximizeAllCityDevMax() {
+    uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) return;
+    const uint16_t MAX_LIMIT = 30000;
+    for (int i = 0; i < g_CityCount; i++) {
+      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      SafeWrite16(ca + OFF_DEV_MAX, MAX_LIMIT);
+    }
+    s_snapDirty = true;
+    AddLog(u8"[도시정보] 모든 도시의 개발한도를 최대치로 설정했습니다.");
+  }
+
+  void MaximizeAllCityComMax() {
+    uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) return;
+    const uint16_t MAX_LIMIT = 30000;
+    for (int i = 0; i < g_CityCount; i++) {
+      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      SafeWrite16(ca + OFF_COM_MAX, MAX_LIMIT);
+    }
+    s_snapDirty = true;
+    AddLog(u8"[도시정보] 모든 도시의 상업한도를 최대치로 설정했습니다.");
+  }
+
+  void MaximizeAllCityDefMax() {
+    uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) return;
+    const uint16_t MAX_LIMIT = 30000;
+    for (int i = 0; i < g_CityCount; i++) {
+      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      SafeWrite16(ca + OFF_DEF_MAX, MAX_LIMIT);
+    }
+    s_snapDirty = true;
+    AddLog(u8"[도시정보] 모든 도시의 방어한도를 최대치로 설정했습니다.");
+  }
+
+  void MaximizeAllCityTecMax() {
+    uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) return;
+    const uint16_t MAX_LIMIT = 30000;
+    for (int i = 0; i < g_CityCount; i++) {
+      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      SafeWrite16(ca + OFF_TEC_MAX, MAX_LIMIT);
+    }
+    s_snapDirty = true;
+    AddLog(u8"[도시정보] 모든 도시의 기술한도를 최대치로 설정했습니다.");
+  }
+
+  void MaximizeAllCitySoldierMax() {
+    uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) return;
+    const uint32_t MAX_SOLDIER = 9999999;
+    for (int i = 0; i < g_CityCount; i++) {
+      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      SafeWrite32(ca - 0x28 + OFF_SOL_MAX, MAX_SOLDIER);
+    }
+    s_snapDirty = true;
+    AddLog(u8"[도시정보] 모든 도시의 병사한도를 최대치로 설정했습니다.");
   }
 
 } // namespace DX11Base

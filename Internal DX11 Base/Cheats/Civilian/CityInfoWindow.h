@@ -12,4 +12,9 @@ namespace DX11Base {
   void DrawCityInfoWindow(uintptr_t p1, float scale);
   void RunAutoCityExchange();
   void MaximizeAllCityResources();
+  void MaximizeAllCityDevMax();
+  void MaximizeAllCityComMax();
+  void MaximizeAllCityDefMax();
+  void MaximizeAllCityTecMax();
+  void MaximizeAllCitySoldierMax();
 } // namespace DX11Base

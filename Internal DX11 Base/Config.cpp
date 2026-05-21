@@ -16,6 +16,7 @@
 
 
 // 치트 기능 헤더들
+#include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/BangmokCity.h"
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/Civilian/Bigcityconvert.h"
@@ -199,6 +200,10 @@ namespace DX11Base {
     file << "  \"g_notificationSpeed\": " << g_notificationSpeed << ",\n";
     file << "  \"fDomesticsPlayer\": " << fDomesticsPlayer << ",\n";
     file << "  \"fDomesticsForce\": " << fDomesticsForce << ",\n";
+    file << "  \"g_cityMaxGrainLimit\": " << g_cityMaxGrainLimit << ",\n";
+    file << "  \"g_cityKeepGrain\": " << g_cityKeepGrain << ",\n";
+    file << "  \"g_cityExchangeRate\": " << g_cityExchangeRate << ",\n";
+    file << "  \"g_cityAutoExchangeEnabled\": " << (g_cityAutoExchangeEnabled ? "true" : "false") << ",\n";
     file << "  \"v_HealLv1_Amount\": " << v_HealLv1_Amount << ",\n";
     file << "  \"v_HealLv2_Amount\": " << v_HealLv2_Amount << ",\n";
     file << "  \"v_HealLv2_Range\": " << v_HealLv2_Range << ",\n";
@@ -313,6 +318,25 @@ namespace DX11Base {
           }
         }
         continue;
+      }
+      if (line.find("g_cityMaxGrainLimit") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { g_cityMaxGrainLimit = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("g_cityKeepGrain") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { g_cityKeepGrain = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("g_cityExchangeRate") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { g_cityExchangeRate = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
+          continue;
+      }
+      if (line.find("\"g_cityAutoExchangeEnabled\"") != std::string::npos) {
+          g_cityAutoExchangeEnabled = (line.find("true") != std::string::npos);
+          continue;
       }
       if (line.find("iSiegeHealRate") != std::string::npos) {
           size_t colonPos = line.find(":");
