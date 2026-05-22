@@ -142,6 +142,23 @@ namespace DX11Base {
                              u8"20부대 미만: 15일 / 20~29부대: 20일 / 30부대 이상: 25일");
           ImGui::EndTooltip();
         }
+        ImGui::AlignTextToFramePadding();
+        if (ImGui::Checkbox(u8"스킵 활성화", &bSkipDaysEnabled)) {
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"전투 진입 시 시작 경과일을 설정하여 초반 턴을 스킵합니다.");
+          ImGui::EndTooltip();
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(50.0f * scale);
+        if (ImGui::InputInt("##SkipDays", &nSkipDays, 0, 0)) {
+          if (nSkipDays < 0) nSkipDays = 0;
+          SaveConfig();
+        }
+        ImGui::SameLine();
+        ImGui::TextUnformatted(u8"일");
 
         ImGui::TableNextColumn();
         if (ImGui::Checkbox(u8"공방/무력/지력", &bTerrainAbilityAll)) {

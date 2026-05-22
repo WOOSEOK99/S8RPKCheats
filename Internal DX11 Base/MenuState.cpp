@@ -51,6 +51,8 @@ namespace DX11Base {
   bool bWeatherSkillComplex = false;
   bool bDateAlways15 = false;
   bool bDateDynamic = false;
+  bool bSkipDaysEnabled = false;
+  int nSkipDays = 0;
   bool bTerrainAbilityAtkDef = false;
   bool bTerrainAbilityAll = false;
   bool bSiegeWarfare2 = false;

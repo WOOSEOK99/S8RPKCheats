@@ -132,6 +132,7 @@ namespace DX11Base {
       {"bWeatherSkillComplex", u8"전쟁: 날씨 대폭 변경", &bWeatherSkillComplex, nullptr, nullptr, false, true},
       {"bDateAlways15", u8"전쟁: 전투 일자 15일 고정", &bDateAlways15, nullptr, nullptr, false, true},
       {"bDateDynamic", u8"전쟁: 전투 일자 유동 조절", &bDateDynamic, nullptr, nullptr, false, true},
+      {"bSkipDaysEnabled", u8"전쟁: 시작 경과일 스킵 활성화", &bSkipDaysEnabled, nullptr, nullptr, false, true},
       {"bTerrainAbilityAtkDef", u8"전쟁: 지형 능력 공방만", &bTerrainAbilityAtkDef, nullptr, nullptr, false, true},
       {"bTerrainAbilityAll", u8"전쟁: 지형 능력 전체", &bTerrainAbilityAll, nullptr, nullptr, false, true},
       {"bAllAggressive", u8"전쟁: 모든 무장 성향 적극", &bAllAggressive, nullptr, nullptr, false, true},
@@ -204,6 +205,7 @@ namespace DX11Base {
     file << "  \"g_cityKeepGrain\": " << g_cityKeepGrain << ",\n";
     file << "  \"g_cityExchangeRate\": " << g_cityExchangeRate << ",\n";
     file << "  \"g_cityAutoExchangeEnabled\": " << (g_cityAutoExchangeEnabled ? "true" : "false") << ",\n";
+    file << "  \"nSkipDays\": " << nSkipDays << ",\n";
     file << "  \"v_HealLv1_Amount\": " << v_HealLv1_Amount << ",\n";
     file << "  \"v_HealLv2_Amount\": " << v_HealLv2_Amount << ",\n";
     file << "  \"v_HealLv2_Range\": " << v_HealLv2_Range << ",\n";
@@ -336,6 +338,11 @@ namespace DX11Base {
       }
       if (line.find("\"g_cityAutoExchangeEnabled\"") != std::string::npos) {
           g_cityAutoExchangeEnabled = (line.find("true") != std::string::npos);
+          continue;
+      }
+      if (line.find("nSkipDays") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) { try { nSkipDays = std::stoi(line.substr(colonPos + 1)); } catch (...) {} }
           continue;
       }
       if (line.find("iSiegeHealRate") != std::string::npos) {

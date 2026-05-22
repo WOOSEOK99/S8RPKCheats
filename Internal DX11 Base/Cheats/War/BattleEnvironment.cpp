@@ -201,6 +201,22 @@ namespace DX11Base {
           WriteByteIfDiff(finalDayAddr, 30); // 기본값 복구
       }
 
+      // [신규] 시작 경과일 스킵 로직
+      if (bSkipDaysEnabled && nSkipDays > 0) {
+          if (day == 1) { // 1일차일 때 한 번만 적용
+              uint8_t currentFinalDay = *(uint8_t*)finalDayAddr;
+              int clampedSkipDays = nSkipDays;
+              if (clampedSkipDays >= currentFinalDay) {
+                  clampedSkipDays = currentFinalDay - 1; 
+              }
+              if (clampedSkipDays > 0) {
+                  uint8_t targetDay = 1 + clampedSkipDays;
+                  WriteByteIfDiff(battleDayAddr, targetDay);
+                  AddLog(u8"[BattleEnv] 시작 경과일 스킵 발동: %d일 스킵 (현재 %d일차로 설정됨)", clampedSkipDays, targetDay);
+              }
+          }
+      }
+
       // 캐시된 tacticBase 사용, 없으면 폴백 해소 시도
       static bool logTacticGate = false;
       uintptr_t tacticBase = g_cachedTacticBase;

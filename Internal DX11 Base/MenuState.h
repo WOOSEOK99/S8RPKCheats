@@ -56,6 +56,8 @@ namespace DX11Base {
   extern bool bWeatherSkillComplex;
   extern bool bDateAlways15;
   extern bool bDateDynamic;
+  extern bool bSkipDaysEnabled;
+  extern int nSkipDays;
   extern bool bTerrainAbilityAtkDef;
   extern bool bTerrainAbilityAll;
   extern bool bSiegeWarfare2;
