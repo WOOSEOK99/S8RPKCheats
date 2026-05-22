@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.757"
+#define SAM8_CHEAT_VERSION "V0.758"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -98,7 +98,7 @@ namespace DX11Base {
   extern bool bSangbyeongCondition; // 상병 습득 조건 해제
   extern bool bFactionLordBonus;    // 세력 군주 보너스 자동 배정
 
-  extern bool bShowCityInfoWin;          // 도시 정보 창
+  extern bool bShowCityInfoWin; // 도시 정보 창
   extern bool bShowSelectedOfficerWin;
   extern bool bShowOfficerListWin;
   extern bool bShowSpouseListWin;
@@ -125,7 +125,7 @@ namespace DX11Base {
   extern bool bShowPasswordPopup;         // 디버그 비밀번호 창 표시 여부
   extern bool bShowNotificationLog;       // 알림 기록 창 표시 여부
   extern bool bShowTacticsEditWin;        // 전법 수정 창 표시 여부
-  extern bool bShowBatchOfficerEditWin;  // 모든 무장 일괄 편집 창 표시 여부
+  extern bool bShowBatchOfficerEditWin;   // 모든 무장 일괄 편집 창 표시 여부
   extern bool bShowFactionTechEditor;     // 세력별 기술력 편집 창 표시 여부
 
   struct BatchUnitSetting {
