@@ -282,6 +282,15 @@ namespace DX11Base {
         if (ImGui::Button(btnLabelCnt, ImVec2(30 * scale, 25 * scale))) {
             targetCount = (targetCount + 1) % 10;
             SetTargetSkillCount(officerID, offset, targetCount);
+            // [다중 선택] 체크된 모든 무장에 동일 횟수 적용
+            if (GetSelectedOfficerIDCount() > 0) {
+              const int applyCount = targetCount;
+              ApplyPatchToSelectedOfficers([offset, applyCount](uintptr_t base) {
+                if (!IsValidPtr(base + 0x08, 2)) return;
+                int id = (int)(*(unsigned short*)(base + 0x08));
+                SetTargetSkillCount(id, offset, applyCount);
+              });
+            }
         }
         ImGui::PopStyleColor();
 
