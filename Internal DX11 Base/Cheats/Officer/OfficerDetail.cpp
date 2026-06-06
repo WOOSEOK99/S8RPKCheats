@@ -142,6 +142,13 @@ namespace DX11Base {
       (*inputVal)--;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
       SyncInlineReadBufFromWrite(p1);
+      // [다중 선택] 체크된 모든 무장에 동일 값 적용
+      if (GetSelectedOfficerIDCount() > 0) {
+        const int applyVal = *inputVal;
+        ApplyPatchToSelectedOfficers([offset, applyVal, size](uintptr_t base) {
+          DX11Base::ModifyStat(base, offset, applyVal, size);
+        });
+      }
     }
     ImGui::SameLine();
  
@@ -152,7 +159,14 @@ namespace DX11Base {
     bool justFinished = ImGui::IsItemDeactivatedAfterEdit();
     if (justFinished) {
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
-      SyncInlineReadBufFromWrite(p1); 
+      SyncInlineReadBufFromWrite(p1);
+      // [다중 선택] 체크된 모든 무장에 동일 값 적용
+      if (GetSelectedOfficerIDCount() > 0) {
+        const int applyVal = *inputVal;
+        ApplyPatchToSelectedOfficers([offset, applyVal, size](uintptr_t base) {
+          DX11Base::ModifyStat(base, offset, applyVal, size);
+        });
+      }
     }
     
     // [중요] 사용자가 입력 중이 아닐 때만 적절한 스냅샷 버퍼(pR)에서 값을 가져와 표시
@@ -171,6 +185,13 @@ namespace DX11Base {
       (*inputVal)++;
       DX11Base::ModifyStat(p1, offset, *inputVal, size);
       SyncInlineReadBufFromWrite(p1);
+      // [다중 선택] 체크된 모든 무장에 동일 값 적용
+      if (GetSelectedOfficerIDCount() > 0) {
+        const int applyVal = *inputVal;
+        ApplyPatchToSelectedOfficers([offset, applyVal, size](uintptr_t base) {
+          DX11Base::ModifyStat(base, offset, applyVal, size);
+        });
+      }
     }
     ImGui::PopID();
   }
@@ -223,6 +244,13 @@ namespace DX11Base {
             *val = (*val + 1) % 4;
             DX11Base::ModifyStat(p1, offset, *val, 1);
             SyncInlineReadBufFromWrite(p1);
+            // [다중 선택] 체크된 모든 무장에 동일 레벨 적용
+            if (GetSelectedOfficerIDCount() > 0) {
+              const int applyVal = *val;
+              ApplyPatchToSelectedOfficers([offset, applyVal](uintptr_t base) {
+                DX11Base::ModifyStat(base, offset, applyVal, 1);
+              });
+            }
         }
         if (ImGui::IsItemHovered()) {
             ImGui::BeginTooltip();
@@ -719,6 +747,15 @@ namespace DX11Base {
     int currentID = *(unsigned short*)(pBase + 0x08);
 
     ImGui::Spacing();
+    // [다중 선택] 배너 표시
+    size_t selCount = GetSelectedOfficerIDCount();
+    if (selCount > 0) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.5f, 1.0f));
+      ImGui::Text(u8"★ %zu명 동시 편집 중 — 아래 변경은 체크된 모든 무장에 적용됩니다", selCount);
+      ImGui::PopStyleColor();
+      ImGui::Separator();
+    }
+
     ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.0f, 1.0f), u8"[ 특수 능력 설정 ]");
     ImGui::SameLine();
     ImGui::TextDisabled(u8"(선택 무장에게 특수 유닛 능력을 부여합니다)");
@@ -759,6 +796,17 @@ namespace DX11Base {
           SetTargetSkillCount(currentID, abilities[i].vOffset, isEnabled ? 1 : 0);
           AddLog(u8"[특수기능] 무장[%d] %s %s", currentID, abilities[i].label,
                  isEnabled ? u8"활성화 (저장됨)" : u8"비활성화 (삭제됨)");
+          // [다중 선택] 체크된 모든 무장에 동일 특수 기능 적용
+          if (GetSelectedOfficerIDCount() > 0) {
+            const uintptr_t applyOffset = abilities[i].vOffset;
+            const int       applyVal    = isEnabled ? 1 : 0;
+            // 배열 베이스를 이용하여 무장 ID를 얻어 SetTargetSkillCount 호출
+            ApplyPatchToSelectedOfficers([applyOffset, applyVal](uintptr_t base) {
+              if (!IsValidPtr(base + 0x08, 2)) return;
+              int id = (int)(*(unsigned short*)(base + 0x08));
+              SetTargetSkillCount(id, applyOffset, applyVal);
+            });
+          }
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
@@ -776,6 +824,14 @@ namespace DX11Base {
         SetTargetSkillCount(currentID, 0x1008, isMusinEnabled ? 1 : 0);
         AddLog(u8"[특수기능] 무장[%d] 무신(병종제약무시) %s", currentID,
                isMusinEnabled ? u8"활성화 (저장됨)" : u8"비활성화 (삭제됨)");
+        if (GetSelectedOfficerIDCount() > 0) {
+          const int applyVal = isMusinEnabled ? 1 : 0;
+          ApplyPatchToSelectedOfficers([applyVal](uintptr_t base) {
+            if (!IsValidPtr(base + 0x08, 2)) return;
+            int id = (int)(*(unsigned short*)(base + 0x08));
+            SetTargetSkillCount(id, 0x1008, applyVal);
+          });
+        }
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
@@ -788,6 +844,14 @@ namespace DX11Base {
         SetTargetSkillCount(currentID, 0x1009, isShipWeaponEnabled ? 1 : 0);
         AddLog(u8"[특수기능] 무장[%d] 함선 병기화 %s", currentID,
                isShipWeaponEnabled ? u8"활성화 (저장됨)" : u8"비활성화 (삭제됨)");
+        if (GetSelectedOfficerIDCount() > 0) {
+          const int applyVal = isShipWeaponEnabled ? 1 : 0;
+          ApplyPatchToSelectedOfficers([applyVal](uintptr_t base) {
+            if (!IsValidPtr(base + 0x08, 2)) return;
+            int id = (int)(*(unsigned short*)(base + 0x08));
+            SetTargetSkillCount(id, 0x1009, applyVal);
+          });
+        }
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();

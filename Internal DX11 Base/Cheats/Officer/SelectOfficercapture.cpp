@@ -59,12 +59,16 @@ namespace DX11Base {
   static bool s_requestOfficerListRefresh = false;     // [최적화] 목록 캐시 재구축 요청 플래그
   static bool s_forceFilterRebuild = false;            // [UX] 캐시 변동 후 필터 리스트 즉각적인 재구축 요청 플래그
   static uintptr_t s_nextTargetFallback = 0;           // [UX] 일괄 변경 시 다음으로 선택할 무장 주소 보관
-  static std::unordered_set<int> s_selectedOfficerIDs; // 다중 선택용 보관함
+  static std::unordered_set<int> s_selectedOfficerIDs;    // 다중 선택용 보관함
+  static std::vector<uintptr_t>  s_selectedOfficerBases;  // [캐시] 선택된 무장들의 메모리 베이스 (패치 고속화용)
   static std::vector<CachedOfficer> s_allOfficerCache; // [최적화] 전체 무장 캐시 (새로고침 시 1회 구축)
   static std::vector<CachedOfficer> s_filteredIndices; // [최적화] 필터링 및 이름/ID 캐싱된 목록
   static int s_officerNameEditId = -1;                 // JSON 이름 편집 중인 무장 ID
   static char s_officerNameEditBuf[384] = {};
   static bool s_focusDetailNameInput = false; // 상세 패널 이름 클릭 직후 InputText 포커스
+
+  // [전방 선언] 선택 무장 베이스 캐시 재구축 (정의는 이 파일 하단)
+  static void RebuildSelectedOfficerBases();
 
   // ID는 고유하므로 단건 상태 변경 시 전체 재스캔 없이 캐시 항목만 즉시 갱신
   static bool UpdateOfficerStatusInAllCache(int officerID, uint8_t newStatus) {
@@ -1031,6 +1035,7 @@ namespace DX11Base {
           s_triggerReselection = true;
           AddLog(u8"[LIFE] 선택한 %d명의 미발견 무장을 재야(0x58) 상태로 변경했습니다.", count);
           s_selectedOfficerIDs.clear();
+          RebuildSelectedOfficerBases(); // 캐시 비우기
         }
       }
       ImGui::PopStyleColor();
@@ -1062,6 +1067,24 @@ namespace DX11Base {
           uint16_t selectedId = *(uint16_t *)(pBase + 0x08);
           isHeroOfficer = (heroId == selectedId);
         }
+      }
+    }
+
+    // --- [ 다중 선택 배너 ] ---
+    {
+      size_t selCount = GetSelectedOfficerIDCount();
+      if (selCount > 0) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.20f, 1.00f, 0.50f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.05f, 0.25f, 0.10f, 0.55f));
+        ImGui::BeginChild("MultiEditBanner", ImVec2(0, 30 * scale), false,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoInputs);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5 * scale);
+        ImGui::Text(u8"  \u2605 %zu\uba85 \ub3d9\uc2dc \ud3b8\uc9d1 \ubaa8\ub4dc "
+                    u8"\u2014 [\ub2a5\ub825/\uc0c1\ud0dc][\uae30\ub2a5][\ud2b9\uc218\uae30\ub2a5] \ud0ed\uc758 \ubcc0\uacbd\uc774 \uccb4\ud06c\ub41c \ubaa8\ub4e0 \ubb34\uc7a5\uc5d0 \uc801\uc6a9\ub429\ub2c8\ub2e4",
+                    selCount);
+        ImGui::EndChild();
+        ImGui::PopStyleColor(2);
+        ImGui::Spacing();
       }
     }
 
@@ -1164,6 +1187,55 @@ namespace DX11Base {
     }
     g_dumpText = oss.str();
     g_showDumpPopup = true;
+  }
+
+  // --- [ 다중 선택 무장 일괄 패치 API ] ---
+
+  // 현재 체크 선택된 무장 수 반환 (0 = 단일 편집 모드)
+  size_t GetSelectedOfficerIDCount() {
+    return s_selectedOfficerIDs.size();
+  }
+
+  // [캐시 재구축] 전체 배열을 1회 순회해 선택된 무장의 베이스 주소만 뽑아 캐시에 저장
+  // · 체크박스 토글 / 전체선택 / 선택해제 시 호출해야 함
+  // · 이후 ApplyPatchToSelectedOfficers는 이 캐시만 순회 → O(N_selected) 패치
+  static void RebuildSelectedOfficerBases() {
+    s_selectedOfficerBases.clear();
+    if (s_selectedOfficerIDs.empty() || s_stableArrayBase <= 0x10000)
+      return;
+
+    s_selectedOfficerBases.reserve(s_selectedOfficerIDs.size());
+
+    for (int i = 0; i < 5102; i++) {
+      uintptr_t base = s_stableArrayBase + (i * 0x3D0);
+      if (!IsValidPtr(base + 0x08, 2)) continue;
+      unsigned short id = *(unsigned short*)(base + 0x08);
+      if (s_selectedOfficerIDs.count(id)) {
+        s_selectedOfficerBases.push_back(base);
+        // 모두 찾았으면 조기 종료
+        if (s_selectedOfficerBases.size() >= s_selectedOfficerIDs.size()) break;
+      }
+    }
+  }
+
+  // 체크 선택된 모든 무장에 patchFn(base) 콜백 적용
+  // · 사전에 RebuildSelectedOfficerBases()가 호출되어 있어야 함
+  // · VirtualProtect는 1회만 수행 → 개별 ModifyStat 내부의 중복 호출 무력화 가능
+  void ApplyPatchToSelectedOfficers(std::function<void(uintptr_t)> patchFn) {
+    if (s_selectedOfficerBases.empty())
+      return;
+
+    DWORD oldProt = 0;
+    bool protChanged = false;
+    if (VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, PAGE_READWRITE, &oldProt))
+      protChanged = true;
+
+    for (uintptr_t base : s_selectedOfficerBases) {
+      patchFn(base);
+    }
+
+    if (protChanged)
+      VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, oldProt, &oldProt);
   }
 
   void DrawOfficerListWindow(uintptr_t p1, float scale) {
@@ -1295,8 +1367,10 @@ namespace DX11Base {
       bool hasSelections = !s_selectedOfficerIDs.empty();
       if (hasSelections) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.65f, 0.2f, 0.2f, 1.0f));
-        if (ImGui::Button(u8"선택 해제"))
+        if (ImGui::Button(u8"선택 해제")) {
           s_selectedOfficerIDs.clear();
+          RebuildSelectedOfficerBases(); // 캐시 비우기
+        }
         ImGui::PopStyleColor();
       } else {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.45f, 0.2f, 1.0f));
@@ -1304,6 +1378,7 @@ namespace DX11Base {
           for (const auto &info : s_filteredIndices) {
             s_selectedOfficerIDs.insert(info.officerID);
           }
+          RebuildSelectedOfficerBases(); // 캐시 재구축
         }
         ImGui::PopStyleColor();
       }
@@ -1646,6 +1721,8 @@ namespace DX11Base {
                 s_selectedOfficerIDs.insert(officerID);
               else
                 s_selectedOfficerIDs.erase(officerID);
+              // [최적화] 선택 변경 시 베이스 주소 캐시 즉시 재구축
+              RebuildSelectedOfficerBases();
             }
 
             // 2열: 무장 이름

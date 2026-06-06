@@ -2,6 +2,7 @@
 #include "Framework/imgui.h"
 #include "OfficerData.h"
 #include <cstdint>
+#include <functional>
 
 namespace DX11Base {
   /*
@@ -54,4 +55,8 @@ namespace DX11Base {
   void DrawSpouseListWindow(float scale);
   void DrawSpecialtyInfoWindow(float scale);
   void UpdateAutoSpecialtyDistribution(bool isCouncil);
+
+  // 다중 선택 무장 일괄 패치 API
+  size_t GetSelectedOfficerIDCount();
+  void   ApplyPatchToSelectedOfficers(std::function<void(uintptr_t)> patchFn);
 } // namespace DX11Base
