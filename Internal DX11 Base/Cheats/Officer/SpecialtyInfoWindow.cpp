@@ -1,3 +1,4 @@
+#include "../../BattleMonitor.h"
 #include "../../Cheats.h"
 #include "../../MenuState.h"
 #include "../../debug.h"
@@ -13,8 +14,6 @@
 #include <random>
 #include <set>
 #include <unordered_map>
-#include "../../BattleMonitor.h"
-
 
 // 명품(Specialty) 관련 오프셋 및 데이터 구조 정리
 /*
@@ -42,6 +41,31 @@
 
     [기타 관련 주소]
     - 주인공(Hero) 주소: GetGameBase() + 0xE0 (포인터)
+
+      ---- 자세한 설명 ----
+    도시 객체 기준 오프셋 (명품 객체를 가리키는 포인터)
+    도시 객체 베이스(크기 0x2A0) 내에는 상점에 진열되는 총 3개의 명품 슬롯이 있으며, 각 슬롯은 특정 명품 객체의 메모리
+    주소를 가리킵니다.
+
+    슬롯 1 포인터 주소: 도시 베이스 + 0x248
+    슬롯 2 포인터 주소: 도시 베이스 + 0x260
+    슬롯 3 포인터 주소: 도시 베이스 + 0x278
+    (추가로, 각 슬롯 포인터 주소를 기준으로 -0x08은 슬롯 활성화 플래그, +0x08은 구매 완료 플래그로 사용됩니다.)
+
+    2. 명품 객체 구조 (실제 명품 데이터)
+    위의 도시 슬롯 주소를 읽어들여(포인터 참조) 찾아간 **명품 객체 베이스(크기 0x40)**에서 오프셋을 더해야 실제 명품의
+   ID 및 속성을 확인할 수 있습니다.
+
+    +0x08 : 명품 ID (2바이트, uint16_t) 👈 여기에 명품 ID가 존재합니다.
+    +0x0E : 명품 종류 (1:명마, 2:검, 3:도, 11:활 등)
+    +0x10 : 부여 특기 ID
+    +0x20 : 특기 레벨
+    +0x22 : 상승 능력 종류 (1:통솔, 2:무력, 3:지력, 4:정치, 5:매력)
+    +0x23 : 능력 상승치
+    +0x24 : 특수 효과 종류
+    +0x26 : 명품 가치
+    +0x30 : 소유주 포인터 (해당 명품을 보유한 장수 또는 도시의 객체 주소)
+    +0x38 : 소유주 타입 (1: 장수, 2: 도시, 0: 없음)
 */
 
 namespace DX11Base {
@@ -388,18 +412,12 @@ namespace DX11Base {
       if (objPtr <= 0x10000)
         return false;
 
-      uint8_t skill = 0, ability = 0, effect = 0;
-      Read8(objPtr + 0x10, &skill);
-      Read8(objPtr + 0x22, &ability);
-      Read8(objPtr + 0x24, &effect);
+      uint8_t type = 0;
+      if (!Read8(objPtr + 0x0E, &type))
+        return false;
 
-      // 정의된 맵에 ID가 존재하는 경우에만 유효한 속성으로 간주 (단순 0 체크 지양)
-      static const std::set<uint8_t> validSkills = {1,  10, 13, 14, 16, 17,  24,  30,  32,  53,
-                                                    54, 66, 71, 78, 87, 104, 105, 107, 108, 184};
-      static const std::set<uint8_t> validAbilities = {1, 2, 3, 4, 5};
-      static const std::set<uint8_t> validEffects = {1, 2, 3};
-
-      return (validSkills.count(skill) > 0 || validAbilities.count(ability) > 0 || validEffects.count(effect) > 0);
+      // 종류(Type)가 1~26 사이면 유효한 명품으로 간주 (술, 보물, 기증품 등 능력치가 없는 명품도 포함)
+      return (type >= 1 && type <= 26);
     }
 
     static uintptr_t s_lastResolvedSpBase = 0;
@@ -627,13 +645,13 @@ namespace DX11Base {
     }
 
     // 상단 수동 조작 영역
-    // ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.2f, 1.0f));
-    // if (ImGui::Button(u8"명품 즉시 자동 배분 실행")) {
-    //   AssignRandomSpecialtiesToEmptySlots();
-    // }
-    // ImGui::PopStyleColor();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.2f, 1.0f));
+    if (ImGui::Button(u8"명품 즉시 자동 배분 실행")) {
+      AssignRandomSpecialtiesToEmptySlots();
+    }
+    ImGui::PopStyleColor();
 
-    // ImGui::Separator();
+    ImGui::Separator();
 
     // ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 도시별 명품 보유 현황 ]");
 #if 0

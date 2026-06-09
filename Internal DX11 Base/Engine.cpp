@@ -161,7 +161,8 @@ namespace DX11Base {
                         DX11Base::bShowSelectedOfficerWin ||
                         (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) ||
                         (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor);
-      if (!DX11Base::bAllowGameClick && !DX11Base::bShowDebug && bHardBlock) {
+      bool bWantMouse = ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
+      if (bWantMouse || (!DX11Base::bAllowGameClick && !DX11Base::bShowDebug && bHardBlock)) {
         switch (msg) {
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:

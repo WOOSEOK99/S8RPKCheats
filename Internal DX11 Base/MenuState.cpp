@@ -1,6 +1,7 @@
 #include "MenuState.h"
 #include "Engine.h"
 #include "pch.h"
+#include "debug.h"
 
 // 글로벌 변수 정의 (Flags)
 ImGuiWindowFlags Flags = ImGuiWindowFlags_AlwaysAutoResize;
@@ -214,6 +215,10 @@ namespace DX11Base {
            bShowMemoryNotepadWin ||
            bShowNotificationLog ||
            bShowTacticsEditWin ||
-           bShowPasswordPopup;
+           bShowPasswordPopup ||
+           bShowTerrainBonusWin ||
+           bShowBattleEnvWin ||
+           bShowDebug ||
+           bShowMemoryEditor;
   }
 } // namespace DX11Base
