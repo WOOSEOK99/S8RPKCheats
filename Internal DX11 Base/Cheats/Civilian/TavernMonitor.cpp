@@ -115,12 +115,15 @@ namespace DX11Base {
             }
         }
 
-        // --- 3. 일반 복구 루프 ----------------------------------------
+        // --- 3. 일반 복구 루프 및 빈 슬롯 채우기 -----------------------
         const uintptr_t nameOff[4] = {0x178, 0x1A0, 0x1C8, 0x1F0};
         const uintptr_t dataOff[4] = {0x180, 0x1A8, 0x1D0, 0x1F8};
 
         for (int c = 0; c < 51; c++) {
             uintptr_t cityAddr = cityArrayBase + (uintptr_t)c * 0x2A0;
+            uintptr_t currentCityData[4] = {0};
+
+            // 1) 기존 청부 확인 및 본인 백업 복구 시도
             for (int s = 0; s < 4; s++) {
                 uintptr_t curName = 0, curData = 0;
                 TM_ReadPtr(cityAddr + nameOff[s], &curName);
@@ -130,12 +133,53 @@ namespace DX11Base {
                     // 유효한 청부 -> 최신 백업 유지
                     g_TavernBackups[c][s].name = curName;
                     g_TavernBackups[c][s].data = curData;
+                    currentCityData[s] = curData;
                 } else if (curName == 0 && curData == 0) {
-                    // 비어있으면 백업으로 복구
+                    // 비어있으면 본인 백업으로 복구
                     if (g_TavernBackups[c][s].name > 0x10000 &&
                         g_TavernBackups[c][s].data > 0x10000) {
                         TM_WritePtrSafe(cityAddr + nameOff[s], g_TavernBackups[c][s].name);
                         TM_WritePtrSafe(cityAddr + dataOff[s], g_TavernBackups[c][s].data);
+                        currentCityData[s] = g_TavernBackups[c][s].data;
+                    }
+                }
+            }
+
+            // 2) 여전히 비어있는 슬롯이 있다면(최대 4개 미만) 다른 도시의 청부로 채우기
+            for (int s = 0; s < 4; s++) {
+                if (currentCityData[s] == 0) {
+                    bool found = false;
+                    for (int other_c = 0; other_c < 51 && !found; other_c++) {
+                        if (other_c == c) continue;
+                        
+                        for (int other_s = 0; other_s < 4 && !found; other_s++) {
+                            uintptr_t candName = g_TavernBackups[other_c][other_s].name;
+                            uintptr_t candData = g_TavernBackups[other_c][other_s].data;
+                            
+                            if (candName > 0x10000 && candData > 0x10000) {
+                                // 현재 도시에 이미 같은 청부가 있는지 중복 검사
+                                bool isDuplicate = false;
+                                for (int idx = 0; idx < 4; idx++) {
+                                    if (currentCityData[idx] == candData) {
+                                        isDuplicate = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!isDuplicate) {
+                                    // 겹치지 않으면 해당 청부 슬롯에 채움
+                                    TM_WritePtrSafe(cityAddr + nameOff[s], candName);
+                                    TM_WritePtrSafe(cityAddr + dataOff[s], candData);
+                                    
+                                    // 새로운 청부를 백업에도 갱신
+                                    g_TavernBackups[c][s].name = candName;
+                                    g_TavernBackups[c][s].data = candData;
+                                    
+                                    currentCityData[s] = candData; // 다음 루프에서 중복판정 될 수 있도록 추가
+                                    found = true;
+                                }
+                            }
+                        }
                     }
                 }
             }
