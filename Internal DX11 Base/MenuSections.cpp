@@ -219,6 +219,11 @@ namespace DX11Base {
           SaveConfig();
         }
 
+        if (ImGui::Checkbox(u8"청부 무한 유지 (주점)", &bInfiniteTavernRequests)) {
+          NotifyFeatureToggle(u8"청부 무한 유지 (주점)", bInfiniteTavernRequests);
+          SaveConfig();
+        }
+
         // -----------------------
         // ImGui::Separator();
         // ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");

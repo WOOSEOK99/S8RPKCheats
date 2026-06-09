@@ -12,6 +12,7 @@
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/System/SystemMonth.h"
 #include "Cheats/System/TengiCave.h"
+#include "Cheats/Civilian/TavernMonitor.h"
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/SiegeWarfare.h"
@@ -488,6 +489,13 @@ namespace DX11Base {
           s_lastRealMonth = realMonth;
         }
       }
+    }
+
+    // 주점 청부 무한 모니터링 (500ms 간격으로 스로틀링하여 렉 방지)
+    static uint64_t s_lastTavernMonitor = 0;
+    if (GetTickCount64() - s_lastTavernMonitor >= 500) {
+        s_lastTavernMonitor = GetTickCount64();
+        DX11Base::UpdateTavernRequests();
     }
   }
 

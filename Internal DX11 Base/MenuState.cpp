@@ -17,6 +17,7 @@ namespace DX11Base {
   bool bInfiniteAP = false;
   bool bFastJewel = false;
   bool bAutoFillSpecialties = false;
+  bool bInfiniteTavernRequests = false;
   bool bBigCity = false;
   bool bBangmokCity = false;
   bool bNonggyeongCity = false;

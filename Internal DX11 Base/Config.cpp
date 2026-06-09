@@ -107,6 +107,7 @@ namespace DX11Base {
       {"bInfiniteAP", u8"행동력 무한", &bInfiniteAP, nullptr, nullptr, false, true},
       {"bFastJewel", u8"보주교체 무제한", &bFastJewel, nullptr, nullptr, false, true},
       {"bAutoFillSpecialties", u8"평정 시 남는 명품 자동 배분", &bAutoFillSpecialties, nullptr, nullptr, false, true},
+      {"bInfiniteTavernRequests", u8"주점 청부 무한 유지", &bInfiniteTavernRequests, nullptr, nullptr, false, true},
       {"bBigCity", u8"대도시 전환", &bBigCity, &s_appBigCity, SetBigCityConvert, false, true},
       {"bBangmokCity", u8"방목도시 황폐화", &bBangmokCity, &s_appBangmokCity, SetBangmokCity, false, true},
       {"bNonggyeongCity", u8"농경도시 버프", &bNonggyeongCity, &s_appNonggyeongCity, SetNonggyeongCity, false, true},

@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.759"
+#define SAM8_CHEAT_VERSION "V0.760"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
@@ -18,7 +18,8 @@ namespace DX11Base {
 
   extern bool bInfiniteAP;
   extern bool bFastJewel;
-  extern bool bAutoFillSpecialties; // 평정 종료 시 명품 자동 배분
+  extern bool bAutoFillSpecialties;    // 평정 종료 시 명품 자동 배분
+  extern bool bInfiniteTavernRequests; // 청부 무한 유지
   extern bool bBigCity;
   extern bool bBangmokCity;
   extern bool bNonggyeongCity;
