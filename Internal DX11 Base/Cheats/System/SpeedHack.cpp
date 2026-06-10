@@ -49,28 +49,7 @@ namespace DX11Base {
     static constexpr LONGLONG SAFE_DELTA_THRESHOLD = 50000; // 50ms 이상이면 보호
     // [MOD END]
 
-    void ResetBases(float currentMul, float desiredMul) {
-      if (oQueryPerformanceCounter) {
-        LARGE_INTEGER li;
-        oQueryPerformanceCounter(&li);
-        s_qpcReal.store(li.QuadPart);
-        s_qpcFake.store(li.QuadPart);
-      }
-      if (oGetTickCount) {
-        DWORD t = oGetTickCount();
-        s_gtcReal.store(t);
-        s_gtcFake.store(t);
-      }
-      if (oGetTickCount64) {
-        ULONGLONG t = oGetTickCount64();
-        s_gtc64Real.store(t);
-        s_gtc64Fake.store(t);
-      }
-      if (otimeGetTime) {
-        DWORD t = otimeGetTime();
-        s_tgtReal.store(t);
-        s_tgtFake.store(t);
-      }
+    void ResetBases(float desiredMul) {
       s_multiplier.store(desiredMul);
     }
 
@@ -99,15 +78,19 @@ namespace DX11Base {
       return ret;
 
     float mul = s_multiplier.load(std::memory_order_relaxed);
+    if (!bSpeedHack) mul = 1.0f;
     if (mul > MAX_MULTIPLIER)
       mul = MAX_MULTIPLIER;
-
-    if (!bSpeedHack || mul == 1.0f)
-      return ret;
 
     // [MOD BEGIN] 안정화된 QPC 처리 핵심
     LONGLONG real = lpPerformanceCount->QuadPart;
     LONGLONG prevReal = s_qpcReal.load(std::memory_order_relaxed);
+
+    if (prevReal == 0) {
+      s_qpcReal.store(real, std::memory_order_relaxed);
+      s_qpcFake.store(real, std::memory_order_relaxed);
+      return ret;
+    }
 
     LONGLONG delta = real - prevReal;
 
@@ -141,9 +124,16 @@ namespace DX11Base {
   DWORD WINAPI hkGetTickCount() {
     DWORD real = oGetTickCount();
     float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack || mul == 1.0f) return real;
+    if (!bSpeedHack) mul = 1.0f;
+    if (mul > MAX_MULTIPLIER) mul = MAX_MULTIPLIER;
 
     DWORD prevReal = s_gtcReal.load(std::memory_order_relaxed);
+    if (prevReal == 0) {
+      s_gtcReal.store(real, std::memory_order_relaxed);
+      s_gtcFake.store(real, std::memory_order_relaxed);
+      return real;
+    }
+
     DWORD delta = real - prevReal;
     if ((int)delta < 0) delta = 0;
     if (delta > 50) mul = 1.0f; // 급격한 스파이크 방지
@@ -158,9 +148,16 @@ namespace DX11Base {
   ULONGLONG WINAPI hkGetTickCount64() {
     ULONGLONG real = oGetTickCount64();
     float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack || mul == 1.0f) return real;
+    if (!bSpeedHack) mul = 1.0f;
+    if (mul > MAX_MULTIPLIER) mul = MAX_MULTIPLIER;
 
     ULONGLONG prevReal = s_gtc64Real.load(std::memory_order_relaxed);
+    if (prevReal == 0) {
+      s_gtc64Real.store(real, std::memory_order_relaxed);
+      s_gtc64Fake.store(real, std::memory_order_relaxed);
+      return real;
+    }
+
     ULONGLONG delta = real - prevReal;
     if (delta > 50) mul = 1.0f;
     delta = (ULONGLONG)((float)delta * mul);
@@ -174,9 +171,16 @@ namespace DX11Base {
   DWORD WINAPI hktimeGetTime() {
     DWORD real = otimeGetTime();
     float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack || mul == 1.0f) return real;
+    if (!bSpeedHack) mul = 1.0f;
+    if (mul > MAX_MULTIPLIER) mul = MAX_MULTIPLIER;
 
     DWORD prevReal = s_tgtReal.load(std::memory_order_relaxed);
+    if (prevReal == 0) {
+      s_tgtReal.store(real, std::memory_order_relaxed);
+      s_tgtFake.store(real, std::memory_order_relaxed);
+      return real;
+    }
+
     DWORD delta = real - prevReal;
     if ((int)delta < 0) delta = 0;
     if (delta > 50) mul = 1.0f;
@@ -199,7 +203,7 @@ namespace DX11Base {
     
     MH_EnableHook(MH_ALL_HOOKS);
 
-    ResetBases(1.0f, g_speedMultiplier);
+    ResetBases(g_speedMultiplier);
 
     s_installed = true;
   }
@@ -223,7 +227,7 @@ namespace DX11Base {
 
     if (current != desired) {
       AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx", current, desired);
-      ResetBases(current, desired);
+      ResetBases(desired);
     }
   }
 
