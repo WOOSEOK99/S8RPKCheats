@@ -179,7 +179,10 @@ namespace DX11Base {
       if (!dayBaseAddr) return;
       uintptr_t battleDayAddr = dayBaseAddr + 0x28;
       uintptr_t finalDayAddr  = dayBaseAddr + 0x2C;
-      
+
+      // [크래시 방지] 역참조 전 유효성 검사 (포진 화면에서 dayBaseAddr이 준비됐지만 내용이
+      // 초기화되지 않은 상태에서 직접 역참조하면 AV 크래시 발생 가능)
+      if (!IsValidPtr(battleDayAddr, 1) || !IsValidPtr(finalDayAddr, 1)) return;
       uint8_t day = *(uint8_t*)battleDayAddr;
       if (day < 1 || day > 30) return;
 

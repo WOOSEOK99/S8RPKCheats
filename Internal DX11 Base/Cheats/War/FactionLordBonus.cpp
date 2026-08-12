@@ -19,6 +19,9 @@ namespace DX11Base {
 
     static std::unordered_map<uintptr_t, bool> g_prevAssigned;
     static bool g_titleNamesApplied = false;
+    // [크래시 방지] FactionLordBonusThread(별도 스레드)와 메인 스레드가 g_prevAssigned를
+    // 동시에 읽고 쓸 수 있으므로 mutex로 보호
+    static std::mutex g_prevAssignedMutex;
 
     // 상수
     static const int      FACTION_COUNT = 120;
@@ -188,16 +191,18 @@ namespace DX11Base {
         }
 
         // 3. 이전에 배정됐지만 지금은 빠진 대상 정리
-        for (auto& kv : g_prevAssigned) {
-            uintptr_t bonusAddr = kv.first;
-            if (currentAssigned.count(bonusAddr)) continue;
-            if (!IsValidPtr(bonusAddr, 8)) continue;
-            uint64_t current = *(uint64_t*)bonusAddr;
-            if (bonusSet.count(current))
-                WriteQword(bonusAddr, 0);
+        {
+            std::lock_guard<std::mutex> lock(g_prevAssignedMutex);
+            for (auto& kv : g_prevAssigned) {
+                uintptr_t bonusAddr = kv.first;
+                if (currentAssigned.count(bonusAddr)) continue;
+                if (!IsValidPtr(bonusAddr, 8)) continue;
+                uint64_t current = *(uint64_t*)bonusAddr;
+                if (bonusSet.count(current))
+                    WriteQword(bonusAddr, 0);
+            }
+            g_prevAssigned = currentAssigned;
         }
-
-        g_prevAssigned = currentAssigned;
     }
 
     static void ClearAll(uintptr_t root) {
@@ -207,17 +212,17 @@ namespace DX11Base {
         uintptr_t ptrJumok   = root + OFF_JUMOK;
         uintptr_t ptrGunju   = root + OFF_GUNJU;
 
-        std::unordered_map<uintptr_t, bool> bonusSet = {
-            {ptrEmperor, true}, {ptrKing, true}, {ptrGong, true},
-            {ptrJumok,   true}, {ptrGunju, true},
-        };
+        uintptr_t bonusSet_copy[5] = {ptrEmperor, ptrKing, ptrGong, ptrJumok, ptrGunju};
 
+        std::lock_guard<std::mutex> lock(g_prevAssignedMutex);
         for (auto& kv : g_prevAssigned) {
             uintptr_t bonusAddr = kv.first;
             if (!IsValidPtr(bonusAddr, 8)) continue;
             uint64_t current = *(uint64_t*)bonusAddr;
-            if (bonusSet.count(current))
-                WriteQword(bonusAddr, 0);
+            // bonusSet은 포인터 비교용 — 위에서 계산한 5개 주소 중 하나면 복구
+            for (auto target : bonusSet_copy) {
+                if (current == target) { WriteQword(bonusAddr, 0); break; }
+            }
         }
 
         g_prevAssigned.clear();

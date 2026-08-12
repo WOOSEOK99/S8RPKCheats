@@ -109,7 +109,12 @@ namespace DX11Base {
     auto writeShallow = [&](int delta) {
       uintptr_t target = first.addr + (delta * 0x40);
       if (IsValidPtr(target, 8)) {
-        *(uintptr_t *)target = shallowAddrValue;
+        // [크래시 방지] 타일 테이블이 쓰기 보호된 경우 AV 크래시 방지용 VirtualProtect
+        DWORD old, tmp;
+        if (VirtualProtect((LPVOID)target, 8, PAGE_READWRITE, &old)) {
+          *(uintptr_t *)target = shallowAddrValue;
+          VirtualProtect((LPVOID)target, 8, old, &tmp);
+        }
       }
     };
 
@@ -354,8 +359,14 @@ namespace DX11Base {
 
     auto writeShallow = [&](uintptr_t baseAddr, int delta) {
       uintptr_t target = baseAddr + (delta * 0x40);
-      if (IsValidPtr(target, 8))
-        *(uintptr_t *)target = shallowAddrValue;
+      if (IsValidPtr(target, 8)) {
+        // [크래시 방지] 타일 테이블이 쓰기 보호된 경우 AV 크래시 방지용 VirtualProtect
+        DWORD old, tmp;
+        if (VirtualProtect((LPVOID)target, 8, PAGE_READWRITE, &old)) {
+          *(uintptr_t *)target = shallowAddrValue;
+          VirtualProtect((LPVOID)target, 8, old, &tmp);
+        }
+      }
     };
 
     // Lua shallowOdd / shallowEven 배열을 firstBaseAddr 기준으로 전부 적용

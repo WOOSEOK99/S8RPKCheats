@@ -270,8 +270,10 @@ namespace DX11Base {
 
 
       // 아직 리프레시를 안 했다면 실행
-      if (!s_isWarModsApplied) {
-        AddLog(u8"[자동화] 전투 감지(%llX) -> 모든 전쟁 모드 리프레시", addr1);
+      // [크래시 방지] 포진 화면 오탐 방지: unitCountTotal > 0 AND currentDay가 유효(1~30)해야
+      // 실제 전투 진입으로 판단. 둘 중 하나만 준비된 시점(포진 중)에는 리프레시 보류.
+      if (!s_isWarModsApplied && unitCountTotal > 0 && currentDay >= 1 && currentDay <= 30) {
+        AddLog(u8"[자동화] 전투 감지(%llX) -> 모든 전쟁 모드 리프레시 (부대:%d, 현재일:%d)", addr1, unitCountTotal, currentDay);
 
         __try {
           // 켜져 있는 기능들에 대해 원본 복구 후 다시 적용 (Refresh)

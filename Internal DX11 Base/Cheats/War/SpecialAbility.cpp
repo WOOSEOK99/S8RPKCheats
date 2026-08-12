@@ -249,6 +249,9 @@ namespace DX11Base {
         uint8_t targetVal = isActive ? t.active : t.normal;
 
         // 성능 최적화: 현재 값이 이미 목표값과 같으면 VirtualProtect 및 쓰기 건너뜀
+        // [크래시 방지] 캐시 포인터가 무효화됐을 경우를 대비한 IsValidPtr 추가
+        if (!IsValidPtr(targetAddr, 1))
+          continue;
         if (*(uint8_t *)targetAddr == targetVal)
           continue;
 
