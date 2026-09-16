@@ -18,23 +18,34 @@ namespace DX11Base {
     // ───────────────────────────────────────────────
 
     bool IsValidPtr(uintptr_t addr, SIZE_T size) {
-        if (!addr) return false;
-        
-        // 시작 주소 검사
+        if (!addr || size == 0)
+            return false;
+
+        // 오버플로 방지. 잘못된 범위가 wrap-around 되면 유효 주소처럼 보일 수 있습니다.
+        const uintptr_t endAddr = addr + size - 1;
+        if (endAddr < addr)
+            return false;
+
         MEMORY_BASIC_INFORMATION mbiStart{};
         if (VirtualQuery((LPCVOID)addr, &mbiStart, sizeof(mbiStart)) != sizeof(mbiStart))
             return false;
         if (mbiStart.State != MEM_COMMIT || (mbiStart.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
             return false;
 
-        // 범위가 한 페이지를 넘을 경우 끝 주소도 검사
-        if (size > 1) {
-            MEMORY_BASIC_INFORMATION mbiEnd{};
-            if (VirtualQuery((LPCVOID)(addr + size - 1), &mbiEnd, sizeof(mbiEnd)) != sizeof(mbiEnd))
-                return false;
-            if (mbiEnd.State != MEM_COMMIT || (mbiEnd.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
-                return false;
-        }
+        // 대부분의 런타임 검사는 1~8바이트이며 같은 메모리 영역 안에 있습니다.
+        // 첫 VirtualQuery가 알려준 영역 안에 끝 주소까지 포함되면 추가 시스템 호출을 생략합니다.
+        const uintptr_t regionStart = (uintptr_t)mbiStart.BaseAddress;
+        const SIZE_T regionSize = mbiStart.RegionSize;
+        const uintptr_t regionEnd = regionStart + regionSize - 1;
+        if (regionEnd >= regionStart && endAddr <= regionEnd)
+            return true;
+
+        // 실제로 다른 메모리 영역까지 걸치는 범위만 끝 주소를 한 번 더 검사합니다.
+        MEMORY_BASIC_INFORMATION mbiEnd{};
+        if (VirtualQuery((LPCVOID)endAddr, &mbiEnd, sizeof(mbiEnd)) != sizeof(mbiEnd))
+            return false;
+        if (mbiEnd.State != MEM_COMMIT || (mbiEnd.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+            return false;
 
         return true;
     }
@@ -79,37 +90,16 @@ namespace DX11Base {
         return 0;
     }
 
-    // 1. 실시간으로 낚아챈 주인공 주소를 저장할 전역 변수
     uintptr_t g_HeroAddr = 0;
 
-    // 2. 원래 코드를 저장할 트램펄린
     typedef void(__fastcall *tGetHeroStats)(void *);
     tGetHeroStats oGetHeroStats = nullptr;
 
-    // 3. 우리가 가로챌 후킹 함수 (Naked 함수 또는 인라인 어셈블리 활용)
-    // x64에서는 __declspec(naked)를 사용할 수 없으므로, 트램펄린 지점으로 점프하기
-    // 전 레지스터를 저장합니다.
     extern "C" void HookHandler();
 
-    // 5. 실제 레지스터를 낚아채는 로직 (Proxy 함수)
-    // 이 함수는 게임 엔진이 주인공 스탯을 읽을 때마다 호출되어 g_HeroAddr를
-    // 최신화합니다.
-
     void __fastcall hkHeroLogic(void *rcx) {
-        // 어셈블리 수준에서 R15를 가져와야 하므로, 인라인 어셈블리가 지원되지 않는
-        // x64 환경에서는 별도의 .asm 파일을 쓰거나 레지스터 접근 헬퍼를 사용해야
-        // 합니다. 여기서는 개념적으로 g_HeroAddr = (R15 값) 이 들어간다고 보시면
-        // 됩니다.
-
-        // [임시 헬퍼] 호출 시점의 R15 값을 낚아챘다고 가정 (프로젝트 설정에 따라
-        // 어셈블리 구현 필요) g_HeroAddr = GetR15Register();
-
         return oGetHeroStats(rcx);
     }
-
-    // ───────────────────────────────────────────────
-    //  기존 함수들 (변경 없음)
-    // ───────────────────────────────────────────────
 
     uintptr_t GetGameBase() {
         if (!s_gameBasePtrAddr)
@@ -121,7 +111,6 @@ namespace DX11Base {
         const uint64_t now = GetTickCount64();
         uintptr_t base = *(uintptr_t *)s_gameBasePtrAddr;
 
-        // 포인터 값이 같고 최근에 검증했으면 VirtualQuery 생략 (Loops 등에서 매프레임 호출됨)
         if (base != 0 && base == s_cachedGameBase && (now - s_lastGameBaseProbeMs) < 300ull)
             return base;
 
@@ -147,19 +136,16 @@ namespace DX11Base {
             return false;
         uintptr_t imgEnd = exeBase + mi.SizeOfImage;
 
-        // gameBase 스캔
         const std::string gameBasePat = "4C 8B 05 ? ? ? ? 41 0F B7";
         uintptr_t foundAddr = FindPattern(exeBase, imgEnd, gameBasePat);
         if (foundAddr)
             s_gameBasePtrAddr = ResolveRelAddr(foundAddr, 3, 7);
 
-        // 저장된 전법 횟수 설정 불러오기 (S8RPK_skill_counts.json)
         LoadSkillCounts();
 
         return (s_gameBasePtrAddr != 0);
     }
 
-    // 단일 항목 수정 (VirtualProtect 포함 - UI 버튼용)
     void ModifyStat(uintptr_t targetBase, uintptr_t offset, int value, int size) {
       if (!targetBase)
         return;
@@ -181,8 +167,6 @@ namespace DX11Base {
       }
     }
 
-    // 초고속 수정 (VirtualProtect 제외 - 대량 처리 루프용)
-    // 호출 전에 호출자가 VirtualProtect로 전체 영역을 쓰기 가능하게 만들어야 함.
     void ModifyStatFast(uintptr_t targetAddr, int value, int size) {
       __try {
         if (size == 1)
@@ -194,24 +178,21 @@ namespace DX11Base {
         else if (size == 8)
           *(uint64_t *)targetAddr = (uint64_t)value;
       } __except (EXCEPTION_EXECUTE_HANDLER) {
-        // 루프 내에서 대량 처리 시 로그가 너무 많아질 수 있으므로 로그는 생략하거나 카운트만 할 수도 있음
       }
     }
 
     void MaximizeHeroStats() {
         if (!g_HeroAddr || !IsValidPtr(g_HeroAddr, 0x150)) {
-            AddLog("[FAIL] 주인공 주소를 아직 찾지 못했습니다. (정보창을 한번 "
-                   "열어주세요)");
+            AddLog("[FAIL] 주인공 주소를 아직 찾지 못했습니다. (정보창을 한번 열어주세요)");
             return;
         }
 
-        // 분석된 오프셋 적용
         struct Stats {
-            unsigned char lead;  // +AA
-            unsigned char war;   // +AB
-            unsigned char intel; // +AC
-            unsigned char pol;   // +AD
-            unsigned char cha;   // +AE
+            unsigned char lead;
+            unsigned char war;
+            unsigned char intel;
+            unsigned char pol;
+            unsigned char cha;
         };
 
         Stats *s = (Stats *)(g_HeroAddr + 0xAA);
@@ -240,14 +221,11 @@ namespace DX11Base {
             return;
 
         DWORD oldProtect;
-        // 5바이트 명령어 패치
         if (VirtualProtect((LPVOID)targetAddr, 5, PAGE_EXECUTE_READWRITE, &oldProtect)) {
             if (enable) {
-                // [패치] mov byte ptr [rdi+rax+70], 64 (C6 44 07 70 64)
                 unsigned char patch[] = {0xC6, 0x44, 0x07, 0x70, 0x64};
                 memcpy((void *)targetAddr, patch, 5);
             } else {
-                // [원복] 원래 코드: 44 88 44 07 70
                 unsigned char original[] = {0x44, 0x88, 0x44, 0x07, 0x70};
                 memcpy((void *)targetAddr, original, 5);
             }
@@ -300,9 +278,8 @@ namespace DX11Base {
         }
     }
 
-    // 결혼 패치 관련 변수
     uintptr_t marriageAddr = 0;
-    BYTE marriageOriginal[2]; // 75 21 (또는 해당 위치의 2바이트)
+    BYTE marriageOriginal[2];
     bool marriageSaved = false;
     bool marriageApplied = false;
 
@@ -311,13 +288,10 @@ namespace DX11Base {
         if (!exeBase)
             return;
 
-        // 1. 와일드카드 없는 고정 패턴으로 검색 (A350 지점)
         if (!marriageAddr) {
-            // "mov rax,[rdi+10]" -> 48 8B 47 10
             uintptr_t searchAddr = FindPattern(exeBase, exeBase + 0x3000000, "48 8B 47 10 4C 3B F0");
 
             if (searchAddr) {
-                // 찾은 주소에서 2바이트 앞이 바로 '75 21' (jne) 지점입니다.
                 marriageAddr = searchAddr - 2;
                 AddLog("[DEBUG] [marriageAddr]: %02X", *(uint8_t *)(marriageAddr));
             }
@@ -326,7 +300,6 @@ namespace DX11Base {
         if (!marriageAddr)
             return;
 
-        // 2. 원본 백업
         if (!marriageSaved) {
             memcpy(marriageOriginal, (void *)marriageAddr, 2);
             marriageSaved = true;
@@ -336,11 +309,9 @@ namespace DX11Base {
         VirtualProtect((LPVOID)marriageAddr, 2, PAGE_EXECUTE_READWRITE, &old);
 
         if (!marriageApplied) {
-            // 75 21 (jne) -> EB 21 (jmp) 로 교체
             *(BYTE *)marriageAddr = 0xEB;
             marriageApplied = true;
         } else {
-            // 원본 복구 (75 21)
             memcpy((void *)marriageAddr, marriageOriginal, 2);
             marriageApplied = false;
         }
@@ -353,7 +324,6 @@ namespace DX11Base {
         if (!exeBase)
             return;
 
-        // 1. 패턴 검색 (최초 1회 실행)
         if (!marriageAddr) {
             uintptr_t searchAddr = FindPattern(exeBase, exeBase + 0x3000000, "48 8B 47 10 4C 3B F0");
             if (searchAddr)
@@ -363,43 +333,34 @@ namespace DX11Base {
         if (!marriageAddr)
             return;
 
-        // 2. 원본 데이터 백업 (최초 1회 실행)
         if (!marriageSaved) {
             memcpy(marriageOriginal, (void *)marriageAddr, 2);
             marriageSaved = true;
         }
 
-        // 3. 현재 상태가 이미 원하는 상태(enable)와 같다면 작업 건너뛰기
         if (marriageApplied == enable)
             return;
 
-        // 4. 메모리 보호 해제 및 패치 적용
         DWORD old;
         if (VirtualProtect((LPVOID)marriageAddr, 2, PAGE_EXECUTE_READWRITE, &old)) {
             if (enable) {
-                // JNE (75) -> JMP (EB) 강제 점프 적용
                 *(BYTE *)marriageAddr = 0xEB;
             } else {
-                // 원본 데이터(75 21) 복구
                 memcpy((void *)marriageAddr, marriageOriginal, 2);
             }
 
-            // 상태 업데이트
             marriageApplied = enable;
-
-            // 메모리 보호 복구
             VirtualProtect((LPVOID)marriageAddr, 2, old, &old);
         }
     }
 
-    bool g_isHeroHookInstalled = false; // 후킹 상태 플래그
+    bool g_isHeroHookInstalled = false;
 
     bool InstallHeroHook() {
         if (g_isHeroHookInstalled)
-            return true; // 이미 설치됨
+            return true;
 
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-        // 스크립트에서 확인한 주인공 매력 읽는 지점
         uintptr_t targetAddr = FindPattern(exeBase, exeBase + 0x3000000, "41 0F B6 B7 AE 00 00 00");
 
         if (targetAddr && MH_Initialize() == MH_OK) {
@@ -416,32 +377,22 @@ namespace DX11Base {
     }
 
     OfficerInfo GetHeroInfo() {
-        OfficerInfo info = {
-            0,
-        };
-        uintptr_t gameBase = GetGameBase(); // 이미 구현하신 함수
+        OfficerInfo info = {0,};
+        uintptr_t gameBase = GetGameBase();
         if (!gameBase)
             return info;
 
-        // 1. 포인터 컨테이너 접근
         uintptr_t *pContainer = (uintptr_t *)(gameBase + 0x3B8);
         if (IsBadReadPtr(pContainer, 8) || !*pContainer)
             return info;
 
         uintptr_t container = *pContainer;
-
-        // 2. 주인공은 보통 배열의 첫 번째(0번)이거나 특정 인덱스에 있습니다.
-        // 여기서는 '주인공' 주소를 가리키는 포인터를 읽어옵니다.
-        // [치트엔진 이미지 기반] 컨테이너 내부의 첫 번째 포인터가 주인공일 확률이
-        // 높음
-        uintptr_t *pOfficerData = (uintptr_t *)(container); // +0x0 또는 +0xE0 등 확인 필요
+        uintptr_t *pOfficerData = (uintptr_t *)(container);
         if (IsBadReadPtr(pOfficerData, 8) || !*pOfficerData)
             return info;
 
         uintptr_t dataAddr = *pOfficerData;
         info.address = dataAddr;
-
-        // 3. 실제 데이터 읽기 (오프셋 적용)
         info.id = *(unsigned short *)(dataAddr + 0x08);
         info.lead = *(unsigned char *)(dataAddr + 0xAA);
         info.war = *(unsigned char *)(dataAddr + 0xAB);
