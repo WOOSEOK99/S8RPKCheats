@@ -20,6 +20,7 @@
 #include "Cheats/System/SkillCondition.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/Officer/OfficerDetail.h"
+#include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/System/FactionTechEditor.h"
 #include "Cheats/System/StartSetting.h"
 #include "Cheats/System/TengiCave.h"
@@ -981,6 +982,9 @@ namespace DX11Base {
 
       ImGui::Spacing();
       if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
+        const bool requested = DX11Base::bTraitViewer;
+        if (!DX11Base::SetTraitViewerFeature(requested))
+          DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
         NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
         SaveConfig();
       }

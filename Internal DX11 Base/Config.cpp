@@ -4,6 +4,8 @@
 #undef LoadConfig
 #undef SaveConfig
 
+#include "Cheats/Officer/TraitViewerFeature.h"
+
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
     std::ifstream in(GetConfigPath(), std::ios::binary);
@@ -77,11 +79,13 @@ namespace DX11Base {
       AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
     }
 
-    // 이전 설정 파일에 키가 없으면 MenuState.cpp의 기본값(true)을 그대로 유지합니다.
+    // 이전 설정 파일에 키가 없으면 기본값(true)으로 실제 패치까지 적용합니다.
     bool savedTraitViewer = true;
-    if (LoadBoolConfigValue("bTraitViewer", savedTraitViewer)) {
-      bTraitViewer = savedTraitViewer;
-      AddLog(u8"[Config] 기재 화면 보이기 설정 로드: %s", savedTraitViewer ? "ON" : "OFF");
-    }
+    const bool hasTraitViewerSetting = LoadBoolConfigValue("bTraitViewer", savedTraitViewer);
+    bTraitViewer = savedTraitViewer;
+    if (!SetTraitViewerFeature(bTraitViewer))
+      bTraitViewer = IsTraitViewerFeatureApplied();
+    AddLog(u8"[Config] 기재 화면 보이기 설정 로드%s: %s",
+           hasTraitViewerSetting ? "" : "(기본값)", bTraitViewer ? "ON" : "OFF");
   }
 } // namespace DX11Base
