@@ -1,0 +1,54 @@
+name: Trait text editor step1 wire
+
+on:
+  push:
+    paths:
+      - '.github/workflows/trait-text-editor-step1-wire.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: github.ref == 'refs/heads/feature/trait-text-editor-step1-storage'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/trait-text-editor-step1-storage
+          fetch-depth: 0
+      - name: Write Step 1 source files
+        shell: bash
+        run: |
+          mkdir -p 'Internal DX11 Base/Cheats/Officer'
+          printf '%s' 'H4sIAM0qq2oC/5VT30/TUBh9v3/Fl5AYNMIYiUIY8qD444EQw4bxjVzbCzYZ7dLeAdGQDNaZZZuKkcai3VzMcED2UBQIJvMf6v36P3i7gZvDxPjSpueec/Ldc74OZUy6skrB0BVGyJCmK+msymBasbiqsuWZPsjipqav9CNrTOGGOUOITleZlaEKg9mn8fhdajF4SYgUZBUOKZNqPMU2+H1V4wvGujwCkPZTU11HMNLqvDRIXIVnmaUMwjpb/xtbwl32ZoKQWAzupWByYnxsDKsuTIwHvgfBuY+1FuCnHdE6j4VvzrH5DjC/Fea90UiR5CwDcfywg7YnSrsgXvtYPQltH/dywKNLLHF5C2tU0zXAeg5r+zFxVhSfW+g2pLloVkCUT0T5R+i44tCH4FsFazaIw11xdCC+tiLT4PhEvPfkBzZzgE4JS6eiXBTlxijp3KYb6fRgZjPX4CHjg6g1fD1BSH8K/aSkNKIr7DHlzyPeM8NIw5xB1T9crOE++Q1gpmmYcAf0bDqd4ealLEnX2P/J1gxNhQVmDQxt/Z7kEbWunnSLi/IWb/ew2g4dD7BWEPV9GbiHzk+s2jLWHG63QufwMjgpGoHF1IORSUCvHn48QPsYYjC/OCc7L8qge4z47c4aNHJwKz4OiiG3OKtrHKKiHbfLw3zxYlfEUQGrsqZTT1SkosfvEdFudFguZGQUfBnCV/Vwy+/I6rY4i15ecOxLd/kU2+7F/gXf24BfCmLfjWHRkxsX+DkI/D10bHTaEDoH3Zie0LSmUt5LX9Z+kb32gi1x0HSVbdyEf9RBNkGOfPU3Jb8Anhm+dwAEAAA=' | base64 -d | gzip -d > 'Internal DX11 Base/Cheats/Officer/TraitTextEditorData.h'
+          printf '%s' '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' | base64 -d | gzip -d > 'Internal DX11 Base/Cheats/Officer/TraitTextEditorData.cpp'
+      - name: Register Step 1 files
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('Internal DX11 Base/Internal DX11 Base.vcxproj')
+          s = p.read_text(encoding='utf-8-sig')
+          if 'Cheats\\Officer\\TraitTextEditorData.h' not in s:
+              anchor = '    <ClInclude Include="Cheats\\Officer\\TraitViewerWidths.h" />\n'
+              if anchor not in s:
+                  raise SystemExit('header anchor missing')
+              s = s.replace(anchor, anchor + '    <ClInclude Include="Cheats\\Officer\\TraitTextEditorData.h" />\n', 1)
+          if 'Cheats\\Officer\\TraitTextEditorData.cpp' not in s:
+              anchor = '    <ClCompile Include="Cheats\\Officer\\TraitViewerWidths.cpp" />\n'
+              if anchor not in s:
+                  raise SystemExit('cpp anchor missing')
+              s = s.replace(anchor, anchor + '    <ClCompile Include="Cheats\\Officer\\TraitTextEditorData.cpp" />\n', 1)
+          p.write_text(s, encoding='utf-8-sig')
+          PY
+      - name: Commit Step 1
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'Internal DX11 Base/Cheats/Officer/TraitTextEditorData.h' \
+                  'Internal DX11 Base/Cheats/Officer/TraitTextEditorData.cpp' \
+                  'Internal DX11 Base/Internal DX11 Base.vcxproj'
+          git commit -m 'Trait text editor Step 1: add data and storage layer'
+          git push origin HEAD:feature/trait-text-editor-step1-storage
