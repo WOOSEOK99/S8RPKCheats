@@ -16,48 +16,68 @@ namespace DX11Base {
 
   // ───────────────────────────────────────────────
   //  AI 전투 개선
-  //  SAN8RPK.exe+0x144D24C : 74 0A (JE) -> EB 0A (JMP)
-  //  현재 게임 버전에서 직접 확인한 원본 바이트가 일치할 때만 적용합니다.
+  //  3개의 AI 전쟁 관련 패치를 하나의 토글로 함께 적용합니다.
+  //  모든 주소가 원본/패치 바이트 중 하나와 일치하는지 먼저 검증한 뒤 적용합니다.
   // ───────────────────────────────────────────────
-  static constexpr uintptr_t kAIWarImproveOffset = 0x144D24C;
+  static const unsigned char kAIWarMultiAttackOriginal[] = {0x74, 0x0A};
+  static const unsigned char kAIWarMultiAttackEnabled[] = {0xEB, 0x0A};
+  static const unsigned char kAIWarHeroAggroOriginal[] = {0x75, 0x1E};
+  static const unsigned char kAIWarHeroAggroEnabled[] = {0x90, 0x90};
+  static const unsigned char kAIWarEmptyCityOriginal[] = {0xB8, 0x01, 0x00, 0x00, 0x00};
+  static const unsigned char kAIWarEmptyCityEnabled[] = {0xB8, 0x00, 0x00, 0x00, 0x00};
 
-  static bool ReadAIWarImproveBytes(uintptr_t addr, unsigned char &op, unsigned char &disp) {
-    op = 0;
-    disp = 0;
-    if (!IsValidPtr(addr, 2))
+  struct AIWarPatchSpec {
+    uintptr_t offset;
+    const unsigned char *original;
+    const unsigned char *enabled;
+    SIZE_T size;
+  };
+
+  static const AIWarPatchSpec kAIWarPatches[] = {
+      {0x144D24C, kAIWarMultiAttackOriginal, kAIWarMultiAttackEnabled, sizeof(kAIWarMultiAttackOriginal)},
+      {0x1464B91, kAIWarHeroAggroOriginal, kAIWarHeroAggroEnabled, sizeof(kAIWarHeroAggroOriginal)},
+      {0x145BDAB, kAIWarEmptyCityOriginal, kAIWarEmptyCityEnabled, sizeof(kAIWarEmptyCityOriginal)},
+  };
+
+  struct AIWarPatchSnapshot {
+    uintptr_t address = 0;
+    unsigned char bytes[5]{};
+    bool needsWrite = false;
+  };
+
+  static bool ReadAIWarPatchBytes(uintptr_t addr, unsigned char *out, SIZE_T size) {
+    if (!out || size == 0 || size > 5 || !IsValidPtr(addr, size))
       return false;
 
     __try {
-      op = *(unsigned char *)addr;
-      disp = *(unsigned char *)(addr + 1);
+      memcpy(out, (const void *)addr, size);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-      op = 0;
-      disp = 0;
+      memset(out, 0, size);
       return false;
     }
     return true;
   }
 
-  static bool WriteAIWarImproveOpcode(uintptr_t addr, unsigned char opcode) {
-    if (!IsValidPtr(addr, 2))
+  static bool WriteAIWarPatchBytes(uintptr_t addr, const unsigned char *bytes, SIZE_T size) {
+    if (!bytes || size == 0 || !IsValidPtr(addr, size))
       return false;
 
     DWORD oldProtect = 0;
-    if (!VirtualProtect((LPVOID)addr, 1, PAGE_EXECUTE_READWRITE, &oldProtect))
+    if (!VirtualProtect((LPVOID)addr, size, PAGE_EXECUTE_READWRITE, &oldProtect))
       return false;
 
     bool success = false;
     __try {
-      *(unsigned char *)addr = opcode;
+      memcpy((void *)addr, bytes, size);
       success = true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       success = false;
     }
 
     DWORD ignored = 0;
-    VirtualProtect((LPVOID)addr, 1, oldProtect, &ignored);
+    VirtualProtect((LPVOID)addr, size, oldProtect, &ignored);
     if (success)
-      FlushInstructionCache(GetCurrentProcess(), (LPCVOID)addr, 2);
+      FlushInstructionCache(GetCurrentProcess(), (LPCVOID)addr, size);
     return success;
   }
 
@@ -70,40 +90,59 @@ namespace DX11Base {
       return;
     }
 
-    const uintptr_t patchAddr = exeBase + kAIWarImproveOffset;
-    unsigned char op = 0;
-    unsigned char disp = 0;
-    if (!ReadAIWarImproveBytes(patchAddr, op, disp)) {
-      AddLog(u8"[AI전투] 패치 주소 읽기 실패: %p", (void *)patchAddr);
-      if (enable)
-        bAIWarImprove = false;
-      return;
+    AIWarPatchSnapshot snapshots[_countof(kAIWarPatches)]{};
+
+    // 먼저 세 주소를 모두 검증합니다. 하나라도 예상과 다르면 아무 것도 쓰지 않습니다.
+    for (size_t i = 0; i < _countof(kAIWarPatches); ++i) {
+      const AIWarPatchSpec &spec = kAIWarPatches[i];
+      AIWarPatchSnapshot &snapshot = snapshots[i];
+      snapshot.address = exeBase + spec.offset;
+
+      if (!ReadAIWarPatchBytes(snapshot.address, snapshot.bytes, spec.size)) {
+        AddLog(u8"[AI전투] 패치 주소 읽기 실패: SAN8RPK.exe+%llX", (unsigned long long)spec.offset);
+        if (enable)
+          bAIWarImprove = false;
+        return;
+      }
+
+      const bool isOriginal = memcmp(snapshot.bytes, spec.original, spec.size) == 0;
+      const bool isEnabled = memcmp(snapshot.bytes, spec.enabled, spec.size) == 0;
+      if (!isOriginal && !isEnabled) {
+        AddLog(u8"[AI전투] 패치 거부: SAN8RPK.exe+%llX 바이트 불일치", (unsigned long long)spec.offset);
+        if (enable)
+          bAIWarImprove = false;
+        return;
+      }
+
+      const unsigned char *wanted = enable ? spec.enabled : spec.original;
+      snapshot.needsWrite = memcmp(snapshot.bytes, wanted, spec.size) != 0;
     }
 
-    // 두 번째 바이트(점프 거리)는 원본/패치 모두 0x0A여야 합니다.
-    if (disp != 0x0A || (op != 0x74 && op != 0xEB)) {
-      AddLog(u8"[AI전투] 패치 거부: 예상 바이트 불일치 (현재 %02X %02X / 기대 74 0A 또는 EB 0A)",
-             (unsigned int)op, (unsigned int)disp);
-      if (enable)
-        bAIWarImprove = false;
-      return;
+    // 검증을 모두 통과한 뒤에만 실제 쓰기를 시작합니다.
+    for (size_t i = 0; i < _countof(kAIWarPatches); ++i) {
+      if (!snapshots[i].needsWrite)
+        continue;
+
+      const AIWarPatchSpec &spec = kAIWarPatches[i];
+      const unsigned char *wanted = enable ? spec.enabled : spec.original;
+      if (!WriteAIWarPatchBytes(snapshots[i].address, wanted, spec.size)) {
+        // 부분 적용 방지: 이번 호출에서 이미 바꾼 주소들을 호출 전 상태로 되돌립니다.
+        for (size_t j = 0; j <= i; ++j) {
+          if (snapshots[j].needsWrite)
+            WriteAIWarPatchBytes(snapshots[j].address, snapshots[j].bytes, kAIWarPatches[j].size);
+        }
+        AddLog(u8"[AI전투] 패치 쓰기 실패: SAN8RPK.exe+%llX (변경분 롤백)",
+               (unsigned long long)spec.offset);
+        bAIWarImprove = !enable;
+        return;
+      }
     }
 
-    const unsigned char wanted = enable ? 0xEB : 0x74;
-    if (op == wanted)
-      return;
-
-    if (!WriteAIWarImproveOpcode(patchAddr, wanted)) {
-      AddLog(u8"[AI전투] 패치 쓰기 실패: %p", (void *)patchAddr);
-      if (enable)
-        bAIWarImprove = false;
-      return;
+    if (enable) {
+      AddLog(u8"[AI전투] 전투 개선 활성화: +144D24C, +1464B91, +145BDAB");
+    } else {
+      AddLog(u8"[AI전투] 전투 개선 비활성화: 3개 주소 원본 복구");
     }
-
-    if (enable)
-      AddLog(u8"[AI전투] 전투 개선 활성화 (SAN8RPK.exe+0x144D24C: 74 -> EB)");
-    else
-      AddLog(u8"[AI전투] 전투 개선 비활성화 (원본 74 복구)");
   }
 
   void DrawAIWarImproveSection(float scale) {
@@ -120,10 +159,12 @@ namespace DX11Base {
 
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
-      ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                         u8"컴퓨터 세력의 군단이 전쟁 행동에서 빠지는 현상을 완화합니다.");
+      ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"AI 세력의 전쟁 행동 관련 3개 분기를 함께 조정합니다.");
+      ImGui::TextUnformatted(u8"- 한 세력의 복수 공격 분기");
+      ImGui::TextUnformatted(u8"- 주인공 대상 호전성 증가 분기 제거");
+      ImGui::TextUnformatted(u8"- 일부 군주의 공백지 점령 제한 플래그 무력화");
       ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                         u8"※ 게임 버전이 달라 원본 바이트가 일치하지 않으면 안전하게 적용하지 않습니다.");
+                         u8"※ 세 주소 중 하나라도 예상 바이트와 다르면 전체 패치를 적용하지 않습니다.");
       ImGui::EndTooltip();
     }
 
