@@ -437,7 +437,6 @@ namespace DX11Base {
         }
 
         ImGui::SameLine(160.0f * scale);
-
         if (ImGui::Checkbox(u8"상병 습득 조건 해제", &bSangbyeongCondition)) {
           DX11Base::ApplySangbyeongCondition(bSangbyeongCondition);
           NotifyFeatureToggle(u8"상병 습득 조건 해제", bSangbyeongCondition);
@@ -666,12 +665,13 @@ namespace DX11Base {
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"AI 세력의 전쟁 행동 관련 3개 분기를 함께 조정합니다.");
-        ImGui::TextUnformatted(u8"- 한 세력의 복수 공격 분기");
-        ImGui::TextUnformatted(u8"- 주인공 대상 호전성 증가 분기 제거");
-        ImGui::TextUnformatted(u8"- 일부 군주의 공백지 점령 제한 플래그 무력화");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"AI가 더 적극적으로 전쟁을 걸고 공백지도 더 잘 점령하도록 조정합니다.");
+        ImGui::TextUnformatted(u8"- 한 세력이 한 턴에 여러 세력을 공격할 수 있게 변경");
+        ImGui::TextUnformatted(u8"- 주인공만 지나치게 공격하는 행동을 줄임");
+        ImGui::TextUnformatted(u8"- 일부 군주가 빈 도시를 점령하지 않는 현상을 완화");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 세 주소 중 하나라도 예상 바이트와 다르면 전체 패치를 적용하지 않습니다.");
+                           u8"※ 게임 버전이 달라 예상한 데이터와 다르면 적용하지 않습니다.");
         ImGui::EndTooltip();
       }
 
@@ -877,7 +877,6 @@ namespace DX11Base {
         NotifyFeatureToggle(u8"모든 미발견 무장 재야로 변경", bUndiscoveredToRonin);
         SaveConfig();
       }
-
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"<주의사항>");
