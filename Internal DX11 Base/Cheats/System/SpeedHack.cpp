@@ -73,8 +73,7 @@ namespace DX11Base {
   BOOL WINAPI hkQueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
     BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
 
-    // 배속이 꺼져 있으면 원본 값을 그대로 반환합니다.
-    // 기존처럼 프로세스 전체에 훅은 걸리지만 OFF 상태의 atomic/fake-time 계산 비용은 제거합니다.
+    // 훅이 한 번 설치된 이후 배속이 OFF라면 원본 값을 그대로 반환합니다.
     if (!ret || !bSpeedHack)
       return ret;
 
@@ -196,7 +195,9 @@ namespace DX11Base {
   }
 
   void SpeedHack_Sleep_Install() {
-    if (s_installed)
+    // Engine::HookD3D()에서도 이 함수가 호출되지만 배속이 꺼져 있으면 아무 훅도 만들지 않습니다.
+    // 실제 첫 설치는 사용자가 배속을 ON한 뒤 SpeedHack_Update()가 다시 호출하는 시점입니다.
+    if (s_installed || !bSpeedHack)
       return;
 
     InitializeQpcThresholds();
