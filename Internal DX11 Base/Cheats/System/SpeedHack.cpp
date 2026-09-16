@@ -3,10 +3,8 @@
 #include "../../MenuState.h"
 #include "../../showlog.h"
 #include <atomic>
-#include <intrin.h>
 #include <windows.h>
 
-#pragma intrinsic(_ReturnAddress)
 #pragma comment(lib, "winmm.lib")
 
 namespace DX11Base {
@@ -65,36 +63,19 @@ namespace DX11Base {
     void InitializeQpcThresholds() {
       LARGE_INTEGER freq{};
       if (QueryPerformanceFrequency(&freq) && freq.QuadPart > 0) {
-        // QPC의 단위는 PC마다 다르므로 실제 주파수 기준으로 33ms/50ms를 계산합니다.
+        // QPC는 PC마다 주파수가 다르므로 실제 주파수 기준으로 33ms/50ms를 계산합니다.
         s_maxDeltaQpc = (freq.QuadPart * 33) / 1000;
         s_safeDeltaQpc = (freq.QuadPart * 50) / 1000;
       }
     }
-
-    bool __forceinline IsCallerGame(void *caller) {
-      static uintptr_t s_exeBase = 0;
-      static uintptr_t s_exeEnd = 0;
-      if (s_exeBase == 0) {
-        HMODULE hExe = GetModuleHandle(NULL);
-        if (hExe) {
-          PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)hExe;
-          PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((uint8_t *)hExe + dosHeader->e_lfanew);
-          s_exeBase = (uintptr_t)hExe;
-          s_exeEnd = s_exeBase + ntHeaders->OptionalHeader.SizeOfImage;
-        }
-      }
-      uintptr_t addr = (uintptr_t)caller;
-      return (addr >= s_exeBase && addr < s_exeEnd);
-    }
   } // namespace
 
   BOOL WINAPI hkQueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
-    void *caller = _ReturnAddress();
     BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
 
-    // 배속 OFF 또는 게임 EXE 외부 호출(hid.dll 내부 타이머 포함)은 원본 값을 그대로 반환합니다.
-    // 치트 자체의 감시 타이머가 배속에 따라 빨라지는 현상도 함께 차단합니다.
-    if (!ret || !bSpeedHack || !IsCallerGame(caller))
+    // 배속이 꺼져 있으면 원본 값을 그대로 반환합니다.
+    // 기존처럼 프로세스 전체에 훅은 걸리지만 OFF 상태의 atomic/fake-time 계산 비용은 제거합니다.
+    if (!ret || !bSpeedHack)
       return ret;
 
     float mul = s_multiplier.load(std::memory_order_relaxed);
@@ -114,7 +95,6 @@ namespace DX11Base {
     if (delta < 0)
       delta = 0;
 
-    // 큰 끊김은 배속하지 않고, 한 번의 가상 시간 증가량도 33ms까지만 허용합니다.
     if (delta > s_safeDeltaQpc)
       mul = 1.0f;
 
@@ -131,9 +111,8 @@ namespace DX11Base {
   }
 
   DWORD WINAPI hkGetTickCount() {
-    void *caller = _ReturnAddress();
     DWORD real = oGetTickCount();
-    if (!bSpeedHack || !IsCallerGame(caller))
+    if (!bSpeedHack)
       return real;
 
     float mul = s_multiplier.load(std::memory_order_relaxed);
@@ -161,9 +140,8 @@ namespace DX11Base {
   }
 
   ULONGLONG WINAPI hkGetTickCount64() {
-    void *caller = _ReturnAddress();
     ULONGLONG real = oGetTickCount64();
-    if (!bSpeedHack || !IsCallerGame(caller))
+    if (!bSpeedHack)
       return real;
 
     float mul = s_multiplier.load(std::memory_order_relaxed);
@@ -189,9 +167,8 @@ namespace DX11Base {
   }
 
   DWORD WINAPI hktimeGetTime() {
-    void *caller = _ReturnAddress();
     DWORD real = otimeGetTime();
-    if (!bSpeedHack || !IsCallerGame(caller))
+    if (!bSpeedHack)
       return real;
 
     float mul = s_multiplier.load(std::memory_order_relaxed);
@@ -248,7 +225,7 @@ namespace DX11Base {
 
     static bool s_lastEnabled = false;
     if (s_lastEnabled != bSpeedHack) {
-      // OFF 동안 원본 시간이 진행된 뒤 다시 ON할 때 오래된 fake 기준값을 재사용하지 않도록 초기화합니다.
+      // OFF 동안 원본 시간이 진행된 뒤 다시 ON할 때 오래된 fake 기준을 재사용하지 않습니다.
       ResetClockState();
       s_lastEnabled = bSpeedHack;
     }
