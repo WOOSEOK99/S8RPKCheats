@@ -2,6 +2,8 @@
 #include "pch.h"
 
 namespace DX11Base {
+  void DrawAIWarImproveSection(float scale);
+
   namespace MenuSections {
     // 공통 UI 헬퍼
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
@@ -11,6 +13,16 @@ namespace DX11Base {
     void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale);
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale);
     void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale);
+
+#ifdef DX11BASE_MENU_WRAP_WAR_SECTION
+    // Menu.cpp에서만 기존 전쟁 섹션 바로 뒤에 AI 전투 개선 UI를 추가합니다.
+    inline void DrawWarSectionWithAIImprove(uintptr_t p1, uintptr_t gameBase, float scale) {
+      DrawWarSection(p1, gameBase, scale);
+      ::DX11Base::DrawAIWarImproveSection(scale);
+    }
+#define DrawWarSection DrawWarSectionWithAIImprove
+#endif
+
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale);
   } // namespace MenuSections
 } // namespace DX11Base
