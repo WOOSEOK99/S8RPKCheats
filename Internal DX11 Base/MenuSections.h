@@ -2,8 +2,6 @@
 #include "pch.h"
 
 namespace DX11Base {
-  void DrawAIWarImproveSection(float scale);
-
   namespace MenuSections {
     // 공통 UI 헬퍼
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
@@ -13,16 +11,6 @@ namespace DX11Base {
     void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale);
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale);
     void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale);
-
-#ifdef DX11BASE_MENU_WRAP_WAR_SECTION
-    // Menu.cpp에서만 기존 전쟁 섹션 바로 뒤에 AI 전투 개선 UI를 추가합니다.
-    inline void DrawWarSectionWithAIImprove(uintptr_t p1, uintptr_t gameBase, float scale) {
-      DrawWarSection(p1, gameBase, scale);
-      ::DX11Base::DrawAIWarImproveSection(scale);
-    }
-#define DrawWarSection DrawWarSectionWithAIImprove
-#endif
-
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale);
   } // namespace MenuSections
 } // namespace DX11Base
@@ -58,7 +46,7 @@ ImVec4 Lavender= ImVec4(0.9f, 0.7f, 1.0f, 1.0f); // 라벤더
 ImVec4 Salmon  = ImVec4(0.98f, 0.5f, 0.45f, 1.0f); // 연어
 ImVec4 Tan     = ImVec4(0.82f, 0.7f, 0.55f, 1.0f); // 황갈색
 ImVec4 Turquoise= ImVec4(0.25f, 0.88f, 0.82f, 1.0f); // 터콰이즈
-ImVec4 Violet2 = ImVec4(0.54f, 0.17f, 0.88f, 1.0f); // 바이올렛2
+ImVec4 Violet2 = ImVec4(0.54f, 0.17f, 0.88f, 1.0f); // 바이올렛
 ImVec4 Wheat   = ImVec4(0.96f, 0.87f, 0.7f, 1.0f); // 밀색
 
 ImVec4 Cyan    = ImVec4(0.0f, 1.0f, 1.0f, 1.0f); // 하늘색
