@@ -209,6 +209,7 @@
     <ClInclude Include="Cheats\Officer\TraitViewerRoster.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerBattleMap.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerOfficerInfo.h" />
+    <ClInclude Include="Cheats\Officer\TraitViewerBattleInfo.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Cheats\Social\Resonancecave.h" />
     <ClInclude Include="Cheats\War\Selfheal.h" />
@@ -301,6 +302,9 @@
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="Cheats\Officer\TraitViewerOfficerInfo.cpp">
+      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="Cheats\Officer\TraitViewerBattleInfo.cpp">
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="pch.cpp">
