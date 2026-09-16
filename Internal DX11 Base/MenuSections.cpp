@@ -658,6 +658,23 @@ namespace DX11Base {
 
       ImGui::SameLine(160.0f * scale);
 
+      if (ImGui::Checkbox(u8"AI 전투 개선", &bAIWarImprove)) {
+        const bool requested = bAIWarImprove;
+        DX11Base::SetAIWarImprove(requested);
+        DX11Base::NotifyFeatureToggle(u8"AI 전투 개선", bAIWarImprove);
+        DX11Base::SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"AI 세력의 전쟁 행동 관련 3개 분기를 함께 조정합니다.");
+        ImGui::TextUnformatted(u8"- 한 세력의 복수 공격 분기");
+        ImGui::TextUnformatted(u8"- 주인공 대상 호전성 증가 분기 제거");
+        ImGui::TextUnformatted(u8"- 일부 군주의 공백지 점령 제한 플래그 무력화");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 세 주소 중 하나라도 예상 바이트와 다르면 전체 패치를 적용하지 않습니다.");
+        ImGui::EndTooltip();
+      }
+
       if (ImGui::Checkbox(u8"전투맵 랜덤(관문제외)", &bBattleMapShuffle)) {
         DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
         NotifyFeatureToggle(u8"전투맵 랜덤(관문제외)", bBattleMapShuffle);
