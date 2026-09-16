@@ -1,0 +1,49 @@
+name: Trait viewer step1 build
+
+on:
+  push:
+    paths:
+      - '.github/workflows/trait-viewer-step1-build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire-and-build:
+    if: github.ref == 'refs/heads/feature/trait-viewer-step1-widths'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/trait-viewer-step1-widths
+          fetch-depth: 0
+
+      - name: Register Step 1 files in vcxproj
+        shell: pwsh
+        run: |
+          $path = 'Internal DX11 Base/Internal DX11 Base.vcxproj'
+          $text = [IO.File]::ReadAllText($path)
+          if ($text -notmatch 'TraitViewerWidths\.h') {
+            $text = $text.Replace('    <ClInclude Include="Cheats\Officer\OfficerDetail.h" />', "    <ClInclude Include=`"Cheats\Officer\OfficerDetail.h`" />`r`n    <ClInclude Include=`"Cheats\Officer\TraitViewerWidths.h`" />")
+          }
+          if ($text -notmatch 'TraitViewerWidths\.cpp') {
+            $text = $text.Replace('    <ClCompile Include="Cheats\Officer\OfficerDetail.cpp" />', "    <ClCompile Include=`"Cheats\Officer\OfficerDetail.cpp`" />`r`n    <ClCompile Include=`"Cheats\Officer\TraitViewerWidths.cpp`" />")
+          }
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($true))
+
+      - name: Commit project registration
+        shell: pwsh
+        run: |
+          if (git diff --quiet) { exit 0 }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'Internal DX11 Base/Internal DX11 Base.vcxproj'
+          git commit -m 'Step 1: register trait viewer width patches'
+          git push origin HEAD:feature/trait-viewer-step1-widths
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild 'SAM8RPK_Ingame_Cheat.sln' /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143
