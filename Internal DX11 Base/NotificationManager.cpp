@@ -2,6 +2,7 @@
 #include "NotificationManager.h"
 #include "MenuState.h"
 #include "showlog.h"
+#include "Cheats/System/SpeedHack.h"
 #include <algorithm>
 
 namespace DX11Base {
@@ -56,7 +57,9 @@ namespace DX11Base {
             drawList->AddRectFilled(clipMin, clipMax, IM_COL32(0, 0, 0, 160));
             drawList->AddLine(ImVec2(clipMin.x, clipMax.y - 1.0f), ImVec2(clipMax.x, clipMax.y - 1.0f), IM_COL32(255, 255, 50, 150), 2.0f);
 
-            float deltaTime = io.DeltaTime;
+            // ImGui의 DeltaTime은 SpeedHack이 후킹한 QPC의 영향을 받을 수 있으므로
+            // marquee 애니메이션만 원본 QPC 기반 실제 시간으로 분리합니다.
+            float deltaTime = SpeedHack_GetRealDeltaTime();
             float speed = g_notificationSpeed * scale;
             float minNextX = marqueeWidth;
             float gap = 80.0f * scale;
@@ -110,7 +113,7 @@ namespace DX11Base {
         if (ImGui::Begin("##NotificationHistoryWindow", nullptr, flags)) {
             ImGui::SetWindowFontScale(1.1f);
             
-            ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 최근 알림 기록 ]");
+            ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.f), u8"[ 최근 알림 기록 ]");
             ImGui::SameLine(ImGui::GetWindowWidth() - 80.0f * scale);
             if (ImGui::Button(u8"기록 삭제", ImVec2(70.0f * scale, 0))) {
                 g_notificationHistory.clear();

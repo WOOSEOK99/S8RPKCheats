@@ -73,8 +73,7 @@ namespace DX11Base {
   BOOL WINAPI hkQueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
     BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
 
-    // 배속이 꺼져 있으면 원본 값을 그대로 반환합니다.
-    // 기존처럼 프로세스 전체에 훅은 걸리지만 OFF 상태의 atomic/fake-time 계산 비용은 제거합니다.
+    // 훅이 한 번 설치된 이후 배속이 OFF라면 원본 값을 그대로 반환합니다.
     if (!ret || !bSpeedHack)
       return ret;
 
@@ -196,7 +195,9 @@ namespace DX11Base {
   }
 
   void SpeedHack_Sleep_Install() {
-    if (s_installed)
+    // Engine::HookD3D()에서도 이 함수가 호출되지만 배속이 꺼져 있으면 아무 훅도 만들지 않습니다.
+    // 실제 첫 설치는 사용자가 배속을 ON한 뒤 SpeedHack_Update()가 다시 호출하는 시점입니다.
+    if (s_installed || !bSpeedHack)
       return;
 
     InitializeQpcThresholds();
@@ -240,6 +241,44 @@ namespace DX11Base {
       AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx", current, desired);
       ResetBases(desired);
     }
+  }
+
+  float SpeedHack_GetRealDeltaTime() {
+    static LARGE_INTEGER s_freq{};
+    static LONGLONG s_prev = 0;
+
+    if (s_freq.QuadPart <= 0) {
+      if (!QueryPerformanceFrequency(&s_freq) || s_freq.QuadPart <= 0)
+        return 1.0f / 60.0f;
+    }
+
+    LARGE_INTEGER now{};
+    BOOL ok = FALSE;
+
+    // 훅 설치 전에는 일반 QPC를 써도 실제 시간입니다.
+    // 훅 설치 후에는 MinHook이 넘겨준 원본 트램펄린을 직접 호출해 SpeedHack 가짜 시간을 우회합니다.
+    if (s_installed && oQueryPerformanceCounter)
+      ok = oQueryPerformanceCounter(&now);
+    else
+      ok = QueryPerformanceCounter(&now);
+
+    if (!ok)
+      return 1.0f / 60.0f;
+
+    if (s_prev == 0) {
+      s_prev = now.QuadPart;
+      return 1.0f / 60.0f;
+    }
+
+    LONGLONG delta = now.QuadPart - s_prev;
+    s_prev = now.QuadPart;
+    if (delta <= 0)
+      return 1.0f / 60.0f;
+
+    float dt = (float)((double)delta / (double)s_freq.QuadPart);
+    if (dt > 0.1f)
+      dt = 0.1f;
+    return dt;
   }
 
 } // namespace DX11Base

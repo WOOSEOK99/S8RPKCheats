@@ -16,6 +16,7 @@
  *   - 세이브 로드/시나리오 전환 등으로 도시 배열 베이스가 바뀌면 런타임 포인터 백업을 폐기합니다.
  *   - name/data 포인터는 모두 읽기 가능한 경우에만 사용합니다.
  *   - name/data 두 포인터는 한 보호구간에서 함께 쓰고 실패 시 원래 값으로 롤백합니다.
+ *   - 한 번의 500ms 유지 작업 동안 같은 메모리 영역의 VirtualQuery 결과만 재사용하고 다음 작업 때는 다시 검증합니다.
  */
 
 #include "TavernMonitor.h"
@@ -35,6 +36,7 @@ namespace DX11Base {
         constexpr ULONGLONG kPhaseStabilizeMs = 2500;
         constexpr uint8_t kStateCouncil = 0x05;
         constexpr uint8_t kStateDomestic = 0x07;
+        constexpr size_t kReadableCacheSlots = 256;
 
         constexpr uintptr_t kNameOff[kSlotCount] = {0x178, 0x1A0, 0x1C8, 0x1F0};
         constexpr uintptr_t kDataOff[kSlotCount] = {0x180, 0x1A8, 0x1D0, 0x1F8};
@@ -57,6 +59,14 @@ namespace DX11Base {
             TavernRequest req{};
         };
 
+        struct ReadableRegionCacheEntry {
+            uintptr_t pageKey = 0;
+            uintptr_t regionStart = 0;
+            uintptr_t regionEnd = 0; // exclusive
+            bool readable = false;
+            bool valid = false;
+        };
+
         static BackupEntry s_backups[kCityCount][kSlotCount] = {};
         static TavernRequest s_lastInjected[kCityCount][kSlotCount] = {};
         static uint8_t s_lastRelevantGameState = 0;
@@ -64,6 +74,7 @@ namespace DX11Base {
         static bool s_waitingStabilize = false;
         static bool s_wasEnabled = false;
         static uintptr_t s_lastCityArrayBase = 0;
+        static ReadableRegionCacheEntry s_readableCache[kReadableCacheSlots] = {};
 
         static bool SameRequest(const TavernRequest& a, const TavernRequest& b) {
             return a.name == b.name && a.data == b.data;
@@ -73,6 +84,10 @@ namespace DX11Base {
             return req.name > 0x10000 && req.data > 0x10000;
         }
 
+        static void ResetReadableCache() {
+            std::memset(s_readableCache, 0, sizeof(s_readableCache));
+        }
+
         static void ClearGenerationState() {
             std::memset(s_backups, 0, sizeof(s_backups));
             std::memset(s_lastInjected, 0, sizeof(s_lastInjected));
@@ -80,6 +95,7 @@ namespace DX11Base {
 
         static void ResetMonitorState() {
             ClearGenerationState();
+            ResetReadableCache();
             s_lastRelevantGameState = 0;
             s_phaseChangeTime = 0;
             s_waitingStabilize = false;
@@ -94,18 +110,29 @@ namespace DX11Base {
             if (end < addr)
                 return false;
 
+            const uintptr_t pageKey = addr >> 12;
+            ReadableRegionCacheEntry& cached = s_readableCache[pageKey & (kReadableCacheSlots - 1)];
+            if (cached.valid && cached.pageKey == pageKey &&
+                addr >= cached.regionStart && end < cached.regionEnd) {
+                return cached.readable;
+            }
+
             MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi))
+            if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi)) {
+                cached = {pageKey, addr, end + 1, false, true};
                 return false;
-            if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
-                return false;
+            }
 
             uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
             uintptr_t regionEnd = regionStart + mbi.RegionSize;
-            if (regionEnd < regionStart)
+            if (regionEnd < regionStart) {
+                cached = {pageKey, addr, end + 1, false, true};
                 return false;
+            }
 
-            return end < regionEnd;
+            const bool readable = (mbi.State == MEM_COMMIT) && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+            cached = {pageKey, regionStart, regionEnd, readable, true};
+            return readable && end < regionEnd;
         }
 
         static bool IsUsableRequest(const TavernRequest& req) {
@@ -307,6 +334,9 @@ namespace DX11Base {
         }
 
         static void MaintainFourRequests(uintptr_t cityArrayBase, bool preferCurrentGenerationSources = false) {
+            // 캐시는 오직 이번 유지 작업 안에서만 사용합니다. 다음 500ms 틱에서는 다시 VirtualQuery합니다.
+            ResetReadableCache();
+
             TavernRequest current[kCityCount][kSlotCount] = {};
             bool pairRead[kCityCount][kSlotCount] = {};
             std::vector<LiveSource> nativeSources;
