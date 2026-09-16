@@ -1,5 +1,6 @@
 #include "RoadBlock.h"
 #include "../../Cheats.h"
+#include "../../MenuState.h"
 #include "../../pch.h"
 #include "../../showlog.h"
 #include <psapi.h>
@@ -8,6 +9,98 @@ namespace DX11Base {
 
   void AddLog(const char *fmt, ...);
   bool IsValidPtr(uintptr_t addr, SIZE_T size);
+
+  // ───────────────────────────────────────────────
+  //  AI 전투 개선
+  //  SAN8RPK.exe+0x144D24C : 74 0A (JE) -> EB 0A (JMP)
+  //  현재 게임 버전에서 직접 확인한 원본 바이트가 일치할 때만 적용합니다.
+  // ───────────────────────────────────────────────
+  static constexpr uintptr_t kAIWarImproveOffset = 0x144D24C;
+
+  static bool ReadAIWarImproveBytes(uintptr_t addr, unsigned char &op, unsigned char &disp) {
+    op = 0;
+    disp = 0;
+    if (!IsValidPtr(addr, 2))
+      return false;
+
+    __try {
+      op = *(unsigned char *)addr;
+      disp = *(unsigned char *)(addr + 1);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      op = 0;
+      disp = 0;
+      return false;
+    }
+    return true;
+  }
+
+  static bool WriteAIWarImproveOpcode(uintptr_t addr, unsigned char opcode) {
+    if (!IsValidPtr(addr, 2))
+      return false;
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect((LPVOID)addr, 1, PAGE_EXECUTE_READWRITE, &oldProtect))
+      return false;
+
+    bool success = false;
+    __try {
+      *(unsigned char *)addr = opcode;
+      success = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      success = false;
+    }
+
+    DWORD ignored = 0;
+    VirtualProtect((LPVOID)addr, 1, oldProtect, &ignored);
+    if (success)
+      FlushInstructionCache(GetCurrentProcess(), (LPCVOID)addr, 2);
+    return success;
+  }
+
+  void SetAIWarImprove(bool enable) {
+    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+    if (!exeBase) {
+      AddLog(u8"[AI전투] SAN8RPK.exe 베이스 주소를 찾지 못했습니다.");
+      if (enable)
+        bAIWarImprove = false;
+      return;
+    }
+
+    const uintptr_t patchAddr = exeBase + kAIWarImproveOffset;
+    unsigned char op = 0;
+    unsigned char disp = 0;
+    if (!ReadAIWarImproveBytes(patchAddr, op, disp)) {
+      AddLog(u8"[AI전투] 패치 주소 읽기 실패: %p", (void *)patchAddr);
+      if (enable)
+        bAIWarImprove = false;
+      return;
+    }
+
+    // 두 번째 바이트(점프 거리)는 원본/패치 모두 0x0A여야 합니다.
+    if (disp != 0x0A || (op != 0x74 && op != 0xEB)) {
+      AddLog(u8"[AI전투] 패치 거부: 예상 바이트 불일치 (현재 %02X %02X / 기대 74 0A 또는 EB 0A)",
+             (unsigned int)op, (unsigned int)disp);
+      if (enable)
+        bAIWarImprove = false;
+      return;
+    }
+
+    const unsigned char wanted = enable ? 0xEB : 0x74;
+    if (op == wanted)
+      return;
+
+    if (!WriteAIWarImproveOpcode(patchAddr, wanted)) {
+      AddLog(u8"[AI전투] 패치 쓰기 실패: %p", (void *)patchAddr);
+      if (enable)
+        bAIWarImprove = false;
+      return;
+    }
+
+    if (enable)
+      AddLog(u8"[AI전투] 전투 개선 활성화 (SAN8RPK.exe+0x144D24C: 74 -> EB)");
+    else
+      AddLog(u8"[AI전투] 전투 개선 비활성화 (원본 74 복구)");
+  }
 
   // ───────────────────────────────────────────────
   //  도로 차단 - 건녕 ↔ 교지
@@ -135,7 +228,7 @@ namespace DX11Base {
       if (!g_road1Enabled)
         return;
       g_road1Enabled = false;
-      
+
       uintptr_t root = ResolveRoadRoot();
       if (root) {
         RestoreAddr(root + 0x7E30, g_road1OrigVal1);
