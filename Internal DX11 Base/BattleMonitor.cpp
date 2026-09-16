@@ -21,6 +21,7 @@
 #include "MenuState.h"
 #include "pch.h"
 #include "NotificationManager.h"
+#include "debug.h"
 #include "showlog.h"
 
 namespace DX11Base {
@@ -200,6 +201,18 @@ namespace DX11Base {
     static float s_lastSeenTime = 0.0f;
     static int s_lastAppliedDay = -1;
     static int s_lastNotifiedDay = -1;
+
+    // 디버그 모드 전용 전투 상태 변화 스냅샷.
+    // 디버그를 다시 켤 때 현재 상태를 즉시 한 번 출력하도록 OFF 시 초기화합니다.
+    static bool s_debugSnapshotValid = false;
+    static uint8_t s_debugLastGameState = 0xFF;
+    static int s_debugLastDay = -999;
+    static int s_debugLastUnits = -999;
+    static bool s_debugLastBattleActive = false;
+    static bool s_debugLastApplied = false;
+    if (!bShowDebug)
+      s_debugSnapshotValid = false;
+
     float currentTime = (float)GetTickCount64() / 1000.0f;
 
     // 0. 기반 주소 체크 (게임 로딩/메뉴 시 자동 초기화)
@@ -263,6 +276,31 @@ namespace DX11Base {
 
     // 전투 활성화 조건: 훅 포착 OR 올바른 날짜 유효 OR 올바른 부대 리스트 유효
     bool battleActive = (addr1 != 0 || addr2 != 0) || isDateValid || isUnitListValid;
+
+    if (bShowDebug) {
+      uint8_t gameState = 0xFF;
+      __try {
+        if (IsValidPtr(gameBase + 0xD0, 1))
+          gameState = *(uint8_t *)(gameBase + 0xD0);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        gameState = 0xFF;
+      }
+
+      const bool changed = !s_debugSnapshotValid || gameState != s_debugLastGameState || currentDay != s_debugLastDay ||
+                           unitCountTotal != s_debugLastUnits || battleActive != s_debugLastBattleActive ||
+                           s_isWarModsApplied != s_debugLastApplied;
+      if (changed) {
+        AddLog(u8"[BattleDebug] State:0x%02X Day:%d Units:%d Addr1:%p Addr2:%p Active:%d Applied:%d",
+               (unsigned int)gameState, currentDay, unitCountTotal, (void *)addr1, (void *)addr2,
+               battleActive ? 1 : 0, s_isWarModsApplied ? 1 : 0);
+        s_debugLastGameState = gameState;
+        s_debugLastDay = currentDay;
+        s_debugLastUnits = unitCountTotal;
+        s_debugLastBattleActive = battleActive;
+        s_debugLastApplied = s_isWarModsApplied;
+        s_debugSnapshotValid = true;
+      }
+    }
 
     if (battleActive) {
       s_lastSeenTime = currentTime;
