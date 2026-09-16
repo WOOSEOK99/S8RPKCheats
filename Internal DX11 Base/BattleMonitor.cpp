@@ -31,38 +31,101 @@ namespace DX11Base {
   static uintptr_t s_cachedDefenderAddr = 0;
   static DWORD s_lastResolveTick = 0;
 
-  // 프리징 방지를 위한 SEH(예외 처리) 기반의 안전한 포인터 체인 추적
-  static uintptr_t ResolveChain(uintptr_t base, std::initializer_list<int> offsets) {
+  struct ResolveRegionEntry {
+    uintptr_t start = 0;
+    uintptr_t end = 0; // exclusive
+    bool readable = false;
+  };
+
+  struct ResolveRegionCache {
+    static constexpr size_t kCapacity = 16;
+    ResolveRegionEntry entries[kCapacity]{};
+    size_t next = 0;
+  };
+
+  // 한 번의 전투 포인터 갱신 안에서 같은 VirtualQuery 영역의 결과를 재사용합니다.
+  // 캐시는 호출마다 새로 만들어지므로 다음 500ms 갱신까지 오래된 메모리 상태를 유지하지 않습니다.
+  static bool IsValidPtrForResolve(uintptr_t addr, SIZE_T size, ResolveRegionCache &cache) {
+    if (!addr || size == 0)
+      return false;
+
+    const uintptr_t endAddr = addr + size - 1;
+    if (endAddr < addr)
+      return false;
+
+    for (const auto &entry : cache.entries) {
+      if (entry.start != 0 && addr >= entry.start && endAddr < entry.end)
+        return entry.readable;
+    }
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi))
+      return false;
+
+    const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+    const uintptr_t regionEnd = regionStart + mbi.RegionSize;
+    const bool regionEndValid = (regionEnd >= regionStart);
+    const bool readable = regionEndValid && mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+
+    ResolveRegionEntry &slot = cache.entries[cache.next++ % ResolveRegionCache::kCapacity];
+    slot.start = regionStart;
+    slot.end = regionEndValid ? regionEnd : regionStart;
+    slot.readable = readable;
+
+    if (!readable)
+      return false;
+    if (endAddr < regionEnd)
+      return true;
+
+    // 드문 영역 경계 횡단은 기존 검사로 폴백하여 검증 의미를 유지합니다.
+    return IsValidPtr(addr, size);
+  }
+
+  static bool ReadPtrForResolve(uintptr_t addr, uintptr_t &out, ResolveRegionCache &cache) {
+    out = 0;
+    if (addr < 0x10000 || !IsValidPtrForResolve(addr, sizeof(uintptr_t), cache))
+      return false;
+
+    __try {
+      out = *(uintptr_t *)addr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      out = 0;
+      return false;
+    }
+    return out >= 0x10000;
+  }
+
+  // 프리징 방지를 위한 SEH(예외 처리) + 호출 단위 메모리 영역 캐시 기반 포인터 체인 추적
+  static uintptr_t ResolveChainCached(uintptr_t base, std::initializer_list<int> offsets, ResolveRegionCache &cache) {
     if (base == 0)
       return 0;
     uintptr_t current = base;
 
-    __try {
-      for (int offset : offsets) {
-        if (current == 0 || current < 0x10000)
-          return 0; // 널 포인터 및 비정상 주소 방어
-        if (!IsValidPtr(current, 8))
-          return 0;
-
-        uintptr_t next = *(uintptr_t *)current;
-        if (next == 0 || next < 0x10000)
-          return 0;
-        current = next + offset;
-      }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-      // 메모리 접근 위반 발생 시 즉시 탈출하여 프리징/크래시 방지
-      return 0;
+    for (int offset : offsets) {
+      uintptr_t next = 0;
+      if (!ReadPtrForResolve(current, next, cache))
+        return 0;
+      current = next + offset;
     }
     return current;
   }
 
-  // unitList/day는 같은 0x02E99460 루트의 앞 2단계를 공유합니다.
-  // 공통 부분을 한 번만 해석하여 500ms 캐시 갱신 시 중복 VirtualQuery를 줄입니다.
+  // 단독 호출용 폴백. 기존 호출부의 동작은 유지하면서 동일한 검증 경로를 사용합니다.
+  static uintptr_t ResolveChain(uintptr_t base, std::initializer_list<int> offsets) {
+    ResolveRegionCache cache{};
+    return ResolveChainCached(base, offsets, cache);
+  }
+
+  // unitList/day는 같은 0x02E99460 루트와 첫 전투 데이터 포인터를 공유합니다.
+  // 500ms 갱신 주기 자체는 유지하되, 공통 포인터는 한 번만 읽고 같은 메모리 영역의 VirtualQuery 결과를 재사용합니다.
   static void ResolveBattlePointers(uintptr_t exeBase, bool needDefender) {
-    uintptr_t sharedBattleRoot = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250});
-    if (sharedBattleRoot) {
-      s_cachedUnitListBase = ResolveChain(sharedBattleRoot, {0x1D8, 0, 0x180, 0});
-      s_cachedDayBaseAddr = ResolveChain(sharedBattleRoot, {0x218, 0, 0x3D8, 0x478, 0, 0});
+    ResolveRegionCache cache{};
+
+    uintptr_t sharedBattleRoot = ResolveChainCached(exeBase + 0x02E99460, {0x28, 0x250}, cache);
+    uintptr_t battleDataRoot = 0;
+    if (sharedBattleRoot && ReadPtrForResolve(sharedBattleRoot, battleDataRoot, cache)) {
+      s_cachedUnitListBase = ResolveChainCached(battleDataRoot + 0x1D8, {0, 0x180, 0}, cache);
+      s_cachedDayBaseAddr = ResolveChainCached(battleDataRoot + 0x218, {0, 0x3D8, 0x478, 0, 0}, cache);
     } else {
       s_cachedUnitListBase = 0;
       s_cachedDayBaseAddr = 0;
@@ -70,7 +133,7 @@ namespace DX11Base {
 
     // 수비군 주소는 공성 기능에서만 사용하므로 기능이 꺼져 있으면 8단계 체인을 해석하지 않습니다.
     if (needDefender) {
-      s_cachedDefenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
+      s_cachedDefenderAddr = ResolveChainCached(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8}, cache);
     } else {
       s_cachedDefenderAddr = 0;
     }
