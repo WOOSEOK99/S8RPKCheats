@@ -420,6 +420,79 @@ namespace DX11Base {
       return (type >= 1 && type <= 26);
     }
 
+    static bool IsUnownedSpecialtyObject(uintptr_t objPtr, uint16_t expectedId = 0) {
+      objPtr = Ptr48(objPtr);
+      if (objPtr <= 0x10000 || !IsValidPtr(objPtr, 0x40))
+        return false;
+
+      uint16_t id = 0;
+      uintptr_t ownerPtr = 0;
+      uint32_t ownerType = 0;
+      if (!Read16(objPtr + 0x08, &id) || (expectedId != 0 && id != expectedId))
+        return false;
+      if (!ReadPtr(objPtr + 0x30, &ownerPtr) || !Read32(objPtr + 0x38, &ownerType))
+        return false;
+
+      // 기존 게임 동작과 맞추어 실제 소유 여부는 ownerPtr 기준으로 판단합니다.
+      // ownerType은 미소유 상태에서도 잔존값이 남을 수 있으므로 자동 배분 제외 조건으로 사용하지 않습니다.
+      if (Ptr48(ownerPtr) > 0x10000)
+        return false;
+
+      return HasSpecialtyAttributes(objPtr);
+    }
+
+    static bool WriteSpecialtySlotAtomic(uintptr_t slotPtrAddr, uintptr_t objPtr) {
+      objPtr = Ptr48(objPtr);
+      if (slotPtrAddr <= 0x10008 || objPtr <= 0x10000)
+        return false;
+
+      // Enabled(-0x08, 4), Pointer(+0x00, 8), Bought(+0x08, 4)를 하나의 보호 구간으로 처리합니다.
+      constexpr SIZE_T kSlotWriteSpan = 0x14;
+      uintptr_t protectBase = slotPtrAddr - 0x08;
+      if (!IsValidPtr(protectBase, kSlotWriteSpan) || !IsValidPtr(objPtr, 0x40))
+        return false;
+
+      DWORD oldProtect = 0;
+      if (!VirtualProtect((LPVOID)protectBase, kSlotWriteSpan, PAGE_READWRITE, &oldProtect))
+        return false;
+
+      bool ok = false;
+      uint32_t oldEnabled = 0;
+      uintptr_t oldObjPtr = 0;
+      uint32_t oldBought = 0;
+
+      __try {
+        oldEnabled = *(uint32_t *)(slotPtrAddr - 0x08);
+        oldObjPtr = *(uintptr_t *)slotPtrAddr;
+        oldBought = *(uint32_t *)(slotPtrAddr + 0x08);
+
+        *(uint32_t *)(slotPtrAddr - 0x08) = 1;
+        *(uintptr_t *)slotPtrAddr = objPtr;
+        *(uint32_t *)(slotPtrAddr + 0x08) = 0;
+
+        ok = (*(uint32_t *)(slotPtrAddr - 0x08) == 1 && Ptr48(*(uintptr_t *)slotPtrAddr) == objPtr &&
+              *(uint32_t *)(slotPtrAddr + 0x08) == 0);
+
+        if (!ok) {
+          *(uint32_t *)(slotPtrAddr - 0x08) = oldEnabled;
+          *(uintptr_t *)slotPtrAddr = oldObjPtr;
+          *(uint32_t *)(slotPtrAddr + 0x08) = oldBought;
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        __try {
+          *(uint32_t *)(slotPtrAddr - 0x08) = oldEnabled;
+          *(uintptr_t *)slotPtrAddr = oldObjPtr;
+          *(uint32_t *)(slotPtrAddr + 0x08) = oldBought;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+        ok = false;
+      }
+
+      DWORD dummy = 0;
+      VirtualProtect((LPVOID)protectBase, kSlotWriteSpan, oldProtect, &dummy);
+      return ok;
+    }
+
     static uintptr_t s_lastResolvedSpBase = 0;
 
     static void AssignRandomSpecialtiesToEmptySlots() {
@@ -471,27 +544,35 @@ namespace DX11Base {
           }
         }
 
+        bool acceptedDynamicStride = false;
         if (samples.size() >= 2 && samples[0].id != samples[1].id) {
-          // Stride 계산: (Addr2 - Addr1) / (ID2 - ID1)
           int idDiff = (int)samples[1].id - (int)samples[0].id;
           int64_t addrDiff = (int64_t)samples[1].addr - (int64_t)samples[0].addr;
-          detectedStride = (uintptr_t)(std::abs(addrDiff) / std::abs(idDiff));
-          AddLog(u8"[명품] Stride 동적 탐지 성공: 0x%X (기존 0x40)", (uint32_t)detectedStride);
+          uintptr_t candidateStride = (uintptr_t)(std::abs(addrDiff) / std::abs(idDiff));
 
-          // 만약 포인터 체인 결과가 여전히 틀리다면 역산으로 보정
-          if (spBase <= 0x10000 || (Read16(spBase + 0x08, &checkId) && checkId != 1)) {
-            spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * detectedStride);
-            AddLog(u8"[명품] 역산 탐지로 베이스 주소 최종 교정: %p", (void *)spBase);
+          // 명품 객체 크기(0x40) 주변의 현실적인 정렬 범위만 동적 stride로 인정합니다.
+          if (candidateStride >= 0x20 && candidateStride <= 0x100 && (candidateStride % 0x08) == 0) {
+            detectedStride = candidateStride;
+            acceptedDynamicStride = true;
+            AddLog(u8"[명품] Stride 동적 탐지 성공: 0x%X (기존 0x40)", (uint32_t)detectedStride);
+          } else {
+            AddLog(u8"[명품] 비정상 Stride 후보(0x%X) 무시 -> 0x40 사용", (uint32_t)candidateStride);
           }
-        } else if (samples.size() == 1 && (spBase <= 0x10000 || (Read16(spBase + 0x08, &checkId) && checkId != 1))) {
-          // 샘플이 하나라도 있으면 최소한의 역산 시도
-          spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * 0x40);
-          AddLog(u8"[명품] 단일 샘플 역산 탐지 성공: %p", (void *)spBase);
+        }
+
+        uint16_t baseCheck = 0;
+        bool baseLooksValid = spBase > 0x10000 && Read16(spBase + 0x08, &baseCheck) && baseCheck == 1;
+        if (!baseLooksValid && !samples.empty()) {
+          uintptr_t recoveryStride = acceptedDynamicStride ? detectedStride : 0x40;
+          spBase = samples[0].addr - ((uintptr_t)(samples[0].id - 1) * recoveryStride);
+          AddLog(u8"[명품] 샘플 역산으로 베이스 주소 교정: %p (stride 0x%X)", (void *)spBase,
+                 (uint32_t)recoveryStride);
         }
       }
 
-      if (spBase <= 0x10000) {
-        AddLog(u8"[명품자동배분] 명품 데이터 베이스를 찾지 못했습니다. (데이터 로딩 대기 중)");
+      uint16_t baseId = 0;
+      if (spBase <= 0x10000 || !Read16(spBase + 0x08, &baseId) || baseId != 1) {
+        AddLog(u8"[명품자동배분] 명품 데이터 베이스 검증 실패 (데이터 로딩/배열 구조 확인 필요)");
         return;
       }
       s_lastResolvedSpBase = spBase;
@@ -502,7 +583,7 @@ namespace DX11Base {
       constexpr uintptr_t kCityStride = 0x2A0;
       const uintptr_t slotOffsets[3] = {0x248, 0x260, 0x278};
 
-      // [추가] 현재 도시 슬롯에 이미 배치된 명품 주소들을 모두 수집 (중복 배분 방지)
+      // 현재 도시 슬롯에 이미 배치된 명품 주소들을 모두 수집 (중복 배분 방지)
       std::set<uintptr_t> alreadyAssigned;
       for (int c = 0; c < g_CityCount; c++) {
         uintptr_t cityAddr = cityArrayBase + (uintptr_t)c * kCityStride;
@@ -525,18 +606,11 @@ namespace DX11Base {
           continue;
 
         uint16_t readId = 0;
-        if (Read16(objPtr + 0x08, &readId) && readId == i) {
-          uintptr_t ownerPtr = 0;
-          if (ReadPtr(objPtr + 0x30, &ownerPtr)) {
-            ownerPtr = Ptr48(ownerPtr);
-            // 소유주가 없는(0) 아이템 혹은 발견되지 않은 아이템을 배분 대상으로 함
-            if (ownerPtr <= 0x10000 && HasSpecialtyAttributes(objPtr)) {
-              // 추가로 정의 파일에 이름이 있는 경우에만 배분 (예: 124, 130 등 빈 이름 제외)
-              auto it = s_specialityNameById.find((int)readId);
-              if (it != s_specialityNameById.end() && !it->second.empty()) {
-                pool.push_back(objPtr);
-              }
-            }
+        if (Read16(objPtr + 0x08, &readId) && readId == i && IsUnownedSpecialtyObject(objPtr, (uint16_t)i)) {
+          // 추가로 정의 파일에 이름이 있는 경우에만 배분 (예: 124, 130 등 빈 이름 제외)
+          auto it = s_specialityNameById.find((int)readId);
+          if (it != s_specialityNameById.end() && !it->second.empty()) {
+            pool.push_back(objPtr);
           }
         }
       }
@@ -559,17 +633,20 @@ namespace DX11Base {
           uintptr_t slotAddr = cityAddr + slotOffsets[s];
           uintptr_t slotObjPtr = 0;
           uint32_t enabled = 0;
-
-          // 슬롯 포인터가 비어있거나, 활성화되지 않았거나, 품절된 경우 빈 슬롯으로 간주
-          bool hasPtr = ReadPtr(slotAddr, &slotObjPtr) && Ptr48(slotObjPtr) > 0x10000;
-          bool okEnabled = Read32(slotAddr - 0x08, &enabled);
-          bool isEnabled = okEnabled && enabled != 0;
-
           uint32_t bought = 0;
-          bool okBought = Read32(slotAddr + 0x08, &bought);
-          bool isBought = okBought && bought != 0;
 
-          // [개선] 품절된 슬롯(isBought)도 빈자리로 취급하여 새로 채웁니다.
+          // 세 필드를 모두 정상적으로 읽은 슬롯만 수정 후보로 사용합니다.
+          bool okPtr = ReadPtr(slotAddr, &slotObjPtr);
+          bool okEnabled = Read32(slotAddr - 0x08, &enabled);
+          bool okBought = Read32(slotAddr + 0x08, &bought);
+          if (!okPtr || !okEnabled || !okBought)
+            continue;
+
+          bool hasPtr = Ptr48(slotObjPtr) > 0x10000;
+          bool isEnabled = enabled != 0;
+          bool isBought = bought != 0;
+
+          // 품절된 슬롯(isBought)도 빈자리로 취급하여 새로 채웁니다.
           if (!hasPtr || !isEnabled || isBought) {
             emptySlots.push_back({cityAddr, slotAddr, s});
           }
@@ -595,19 +672,14 @@ namespace DX11Base {
         uintptr_t spObj = pool[i];
         EmptySlot &target = emptySlots[i];
 
-        bool ok = true;
-        // 도시 슬롯에 명품 주소 쓰기
-        ok &= WritePtrSafe(target.slotPtrAddr, spObj);
+        // 후보 수집 이후 소유 상태가 바뀌었으면 배분하지 않습니다.
+        if (!IsUnownedSpecialtyObject(spObj))
+          continue;
 
-        // [수정] 명품 객체 자체의 소유주 정보(0x30, 0x38)는 건드리지 않음
-        // 상점 상업 시스템은 소유주가 없는(0) 아이템을 구매 대상으로 처리하므로,
-        // 여기서 도시 주소를 직접 써버리면 구매 버튼 클릭 시 시스템 충돌(프리징)이 발생할 수 있음.
-
-        // 슬롯 활성화 플래그 (Enabled=1, Bought=0)
-        ok &= Write32Safe(target.slotPtrAddr - 0x08, 1);
-        ok &= Write32Safe(target.slotPtrAddr + 0x08, 0);
-
-        if (ok)
+        // 명품 객체 자체의 소유주 정보(0x30, 0x38)는 건드리지 않습니다.
+        // 도시 슬롯의 Enabled / Pointer / Bought 세 필드는 하나의 보호 구간에서 함께 변경하고,
+        // 중간 실패 시 기존 세 값을 모두 복구합니다.
+        if (WriteSpecialtySlotAtomic(target.slotPtrAddr, spObj))
           successCount++;
       }
 
@@ -617,10 +689,13 @@ namespace DX11Base {
   } // namespace
 
   void UpdateAutoSpecialtyDistribution(bool isCouncil) {
-    if (!bAutoFillSpecialties)
-      return;
-
     static bool s_lastCouncil = false;
+
+    // 기능 OFF 중에도 현재 평정 상태를 계속 추적하여, 다시 켰을 때 과거 상태로 오탐하지 않게 합니다.
+    if (!bAutoFillSpecialties) {
+      s_lastCouncil = isCouncil;
+      return;
+    }
 
     // 평정 종료 시점 감지 (Council: true -> false)
     if (!isCouncil && s_lastCouncil) {
@@ -675,7 +750,7 @@ namespace DX11Base {
                 if (Read16(slotPtr + 0x08, &spId) && spId > 0) {
                   uintptr_t baseAddr = slotPtr - ((uintptr_t)(spId - 1) * 0x40);
                   char buf[256];
-                  snprintf(buf, sizeof(buf), u8"[1번 명품 주소: %p] 역산 성공! (사용된 단서 - ID:%d, 객체:%p)", 
+                  snprintf(buf, sizeof(buf), u8"[1번 명품 주소: %p] 역산 성공! (사용된 단서 - ID:%d, 객체:%p)",
                            (void*)baseAddr, spId, (void*)slotPtr);
                   s_testResultString = buf;
                   AddLog(u8"[테스트] %s", buf);
