@@ -1,5 +1,6 @@
 #include "RoadBlock.h"
 #include "../../Cheats.h"
+#include "../../Config.h"
 #include "../../Framework/imgui.h"
 #include "../../NotificationManager.h"
 #include "../../pch.h"
@@ -114,6 +115,7 @@ namespace DX11Base {
       const bool requested = bAIWarImprove;
       SetAIWarImprove(requested);
       NotifyFeatureToggle(u8"AI 전투 개선", bAIWarImprove);
+      SaveConfig();
     }
 
     if (ImGui::IsItemHovered()) {
