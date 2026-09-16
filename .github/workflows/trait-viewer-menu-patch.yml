@@ -1,0 +1,57 @@
+name: Trait viewer menu patch
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'trait-viewer-menu-trigger'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Insert trait viewer checkbox
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('Internal DX11 Base/MenuSections.cpp')
+          text = path.read_text(encoding='utf-8-sig')
+          old = '''      if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
+        DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+      }
+
+      EndSection(); // 무장 정보
+'''
+          new = '''      if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
+        DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+      }
+
+      ImGui::Spacing();
+      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
+        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
+        SaveConfig();
+      }
+
+      EndSection(); // 무장 정보
+'''
+          if new in text:
+              print('Already patched')
+          else:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected target exactly once, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8-sig')
+      - name: Commit patch
+        run: |
+          if git diff --quiet -- 'Internal DX11 Base/MenuSections.cpp'; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'Internal DX11 Base/MenuSections.cpp'
+          git commit -m 'Add trait viewer checkbox to info section'
+          git push origin HEAD:main
