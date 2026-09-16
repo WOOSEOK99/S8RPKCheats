@@ -1,0 +1,42 @@
+name: Trait viewer step5 wire
+
+on:
+  push:
+    paths:
+      - '.github/workflows/trait-viewer-step5-wire.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: github.ref == 'refs/heads/feature/trait-viewer-step5-battle-info'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/trait-viewer-step5-battle-info
+          fetch-depth: 0
+      - name: Register Step 5 files
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('Internal DX11 Base/Internal DX11 Base.vcxproj')
+          s = p.read_text(encoding='utf-8-sig')
+          if 'Cheats\\Officer\\TraitViewerBattleInfo.h' not in s:
+              s = s.replace('    <ClInclude Include="Cheats\\Officer\\TraitViewerOfficerInfo.h" />\n',
+                            '    <ClInclude Include="Cheats\\Officer\\TraitViewerOfficerInfo.h" />\n    <ClInclude Include="Cheats\\Officer\\TraitViewerBattleInfo.h" />\n', 1)
+          if 'Cheats\\Officer\\TraitViewerBattleInfo.cpp' not in s:
+              s = s.replace('    <ClCompile Include="Cheats\\Officer\\TraitViewerOfficerInfo.cpp">\n      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>\n    </ClCompile>\n',
+                            '    <ClCompile Include="Cheats\\Officer\\TraitViewerOfficerInfo.cpp">\n      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>\n    </ClCompile>\n    <ClCompile Include="Cheats\\Officer\\TraitViewerBattleInfo.cpp">\n      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>\n    </ClCompile>\n', 1)
+          p.write_text(s, encoding='utf-8-sig')
+          PY
+      - name: Commit registration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'Internal DX11 Base/Internal DX11 Base.vcxproj'
+          git commit -m 'Step 5: register battle info third trait patch'
+          git push origin HEAD:feature/trait-viewer-step5-battle-info
