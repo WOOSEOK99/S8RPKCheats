@@ -433,8 +433,9 @@ namespace DX11Base {
       if (!ReadPtr(objPtr + 0x30, &ownerPtr) || !Read32(objPtr + 0x38, &ownerType))
         return false;
 
-      // 자동 배분 후보는 소유주 포인터와 타입이 모두 정확히 0인 명품만 허용합니다.
-      if (Ptr48(ownerPtr) != 0 || ownerType != 0)
+      // 기존 게임 동작과 맞추어 실제 소유 여부는 ownerPtr 기준으로 판단합니다.
+      // ownerType은 미소유 상태에서도 잔존값이 남을 수 있으므로 자동 배분 제외 조건으로 사용하지 않습니다.
+      if (Ptr48(ownerPtr) > 0x10000)
         return false;
 
       return HasSpecialtyAttributes(objPtr);
