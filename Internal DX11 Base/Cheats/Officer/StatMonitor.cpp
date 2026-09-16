@@ -12,6 +12,49 @@
 
 namespace DX11Base {
 
+    namespace {
+        struct ScanRegionCache {
+            uintptr_t start = 0;
+            uintptr_t end = 0; // exclusive
+            bool readable = false;
+        };
+
+        // 5102개 슬롯을 순차 스캔할 때 동일 VirtualQuery 영역의 결과를 재사용합니다.
+        // 범위가 캐시 영역을 벗어나는 경우에는 기존 IsValidPtr()로 폴백하여 검증 의미를 유지합니다.
+        static bool IsValidPtrForSequentialScan(uintptr_t addr, SIZE_T size, ScanRegionCache& cache) {
+            if (!addr || size == 0)
+                return false;
+
+            const uintptr_t endAddr = addr + size - 1;
+            if (endAddr < addr)
+                return false;
+
+            if (cache.start != 0 && addr >= cache.start && endAddr < cache.end)
+                return cache.readable;
+
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi)) {
+                cache = {};
+                return false;
+            }
+
+            const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+            const uintptr_t regionEnd = regionStart + mbi.RegionSize;
+            const bool regionEndValid = (regionEnd >= regionStart);
+            const bool readable = mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+
+            cache.start = regionStart;
+            cache.end = regionEndValid ? regionEnd : regionStart;
+            cache.readable = readable && regionEndValid;
+
+            if (cache.readable && endAddr < cache.end)
+                return true;
+
+            // 드물게 슬롯 검사 범위가 VirtualQuery 영역 경계를 넘는 경우 기존 검증을 그대로 사용합니다.
+            return IsValidPtr(addr, size);
+        }
+    } // namespace
+
     void UpdateOfficerStats99To100() {
         if (!bAutoStatUp99) return;
 
@@ -43,6 +86,7 @@ namespace DX11Base {
 
         int upgradeCount = 0;
         int processedCount = 0;
+        ScanRegionCache scanRegion{};
         
         // 통(AA), 무(AB), 지(AC), 정(AD), 매(AE)
         uintptr_t statOffsets[] = { 0xAA, 0xAB, 0xAC, 0xAD, 0xAE };
@@ -50,8 +94,8 @@ namespace DX11Base {
         for (int i = 0; i < 5102; i++) {
             uintptr_t targetBase = arrayBase + (i * 0x3D0);
             
-            // 페이지 단위로 유효성 체크
-            if (!IsValidPtr(targetBase, 0x150)) continue;
+            // 순차 슬롯이 같은 메모리 영역에 있으면 VirtualQuery 결과 재사용
+            if (!IsValidPtrForSequentialScan(targetBase, 0x150, scanRegion)) continue;
             processedCount++;
 
             // 신분(0x10) 필터링: 군사(0x18), 일반(0x28), 두령(0x38), 동지(0x48), 태수(0xE8), 도독(0xD8), 군주(0xC8)만 보정
@@ -154,9 +198,10 @@ namespace DX11Base {
                     AddLog(u8"[자동화] 무장 배열 베이스 주소 확보: %p", (void*)arrayBase);
                     int changeCount = 0;
                     int validObjCount = 0;
+                    ScanRegionCache scanRegion{};
                     for (int i = 0; i < 5102; i++) {
                         uintptr_t pBase = arrayBase + (i * 0x3D0);
-                        if (!IsValidPtr(pBase, 0x3D0))
+                        if (!IsValidPtrForSequentialScan(pBase, 0x3D0, scanRegion))
                             continue;
 
                         RosterStats rs = SafeReadRosterStats(pBase);
