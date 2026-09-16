@@ -369,7 +369,7 @@ namespace DX11Base {
         BeginSection();
         ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 및 진급 관련 ]");
         DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP, p1, gameBase, scale);
-        DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
+        DrawStatRow(u8"공적", &v_Merit, 0x100, 2, p1, gameBase, scale);
         DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
 
         // DrawStatMini(u8"전략P", &v_SP, 0xED, 1, p1, 60, scale);
@@ -977,6 +977,12 @@ namespace DX11Base {
 
       if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
         DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+      }
+
+      ImGui::Spacing();
+      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
+        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
+        SaveConfig();
       }
 
       EndSection(); // 무장 정보
