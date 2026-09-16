@@ -1,0 +1,46 @@
+name: Trait text editor step2 wire
+
+on:
+  push:
+    paths:
+      - '.github/workflows/trait-text-editor-step2-wire.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: github.ref == 'refs/heads/feature/trait-text-editor-step2-name-hook'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/trait-text-editor-step2-name-hook
+          fetch-depth: 0
+      - name: Register Step 2 files
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('Internal DX11 Base/Internal DX11 Base.vcxproj')
+          s = p.read_text(encoding='utf-8-sig')
+          if 'Cheats\\Officer\\TraitTextNameHook.h' not in s:
+              anchor = '    <ClInclude Include="Cheats\\Officer\\TraitTextEditorData.h" />\n'
+              if anchor not in s:
+                  raise SystemExit('header anchor missing')
+              s = s.replace(anchor, anchor + '    <ClInclude Include="Cheats\\Officer\\TraitTextNameHook.h" />\n', 1)
+          if 'Cheats\\Officer\\TraitTextNameHook.cpp' not in s:
+              anchor = '    <ClCompile Include="Cheats\\Officer\\TraitTextEditorData.cpp" />\n'
+              if anchor not in s:
+                  raise SystemExit('cpp anchor missing')
+              s = s.replace(anchor, anchor + '    <ClCompile Include="Cheats\\Officer\\TraitTextNameHook.cpp" />\n', 1)
+          p.write_text(s, encoding='utf-8-sig')
+          PY
+      - name: Commit registration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'Internal DX11 Base/Internal DX11 Base.vcxproj'
+          git commit -m 'Trait text editor Step 2: register name hook'
+          git push origin HEAD:feature/trait-text-editor-step2-name-hook
