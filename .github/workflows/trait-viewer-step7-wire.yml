@@ -22,81 +22,48 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          # MenuSections.cpp
           p = Path('Internal DX11 Base/MenuSections.cpp')
           s = p.read_text(encoding='utf-8-sig')
-          include_anchor = '#include "Cheats/Officer/OfficerDetail.h"\n'
-          include_line = '#include "Cheats/Officer/TraitViewerFeature.h"\n'
-          if include_line not in s:
-              if include_anchor not in s:
-                  raise SystemExit('MenuSections include anchor missing')
-              s = s.replace(include_anchor, include_anchor + include_line, 1)
-          old = '''      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
-        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
-        SaveConfig();
-      }
-'''
-          new = '''      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
-        const bool requested = DX11Base::bTraitViewer;
-        if (!DX11Base::SetTraitViewerFeature(requested))
-          DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
-        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
-        SaveConfig();
-      }
-'''
+          a = '#include "Cheats/Officer/OfficerDetail.h"\n'
+          inc = '#include "Cheats/Officer/TraitViewerFeature.h"\n'
+          if inc not in s:
+              assert a in s, 'MenuSections include anchor missing'
+              s = s.replace(a, a + inc, 1)
+          old = '      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {\n        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);\n        SaveConfig();\n      }\n'
+          new = '      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {\n        const bool requested = DX11Base::bTraitViewer;\n        if (!DX11Base::SetTraitViewerFeature(requested))\n          DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();\n        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);\n        SaveConfig();\n      }\n'
           if old in s:
               s = s.replace(old, new, 1)
-          elif new not in s:
-              raise SystemExit('MenuSections checkbox anchor missing')
+          else:
+              assert new in s, 'MenuSections checkbox anchor missing'
           p.write_text(s, encoding='utf-8-sig')
 
-          # Config.cpp
           p = Path('Internal DX11 Base/Config.cpp')
           s = p.read_text(encoding='utf-8')
-          include_line = '#include "Cheats/Officer/TraitViewerFeature.h"\n\n'
-          anchor = '#undef SaveConfig\n\n'
-          if include_line not in s:
-              if anchor not in s:
-                  raise SystemExit('Config include anchor missing')
-              s = s.replace(anchor, '#undef SaveConfig\n\n' + include_line, 1)
-          old = '''    // 이전 설정 파일에 키가 없으면 MenuState.cpp의 기본값(true)을 그대로 유지합니다.
-    bool savedTraitViewer = true;
-    if (LoadBoolConfigValue("bTraitViewer", savedTraitViewer)) {
-      bTraitViewer = savedTraitViewer;
-      AddLog(u8"[Config] 기재 화면 보이기 설정 로드: %s", savedTraitViewer ? "ON" : "OFF");
-    }
-'''
-          new = '''    // 이전 설정 파일에 키가 없으면 기본값(true)으로 실제 패치까지 적용합니다.
-    bool savedTraitViewer = true;
-    const bool hasTraitViewerSetting = LoadBoolConfigValue("bTraitViewer", savedTraitViewer);
-    bTraitViewer = savedTraitViewer;
-    if (!SetTraitViewerFeature(bTraitViewer))
-      bTraitViewer = IsTraitViewerFeatureApplied();
-    AddLog(u8"[Config] 기재 화면 보이기 설정 로드%s: %s",
-           hasTraitViewerSetting ? "" : "(기본값)", bTraitViewer ? "ON" : "OFF");
-'''
+          inc = '#include "Cheats/Officer/TraitViewerFeature.h"\n\n'
+          a = '#undef SaveConfig\n\n'
+          if inc not in s:
+              assert a in s, 'Config include anchor missing'
+              s = s.replace(a, a + inc, 1)
+          old = '    // 이전 설정 파일에 키가 없으면 MenuState.cpp의 기본값(true)을 그대로 유지합니다.\n    bool savedTraitViewer = true;\n    if (LoadBoolConfigValue("bTraitViewer", savedTraitViewer)) {\n      bTraitViewer = savedTraitViewer;\n      AddLog(u8"[Config] 기재 화면 보이기 설정 로드: %s", savedTraitViewer ? "ON" : "OFF");\n    }\n'
+          new = '    // 이전 설정 파일에 키가 없으면 기본값(true)으로 실제 패치까지 적용합니다.\n    bool savedTraitViewer = true;\n    const bool hasTraitViewerSetting = LoadBoolConfigValue("bTraitViewer", savedTraitViewer);\n    bTraitViewer = savedTraitViewer;\n    if (!SetTraitViewerFeature(bTraitViewer))\n      bTraitViewer = IsTraitViewerFeatureApplied();\n    AddLog(u8"[Config] 기재 화면 보이기 설정 로드%s: %s",\n           hasTraitViewerSetting ? "" : "(기본값)", bTraitViewer ? "ON" : "OFF");\n'
           if old in s:
               s = s.replace(old, new, 1)
-          elif new not in s:
-              raise SystemExit('Config trait viewer block missing')
+          else:
+              assert new in s, 'Config trait viewer block missing'
           p.write_text(s, encoding='utf-8')
 
-          # vcxproj
           p = Path('Internal DX11 Base/Internal DX11 Base.vcxproj')
           s = p.read_text(encoding='utf-8-sig')
-          h_anchor = '    <ClInclude Include="Cheats\\Officer\\TraitViewerBattlePrep.h" />\n'
-          h_line = '    <ClInclude Include="Cheats\\Officer\\TraitViewerFeature.h" />\n'
+          h = '    <ClInclude Include="Cheats\\Officer\\TraitViewerFeature.h" />\n'
+          ha = '    <ClInclude Include="Cheats\\Officer\\TraitViewerBattlePrep.h" />\n'
           if 'Cheats\\Officer\\TraitViewerFeature.h' not in s:
-              if h_anchor not in s:
-                  raise SystemExit('vcxproj header anchor missing')
-              s = s.replace(h_anchor, h_anchor + h_line, 1)
-          cpp_anchor = '    <ClCompile Include="Cheats\\Officer\\TraitViewerBattlePrep.cpp" />\n'
-          cpp_line = '    <ClCompile Include="Cheats\\Officer\\TraitViewerFeature.cpp" />\n'
+              assert ha in s, 'vcxproj header anchor missing'
+              s = s.replace(ha, ha + h, 1)
+          c = '    <ClCompile Include="Cheats\\Officer\\TraitViewerFeature.cpp" />\n'
+          ca = '    <ClCompile Include="Cheats\\Officer\\TraitViewerBattlePrep.cpp" />\n'
           if 'Cheats\\Officer\\TraitViewerFeature.cpp' not in s:
-              if cpp_anchor not in s:
-                  raise SystemExit('vcxproj cpp anchor missing')
-              s = s.replace(cpp_anchor, cpp_anchor + cpp_line, 1)
+              assert ca in s, 'vcxproj cpp anchor missing'
+              s = s.replace(ca, ca + c, 1)
           p.write_text(s, encoding='utf-8-sig')
           PY
       - name: Commit wiring
@@ -104,8 +71,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add 'Internal DX11 Base/MenuSections.cpp' \
-                  'Internal DX11 Base/Config.cpp' \
-                  'Internal DX11 Base/Internal DX11 Base.vcxproj'
+          git add 'Internal DX11 Base/MenuSections.cpp' 'Internal DX11 Base/Config.cpp' 'Internal DX11 Base/Internal DX11 Base.vcxproj'
           git commit -m 'Step 7: wire trait viewer toggle and config'
           git push origin HEAD:feature/trait-viewer-step7-integration-toggle
