@@ -1,0 +1,40 @@
+name: Trait viewer step2 fix minmax
+
+on:
+  push:
+    paths:
+      - '.github/workflows/trait-viewer-step2-fix-minmax.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.ref == 'refs/heads/feature/trait-viewer-step2-roster'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/trait-viewer-step2-roster
+          fetch-depth: 0
+      - name: Fix numeric_limits min/max macro collision
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('Internal DX11 Base/Cheats/Officer/TraitViewerRoster.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = 'if (delta < std::numeric_limits<int32_t>::min() || delta > std::numeric_limits<int32_t>::max())'
+          new = 'if (delta < (std::numeric_limits<int32_t>::min)() || delta > (std::numeric_limits<int32_t>::max)())'
+          if s.count(old) != 1:
+              raise SystemExit(f'expected exactly one match, got {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'Internal DX11 Base/Cheats/Officer/TraitViewerRoster.cpp'
+          git commit -m 'Step 2: fix MSVC min max macro collision'
+          git push origin HEAD:feature/trait-viewer-step2-roster
