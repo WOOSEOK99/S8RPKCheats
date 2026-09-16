@@ -5,7 +5,7 @@
 #undef SaveConfig
 
 namespace DX11Base {
-  static void SaveAIWarImproveConfigValue() {
+  static void UpsertBoolConfigValue(const char *name, bool value) {
     std::ifstream in(GetConfigPath(), std::ios::binary);
     if (!in.is_open())
       return;
@@ -15,8 +15,7 @@ namespace DX11Base {
     in.close();
     std::string data = ss.str();
 
-    // 혹시 이전 실행에서 키가 남아 있으면 중복되지 않도록 기존 줄을 제거합니다.
-    const std::string key = "\"bAIWarImprove\"";
+    const std::string key = std::string("\"") + name + "\"";
     size_t existing = data.find(key);
     if (existing != std::string::npos) {
       size_t lineStart = data.rfind('\n', existing);
@@ -36,8 +35,8 @@ namespace DX11Base {
     size_t insertPos = data.rfind('\n', configEnd);
     insertPos = (insertPos == std::string::npos) ? configEnd : insertPos + 1;
 
-    const std::string line = std::string("  \"bAIWarImprove\": ") +
-                             (bAIWarImprove ? "true" : "false") + ",\n";
+    const std::string line = std::string("  \"") + name + "\": " +
+                             (value ? "true" : "false") + ",\n";
     data.insert(insertPos, line);
 
     std::ofstream out(GetConfigPath(), std::ios::binary | std::ios::trunc);
@@ -46,14 +45,15 @@ namespace DX11Base {
     out << data;
   }
 
-  static bool LoadAIWarImproveConfigValue(bool &value) {
+  static bool LoadBoolConfigValue(const char *name, bool &value) {
     std::ifstream file(GetConfigPath());
     if (!file.is_open())
       return false;
 
+    const std::string key = std::string("\"") + name + "\"";
     std::string line;
     while (std::getline(file, line)) {
-      if (line.find("\"bAIWarImprove\"") != std::string::npos) {
+      if (line.find(key) != std::string::npos) {
         value = (line.find("true") != std::string::npos);
         return true;
       }
@@ -63,18 +63,25 @@ namespace DX11Base {
 
   void SaveConfig() {
     SaveConfigBase();
-    SaveAIWarImproveConfigValue();
+    UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
+    UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
   }
 
   void LoadConfig() {
     LoadConfigBase();
 
-    bool savedValue = false;
-    if (!LoadAIWarImproveConfigValue(savedValue))
-      return;
+    bool savedAIWarImprove = false;
+    if (LoadBoolConfigValue("bAIWarImprove", savedAIWarImprove)) {
+      bAIWarImprove = savedAIWarImprove;
+      SetAIWarImprove(savedAIWarImprove);
+      AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
+    }
 
-    bAIWarImprove = savedValue;
-    SetAIWarImprove(savedValue);
-    AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedValue ? "ON" : "OFF");
+    // 이전 설정 파일에 키가 없으면 MenuState.cpp의 기본값(true)을 그대로 유지합니다.
+    bool savedTraitViewer = true;
+    if (LoadBoolConfigValue("bTraitViewer", savedTraitViewer)) {
+      bTraitViewer = savedTraitViewer;
+      AddLog(u8"[Config] 기재 화면 보이기 설정 로드: %s", savedTraitViewer ? "ON" : "OFF");
+    }
   }
 } // namespace DX11Base
