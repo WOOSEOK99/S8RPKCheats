@@ -3,40 +3,24 @@
  * -----------------
  * 주점 청부(Request) 4개 유지 모니터
  *
- * 목표 동작:
- *   1. 각 도시의 청부 슬롯을 최대치인 4개로 유지합니다.
- *   2. 새로운 청부 갱신 전까지는 현재 달의 기존 청부를 유지합니다.
- *   3. 새 청부 갱신 후 어떤 도시가 4개 미만이면, 다른 도시의 현재 유효한 청부를 가져와 4개로 채웁니다.
+ * 실제 게임 주기에 맞춘 동작:
+ *   1. 청부의 새 갱신 시점은 월 변경이 아니라 평정(0x05) -> 내정(0x07) 전환입니다.
+ *   2. 내정 기간(약 3개월) 동안 완료되어 사라진 청부는 기존 백업으로 복원해 계속 유지합니다.
+ *   3. 평정 -> 내정 전환 후 게임의 새 청부 생성이 끝날 때까지 2.5초 기다립니다.
+ *   4. 새 갱신 결과가 4개 미만이면 다른 도시의 현재 유효한 청부를 우선 가져와 4개까지 채웁니다.
+ *   5. 월이 바뀌어도 백업/주입 상태를 폐기하지 않습니다.
  *
- * 각 도시 객체(크기 0x2A0) 내 청부 슬롯 구조:
- *   도시 베이스 + 0x178 : 청부1 의뢰명 포인터 (8바이트)
- *   도시 베이스 + 0x180 : 청부1 데이터 포인터 (8바이트)
- *   도시 베이스 + 0x1A0 : 청부2 의뢰명 포인터
- *   도시 베이스 + 0x1A8 : 청부2 데이터 포인터
- *   도시 베이스 + 0x1C8 : 청부3 의뢰명 포인터
- *   도시 베이스 + 0x1D0 : 청부3 데이터 포인터
- *   도시 베이스 + 0x1F0 : 청부4 의뢰명 포인터
- *   도시 베이스 + 0x1F8 : 청부4 데이터 포인터
- *
- * 안전성 보강:
- *   - 백업 포인터는 같은 달 안에서만 사용합니다.
- *   - 월이 바뀌면 이전 달 백업/주입 기록을 모두 폐기하고 게임의 새 청부 생성을 2.5초 기다립니다.
- *   - 다른 도시에서 보충할 때는 과거 백업이 아니라 현재 그 원본 슬롯에 실제 존재하는 청부만 사용합니다.
- *   - 다른 도시에서 빌려온 청부는 원본 도시/슬롯을 추적합니다.
- *   - 원본 슬롯이 더 이상 같은 청부를 갖고 있지 않으면, 가능한 경우 다른 현재 유효 청부로 교체합니다.
- *   - 세이브 로드/시나리오 전환 등으로 도시 배열 베이스가 바뀌면 모든 런타임 포인터 백업을 폐기합니다.
- *   - name/data가 모두 존재하고 실제 읽기 가능한 포인터일 때만 백업/복구/공유합니다.
- *   - name/data 두 포인터는 한 번의 보호구간 안에서 함께 쓰고 실패 시 원래 값으로 롤백합니다.
- *
- * 포인터 체인 (명품 창과 동일):
- *   exe + 0x34C8630 -> p1
- *   p1              -> p2
- *   p2              -> cityArrayBase
+ * 안전성:
+ *   - 다른 도시에서 가져올 때 현재 원본 슬롯에 실제로 살아 있는 청부만 사용합니다.
+ *   - 우리가 주입한 슬롯을 다시 원본 후보로 연쇄 사용하지 않습니다.
+ *   - 세이브 로드/시나리오 전환 등으로 도시 배열 베이스가 바뀌면 런타임 포인터 백업을 폐기합니다.
+ *   - name/data 포인터는 모두 읽기 가능한 경우에만 사용합니다.
+ *   - name/data 두 포인터는 한 보호구간에서 함께 쓰고 실패 시 원래 값으로 롤백합니다.
  */
 
 #include "TavernMonitor.h"
+#include "../../Cheats.h"
 #include "../../MenuState.h"
-#include "../System/SystemMonth.h"
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -48,7 +32,9 @@ namespace DX11Base {
         constexpr int kCityCount = 51;
         constexpr int kSlotCount = 4;
         constexpr uintptr_t kCityStride = 0x2A0;
-        constexpr ULONGLONG kMonthStabilizeMs = 2500;
+        constexpr ULONGLONG kPhaseStabilizeMs = 2500;
+        constexpr uint8_t kStateCouncil = 0x05;
+        constexpr uint8_t kStateDomestic = 0x07;
 
         constexpr uintptr_t kNameOff[kSlotCount] = {0x178, 0x1A0, 0x1C8, 0x1F0};
         constexpr uintptr_t kDataOff[kSlotCount] = {0x180, 0x1A8, 0x1D0, 0x1F8};
@@ -73,8 +59,8 @@ namespace DX11Base {
 
         static BackupEntry s_backups[kCityCount][kSlotCount] = {};
         static TavernRequest s_lastInjected[kCityCount][kSlotCount] = {};
-        static uint8_t s_lastMonth = 0xFF;
-        static ULONGLONG s_monthChangeTime = 0;
+        static uint8_t s_lastRelevantGameState = 0;
+        static ULONGLONG s_phaseChangeTime = 0;
         static bool s_waitingStabilize = false;
         static bool s_wasEnabled = false;
         static uintptr_t s_lastCityArrayBase = 0;
@@ -94,8 +80,8 @@ namespace DX11Base {
 
         static void ResetMonitorState() {
             ClearGenerationState();
-            s_lastMonth = 0xFF;
-            s_monthChangeTime = 0;
+            s_lastRelevantGameState = 0;
+            s_phaseChangeTime = 0;
             s_waitingStabilize = false;
             s_lastCityArrayBase = 0;
         }
@@ -159,8 +145,6 @@ namespace DX11Base {
 
             uintptr_t nameAddr = cityAddr + kNameOff[slot];
             uintptr_t dataAddr = cityAddr + kDataOff[slot];
-
-            // 현재 구조에서는 name/data가 연속된 두 포인터입니다.
             if (dataAddr != nameAddr + sizeof(uintptr_t))
                 return false;
             if (!IsReadableAddress(nameAddr, sizeof(uintptr_t) * 2))
@@ -215,6 +199,21 @@ namespace DX11Base {
             return cityBase;
         }
 
+        static uint8_t ReadRelevantGameState() {
+            uintptr_t gameBase = GetGameBase();
+            if (gameBase <= 0x10000 || !IsValidPtr(gameBase + 0xD0, 1))
+                return 0;
+
+            uint8_t state = 0;
+            __try {
+                state = *(uint8_t*)(gameBase + 0xD0);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                return 0;
+            }
+
+            return (state == kStateCouncil || state == kStateDomestic) ? state : 0;
+        }
+
         static bool SourceStillNativeAndLive(uintptr_t cityArrayBase, int sourceCity, int sourceSlot,
                                              const TavernRequest& expected) {
             if (sourceCity < 0 || sourceCity >= kCityCount || sourceSlot < 0 || sourceSlot >= kSlotCount)
@@ -227,7 +226,6 @@ namespace DX11Base {
                 return false;
             }
 
-            // 우리가 채워 넣은 슬롯을 다시 원본 후보로 연쇄 사용하지 않습니다.
             if (HasRequest(s_lastInjected[sourceCity][sourceSlot]) &&
                 SameRequest(current, s_lastInjected[sourceCity][sourceSlot])) {
                 return false;
@@ -276,7 +274,6 @@ namespace DX11Base {
             if (!backup.borrowed)
                 return true;
 
-            // 다른 도시에서 빌려온 청부는 원본 슬롯이 아직 실제 원본으로 살아 있을 때만 재사용합니다.
             return SourceStillNativeAndLive(cityArrayBase, backup.sourceCity, backup.sourceSlot, backup.req);
         }
 
@@ -294,13 +291,28 @@ namespace DX11Base {
             s_backups[city][slot].sourceSlot = source.slot;
         }
 
-        static void MaintainFourRequests(uintptr_t cityArrayBase) {
+        static bool TryFillFromLiveSource(uintptr_t cityArrayBase, const std::vector<LiveSource>& nativeSources,
+                                          int city, int slot, uintptr_t cityAddr,
+                                          TavernRequest current[kSlotCount]) {
+            LiveSource source{};
+            if (!FindLiveCandidate(cityArrayBase, nativeSources, city, slot, current, &source))
+                return false;
+            if (!WriteRequestPair(cityAddr, slot, source.req))
+                return false;
+
+            current[slot] = source.req;
+            s_lastInjected[city][slot] = source.req;
+            SetBorrowedBackup(city, slot, source);
+            return true;
+        }
+
+        static void MaintainFourRequests(uintptr_t cityArrayBase, bool preferCurrentGenerationSources = false) {
             TavernRequest current[kCityCount][kSlotCount] = {};
             bool pairRead[kCityCount][kSlotCount] = {};
             std::vector<LiveSource> nativeSources;
             nativeSources.reserve(kCityCount * kSlotCount);
 
-            // 1차 패스: 현재 게임이 실제로 가진 청부를 수집하고 백업을 최신화합니다.
+            // 1차 패스: 현재 게임이 실제로 가진 청부를 수집하고 같은 슬롯 백업을 최신화합니다.
             for (int c = 0; c < kCityCount; ++c) {
                 uintptr_t cityAddr = cityArrayBase + (uintptr_t)c * kCityStride;
 
@@ -320,20 +332,17 @@ namespace DX11Base {
                                                    SameRequest(req, s_lastInjected[c][s]);
 
                         if (!isOurInjected) {
-                            // 게임이 만든/갱신한 실제 청부. 다른 도시 보충용 원본 후보로 사용할 수 있습니다.
                             SetNativeBackup(c, s, req);
                             s_lastInjected[c][s] = {};
                             nativeSources.push_back({c, s, req});
                         }
                     } else if (bothEmpty) {
-                        // 우리가 넣었던 값도 게임이 지운 상태이므로 주입 표식만 해제합니다.
                         s_lastInjected[c][s] = {};
                     }
-                    // name/data 중 하나만 남은 과도 상태는 이번 틱에 건드리지 않습니다.
                 }
             }
 
-            // 2차 패스: 빈 슬롯 복구 및 다른 도시 청부로 4개 채우기.
+            // 2차 패스: 빈 슬롯을 복원/보충합니다.
             for (int c = 0; c < kCityCount; ++c) {
                 uintptr_t cityAddr = cityArrayBase + (uintptr_t)c * kCityStride;
 
@@ -348,9 +357,13 @@ namespace DX11Base {
                                                SameRequest(slot, s_lastInjected[c][s]);
 
                     if (bothEmpty) {
-                        const BackupEntry backup = s_backups[c][s];
+                        // 평정 -> 내정 직후에는 이번 갱신에서 실제로 생성된 다른 도시 청부를 먼저 사용합니다.
+                        if (preferCurrentGenerationSources &&
+                            TryFillFromLiveSource(cityArrayBase, nativeSources, c, s, cityAddr, current[c])) {
+                            continue;
+                        }
 
-                        // 우선 같은 달의 자기 슬롯 기존 청부를 유지합니다.
+                        const BackupEntry backup = s_backups[c][s];
                         if (CanRestoreBackup(cityArrayBase, backup) &&
                             !DataAlreadyInCity(current[c], s, backup.req.data) &&
                             WriteRequestPair(cityAddr, s, backup.req)) {
@@ -359,31 +372,19 @@ namespace DX11Base {
                             continue;
                         }
 
-                        // 자기 백업을 안전하게 쓸 수 없으면 현재 다른 도시의 실제 청부에서 보충합니다.
-                        LiveSource source{};
-                        if (FindLiveCandidate(cityArrayBase, nativeSources, c, s, current[c], &source) &&
-                            WriteRequestPair(cityAddr, s, source.req)) {
-                            slot = source.req;
-                            s_lastInjected[c][s] = source.req;
-                            SetBorrowedBackup(c, s, source);
-                        }
+                        // 평상시 또는 백업 복원이 불가능한 경우 현재 다른 도시의 실제 청부로 보충합니다.
+                        TryFillFromLiveSource(cityArrayBase, nativeSources, c, s, cityAddr, current[c]);
                         continue;
                     }
 
                     if (!bothPresent || !IsUsableRequest(slot))
                         continue;
 
-                    // 다른 도시에서 빌려온 슬롯은 원본이 사라졌다면 가능한 즉시 다른 현재 유효 청부로 교체합니다.
+                    // 빌려온 청부의 원본이 사라졌다면 다른 현재 유효 청부로 교체합니다.
                     if (isOurInjected && s_backups[c][s].borrowed &&
                         !SourceStillNativeAndLive(cityArrayBase, s_backups[c][s].sourceCity,
                                                   s_backups[c][s].sourceSlot, s_backups[c][s].req)) {
-                        LiveSource replacement{};
-                        if (FindLiveCandidate(cityArrayBase, nativeSources, c, s, current[c], &replacement) &&
-                            WriteRequestPair(cityAddr, s, replacement.req)) {
-                            slot = replacement.req;
-                            s_lastInjected[c][s] = replacement.req;
-                            SetBorrowedBackup(c, s, replacement);
-                        }
+                        TryFillFromLiveSource(cityArrayBase, nativeSources, c, s, cityAddr, current[c]);
                     }
                 }
             }
@@ -408,7 +409,7 @@ namespace DX11Base {
         if (cityArrayBase <= 0x10000)
             return;
 
-        // 세이브 로드/시나리오 전환 등으로 도시 배열이 바뀌면 이전 세션의 포인터는 폐기합니다.
+        // 세이브 로드/시나리오 전환 등으로 도시 배열이 바뀌면 이전 세션 포인터를 폐기합니다.
         if (s_lastCityArrayBase != 0 && cityArrayBase != s_lastCityArrayBase) {
             ResetMonitorState();
             s_lastCityArrayBase = cityArrayBase;
@@ -417,37 +418,52 @@ namespace DX11Base {
         if (s_lastCityArrayBase == 0)
             s_lastCityArrayBase = cityArrayBase;
 
-        uint8_t currentMonth = GetSystemMonthValue();
-        if (currentMonth < 1 || currentMonth > 12)
+        uint8_t gameState = ReadRelevantGameState();
+        if (gameState == 0)
             return;
 
-        // 최초 활성화 시 현재 청부를 기준으로 즉시 4개 유지 로직을 시작합니다.
-        if (s_lastMonth == 0xFF) {
-            s_lastMonth = currentMonth;
-            ClearGenerationState();
-            MaintainFourRequests(cityArrayBase);
+        // 첫 유효 상태는 기준만 잡습니다. 내정 중 처음 켠 경우에는 현재 청부를 즉시 유지 대상으로 잡습니다.
+        if (s_lastRelevantGameState == 0) {
+            s_lastRelevantGameState = gameState;
+            if (gameState == kStateDomestic)
+                MaintainFourRequests(cityArrayBase, true);
             return;
         }
 
-        // 월 변경 = 새 청부 갱신 시작으로 간주합니다.
-        // 이전 달 포인터를 다음 달에 재사용하지 않고, 게임의 삭제/신규 생성이 끝날 때까지 기다립니다.
-        if (currentMonth != s_lastMonth) {
-            s_lastMonth = currentMonth;
-            s_monthChangeTime = GetTickCount64();
-            s_waitingStabilize = true;
-            ClearGenerationState();
-            return;
+        // 중간 상태값은 ReadRelevantGameState()에서 무시하므로 05/07의 실제 방향만 비교됩니다.
+        if (gameState != s_lastRelevantGameState) {
+            const uint8_t prevState = s_lastRelevantGameState;
+            s_lastRelevantGameState = gameState;
+
+            // 평정 -> 내정: 게임이 새 청부를 만들 시간을 준 뒤 새 현재 청부를 우선으로 4개 구성합니다.
+            // 기존 백업은 여기서 지우지 않습니다. 새 청부가 부족/미생성일 때 안전한 fallback으로 남겨둡니다.
+            if (prevState == kStateCouncil && gameState == kStateDomestic) {
+                s_phaseChangeTime = GetTickCount64();
+                s_waitingStabilize = true;
+                return;
+            }
+
+            // 내정 -> 평정: 평정 중에는 청부 메모리를 건드리지 않고 다음 내정 전환을 기다립니다.
+            if (gameState == kStateCouncil) {
+                s_waitingStabilize = false;
+                return;
+            }
         }
+
+        if (gameState != kStateDomestic)
+            return;
 
         if (s_waitingStabilize) {
-            if (GetTickCount64() - s_monthChangeTime < kMonthStabilizeMs)
+            if (GetTickCount64() - s_phaseChangeTime < kPhaseStabilizeMs)
                 return;
 
             s_waitingStabilize = false;
-            ClearGenerationState();
+            MaintainFourRequests(cityArrayBase, true);
+            return;
         }
 
-        MaintainFourRequests(cityArrayBase);
+        // 내정 1~3개월 동안 월 변경과 무관하게 동일 청부 세대를 유지합니다.
+        MaintainFourRequests(cityArrayBase, false);
     }
 
 } // namespace DX11Base
