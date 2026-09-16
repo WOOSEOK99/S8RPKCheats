@@ -106,6 +106,7 @@ namespace DX11Base {
   extern bool bShowOfficerListWin;
   extern bool bShowSpouseListWin;
   extern bool bShowSpecialtyInfoWin;
+  extern bool bTraitViewer; // 기재 화면 보이기 (기본 ON)
   extern bool bShowMemoryNotepadWin;
   extern bool bOfficerCapture;
   extern uintptr_t g_capturedOfficerBase;
