@@ -1,5 +1,7 @@
 #include "RoadBlock.h"
 #include "../../Cheats.h"
+#include "../../Framework/imgui.h"
+#include "../../NotificationManager.h"
 #include "../../pch.h"
 #include "../../showlog.h"
 #include <psapi.h>
@@ -103,12 +105,41 @@ namespace DX11Base {
       AddLog(u8"[AI전투] 전투 개선 비활성화 (원본 74 복구)");
   }
 
+  void DrawAIWarImproveSection(float scale) {
+    ImGui::Spacing();
+    ImGui::BeginGroup();
+    ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 0));
+
+    if (ImGui::Checkbox(u8"AI 전투 개선", &bAIWarImprove)) {
+      const bool requested = bAIWarImprove;
+      SetAIWarImprove(requested);
+      NotifyFeatureToggle(u8"AI 전투 개선", bAIWarImprove);
+    }
+
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                         u8"컴퓨터 세력의 군단이 전쟁 행동에서 빠지는 현상을 완화합니다.");
+      ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                         u8"※ 게임 버전이 달라 원본 바이트가 일치하지 않으면 안전하게 적용하지 않습니다.");
+      ImGui::EndTooltip();
+    }
+
+    ImGui::EndGroup();
+    ImVec2 min = ImGui::GetItemRectMin();
+    ImVec2 max = ImGui::GetItemRectMax();
+    const float pad = 6.0f * scale;
+    ImGui::GetWindowDrawList()->AddRect(ImVec2(min.x - pad, min.y - pad), ImVec2(max.x + pad, max.y + pad),
+                                        IM_COL32(255, 165, 0, 140), 8.0f, 0, 1.2f);
+    ImGui::Spacing();
+  }
+
   // ───────────────────────────────────────────────
   //  도로 차단 - 건녕 ↔ 교지
   //  root + 0x7E30 = 건녕→교지
   //  root + 0x8368 = 교지→건녕
   //
-  //  도로 차단 - 교지 ↔ 회계 (신규)
+  //  도로 차단 - 교지 ↔ 회계
   //  root + 0x8370 = 교지→회계
   //  root + 0x7648 = 회계→교지
   //
