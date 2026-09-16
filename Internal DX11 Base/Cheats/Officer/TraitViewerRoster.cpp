@@ -75,7 +75,7 @@ bool WriteValue(uintptr_t address, T value) {
 bool PutRel32(std::vector<uint8_t> &code, size_t dispOffset, uintptr_t codeAddress, uintptr_t target) {
   const uintptr_t next = codeAddress + dispOffset + 4;
   const int64_t delta = static_cast<int64_t>(target) - static_cast<int64_t>(next);
-  if (delta < std::numeric_limits<int32_t>::min() || delta > std::numeric_limits<int32_t>::max())
+  if (delta < (std::numeric_limits<int32_t>::min)() || delta > (std::numeric_limits<int32_t>::max)())
     return false;
 
   const int32_t rel = static_cast<int32_t>(delta);
