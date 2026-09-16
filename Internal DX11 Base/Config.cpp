@@ -1,4 +1,5 @@
 ﻿#include "Cheats/Officer/TraitViewer.h"
+#include "Cheats/Officer/TraitViewerFeature.h"
 
 #define SaveConfig SaveConfigBase
 #define LoadConfig LoadConfigBase
@@ -84,8 +85,8 @@ namespace DX11Base {
     if (LoadBoolConfigValue("bTraitViewer", savedTraitViewer))
       bTraitViewer = savedTraitViewer;
 
-    if (!SetTraitViewer(bTraitViewer))
-      bTraitViewer = IsTraitViewerApplied();
+    if (!SetTraitViewerFeature(bTraitViewer))
+      bTraitViewer = IsTraitViewerFeatureApplied();
     AddLog(u8"[Config] 기재 화면 보이기 설정 로드: %s", bTraitViewer ? "ON" : "OFF");
   }
 } // namespace DX11Base

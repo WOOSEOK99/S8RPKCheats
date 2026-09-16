@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "TraitViewerBattleMap.h"
 
 #include "../../MemoryUtils.h"
@@ -151,9 +151,9 @@ bool BuildCave(uintptr_t base) {
     0xE9,0x00,0x00,0x00,0x00
   };
   std::vector<uint8_t> init(std::begin(kInitTemplate), std::end(kInitTemplate));
-  if (!PatchRel32(init, 0x23, g_cave + 0x2000, g_cave + 0x108) ||
-      !PatchRel32(init, 0x2E, g_cave + 0x2000, g_cave + 0x000) ||
-      !PatchRel32(init, 0x3A, g_cave + 0x2000, base + 0x1DD6E7C))
+  if (!PatchRel32(init, 0x24, g_cave + 0x2000, g_cave + 0x108) ||
+      !PatchRel32(init, 0x2F, g_cave + 0x2000, g_cave + 0x000) ||
+      !PatchRel32(init, 0x3B, g_cave + 0x2000, base + 0x1DD6E7C))
     return false;
   if (!WriteMemory(g_cave + 0x2000, init.data(), init.size()))
     return false;
