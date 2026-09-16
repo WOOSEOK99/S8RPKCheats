@@ -95,6 +95,7 @@ namespace DX11Base {
   bool bShowOfficerListWin = false;
   bool bShowSpouseListWin = false;
   bool bShowSpecialtyInfoWin = false;
+  bool bTraitViewer = true;          // 기재 화면 보이기: 기본 ON
   bool bShowMemoryNotepadWin = false;
   bool bOfficerCapture = false;
   uintptr_t g_capturedOfficerBase = 0;
