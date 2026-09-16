@@ -92,6 +92,21 @@ namespace DX11Base {
     if (!exeBase || unitCountTotal <= 0 || !unitListBase) return;
     g_BattleUnits.reserve(unitCountTotal);
 
+    // 전투 캐시 생성 중에는 같은 설정 map을 수십~수백 번 조회하므로,
+    // mutex를 매 능력마다 잡지 않고 시작 시 한 번 스냅샷으로 복사합니다.
+    std::unordered_map<int, std::unordered_map<uintptr_t, int>> skillSnapshot;
+    {
+      std::lock_guard<std::mutex> lock(g_skillCountMutex);
+      skillSnapshot = g_customSkillCounts;
+    }
+
+    auto hasSkill = [&](int officerID, uintptr_t skillId) -> bool {
+      auto officerIt = skillSnapshot.find(officerID);
+      if (officerIt == skillSnapshot.end()) return false;
+      auto skillIt = officerIt->second.find(skillId);
+      return skillIt != officerIt->second.end() && skillIt->second > 0;
+    };
+
     for (int i = 0; i < unitCountTotal; i++) {
       if (!IsValidPtr(unitListBase + 0x08 + (uintptr_t)i * 0x10, 8)) continue;
       uintptr_t unitData = *(uintptr_t *)(unitListBase + 0x08 + (uintptr_t)i * 0x10);
@@ -110,15 +125,15 @@ namespace DX11Base {
         int id = (int)(*(unsigned short *)(offPtr + 0x08));
         if (id <= 0) continue;
         if (moff == 0x08) cu.leaderID = id;
-        if (GetTargetSkillCount(id, 0x1000) > 0) cu.hasGunakdae    = true;
-        if (GetTargetSkillCount(id, 0x1001) > 0) cu.hasMussang     = true;
-        if (GetTargetSkillCount(id, 0x1002) > 0) cu.hasFireCavalry = true;
-        if (GetTargetSkillCount(id, 0x1003) > 0) cu.hasArcher      = true;
-        if (GetTargetSkillCount(id, 0x1004) > 0) cu.hasDeunggab    = true;
-        if (GetTargetSkillCount(id, 0x1005) > 0) cu.hasCommander   = true;
-        if (GetTargetSkillCount(id, 0x1006) > 0) cu.hasSneakAttack = true;
-        if (GetTargetSkillCount(id, 0x1007) > 0) cu.hasTactician   = true;
-        if (GetTargetSkillCount(id, 0x1008) > 0) cu.hasMusin       = true;
+        if (hasSkill(id, 0x1000)) cu.hasGunakdae    = true;
+        if (hasSkill(id, 0x1001)) cu.hasMussang     = true;
+        if (hasSkill(id, 0x1002)) cu.hasFireCavalry = true;
+        if (hasSkill(id, 0x1003)) cu.hasArcher      = true;
+        if (hasSkill(id, 0x1004)) cu.hasDeunggab    = true;
+        if (hasSkill(id, 0x1005)) cu.hasCommander   = true;
+        if (hasSkill(id, 0x1006)) cu.hasSneakAttack = true;
+        if (hasSkill(id, 0x1007)) cu.hasTactician   = true;
+        if (hasSkill(id, 0x1008)) cu.hasMusin       = true;
       }
       g_BattleUnits.push_back(cu);
     }
@@ -173,19 +188,20 @@ namespace DX11Base {
     if (!exeBase)
       return;
 
-    // ── 타이머 통합 ────────────────────────────────────────
-    // 상위 BattleMonitor의 s_tickPhase 스케줄러가 이 함수를 ~300ms 주기로
-    // 호출하므로, 여기서는 500ms 주기인 전체 스캔(무신 등)의 진입 여부만
-    // 하나의 타이머로 통제합니다. 버프 주입도 동일 조건(runGlobalScan)을
-    // 재사용하여 중복 타이머 및 600ms 밀림 현상을 제거합니다.
-    // ──────────────────────────────────────────────────────
     static DWORD lastUpdateTick = 0;
+    static DWORD lastBuffVerifyTick = 0;
     DWORD currentTick = GetTickCount();
 
-    // 전체 부대 스캔 + 버프 주입: 500ms 주기
+    // 무신 등 개별 부대 데이터는 기존과 동일하게 500ms마다 유지 확인합니다.
     bool runGlobalScan = (unitCountTotal > 0 && currentTick - lastUpdateTick >= 500);
     if (runGlobalScan)
       lastUpdateTick = currentTick;
+
+    // 공유 마스터 데이터 버프는 부대 전환 시 즉시 적용하고,
+    // 게임이 값을 되돌리는 예외 상황 대비 안전 재검사만 3초마다 수행합니다.
+    bool verifySharedBuffs = (unitCountTotal > 0 && currentTick - lastBuffVerifyTick >= 3000);
+    if (verifySharedBuffs)
+      lastBuffVerifyTick = currentTick;
 
     bool hasGunakdae = false;
     bool hasMussang = false;
@@ -232,8 +248,9 @@ namespace DX11Base {
     if (stateChangedTactician)
       AddLog(u8"[특수기능] 대군사 배치 스캔 방금 됨 -> %s", hasTactician ? u8"활성(ON)" : u8"비활성(OFF)");
 
-    // 상태가 변경되었으면 타이머(runGlobalScan)를 기다리지 않고 즉시 버프를 주입합니다.
-    bool injectBuffs = (runGlobalScan || stateChangedGunakdae || stateChangedMussang || stateChangedFireCavalry ||
+    // 현재 행동 부대의 능력 상태가 바뀌면 즉시 적용합니다.
+    // 상태 변화가 없을 때는 3초 안전검사만 수행하여 90여 개 대상 주소 반복 검사를 줄입니다.
+    bool injectBuffs = (verifySharedBuffs || stateChangedGunakdae || stateChangedMussang || stateChangedFireCavalry ||
                         stateChangedArcher || stateChangedCommander || stateChangedSneakAttack || stateChangedTactician);
 
     // 인젝터 유틸리티 람다 (공용)
@@ -292,14 +309,12 @@ namespace DX11Base {
         applyBuffTargets(p, u8"군악대", hasGunakdae, stateChangedGunakdae, gunakdaeTargets,
                          sizeof(gunakdaeTargets) / sizeof(STarget));
 
-        // --- (B) 무쌍 보명 타겟 (강격 관통 및 맹돌 훨윈드) ---
         STarget mussangTargets[] = {{0x238, 1, 2}, {0x25A, 1, 2}, {0x27C, 1, 2}, {0x3B8, 1, 5}, {0x3C6, 1, 5},
                                     {0x3DA, 1, 5}, {0x3E8, 1, 5}, {0x3FC, 1, 5}, {0x40A, 1, 5}};
         applyBuffTargets(p, u8"무쌍보병", hasMussang, stateChangedMussang, mussangTargets,
                          sizeof(mussangTargets) / sizeof(STarget));
 
-        // --- (C) 불꽃기병 타겟 (연격, 기사 불지르기) ---
-        STarget fireCavalryTargets[] = {// 연격 불지르기
+        STarget fireCavalryTargets[] = {
                                         {0x4BC, 0, 15},
                                         {0x4BE, 0, 1},
                                         {0x4C6, 0, 1},
@@ -312,7 +327,6 @@ namespace DX11Base {
                                         {0x502, 0, 1},
                                         {0x50A, 0, 1},
                                         {0x50B, 0, 100},
-                                        // 기사 불지르기
                                         {0x63C, 0, 15},
                                         {0x63E, 0, 1},
                                         {0x646, 0, 1},
@@ -328,8 +342,7 @@ namespace DX11Base {
         applyBuffTargets(p, u8"불꽃기병", hasFireCavalry, stateChangedFireCavalry, fireCavalryTargets,
                          sizeof(fireCavalryTargets) / sizeof(STarget));
 
-        // --- (D) 원격 궁병 타겟 (사거리 보정) ---
-        STarget archerTargets[] = {// 제사,난사,화시,원사 최대 사거리+1
+        STarget archerTargets[] = {
                                    {0x72C, 2, 3},
                                    {0x74E, 2, 3},
                                    {0x770, 2, 3},
@@ -339,7 +352,6 @@ namespace DX11Base {
                                    {0x82C, 2, 3},
                                    {0x84E, 2, 3},
                                    {0x870, 2, 3},
-                                   // 시람은, 최소 사거리-1, 최대 사거리+1
                                    {0x8AC, 3, 4},
                                    {0x8CE, 3, 4},
                                    {0x8F0, 3, 4},
@@ -352,39 +364,32 @@ namespace DX11Base {
         applyBuffTargets(p, u8"원격궁병", hasArcher, stateChangedArcher, archerTargets,
                          sizeof(archerTargets) / sizeof(STarget));
 
-        // --- (F) 기습부대 타겟 (상태이상기 확률 마개조) ---
-        STarget sneakAttackTargets[] = {// 교란 확률 증가 1,2,3레벨
+        STarget sneakAttackTargets[] = {
                                         {0x347, 10, 50},
                                         {0x369, 10, 70},
                                         {0x38B, 10, 100},
-                                        // 급습 확률 증가 1,2,3레벨
                                         {0x5C7, 10, 50},
                                         {0x5E9, 10, 70},
                                         {0x60B, 10, 100},
-                                        // 요격 확률 증가 1,2,3레벨
                                         {0xDC7, 10, 50},
                                         {0xDE9, 10, 70},
                                         {0xE0B, 10, 100}};
         applyBuffTargets(p, u8"기습부대", hasSneakAttack, stateChangedSneakAttack, sneakAttackTargets,
                          sizeof(sneakAttackTargets) / sizeof(STarget));
 
-        // --- (G) 대군사 타겟 (전법 위력 및 범위 마개조) ---
-        STarget tacticianTargets[] = {// 열화 범위 증가
+        STarget tacticianTargets[] = {
                                       {0xC38, 2, 3},
                                       {0xC46, 2, 3},
                                       {0xC5A, 2, 3},
                                       {0xC68, 2, 3},
                                       {0xC7C, 2, 3},
                                       {0xC8A, 2, 3},
-                                      // 격류 범위 증가
                                       {0xCB8, 5, 6},
                                       {0xCDA, 5, 6},
                                       {0xCFC, 5, 6},
-                                      // 낙석 범위 증가
                                       {0xD38, 4, 8},
                                       {0xD5A, 4, 8},
                                       {0xD7C, 4, 8},
-                                      // 요격 범위 증가
                                       {0xDB8, 1, 5},
                                       {0xDC6, 1, 5},
                                       {0xDDA, 1, 5},
@@ -401,9 +406,7 @@ namespace DX11Base {
         }
       }
 
-      // 2-2. 총사령관 버프 메모리 주입 (캐시된 p2 재사용)
       if (p2) {
-        // --- (E) 총사령관 타겟 ---
         STarget commanderTargets[] = {{0x4B2F0C, 0, 1}, {0x4B2F34, 0, 1}, {0x4B2F5C, 0, 1}, {0x4B2F84, 0, 1},
                                       {0x4B2FAC, 0, 1}, {0x4B2FD4, 0, 1}, {0x4B2FFC, 0, 1}, {0x4B3024, 0, 1}};
         applyBuffTargets(p2, u8"총사령관", hasCommander, stateChangedCommander, commanderTargets,
@@ -416,8 +419,6 @@ namespace DX11Base {
     }
 
     // 3. 등갑군 (턴 시작 시 화염 디버프 추가 피해)
-    //    [캐시 활용] GetTargetSkillCount 대신 cu.hasDeunggab 참조
-    //    activeUnitData는 ScanActiveUnitAbilities 반환값 재사용
     static int s_prevBurnLeader = -1;
     static DWORD lastBurnTick = 0;
 
@@ -426,7 +427,6 @@ namespace DX11Base {
     } else if (g_CacheReady && activeUnitData && currentTick - lastBurnTick >= 300) {
       lastBurnTick = currentTick;
 
-      // 캐시에서 현재 활성 부대 조회
       for (const auto &cu : g_BattleUnits) {
         if (cu.unitAddress != activeUnitData) continue;
 
@@ -436,7 +436,6 @@ namespace DX11Base {
 
         if (!cu.hasDeunggab) break;
 
-        // 화염 상태(Burn) 확인 — activeUnitData 직접 사용
         if (!IsValidPtr(activeUnitData, 0x280)) break;
         bool isBurning = false;
         if (IsValidPtr(activeUnitData + 0x40, 8)) {
@@ -462,8 +461,6 @@ namespace DX11Base {
     }
 
     // 4. 무신 (부대 전용 — 전법 병종 제약 해제)
-    //    [캐시 활용] GetTargetSkillCount 대신 cu.hasMusin 참조
-    //    unitData는 cu.unitAddress 재사용 → unitListBase 순회 불필요
     if (runGlobalScan && g_CacheReady) {
       const uintptr_t SKILL_PTR_OFF  = 0x5D8;
       const uintptr_t SKILL_REC_SIZE = 0x28;

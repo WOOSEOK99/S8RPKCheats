@@ -18,7 +18,10 @@ namespace DX11Base {
     // ───────────────────────────────────────────────
 
     bool IsValidPtr(uintptr_t addr, SIZE_T size) {
-        if (!addr) return false;
+        if (!addr || size == 0) return false;
+
+        const uintptr_t endAddr = addr + size - 1;
+        if (endAddr < addr) return false;
         
         // 시작 주소 검사
         MEMORY_BASIC_INFORMATION mbiStart{};
@@ -27,14 +30,19 @@ namespace DX11Base {
         if (mbiStart.State != MEM_COMMIT || (mbiStart.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
             return false;
 
-        // 범위가 한 페이지를 넘을 경우 끝 주소도 검사
-        if (size > 1) {
-            MEMORY_BASIC_INFORMATION mbiEnd{};
-            if (VirtualQuery((LPCVOID)(addr + size - 1), &mbiEnd, sizeof(mbiEnd)) != sizeof(mbiEnd))
-                return false;
-            if (mbiEnd.State != MEM_COMMIT || (mbiEnd.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
-                return false;
-        }
+        // 대부분의 런타임 검사는 1~8바이트이며 같은 메모리 영역 안에 있습니다.
+        // 시작 주소의 VirtualQuery 결과가 검사 끝 주소까지 포함하면 추가 호출을 생략합니다.
+        uintptr_t regionStart = (uintptr_t)mbiStart.BaseAddress;
+        uintptr_t regionEnd = regionStart + mbiStart.RegionSize - 1;
+        if (regionEnd >= regionStart && endAddr <= regionEnd)
+            return true;
+
+        // 실제로 다른 메모리 영역까지 걸치는 범위만 끝 주소를 추가 검사
+        MEMORY_BASIC_INFORMATION mbiEnd{};
+        if (VirtualQuery((LPCVOID)endAddr, &mbiEnd, sizeof(mbiEnd)) != sizeof(mbiEnd))
+            return false;
+        if (mbiEnd.State != MEM_COMMIT || (mbiEnd.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+            return false;
 
         return true;
     }

@@ -3,10 +3,8 @@
 #include "../../MenuState.h"
 #include "../../showlog.h"
 #include <atomic>
-#include <intrin.h>
 #include <windows.h>
 
-#pragma intrinsic(_ReturnAddress)
 #pragma comment(lib, "winmm.lib")
 
 namespace DX11Base {
@@ -43,46 +41,47 @@ namespace DX11Base {
 
     static std::atomic<float> s_multiplier{1.0f};
 
-    // [MOD BEGIN] 안정화 파라미터
-    static constexpr LONGLONG MAX_DELTA_QPC = 33000;        // 약 33ms
-    static constexpr float MAX_MULTIPLIER = 3.0f;           // 최대 배속
-    static constexpr LONGLONG SAFE_DELTA_THRESHOLD = 50000; // 50ms 이상이면 보호
-    // [MOD END]
+    static constexpr float MAX_MULTIPLIER = 3.0f;
+    static LONGLONG s_maxDeltaQpc = 33000;
+    static LONGLONG s_safeDeltaQpc = 50000;
 
     void ResetBases(float desiredMul) {
-      s_multiplier.store(desiredMul);
+      s_multiplier.store(desiredMul, std::memory_order_relaxed);
     }
 
-    bool __forceinline IsCallerGame(void *caller) {
-      static uintptr_t s_exeBase = 0;
-      static uintptr_t s_exeEnd = 0;
-      if (s_exeBase == 0) {
-        HMODULE hExe = GetModuleHandle(NULL);
-        if (hExe) {
-          PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)hExe;
-          PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((uint8_t *)hExe + dosHeader->e_lfanew);
-          s_exeBase = (uintptr_t)hExe;
-          s_exeEnd = s_exeBase + ntHeaders->OptionalHeader.SizeOfImage;
-        }
+    void ResetClockState() {
+      s_tgtReal.store(0, std::memory_order_relaxed);
+      s_tgtFake.store(0, std::memory_order_relaxed);
+      s_gtcReal.store(0, std::memory_order_relaxed);
+      s_gtcFake.store(0, std::memory_order_relaxed);
+      s_gtc64Real.store(0, std::memory_order_relaxed);
+      s_gtc64Fake.store(0, std::memory_order_relaxed);
+      s_qpcReal.store(0, std::memory_order_relaxed);
+      s_qpcFake.store(0, std::memory_order_relaxed);
+    }
+
+    void InitializeQpcThresholds() {
+      LARGE_INTEGER freq{};
+      if (QueryPerformanceFrequency(&freq) && freq.QuadPart > 0) {
+        // QPC는 PC마다 주파수가 다르므로 실제 주파수 기준으로 33ms/50ms를 계산합니다.
+        s_maxDeltaQpc = (freq.QuadPart * 33) / 1000;
+        s_safeDeltaQpc = (freq.QuadPart * 50) / 1000;
       }
-      uintptr_t addr = (uintptr_t)caller;
-      return (addr >= s_exeBase && addr < s_exeEnd);
     }
   } // namespace
 
   BOOL WINAPI hkQueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
-    void *caller = _ReturnAddress();
     BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
 
-    if (!ret)
+    // 배속이 꺼져 있으면 원본 값을 그대로 반환합니다.
+    // 기존처럼 프로세스 전체에 훅은 걸리지만 OFF 상태의 atomic/fake-time 계산 비용은 제거합니다.
+    if (!ret || !bSpeedHack)
       return ret;
 
     float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack) mul = 1.0f;
     if (mul > MAX_MULTIPLIER)
       mul = MAX_MULTIPLIER;
 
-    // [MOD BEGIN] 안정화된 QPC 처리 핵심
     LONGLONG real = lpPerformanceCount->QuadPart;
     LONGLONG prevReal = s_qpcReal.load(std::memory_order_relaxed);
 
@@ -93,39 +92,32 @@ namespace DX11Base {
     }
 
     LONGLONG delta = real - prevReal;
-
-    // 비정상 값 방지
     if (delta < 0)
       delta = 0;
 
-    // 큰 끊김 보호
-    if (delta > SAFE_DELTA_THRESHOLD)
+    if (delta > s_safeDeltaQpc)
       mul = 1.0f;
 
     delta = (LONGLONG)(delta * mul);
+    if (delta > s_maxDeltaQpc)
+      delta = s_maxDeltaQpc;
 
-    // delta 상한 제한
-    if (delta > MAX_DELTA_QPC)
-      delta = MAX_DELTA_QPC;
-
-    // 🔥 핵심: 누적 방식
     LONGLONG fake = s_qpcFake.load(std::memory_order_relaxed) + delta;
-
-    // 상태 업데이트
     s_qpcReal.store(real, std::memory_order_relaxed);
     s_qpcFake.store(fake, std::memory_order_relaxed);
 
     lpPerformanceCount->QuadPart = fake;
-    // [MOD END]
-
     return ret;
   }
 
   DWORD WINAPI hkGetTickCount() {
     DWORD real = oGetTickCount();
+    if (!bSpeedHack)
+      return real;
+
     float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack) mul = 1.0f;
-    if (mul > MAX_MULTIPLIER) mul = MAX_MULTIPLIER;
+    if (mul > MAX_MULTIPLIER)
+      mul = MAX_MULTIPLIER;
 
     DWORD prevReal = s_gtcReal.load(std::memory_order_relaxed);
     if (prevReal == 0) {
@@ -135,8 +127,10 @@ namespace DX11Base {
     }
 
     DWORD delta = real - prevReal;
-    if ((int)delta < 0) delta = 0;
-    if (delta > 50) mul = 1.0f; // 급격한 스파이크 방지
+    if ((int)delta < 0)
+      delta = 0;
+    if (delta > 50)
+      mul = 1.0f;
     delta = (DWORD)((float)delta * mul);
 
     DWORD fake = s_gtcFake.load(std::memory_order_relaxed) + delta;
@@ -147,9 +141,12 @@ namespace DX11Base {
 
   ULONGLONG WINAPI hkGetTickCount64() {
     ULONGLONG real = oGetTickCount64();
+    if (!bSpeedHack)
+      return real;
+
     float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack) mul = 1.0f;
-    if (mul > MAX_MULTIPLIER) mul = MAX_MULTIPLIER;
+    if (mul > MAX_MULTIPLIER)
+      mul = MAX_MULTIPLIER;
 
     ULONGLONG prevReal = s_gtc64Real.load(std::memory_order_relaxed);
     if (prevReal == 0) {
@@ -159,7 +156,8 @@ namespace DX11Base {
     }
 
     ULONGLONG delta = real - prevReal;
-    if (delta > 50) mul = 1.0f;
+    if (delta > 50)
+      mul = 1.0f;
     delta = (ULONGLONG)((float)delta * mul);
 
     ULONGLONG fake = s_gtc64Fake.load(std::memory_order_relaxed) + delta;
@@ -170,9 +168,12 @@ namespace DX11Base {
 
   DWORD WINAPI hktimeGetTime() {
     DWORD real = otimeGetTime();
+    if (!bSpeedHack)
+      return real;
+
     float mul = s_multiplier.load(std::memory_order_relaxed);
-    if (!bSpeedHack) mul = 1.0f;
-    if (mul > MAX_MULTIPLIER) mul = MAX_MULTIPLIER;
+    if (mul > MAX_MULTIPLIER)
+      mul = MAX_MULTIPLIER;
 
     DWORD prevReal = s_tgtReal.load(std::memory_order_relaxed);
     if (prevReal == 0) {
@@ -182,8 +183,10 @@ namespace DX11Base {
     }
 
     DWORD delta = real - prevReal;
-    if ((int)delta < 0) delta = 0;
-    if (delta > 50) mul = 1.0f;
+    if ((int)delta < 0)
+      delta = 0;
+    if (delta > 50)
+      mul = 1.0f;
     delta = (DWORD)((float)delta * mul);
 
     DWORD fake = s_tgtFake.load(std::memory_order_relaxed) + delta;
@@ -196,35 +199,43 @@ namespace DX11Base {
     if (s_installed)
       return;
 
+    InitializeQpcThresholds();
+
     MH_CreateHookApi(L"kernel32.dll", "QueryPerformanceCounter", &hkQueryPerformanceCounter, (LPVOID *)&oQueryPerformanceCounter);
     MH_CreateHookApi(L"kernel32.dll", "GetTickCount", &hkGetTickCount, (LPVOID *)&oGetTickCount);
     MH_CreateHookApi(L"kernel32.dll", "GetTickCount64", &hkGetTickCount64, (LPVOID *)&oGetTickCount64);
     MH_CreateHookApi(L"winmm.dll", "timeGetTime", &hktimeGetTime, (LPVOID *)&otimeGetTime);
-    
+
     MH_EnableHook(MH_ALL_HOOKS);
 
+    ResetClockState();
     ResetBases(g_speedMultiplier);
-
     s_installed = true;
   }
 
   void SpeedHack_Init() { SpeedHack_Sleep_Install(); }
 
   void SpeedHack_Update(uintptr_t p1) {
+    // 배속을 한 번도 켜지 않았다면 시간 API 훅 자체를 설치하지 않습니다.
     if (!s_installed) {
+      if (!bSpeedHack)
+        return;
       SpeedHack_Init();
     }
 
-    // 전투 중에는 주인공 주소(p1)가 0으로 풀리므로 조건에서 p1 검사를 해제하여 배속 유지
-    float desired = bSpeedHack ? g_speedMultiplier : 1.0f;
+    static bool s_lastEnabled = false;
+    if (s_lastEnabled != bSpeedHack) {
+      // OFF 동안 원본 시간이 진행된 뒤 다시 ON할 때 오래된 fake 기준을 재사용하지 않습니다.
+      ResetClockState();
+      s_lastEnabled = bSpeedHack;
+    }
 
-    // [MOD BEGIN] 배율 제한
+    // 전투 중에는 주인공 주소(p1)가 0으로 풀리므로 p1과 무관하게 배속 상태를 유지합니다.
+    float desired = bSpeedHack ? g_speedMultiplier : 1.0f;
     if (desired > MAX_MULTIPLIER)
       desired = MAX_MULTIPLIER;
-    // [MOD END]
 
-    float current = s_multiplier.load();
-
+    float current = s_multiplier.load(std::memory_order_relaxed);
     if (current != desired) {
       AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx", current, desired);
       ResetBases(desired);
