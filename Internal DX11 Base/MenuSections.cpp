@@ -10,6 +10,7 @@
 #include "Cheats/Civilian/Techzero.h"
 #include "Cheats/Officer/OfficerRosterResolve.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
+#include "Cheats/Officer/TraitViewer.h"
 #include "Cheats/Social/Fastrelationship.h"
 #include "Cheats/Social/Infinitegift.h"
 #include "Cheats/Social/Infinitetalk.h"
@@ -981,6 +982,9 @@ namespace DX11Base {
 
       ImGui::Spacing();
       if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
+        const bool requested = DX11Base::bTraitViewer;
+        if (!DX11Base::SetTraitViewer(requested))
+          DX11Base::bTraitViewer = DX11Base::IsTraitViewerApplied();
         NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
         SaveConfig();
       }

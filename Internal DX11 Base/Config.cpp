@@ -1,3 +1,5 @@
+﻿#include "Cheats/Officer/TraitViewer.h"
+
 #define SaveConfig SaveConfigBase
 #define LoadConfig LoadConfigBase
 #include "ConfigBase.inc"
@@ -77,11 +79,13 @@ namespace DX11Base {
       AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
     }
 
-    // 이전 설정 파일에 키가 없으면 MenuState.cpp의 기본값(true)을 그대로 유지합니다.
+    // 이전 설정 파일에 키가 없으면 MenuState.cpp의 기본값(true)을 사용하고 실제 패치도 적용합니다.
     bool savedTraitViewer = true;
-    if (LoadBoolConfigValue("bTraitViewer", savedTraitViewer)) {
+    if (LoadBoolConfigValue("bTraitViewer", savedTraitViewer))
       bTraitViewer = savedTraitViewer;
-      AddLog(u8"[Config] 기재 화면 보이기 설정 로드: %s", savedTraitViewer ? "ON" : "OFF");
-    }
+
+    if (!SetTraitViewer(bTraitViewer))
+      bTraitViewer = IsTraitViewerApplied();
+    AddLog(u8"[Config] 기재 화면 보이기 설정 로드: %s", bTraitViewer ? "ON" : "OFF");
   }
 } // namespace DX11Base
