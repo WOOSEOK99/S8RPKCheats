@@ -273,10 +273,24 @@ namespace DX11Base {
       }
       logTacticGate = false;
 
-      uintptr_t weatherP = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0xE8, 0x1A8, 0x218, 0xF8, 0x218, 0 });
-      uintptr_t windP    = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0x3C0, 0, 0x50, 0 });
-      uint8_t weather = weatherP ? *(uint8_t*)(weatherP + 0x559) : 0;
-      uint8_t wind    = windP ? *(uint8_t*)(windP + 0xF9) : 0;
+      // 날씨 옵션이 모두 꺼져 있으면 weather/wind 포인터 체인을 해석할 필요가 없습니다.
+      const bool weatherFeatureEnabled = (bWeatherSkillSimple || bWeatherSkillComplex);
+      uintptr_t weatherP = 0;
+      uintptr_t windP = 0;
+      uint8_t weather = 0;
+      uint8_t wind = 0;
+      if (weatherFeatureEnabled) {
+          weatherP = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0xE8, 0x1A8, 0x218, 0xF8, 0x218, 0 });
+          if (weatherP)
+              weather = *(uint8_t*)(weatherP + 0x559);
+
+          // 바람 값은 대폭 변경 모드에서만 사용하므로 간단 모드에서는 두 번째 체인도 생략합니다.
+          if (bWeatherSkillComplex) {
+              windP = SAResolveChainLocal(exeBase + 0x02E99460, { 0x28, 0x250, 0x1D8, 0x3C0, 0, 0x50, 0 });
+              if (windP)
+                  wind = *(uint8_t*)(windP + 0xF9);
+          }
+      }
 
       if (bWeatherSkillComplex && weatherP && windP) {
           uint8_t fireEffTarget = 25;
@@ -357,7 +371,7 @@ namespace DX11Base {
           }
       }
 
-      if ((bWeatherSkillSimple || bWeatherSkillComplex) && weatherP) {
+      if (weatherFeatureEnabled && weatherP) {
           uint8_t fireTarget = 70;
           if (weather == 2 || weather == 3 || weather == 4) fireTarget = 123;
           uint8_t waterTarget = 9;

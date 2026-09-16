@@ -55,14 +55,36 @@ namespace DX11Base {
     return current;
   }
 
+  // unitList/day는 같은 0x02E99460 루트의 앞 2단계를 공유합니다.
+  // 공통 부분을 한 번만 해석하여 500ms 캐시 갱신 시 중복 VirtualQuery를 줄입니다.
+  static void ResolveBattlePointers(uintptr_t exeBase, bool needDefender) {
+    uintptr_t sharedBattleRoot = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250});
+    if (sharedBattleRoot) {
+      s_cachedUnitListBase = ResolveChain(sharedBattleRoot, {0x1D8, 0, 0x180, 0});
+      s_cachedDayBaseAddr = ResolveChain(sharedBattleRoot, {0x218, 0, 0x3D8, 0x478, 0, 0});
+    } else {
+      s_cachedUnitListBase = 0;
+      s_cachedDayBaseAddr = 0;
+    }
+
+    // 수비군 주소는 공성 기능에서만 사용하므로 기능이 꺼져 있으면 8단계 체인을 해석하지 않습니다.
+    if (needDefender) {
+      s_cachedDefenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
+    } else {
+      s_cachedDefenderAddr = 0;
+    }
+  }
+
   // 전투 유닛들의 전법 횟수를 커스텀 설정값으로 덮어씁니다.
-  void UpdateBattleUnitSkills(bool silent = false) {
+  void UpdateBattleUnitSkills(bool silent = false, uintptr_t cachedUnitListBase = 0) {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
     if (!exeBase)
       return;
 
-    // SiegeWarfare.cpp에서 검증된 체인 사용
-    uintptr_t unitListBase = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
+    // MonitorBattleStatus에서 이미 해석한 주소가 있으면 재사용하고, 없을 때만 폴백 해석합니다.
+    uintptr_t unitListBase = cachedUnitListBase;
+    if (!unitListBase)
+      unitListBase = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
 
     if (!unitListBase) {
       if (!silent)
@@ -198,76 +220,53 @@ namespace DX11Base {
     uintptr_t addr1 = DX11Base::g_battleUnitAddr1;
     uintptr_t addr2 = DX11Base::g_battleUnitAddr2;
 
-    // 2. 극심한 CPU 스로틀 방지를 위한 체인 주소 500ms 갱신 지연 캐시
+    // 2. 체인 주소 500ms 갱신 캐시
     DWORD currentTick = GetTickCount();
     static bool s_initialResolveDone = false;
+    const bool needDefender = (bSiegeWarfare || bSiegeWarfare2);
 
     if (currentTick - s_lastResolveTick >= 500 || !s_initialResolveDone) {
       s_lastResolveTick = currentTick;
       s_initialResolveDone = true;
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-      // [루아 대조] unitListBase: 6단계([] 6개), dayAddr: 8단계([] 8개), defender: 8단계([] 8개)
-      s_cachedUnitListBase = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
-      s_cachedDayBaseAddr = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0});
-      s_cachedDefenderAddr = ResolveChain(exeBase + 0x03510578, {0x100, 0x80, 0, 8, 0xC8, 8, 0x18, 8});
+      ResolveBattlePointers(exeBase, needDefender);
     }
 
-    uintptr_t dayAddr = s_cachedDayBaseAddr ? (s_cachedDayBaseAddr + 0x28) : 0;
-    
-    // 날짜 데이터 유효성 검사 (1일~30일 사이인지 확인)
+    uintptr_t unitListBase = s_cachedUnitListBase;
+    uintptr_t dayBaseAddr = s_cachedDayBaseAddr;
+    uintptr_t dayAddr = dayBaseAddr ? (dayBaseAddr + 0x28) : 0;
+
+    // 날짜와 부대 수는 한 틱에서 한 번만 검증/읽고 이후 로직에서 재사용합니다.
+    int currentDay = -1;
     bool isDateValid = false;
-    if (dayAddr > 0x10000 && IsValidPtr(dayAddr, 1)) {
-        uint8_t d = *(uint8_t*)dayAddr;
-        if (d > 0 && d <= 30) isDateValid = true;
+    __try {
+      if (dayAddr > 0x10000 && IsValidPtr(dayAddr, 1)) {
+        currentDay = (int)(*(unsigned char *)dayAddr);
+        isDateValid = (currentDay > 0 && currentDay <= 30);
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      currentDay = -1;
+      isDateValid = false;
     }
 
-    // 부대 리스트 유효성 검사 (부대 수가 1~60 사이인지 확인)
+    int unitCountTotal = 0;
     bool isUnitListValid = false;
-    if (s_cachedUnitListBase > 0x10000 && IsValidPtr(s_cachedUnitListBase - 0x08, 1)) {
-        uint8_t count = *(uint8_t*)(s_cachedUnitListBase - 0x08);
-        if (count > 0 && count <= 60) isUnitListValid = true;
+    __try {
+      if (unitListBase > 0x10000 && IsValidPtr(unitListBase - 0x08, 1)) {
+        unitCountTotal = *(unsigned char *)(unitListBase - 0x08);
+        isUnitListValid = (unitCountTotal > 0 && unitCountTotal <= 60);
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      unitCountTotal = 0;
+      isUnitListValid = false;
     }
-    
+
     // 전투 활성화 조건: 훅 포착 OR 올바른 날짜 유효 OR 올바른 부대 리스트 유효
-    // (날짜 주소가 일시적으로 사라지더라도 부대 리스트가 있으면 전투 유지)
     bool battleActive = (addr1 != 0 || addr2 != 0) || isDateValid || isUnitListValid;
 
     if (battleActive) {
-      // [전투 중] 주소가 포착됨 또는 날짜 주소 확인됨
       s_lastSeenTime = currentTime;
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-
-      uintptr_t unitListBase = s_cachedUnitListBase;
-      uintptr_t dayBaseAddr = s_cachedDayBaseAddr;
-      uintptr_t defenderAddr = s_cachedDefenderAddr;
-
-      int unitCountTotal = 0;
-      __try {
-        if (unitListBase > 0x10000 && IsValidPtr(unitListBase - 0x08, 1)) {
-          unitCountTotal = *(unsigned char *)(unitListBase - 0x08);
-        }
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        unitCountTotal = 0;
-      }
-
-      uint8_t defenderForce = 0;
-      __try {
-        if (defenderAddr > 0x10000 && IsValidPtr(defenderAddr, 1)) {
-          defenderForce = *(uint8_t *)defenderAddr;
-        }
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        defenderForce = 0;
-      }
-
-      int currentDay = -1;
-      __try {
-        if (dayAddr > 0x10000 && IsValidPtr(dayAddr, 1)) {
-          currentDay = (int)(*(unsigned char *)dayAddr);
-        }
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        currentDay = -1;
-      }
-
 
       // 아직 리프레시를 안 했다면 실행
       // [크래시 방지] 포진 화면 오탐 방지: unitCountTotal > 0 AND currentDay가 유효(1~30)해야
@@ -330,15 +329,15 @@ namespace DX11Base {
       if (!s_isCacheBuilt && unitCountTotal > 0) {
           __try {
             DX11Base::InitializeBattleCache((int)unitCountTotal, unitListBase, exeBase);
-            UpdateBattleUnitSkills(false);
+            UpdateBattleUnitSkills(false, unitListBase);
             s_isCacheBuilt = true;
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
 
-      // [추가] 1일차가 시작될 때 한 번 더 적용 (포진 등이 끝나고 실제 전투 시작 시 초기화 대응)
+      // 1일차가 시작될 때 한 번 더 적용 (포진 등이 끝나고 실제 전투 시작 시 초기화 대응)
       if (currentDay == 1 && s_lastAppliedDay != 1) {
         AddLog(u8"[자동화] 1일차 감지 -> 전법 횟수 재주입");
-        UpdateBattleUnitSkills(true); // 로그 중복 방지를 위해 silent 모드
+        UpdateBattleUnitSkills(true, unitListBase);
         s_lastAppliedDay = 1;
       }
       if (currentDay != -1) {
@@ -346,8 +345,6 @@ namespace DX11Base {
       }
 
       // [특수 기능 실시간 체크] 매 틱(100ms) 실행
-      // ScanActiveUnitAbilities = 캐시 O(n) 매칭으로 경량 탐지
-      // VirtualProtect(버프 주입)는 부대 상태 변경 시에만 발생 → 부하 최소화
       if (unitListBase > 0x10000) {
           __try {
             UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
@@ -355,34 +352,38 @@ namespace DX11Base {
       }
 
       // [환경/공성전] 2-phase 분산 (100ms 틱 기준)
-      // unitListBase나 dayBaseAddr가 비정상이면 하위 함수에서 예외 폭발 → 즉시 차단
       static int s_tickPhase = 0;
       if (s_tickPhase == 0) {
-        // [전투 환경 업데이트 - 날씨/일자/지형 등]
         if (unitListBase > 0x10000 && dayBaseAddr > 0x10000) {
             __try {
               DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
       } else if (s_tickPhase == 1) {
-        // [공성전 업데이트]
-        if (unitListBase > 0x10000 && dayBaseAddr > 0x10000) {
+        // 공성 기능이 켜졌을 때만 defender 주소를 읽고 공성 업데이트를 호출합니다.
+        if (needDefender && unitListBase > 0x10000 && dayBaseAddr > 0x10000) {
+            uint8_t defenderForce = 0;
             __try {
-              DX11Base::UpdateSiegeWarfare(dayAddr, unitCountTotal, defenderForce, unitListBase);
-              DX11Base::UpdateSiegeWarfare2(dayAddr, unitCountTotal, defenderForce, unitListBase);
+              uintptr_t defenderAddr = s_cachedDefenderAddr;
+              if (defenderAddr > 0x10000 && IsValidPtr(defenderAddr, 1)) {
+                defenderForce = *(uint8_t *)defenderAddr;
+              }
+
+              if (bSiegeWarfare)
+                DX11Base::UpdateSiegeWarfare(dayAddr, unitCountTotal, defenderForce, unitListBase);
+              if (bSiegeWarfare2)
+                DX11Base::UpdateSiegeWarfare2(dayAddr, unitCountTotal, defenderForce, unitListBase);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
       }
       s_tickPhase = (s_tickPhase + 1) % 2;
 
-      // [추가] 날짜 변경 시 알림 팝업 출력
-      // s_tickPhase 로직 이후에 배치하여 UpdateBattleEnvironment가 적용된 후의 정확한 날짜를 가져옵니다.
+      // 날짜 변경 시 알림 팝업 출력
       if (currentDay > 0 && currentDay != s_lastNotifiedDay) {
-          // [중요] 유동 날짜 기능 사용 시 부대 정보가 아직 로드되지 않았으면 다음 틱으로 미룸 (첫날 29일 오류 방지)
-          if (bDateDynamic && (!unitListBase || !IsValidPtr(unitListBase - 0x08, 1))) {
-              // 부대 데이터가 로드될 때까지 알림을 보류합니다. (return으로 함수를 강제 종료하지 않아 하트비트를 유지합니다)
+          // 유동 날짜 기능 사용 시 부대 정보가 아직 로드되지 않았으면 다음 틱으로 미룸
+          if (bDateDynamic && !isUnitListValid) {
+              // 부대 데이터가 로드될 때까지 알림을 보류합니다.
           } else {
-              // 알림 발송 전 강제로 환경 업데이트 실행 (정확한 기한 계산 보장)
               DX11Base::UpdateBattleEnvironment(exeBase, dayBaseAddr, unitListBase, true);
 
               int finalDay = GetFinalDay();
