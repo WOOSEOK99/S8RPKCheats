@@ -1,6 +1,5 @@
 #include "RoadBlock.h"
 #include "../../Cheats.h"
-#include "../../MenuState.h"
 #include "../../pch.h"
 #include "../../showlog.h"
 #include <psapi.h>
@@ -9,6 +8,8 @@ namespace DX11Base {
 
   void AddLog(const char *fmt, ...);
   bool IsValidPtr(uintptr_t addr, SIZE_T size);
+
+  bool bAIWarImprove = false;
 
   // ───────────────────────────────────────────────
   //  AI 전투 개선
