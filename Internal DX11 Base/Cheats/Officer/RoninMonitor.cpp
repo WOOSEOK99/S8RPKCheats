@@ -91,6 +91,25 @@ namespace DX11Base {
     return false;
   }
 
+  // SEH는 C++ 소멸자가 있는 함수(예: std::vector를 가진 ScanRonins) 안에서 사용할 수 없으므로
+  // 원시 메모리 읽기만 별도 헬퍼로 분리합니다.
+  static bool SafeReadOfficerScanFields(uintptr_t addr, uint16_t* outId, uint8_t* outStatus, uintptr_t* outCityPtr) {
+    if (!outId || !outStatus || !outCityPtr)
+      return false;
+
+    __try {
+      *outId = *(uint16_t *)(addr + 0x08);
+      *outStatus = *(uint8_t *)(addr + 0x10);
+      *outCityPtr = *(uintptr_t *)(addr + 0x20);
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      *outId = 0;
+      *outStatus = 0;
+      *outCityPtr = 0;
+      return false;
+    }
+  }
+
   static uint8_t ReadRelevantGameState() {
     uintptr_t gameBase = GetGameBase();
     if (gameBase <= 0x10000 || !IsValidPtr(gameBase + 0xD0, 1))
@@ -165,14 +184,8 @@ namespace DX11Base {
       uint16_t realID = 0;
       uint8_t status = 0;
       uintptr_t cityPtr = 0;
-
-      __try {
-        realID = *(uint16_t *)(addr + 0x08);
-        status = *(uint8_t *)(addr + 0x10);
-        cityPtr = *(uintptr_t *)(addr + 0x20);
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
+      if (!SafeReadOfficerScanFields(addr, &realID, &status, &cityPtr))
         continue;
-      }
 
       if (realID == 0 || realID > 5102 || seenThisTick[realID])
         continue;
