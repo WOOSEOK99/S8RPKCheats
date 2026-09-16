@@ -207,6 +207,7 @@
     <ClInclude Include="Cheats\Officer\OfficerDetail.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerWidths.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerRoster.h" />
+    <ClInclude Include="Cheats\Officer\TraitViewerBattleMap.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Cheats\Social\Resonancecave.h" />
     <ClInclude Include="Cheats\War\Selfheal.h" />
@@ -295,6 +296,9 @@
     <ClCompile Include="Cheats\Officer\OfficerDetail.cpp" />
     <ClCompile Include="Cheats\Officer\TraitViewerWidths.cpp" />
     <ClCompile Include="Cheats\Officer\TraitViewerRoster.cpp" />
+    <ClCompile Include="Cheats\Officer\TraitViewerBattleMap.cpp">
+      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
