@@ -21,6 +21,7 @@
 #include "MenuState.h"
 #include "pch.h"
 #include "NotificationManager.h"
+#include "debug.h"
 #include "showlog.h"
 
 namespace DX11Base {
@@ -200,6 +201,18 @@ namespace DX11Base {
     static float s_lastSeenTime = 0.0f;
     static int s_lastAppliedDay = -1;
     static int s_lastNotifiedDay = -1;
+
+    // 디버그 모드 전용 전투 상태 변화 스냅샷.
+    // 디버그를 다시 켤 때 현재 상태를 즉시 한 번 출력하도록 OFF 시 초기화합니다.
+    static bool s_debugSnapshotValid = false;
+    static uint8_t s_debugLastGameState = 0xFF;
+    static int s_debugLastDay = -999;
+    static int s_debugLastUnits = -999;
+    static bool s_debugLastBattleActive = false;
+    static bool s_debugLastApplied = false;
+    if (!bShowDebug)
+      s_debugSnapshotValid = false;
+
     float currentTime = (float)GetTickCount64() / 1000.0f;
 
     // 0. 기반 주소 체크 (게임 로딩/메뉴 시 자동 초기화)
@@ -263,6 +276,31 @@ namespace DX11Base {
 
     // 전투 활성화 조건: 훅 포착 OR 올바른 날짜 유효 OR 올바른 부대 리스트 유효
     bool battleActive = (addr1 != 0 || addr2 != 0) || isDateValid || isUnitListValid;
+
+    if (bShowDebug) {
+      uint8_t gameState = 0xFF;
+      __try {
+        if (IsValidPtr(gameBase + 0xD0, 1))
+          gameState = *(uint8_t *)(gameBase + 0xD0);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        gameState = 0xFF;
+      }
+
+      const bool changed = !s_debugSnapshotValid || gameState != s_debugLastGameState || currentDay != s_debugLastDay ||
+                           unitCountTotal != s_debugLastUnits || battleActive != s_debugLastBattleActive ||
+                           s_isWarModsApplied != s_debugLastApplied;
+      if (changed) {
+        AddLog(u8"[BattleDebug] State:0x%02X Day:%d Units:%d Addr1:%p Addr2:%p Active:%d Applied:%d",
+               (unsigned int)gameState, currentDay, unitCountTotal, (void *)addr1, (void *)addr2,
+               battleActive ? 1 : 0, s_isWarModsApplied ? 1 : 0);
+        s_debugLastGameState = gameState;
+        s_debugLastDay = currentDay;
+        s_debugLastUnits = unitCountTotal;
+        s_debugLastBattleActive = battleActive;
+        s_debugLastApplied = s_isWarModsApplied;
+        s_debugSnapshotValid = true;
+      }
+    }
 
     if (battleActive) {
       s_lastSeenTime = currentTime;
@@ -420,62 +458,71 @@ namespace DX11Base {
 
   void MonitorTechStatus() {
     static uint8_t s_lastAppliedMonth = 0xFF;
-    static bool s_wasCouncil = false;
+    static uint8_t s_lastRelevantGameState = 0xFF;
 
     uint8_t sm = GetSystemMonthValue();
-    uint8_t rm = GetCurrentMonth();
 
-    // [2026-04-12] 신규 포착 정보: gameBase+0xD0 (00: 시작메뉴, 05:평정, 07:내정)
+    // gameBase+0xD0에서 평정(0x05) / 내정(0x07)만 라이프사이클 상태로 사용합니다.
+    // 0x00/0x02/0x04/0x06/0x08 등은 화면·전투 전환 중에도 나타나므로 마지막 유효 상태를 유지합니다.
     uintptr_t gameBase = DX11Base::GetGameBase();
-    uint8_t gameState = 0;
-    bool isCouncil = false;
+    uint8_t gameState = 0xFF;
+    bool hasGameState = false;
     if (gameBase && IsValidPtr(gameBase + 0xD0, 1)) {
       gameState = *(uint8_t *)(gameBase + 0xD0);
-      isCouncil = (gameState == 0x05);
+      hasGameState = true;
     }
 
-    if (isCouncil) {
+    const bool isRelevantState = hasGameState && (gameState == 0x05 || gameState == 0x07);
+    const uint8_t previousRelevantState = s_lastRelevantGameState;
+    if (isRelevantState)
+      s_lastRelevantGameState = gameState;
+
+    const bool hasRelevantState = (s_lastRelevantGameState == 0x05 || s_lastRelevantGameState == 0x07);
+    const bool isCouncil = (s_lastRelevantGameState == 0x05);
+    const bool councilToDomestic = isRelevantState && gameState == 0x07 && previousRelevantState == 0x05;
+
+    // 평정 중 월 1회 실행. 중간 상태에서는 s_lastAppliedMonth를 리셋하지 않아
+    // 전투 종료 후 0x04 -> 0x05 같은 복귀를 새 평정으로 오인하지 않습니다.
+    if (isRelevantState && gameState == 0x05) {
       if (s_lastAppliedMonth != sm) {
-        if (bDefBuilding) {
-          SetDefBuildingBoost(false);
-          SetDefBuildingBoost(true);
-        }
         UpdateOfficerStats99To100();
         DX11Base::RunAutoCityExchange();
         s_lastAppliedMonth = sm;
       }
-    } else {
-      if (s_lastAppliedMonth != 0xFF) {
-        s_lastAppliedMonth = 0xFF;
-      }
+    } else if (isRelevantState && gameState == 0x07) {
+      s_lastAppliedMonth = 0xFF;
     }
 
-    // 평정 -> 도시 생활(내정 등) 전환 시점 감지
-    if (!isCouncil && s_wasCouncil) {
-      if (bCancelCastleEvent) {
-        uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
-        if (captAddr != 0) {
-          uintptr_t addr80 = captAddr - 0x10;
-          uintptr_t addr90 = captAddr;
-          uintptr_t addrA0 = captAddr + 0x10;
+    // 방어건물강화는 여기서 미리 적용하지 않습니다.
+    // 실제 전투가 Day 1~30 + Units 1~60으로 확정될 때 MonitorBattleStatus()에서 리프레시합니다.
 
-          // 포인터 유효성 검사
-          if (DX11Base::IsValidPtr(addr80, 2) && DX11Base::IsValidPtr(addr90, 1) && DX11Base::IsValidPtr(addrA0, 2)) {
-            if (*(uint8_t *)(addr80) == 0x90 && *(uint8_t *)(addr80 + 1) == 0xE0 && *(uint8_t *)(addr90) == 0xE0 &&
-                *(uint8_t *)(addrA0) == 0x28 && *(uint8_t *)(addrA0 + 1) == 0xCB) {
+    // 실제 평정(0x05) -> 내정(0x07) 전환일 때만 평정 종료 처리합니다.
+    if (councilToDomestic && bCancelCastleEvent) {
+      uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
+      if (captAddr != 0) {
+        uintptr_t addr80 = captAddr - 0x10;
+        uintptr_t addr90 = captAddr;
+        uintptr_t addrA0 = captAddr + 0x10;
 
-              // 조건 일치시 전기 취소와 동일하게 완전히 초기화
-              DX11Base::CancelTengi();
-              AddLog(u8"[자동화] 평정 종료: 중지 성성 전기를 취소했습니다.");
-            }
+        // 포인터 유효성 검사
+        if (DX11Base::IsValidPtr(addr80, 2) && DX11Base::IsValidPtr(addr90, 1) && DX11Base::IsValidPtr(addrA0, 2)) {
+          if (*(uint8_t *)(addr80) == 0x90 && *(uint8_t *)(addr80 + 1) == 0xE0 && *(uint8_t *)(addr90) == 0xE0 &&
+              *(uint8_t *)(addrA0) == 0x28 && *(uint8_t *)(addrA0 + 1) == 0xCB) {
+
+            // 조건 일치시 전기 취소와 동일하게 완전히 초기화
+            DX11Base::CancelTengi();
+            AddLog(u8"[자동화] 평정 종료: 중지 성성 전기를 취소했습니다.");
           }
         }
       }
     }
-    s_wasCouncil = isCouncil;
 
-    UpdateBattleMapAuto(isCouncil);
-    UpdateAutoSpecialtyDistribution(isCouncil);
+    if (hasRelevantState) {
+      // 전투/화면 전환 중간값에서는 마지막 0x05/0x07 상태를 그대로 전달합니다.
+      // 따라서 0x04 같은 순간 상태로 전투맵을 복구했다가 다시 셔플하는 오탐이 발생하지 않습니다.
+      UpdateBattleMapAuto(isCouncil);
+      UpdateAutoSpecialtyDistribution(isCouncil);
+    }
   }
 
   // 전투 상태 반환 함수 추가 (외부 모듈에서 현재 전투중인지 판별할 때 사용)
