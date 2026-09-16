@@ -513,7 +513,12 @@ namespace DX11Base {
     s_wasCouncil = isCouncil;
 
     UpdateBattleMapAuto(isCouncil);
-    UpdateAutoSpecialtyDistribution(isCouncil);
+
+    // 명품 자동배분은 실제 평정(0x05) / 내정(0x07) 상태만 전달합니다.
+    // 전투·화면 전환 중의 0x00/0x02/0x06/0x08 및 일시적인 상태 읽기 실패는 무시하여
+    // 평정 복귀/전투 종료를 평정 종료로 오인하지 않게 합니다.
+    if (gameState == 0x05 || gameState == 0x07)
+      UpdateAutoSpecialtyDistribution(isCouncil);
   }
 
   // 전투 상태 반환 함수 추가 (외부 모듈에서 현재 전투중인지 판별할 때 사용)
