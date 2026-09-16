@@ -500,6 +500,18 @@ namespace DX11Base {
       }
       ImGui::PopStyleColor();
 
+      ImGui::NewLine();
+      ImGui::TextDisabled(u8"주소 바로가기:");
+      ImGui::SameLine();
+      if (ImGui::Button("EXE Base"))
+        hexEditorAddr = (uintptr_t)GetModuleHandle(NULL);
+      ImGui::SameLine();
+      if (ImGui::Button("AI +144D24C")) {
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        if (exeBase)
+          hexEditorAddr = exeBase + 0x144D24C;
+      }
+
       ImGui::SameLine();
       if (ImGui::Button(u8"클립보드 복사", ImVec2(120, 25))) {
         std::string clipboard;
