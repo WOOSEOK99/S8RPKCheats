@@ -13,6 +13,7 @@
 
 namespace DX11Base {
   extern bool bShowDebug;
+  void FlushLoveDebugCaptureLog();
 
   std::vector<std::string> g_loveLogs;
   std::mutex g_logMutex;
@@ -69,6 +70,10 @@ namespace DX11Base {
   static char logFilter[256] = "";
 
   void showLoveLogs() {
+    // 즉시 경애 Cave에서 캡처된 원본 관계값이 있으면 기존 디버그 로그에 1회 출력한다.
+    // AddLog 내부에서 g_logMutex를 사용하므로 로그 목록 lock을 잡기 전에 호출해야 한다.
+    FlushLoveDebugCaptureLog();
+
     // 1. 현재 배율 가져오기
     float scale = ImGui::GetIO().FontGlobalScale;
 
