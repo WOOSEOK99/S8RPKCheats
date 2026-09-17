@@ -4,6 +4,7 @@
 #include <mutex>
 #include <iomanip>
 #include <cstring>
+#include <unordered_map>
 #include "OfficerDetail.h"
 #include "../../Cheats.h"
 #include "../../MenuState.h"
@@ -326,46 +327,111 @@ namespace DX11Base {
 
   // --- [기재 관련 함수군] ---
 
+  static std::unordered_map<uint16_t, uintptr_t> s_traitObjectById;
+
+  static bool TryReadPtr(uintptr_t address, uintptr_t &out) {
+    __try {
+      out = *reinterpret_cast<uintptr_t *>(address);
+      return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      out = 0;
+      return false;
+    }
+  }
+
+  static bool TryReadU16(uintptr_t address, uint16_t &out) {
+    __try {
+      out = *reinterpret_cast<uint16_t *>(address);
+      return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      out = 0;
+      return false;
+    }
+  }
+
+  static bool IsReadablePage(DWORD protect) {
+    if (protect & PAGE_GUARD)
+      return false;
+    const DWORD p = protect & 0xFF;
+    return p == PAGE_READONLY || p == PAGE_READWRITE || p == PAGE_WRITECOPY ||
+           p == PAGE_EXECUTE_READ || p == PAGE_EXECUTE_READWRITE || p == PAGE_EXECUTE_WRITECOPY;
+  }
+
+  static bool ValidateTraitObject(uintptr_t pTrait, uint16_t expectedId = 0, uintptr_t expectedVtable = 0) {
+    if (pTrait < 0x10000)
+      return false;
+
+    uintptr_t vtable = 0;
+    uint16_t id = 0;
+    if (!TryReadPtr(pTrait, vtable) || vtable < 0x10000 || !TryReadU16(pTrait + 0x08, id))
+      return false;
+    if (expectedId != 0 && id != expectedId)
+      return false;
+    if (expectedVtable != 0 && vtable != expectedVtable)
+      return false;
+    return id >= 1 && id <= 202;
+  }
+
+  static void CacheTraitObject(uintptr_t pTrait) {
+    uint16_t id = 0;
+    if (!ValidateTraitObject(pTrait) || !TryReadU16(pTrait + 0x08, id))
+      return;
+    s_traitObjectById[id] = pTrait;
+  }
+
   uint16_t GetTraitID(uintptr_t officerBase, int slotIndex) {
     if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3)
       return 0;
 
-    __try {
-      uintptr_t pTrait = *(uintptr_t *)(officerBase + 0x88 + slotIndex * 0x08);
-      if (pTrait < 0x10000)
-        return 0;
-      return *(uint16_t *)(pTrait + 0x08);
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
+    uintptr_t pTrait = 0;
+    uint16_t id = 0;
+    if (!TryReadPtr(officerBase + 0x88 + slotIndex * 0x08, pTrait) ||
+        !TryReadU16(pTrait + 0x08, id))
       return 0;
+
+    CacheTraitObject(pTrait);
+    return id;
+  }
+
+  static void CacheTraitObjectsFromOfficerArray() {
+    uintptr_t gameBase = GetGameBase();
+    if (!gameBase)
+      return;
+
+    uintptr_t officerArr = 0;
+    if (!TryReadPtr(gameBase + 0x3B8, officerArr) || officerArr < 0x10000)
+      return;
+
+    // 잘못된 한 슬롯 때문에 전체 검색이 중단되지 않도록 슬롯 단위로 안전하게 읽습니다.
+    for (int officerIndex = 0; officerIndex < 5102; ++officerIndex) {
+      const uintptr_t officerBase = officerArr + static_cast<uintptr_t>(officerIndex) * 0x3D0;
+      for (int slot = 0; slot < 3; ++slot) {
+        uintptr_t pTrait = 0;
+        if (!TryReadPtr(officerBase + 0x88 + slot * 0x08, pTrait))
+          continue;
+        CacheTraitObject(pTrait);
+      }
     }
   }
 
-  static uintptr_t FindTraitDataPointerByID(uint16_t traitID) {
-    if (traitID == 0)
+  static uintptr_t ScanReadableRegionForTrait(uintptr_t begin, size_t size,
+                                               uintptr_t vtable, uint16_t traitID) {
+    if (begin < 0x10000 || size < 0x10 || vtable < 0x10000)
       return 0;
 
-    uintptr_t gameBase = GetGameBase();
-    if (!gameBase)
+    const uintptr_t end = begin + size;
+    if (end <= begin)
       return 0;
 
+    uintptr_t p = (begin + 7) & ~static_cast<uintptr_t>(7);
     __try {
-      uintptr_t officerArr = *(uintptr_t *)(gameBase + 0x3B8);
-      if (officerArr < 0x10000)
-        return 0;
-
-      // 현재 프로젝트의 모든 무장 배열 크기와 동일하게 5102명을 검사합니다.
-      // 각 무장의 3개 기재 슬롯에서 실제 기재 데이터 포인터를 수집하므로
-      // ID만 덮어써 효과 데이터가 어긋나는 문제를 피합니다.
-      for (int officerIndex = 0; officerIndex < 5102; ++officerIndex) {
-        const uintptr_t officerBase = officerArr + static_cast<uintptr_t>(officerIndex) * 0x3D0;
-        for (int slot = 0; slot < 3; ++slot) {
-          const uintptr_t pTrait = *(uintptr_t *)(officerBase + 0x88 + slot * 0x08);
-          if (pTrait < 0x10000)
-            continue;
-          if (*(uint16_t *)(pTrait + 0x08) == traitID)
-            return pTrait;
-        }
+      for (; p + 0x0A <= end; p += 8) {
+        if (*reinterpret_cast<uintptr_t *>(p) != vtable)
+          continue;
+        if (*reinterpret_cast<uint16_t *>(p + 0x08) == traitID)
+          return p;
       }
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -374,30 +440,113 @@ namespace DX11Base {
     return 0;
   }
 
+  static uintptr_t FindTraitObjectInProcessMemory(uint16_t traitID, uintptr_t vtable) {
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+
+    uintptr_t address = reinterpret_cast<uintptr_t>(si.lpMinimumApplicationAddress);
+    const uintptr_t maxAddress = reinterpret_cast<uintptr_t>(si.lpMaximumApplicationAddress);
+
+    while (address < maxAddress) {
+      MEMORY_BASIC_INFORMATION mbi{};
+      if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0)
+        break;
+
+      const uintptr_t regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+      if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect)) {
+        const uintptr_t found = ScanReadableRegionForTrait(regionBase, mbi.RegionSize, vtable, traitID);
+        if (found)
+          return found;
+      }
+
+      const uintptr_t next = regionBase + mbi.RegionSize;
+      if (next <= address)
+        break;
+      address = next;
+    }
+    return 0;
+  }
+
+  static uintptr_t FindTraitDataPointerByID(uint16_t traitID, uintptr_t sourceOfficer) {
+    if (traitID == 0)
+      return 0;
+
+    auto cached = s_traitObjectById.find(traitID);
+    if (cached != s_traitObjectById.end() && ValidateTraitObject(cached->second, traitID))
+      return cached->second;
+
+    // 먼저 현재 무장과 전체 무장 슬롯에서 이미 사용 중인 기재 객체를 수집합니다.
+    uintptr_t sourceVtable = 0;
+    if (sourceOfficer > 0x10000) {
+      for (int slot = 0; slot < 3; ++slot) {
+        uintptr_t pTrait = 0;
+        if (!TryReadPtr(sourceOfficer + 0x88 + slot * 0x08, pTrait))
+          continue;
+        CacheTraitObject(pTrait);
+        if (!sourceVtable && ValidateTraitObject(pTrait))
+          TryReadPtr(pTrait, sourceVtable);
+      }
+    }
+
+    CacheTraitObjectsFromOfficerArray();
+
+    cached = s_traitObjectById.find(traitID);
+    if (cached != s_traitObjectById.end() && ValidateTraitObject(cached->second, traitID)) {
+      AddLog(u8"[기재변경] ID:%d 기재 객체를 무장 슬롯 캐시에서 확인", traitID);
+      return cached->second;
+    }
+
+    // 현재 아무 무장도 사용하지 않는 사용자 기재도 원본 편집기에서는 선택할 수 있습니다.
+    // 같은 기재 클래스(vtable)의 객체를 프로세스 메모리에서 찾아 원본 게임 객체를 재사용합니다.
+    if (!sourceVtable) {
+      for (const auto &entry : s_traitObjectById) {
+        if (ValidateTraitObject(entry.second)) {
+          TryReadPtr(entry.second, sourceVtable);
+          if (sourceVtable)
+            break;
+        }
+      }
+    }
+
+    if (sourceVtable) {
+      const uintptr_t found = FindTraitObjectInProcessMemory(traitID, sourceVtable);
+      if (found && ValidateTraitObject(found, traitID, sourceVtable)) {
+        s_traitObjectById[traitID] = found;
+        AddLog(u8"[기재변경] ID:%d 기재 객체를 게임 메모리 카탈로그에서 확인", traitID);
+        return found;
+      }
+    }
+
+    return 0;
+  }
+
   bool SetTraitID(uintptr_t officerBase, int slotIndex, uint16_t traitID) {
     if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 || traitID == 0)
       return false;
 
-    const uintptr_t targetTrait = FindTraitDataPointerByID(traitID);
+    const uintptr_t targetTrait = FindTraitDataPointerByID(traitID, officerBase);
     if (targetTrait < 0x10000) {
-      AddLog(u8"[기재변경] ID:%d 기재 데이터 포인터를 찾지 못했습니다.", traitID);
+      AddLog(u8"[기재변경] ID:%d 기재 객체를 찾지 못했습니다.", traitID);
       return false;
     }
 
-    __try {
-      uintptr_t *slotPtr = reinterpret_cast<uintptr_t *>(officerBase + 0x88 + slotIndex * 0x08);
-      DWORD old = 0, tmp = 0;
-      if (!VirtualProtect(slotPtr, sizeof(uintptr_t), PAGE_READWRITE, &old))
-        return false;
+    uintptr_t *slotPtr = reinterpret_cast<uintptr_t *>(officerBase + 0x88 + slotIndex * 0x08);
+    DWORD old = 0, tmp = 0;
+    if (!VirtualProtect(slotPtr, sizeof(uintptr_t), PAGE_READWRITE, &old))
+      return false;
 
-      *slotPtr = targetTrait;
-      VirtualProtect(slotPtr, sizeof(uintptr_t), old, &tmp);
-      AddLog(u8"[기재변경] 슬롯%d → ID:%d 포인터 교체 완료", slotIndex + 1, traitID);
-      return true;
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
+    *slotPtr = targetTrait;
+    VirtualProtect(slotPtr, sizeof(uintptr_t), old, &tmp);
+
+    const uint16_t verifyId = GetTraitID(officerBase, slotIndex);
+    if (verifyId != traitID) {
+      AddLog(u8"[기재변경] 슬롯%d 쓰기 검증 실패: 요청 ID:%d / 읽힘 ID:%d",
+             slotIndex + 1, traitID, verifyId);
       return false;
     }
+
+    AddLog(u8"[기재변경] 슬롯%d → ID:%d 변경 및 검증 완료", slotIndex + 1, traitID);
+    return true;
   }
 
   uintptr_t GetSelectedOfficerBase() {
