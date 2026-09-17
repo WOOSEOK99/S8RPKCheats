@@ -853,7 +853,22 @@ namespace DX11Base {
       ImGui::Spacing();
     }
 
-    if (s_cachedTalentBase != cacheKey || s_forceTalentCacheRefresh) {
+    // 게임 원본 편집기에서 기재를 바꾼 경우에도 상세 표시 캐시를 자동 무효화합니다.
+    // 주인공/선택 무장은 같은 officerBase를 다시 열 수 있으므로 base 주소만 비교하면
+    // 이전 기재 설명이 남습니다. 현재 슬롯 ID 3개를 실제 메모리에서 다시 읽어 비교합니다.
+    bool liveTraitChanged = false;
+    if (cacheKey > 0x10000 && s_cachedTalentBase == cacheKey && !s_forceTalentCacheRefresh) {
+      for (int i = 0; i < 3; ++i) {
+        const uint16_t liveId = GetTraitID(cacheKey, i);
+        const uint16_t cachedId = s_cachedTalentValid[i] ? s_cachedTalentInfo[i].id : 0;
+        if (liveId != cachedId) {
+          liveTraitChanged = true;
+          break;
+        }
+      }
+    }
+
+    if (s_cachedTalentBase != cacheKey || s_forceTalentCacheRefresh || liveTraitChanged) {
       s_cachedTalentBase = cacheKey;
       for (int i = 0; i < 3; i++) {
         TalentInfo info;
