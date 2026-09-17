@@ -15,7 +15,7 @@ namespace DX11Base {
   void RenderResearchRow(uintptr_t pBase, const char *catLabel, const char *items[], uintptr_t offsets[], int *vars[], int count, float scale, int expOffset = -1);
   
   uint16_t GetTraitID(uintptr_t base, int slot);
-  void SetTraitID(uintptr_t base, int slot, uint16_t traitID);
+  bool SetTraitID(uintptr_t base, int slot, uint16_t traitID);
   uintptr_t GetSelectedOfficerBase();
 
   void RenderBasicTab(uintptr_t pBase, float scale, bool isCaptured);
