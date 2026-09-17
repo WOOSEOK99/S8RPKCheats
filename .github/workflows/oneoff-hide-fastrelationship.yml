@@ -1,0 +1,55 @@
+name: One-off social UI cleanup
+
+on:
+  push:
+    branches:
+      - fix/social-cheat-coexistence
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/social-cheat-coexistence
+          fetch-depth: 0
+
+      - name: Hide unavailable fast relationship toggle
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('Internal DX11 Base/MenuSections.cpp')
+          text = path.read_text(encoding='utf-8-sig')
+          old = '''      ImGui::SameLine(160.0f * scale);
+
+      if (ImGui::Checkbox(u8"경애 시 무조건 공명", &bFastRelationship)) {
+        DX11Base::SetFastRelationship(bFastRelationship);
+        NotifyFeatureToggle(u8"경애 시 무조건 공명", bFastRelationship);
+        SaveConfig();
+      }
+
+'''
+          if old in text:
+              text = text.replace(old, '', 1)
+              path.write_text(text, encoding='utf-8-sig')
+              print('Hidden unavailable fast relationship checkbox.')
+          else:
+              print('Checkbox block already absent; nothing to change.')
+
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          if git diff --quiet -- 'Internal DX11 Base/MenuSections.cpp'; then
+            echo 'No MenuSections.cpp change needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 'Internal DX11 Base/MenuSections.cpp'
+          git commit -m 'Cleanup: hide unavailable fast relationship toggle'
+          git push origin HEAD:fix/social-cheat-coexistence
