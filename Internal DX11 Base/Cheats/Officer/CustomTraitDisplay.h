@@ -1,0 +1,204 @@
+#pragma once
+
+#include <windows.h>
+
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <unordered_map>
+
+namespace DX11Base {
+
+extern HMODULE g_hModule;
+
+struct CustomTraitDisplayInfo {
+  std::string name;
+  std::string desc;
+};
+
+namespace CustomTraitDisplayDetail {
+
+inline bool IsDecimalKey(const std::string &s) {
+  if (s.empty())
+    return false;
+  for (unsigned char c : s) {
+    if (!std::isdigit(c))
+      return false;
+  }
+  return true;
+}
+
+inline bool ReadJsonStringValue(const std::string &line, const char *field, std::string &out) {
+  const std::string key = std::string("\"") + field + "\"";
+  size_t p = line.find(key);
+  if (p == std::string::npos)
+    return false;
+
+  p = line.find(':', p + key.size());
+  if (p == std::string::npos)
+    return false;
+
+  p = line.find('"', p + 1);
+  if (p == std::string::npos)
+    return false;
+
+  ++p;
+  out.clear();
+  bool escaped = false;
+  for (; p < line.size(); ++p) {
+    const char c = line[p];
+    if (escaped) {
+      switch (c) {
+      case '"': out.push_back('"'); break;
+      case '\\': out.push_back('\\'); break;
+      case '/': out.push_back('/'); break;
+      case 'b': out.push_back('\b'); break;
+      case 'f': out.push_back('\f'); break;
+      case 'n': out.push_back('\n'); break;
+      case 'r': out.push_back('\r'); break;
+      case 't': out.push_back('\t'); break;
+      default:
+        // 현재 공식 파일은 한글을 UTF-8 원문으로 저장하므로
+        // 알 수 없는 escape는 원문 보존을 우선합니다.
+        out.push_back('\\');
+        out.push_back(c);
+        break;
+      }
+      escaped = false;
+      continue;
+    }
+
+    if (c == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (c == '"')
+      return true;
+    out.push_back(c);
+  }
+  return false;
+}
+
+struct Cache {
+  std::unordered_map<int, CustomTraitDisplayInfo> byIndex;
+  std::filesystem::file_time_type writeTime{};
+  bool hasWriteTime = false;
+  bool loaded = false;
+  ULONGLONG lastCheckMs = 0;
+};
+
+inline Cache &GetCache() {
+  static Cache cache;
+  return cache;
+}
+
+inline std::filesystem::path ResolveConfigPath() {
+  char modulePath[MAX_PATH] = {};
+  if (GetModuleFileNameA(g_hModule, modulePath, MAX_PATH)) {
+    std::filesystem::path p = std::filesystem::path(modulePath).parent_path() / "san8r_traits_config.json";
+    std::error_code ec;
+    if (std::filesystem::exists(p, ec) && !ec)
+      return p;
+  }
+
+  // 프록시 DLL과 실행 파일의 작업 폴더가 다른 경우를 위한 보조 경로.
+  std::error_code ec;
+  std::filesystem::path cwd = std::filesystem::current_path(ec);
+  if (!ec) {
+    std::filesystem::path p = cwd / "san8r_traits_config.json";
+    if (std::filesystem::exists(p, ec) && !ec)
+      return p;
+  }
+  return {};
+}
+
+inline bool ReloadIfNeeded() {
+  Cache &cache = GetCache();
+  const ULONGLONG now = GetTickCount64();
+  if (cache.loaded && now - cache.lastCheckMs < 2000)
+    return true;
+  cache.lastCheckMs = now;
+
+  const std::filesystem::path path = ResolveConfigPath();
+  if (path.empty()) {
+    cache.loaded = true;
+    cache.byIndex.clear();
+    cache.hasWriteTime = false;
+    return false;
+  }
+
+  std::error_code ec;
+  const auto currentWriteTime = std::filesystem::last_write_time(path, ec);
+  const bool haveWriteTime = !ec;
+  if (cache.loaded && haveWriteTime && cache.hasWriteTime && currentWriteTime == cache.writeTime)
+    return true;
+
+  std::ifstream file(path, std::ios::binary);
+  if (!file.is_open()) {
+    cache.loaded = true;
+    cache.byIndex.clear();
+    cache.hasWriteTime = false;
+    return false;
+  }
+
+  std::unordered_map<int, CustomTraitDisplayInfo> parsed;
+  std::string line;
+  bool inCustomNames = false;
+
+  while (std::getline(file, line)) {
+    if (!inCustomNames) {
+      if (line.find("\"customNames\"") != std::string::npos)
+        inCustomNames = true;
+      continue;
+    }
+
+    const size_t q1 = line.find('"');
+    if (q1 == std::string::npos)
+      continue;
+    const size_t q2 = line.find('"', q1 + 1);
+    if (q2 == std::string::npos)
+      continue;
+
+    const std::string key = line.substr(q1 + 1, q2 - q1 - 1);
+    if (!IsDecimalKey(key))
+      continue;
+
+    CustomTraitDisplayInfo info;
+    ReadJsonStringValue(line, "name", info.name);
+    ReadJsonStringValue(line, "desc", info.desc);
+
+    try {
+      parsed[std::stoi(key)] = std::move(info);
+    } catch (...) {
+      // 숫자 범위를 벗어난 비정상 키는 무시합니다.
+    }
+  }
+
+  cache.byIndex.swap(parsed);
+  cache.loaded = true;
+  cache.hasWriteTime = haveWriteTime;
+  if (haveWriteTime)
+    cache.writeTime = currentWriteTime;
+  return !cache.byIndex.empty();
+}
+
+} // namespace CustomTraitDisplayDetail
+
+// 게임의 기재 ID는 1부터 시작하고 customNames 키는 0부터 시작하므로 ID - 1을 사용합니다.
+inline bool GetCustomTraitDisplayInfo(uint16_t traitId, CustomTraitDisplayInfo &out) {
+  if (traitId == 0)
+    return false;
+
+  CustomTraitDisplayDetail::ReloadIfNeeded();
+  const int customIndex = static_cast<int>(traitId) - 1;
+  auto &map = CustomTraitDisplayDetail::GetCache().byIndex;
+  auto it = map.find(customIndex);
+  if (it == map.end())
+    return false;
+
+  out = it->second;
+  return !out.name.empty() || !out.desc.empty();
+}
+
+} // namespace DX11Base

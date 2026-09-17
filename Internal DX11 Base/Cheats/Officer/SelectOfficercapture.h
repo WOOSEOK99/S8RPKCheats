@@ -1,7 +1,10 @@
 #pragma once
 #include "Framework/imgui.h"
 #include "OfficerData.h"
+#include "CustomTraitDisplay.h"
 #include <cstdint>
+#include <cstdarg>
+#include <cstring>
 #include <functional>
 
 namespace DX11Base {
@@ -60,3 +63,45 @@ namespace DX11Base {
   size_t GetSelectedOfficerIDCount();
   void   ApplyPatchToSelectedOfficers(std::function<void(uintptr_t)> patchFn);
 } // namespace DX11Base
+
+// DrawOfficerTalents()의 기존 Unknown 분기는
+//   "[*] 기재 N : #ID (ID ID)"
+// 형식으로 출력합니다. 이 한 형식에 대해서만 san8r_traits_config.json의
+// customNames[ID-1]을 보조 조회해 커스텀 기재명/설명을 같은 줄에 표시합니다.
+// 그 외 TextColored 호출과 아래 effect_definitions.json 기반 회색 효과 출력은 그대로 전달합니다.
+namespace ImGui {
+inline void CustomTraitAwareTextColored(const ImVec4 &col, const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+
+  static const char *kUnknownTraitFormat = u8"[*] 기재 %d : #%d (ID %d)";
+  if (fmt && std::strcmp(fmt, kUnknownTraitFormat) == 0) {
+    va_list readArgs;
+    va_copy(readArgs, args);
+    const int slotNo = va_arg(readArgs, int);
+    (void)va_arg(readArgs, int); // 기존 #ID 인자
+    const int traitId = va_arg(readArgs, int);
+    va_end(readArgs);
+
+    DX11Base::CustomTraitDisplayInfo custom;
+    if (traitId > 0 && DX11Base::GetCustomTraitDisplayInfo(static_cast<uint16_t>(traitId), custom) &&
+        !custom.name.empty()) {
+      va_end(args);
+      if (!custom.desc.empty()) {
+        ImGui::TextColored(col, u8"[*] 기재 %d : %s (ID %d) - %s", slotNo, custom.name.c_str(), traitId,
+                           custom.desc.c_str());
+      } else {
+        ImGui::TextColored(col, u8"[*] 기재 %d : %s (ID %d)", slotNo, custom.name.c_str(), traitId);
+      }
+      return;
+    }
+  }
+
+  ImGui::TextColoredV(col, fmt, args);
+  va_end(args);
+}
+} // namespace ImGui
+
+// 이 헤더를 포함한 기존 소스의 ImGui::TextColored 호출을 투명하게 감쌉니다.
+// CustomTraitAwareTextColored 내부 정의 뒤에 두어 자기 자신에는 적용되지 않습니다.
+#define TextColored CustomTraitAwareTextColored
