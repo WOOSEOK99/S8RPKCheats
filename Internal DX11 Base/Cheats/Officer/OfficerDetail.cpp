@@ -822,16 +822,20 @@ namespace DX11Base {
   }
 
   void DrawOfficerDetailWindow(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
-    if (!bShowOfficerDetail)
-      return;
-
-    // [최적화] 무장이 변경되었거나, 창이 새로 열렸을 때만 스냅샷 읽기
+    // 같은 주인공을 닫았다 다시 열어도 게임 원본 편집 결과를 다시 읽어야 합니다.
+    // 기존 코드는 숨겨진 프레임에서 s_prevVisible을 false로 내리기 전에 return하여
+    // 재오픈을 감지하지 못했습니다.
     static bool s_prevVisible = false;
-    bool bJustOpened = (bShowOfficerDetail && !s_prevVisible);
-    s_prevVisible = bShowOfficerDetail;
+    if (!bShowOfficerDetail) {
+      s_prevVisible = false;
+      return;
+    }
+
+    const bool bJustOpened = !s_prevVisible;
+    s_prevVisible = true;
 
     if (p1 != s_lastCapturedAddress || !s_hasSnapshot || bJustOpened) {
-        UpdateOfficerSnapshot(p1);
+      UpdateOfficerSnapshot(p1);
     }
 
     ImGui::SetNextItemWidth(580 * scale);
