@@ -793,11 +793,71 @@ namespace DX11Base {
     static bool s_forceTalentCacheRefresh = false;
 
     const uintptr_t cacheKey = (pGame > 0x10000) ? pGame : pBase;
+
+    // [직접 편집] 주인공 / 선택 무장 / 모든 무장이 공통으로 이 함수를 사용하므로
+    // 이 한 UI가 세 화면의 [기재 정보] 바로 아래에 동일하게 표시됩니다.
+    auto traitChoiceLabel = [](uint16_t traitId) -> std::string {
+      const char *builtin = GetTalentName(traitId);
+      if (builtin && std::strcmp(builtin, "Unknown") != 0) {
+        return std::string(builtin) + " (ID " + std::to_string(traitId) + ")";
+      }
+
+      CustomTraitDisplayInfo custom;
+      if (GetCustomTraitDisplayInfo(traitId, custom) && !custom.name.empty()) {
+        return custom.name + " (ID " + std::to_string(traitId) + ")";
+      }
+
+      return std::string(u8"사용자 기재 #") + std::to_string(traitId) +
+             " (ID " + std::to_string(traitId) + ")";
+    };
+
+    if (cacheKey > 0x10000 && ImGui::BeginTable("TraitDirectEditTable", 2,
+        ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp |
+        ImGuiTableFlags_NoSavedSettings)) {
+      ImGui::TableSetupColumn(u8"슬롯", ImGuiTableColumnFlags_WidthFixed, 72.0f * scale);
+      ImGui::TableSetupColumn(u8"기재 선택 / 변경", ImGuiTableColumnFlags_WidthStretch);
+
+      for (int slot = 0; slot < 3; ++slot) {
+        const uint16_t currentId = GetTraitID(cacheKey, slot);
+        std::string preview = currentId ? traitChoiceLabel(currentId) : std::string(u8"비어있음");
+
+        ImGui::PushID(1000 + slot);
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text(u8"기재 %d", slot + 1);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-1.0f);
+
+        if (ImGui::BeginCombo("##TraitDirectSelect", preview.c_str())) {
+          // 현재 게임 기본 기재 1~70, 사용자 정의 영역 71~200,
+          // 그리고 기본 특수 기재 201~202를 한 목록에서 선택합니다.
+          for (int traitId = 1; traitId <= 202; ++traitId) {
+            const std::string label = traitChoiceLabel(static_cast<uint16_t>(traitId));
+            const bool selected = (currentId == traitId);
+            if (ImGui::Selectable(label.c_str(), selected)) {
+              if (SetTraitID(cacheKey, slot, static_cast<uint16_t>(traitId))) {
+                s_forceTalentCacheRefresh = true;
+              } else {
+                AddLog(u8"[기재변경] 슬롯%d 변경 실패 (ID:%d)", slot + 1, traitId);
+              }
+            }
+            if (selected)
+              ImGui::SetItemDefaultFocus();
+          }
+          ImGui::EndCombo();
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndTable();
+      ImGui::Spacing();
+    }
+
     if (s_cachedTalentBase != cacheKey || s_forceTalentCacheRefresh) {
       s_cachedTalentBase = cacheKey;
       for (int i = 0; i < 3; i++) {
         TalentInfo info;
-        s_cachedTalentValid[i] = GetOfficerTalentDetailed(pBase, i, info);
+        s_cachedTalentValid[i] = GetOfficerTalentDetailed(cacheKey, i, info);
         if (s_cachedTalentValid[i]) {
           s_cachedTalentInfo[i] = info;
         } else {
