@@ -19,8 +19,9 @@ jobs:
           fetch-depth: 0
 
       - name: Hide unavailable toggle and realign social checkboxes
-        shell: python
+        shell: bash
         run: |
+          python3 - <<'PY'
           from pathlib import Path
 
           path = Path('Internal DX11 Base/MenuSections.cpp')
@@ -84,6 +85,7 @@ jobs:
           text = text.replace(old_marriage, new_marriage, 1)
 
           path.write_text(text, encoding='utf-8-sig')
+          PY
 
       - name: Commit layout fix
         shell: bash
