@@ -21,6 +21,7 @@
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/Officer/OfficerDetail.h"
 #include "Cheats/Officer/TraitViewerFeature.h"
+#include "Cheats/Officer/TraitTextEditorWindow.h"
 #include "Cheats/System/FactionTechEditor.h"
 #include "Cheats/System/StartSetting.h"
 #include "Cheats/System/TengiCave.h"
@@ -988,8 +989,13 @@ namespace DX11Base {
         NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
         SaveConfig();
       }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"기재 이름 편집", ImVec2(110.0f * scale, 26.0f * scale))) {
+        DX11Base::OpenTraitTextEditorWindow();
+      }
 
       EndSection(); // 무장 정보
+      DX11Base::DrawTraitTextEditorWindow(scale);
 
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
