@@ -948,11 +948,6 @@ namespace DX11Base {
         }
 
         ImGui::SameLine(0, spacing);
-        if (ImGui::Button(u8"선택 무장", ImVec2(btnWidth, btnHeight))) {
-          bShowSelectedOfficerWin = !bShowSelectedOfficerWin;
-        }
-
-        ImGui::SameLine(0, spacing);
       }
 
       if (ImGui::Button(u8"모든 무장", ImVec2(btnWidth, btnHeight))) {
