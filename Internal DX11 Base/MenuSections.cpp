@@ -534,11 +534,6 @@ namespace DX11Base {
             else
               bLoveCave = false;
             DX11Base::SetInstantLoveCave(false);
-
-            // [상호 배제] 인연 기능 켜지면 결혼 무제한 끄기
-            if (::DX11Base::marriageApplied) {
-              ::DX11Base::SetMarriageCondition(false);
-            }
           }
           DX11Base::SetInstantLoveCave(*var, mode);
           NotifyFeatureToggle(label, *var);
@@ -615,14 +610,6 @@ namespace DX11Base {
       ImGui::SameLine(160.0f * scale);
       bool tempMarriage = ::DX11Base::marriageApplied;
       if (ImGui::Checkbox(u8"결혼 무제한", &tempMarriage)) {
-        // [상호 배제] 결혼 무제한 켜지면 인연 기능 끄기
-        if (tempMarriage) {
-          if (bLoveCave || bHateCave) {
-            bLoveCave = false;
-            bHateCave = false;
-            DX11Base::SetInstantLoveCave(false);
-          }
-        }
         ::DX11Base::SetMarriageCondition(tempMarriage);
         NotifyFeatureToggle(u8"결혼 무제한", tempMarriage);
         SaveConfig();
