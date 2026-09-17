@@ -1,0 +1,46 @@
+name: Trait text editor step4 wire
+
+on:
+  push:
+    paths:
+      - '.github/workflows/trait-text-editor-step4-wire.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: github.ref == 'refs/heads/feature/trait-text-editor-step4-special-desc'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/trait-text-editor-step4-special-desc
+          fetch-depth: 0
+      - name: Register Step 4 files
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('Internal DX11 Base/Internal DX11 Base.vcxproj')
+          s = p.read_text(encoding='utf-8-sig')
+          if 'Cheats\\Officer\\TraitTextSpecialDescHook.h' not in s:
+              anchor = '    <ClInclude Include="Cheats\\Officer\\TraitTextDescHook.h" />\n'
+              if anchor not in s:
+                  raise SystemExit('header anchor missing')
+              s = s.replace(anchor, anchor + '    <ClInclude Include="Cheats\\Officer\\TraitTextSpecialDescHook.h" />\n', 1)
+          if 'Cheats\\Officer\\TraitTextSpecialDescHook.cpp' not in s:
+              anchor = '    <ClCompile Include="Cheats\\Officer\\TraitTextDescHook.cpp" />\n'
+              if anchor not in s:
+                  raise SystemExit('cpp anchor missing')
+              s = s.replace(anchor, anchor + '    <ClCompile Include="Cheats\\Officer\\TraitTextSpecialDescHook.cpp" />\n', 1)
+          p.write_text(s, encoding='utf-8-sig')
+          PY
+      - name: Commit registration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'Internal DX11 Base/Internal DX11 Base.vcxproj'
+          git commit -m 'Trait text editor Step 4: register special description hook'
+          git push origin HEAD:feature/trait-text-editor-step4-special-desc
