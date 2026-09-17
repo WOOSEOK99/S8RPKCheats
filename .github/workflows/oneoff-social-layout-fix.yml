@@ -10,88 +10,19 @@ permissions:
 
 jobs:
   fix-layout:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/social-cheat-coexistence
           fetch-depth: 0
-
-      - name: Hide unavailable toggle and realign social checkboxes
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('Internal DX11 Base/MenuSections.cpp')
-          text = path.read_text(encoding='utf-8-sig')
-
-          old = '''      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"경애 시 무조건 공명", &bFastRelationship)) {
-        DX11Base::SetFastRelationship(bFastRelationship);
-        NotifyFeatureToggle(u8"경애 시 무조건 공명", bFastRelationship);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
-        DX11Base::SetInfiniteGift(bInfiniteGift);
-        NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
-        SaveConfig();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"담화 실행 무제한", &bInfiniteTalk)) {
-        DX11Base::SetInfiniteTalk(bInfiniteTalk);
-        NotifyFeatureToggle(u8"담화 실행 무제한", bInfiniteTalk);
-        SaveConfig();
-      }
-
-      if (::DX11Base::g_loyaltyThreadRunning.load())
-        ImGui::BeginDisabled();
-'''
-
-          new = '''      ImGui::SameLine(160.0f * scale);
-      if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
-        DX11Base::SetInfiniteGift(bInfiniteGift);
-        NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"담화 실행 무제한", &bInfiniteTalk)) {
-        DX11Base::SetInfiniteTalk(bInfiniteTalk);
-        NotifyFeatureToggle(u8"담화 실행 무제한", bInfiniteTalk);
-        SaveConfig();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-      if (::DX11Base::g_loyaltyThreadRunning.load())
-        ImGui::BeginDisabled();
-'''
-
-          if old not in text:
-              raise SystemExit('Expected social UI block not found; aborting without changes.')
-          text = text.replace(old, new, 1)
-
-          old_marriage = '''      ImGui::SameLine(160.0f * scale);
-      bool tempMarriage = ::DX11Base::marriageApplied;
-'''
-          new_marriage = '''      bool tempMarriage = ::DX11Base::marriageApplied;
-'''
-          if old_marriage not in text:
-              raise SystemExit('Marriage layout block not found; aborting without changes.')
-          text = text.replace(old_marriage, new_marriage, 1)
-
-          path.write_text(text, encoding='utf-8-sig')
-          PY
-
-      - name: Commit layout fix
-        shell: bash
-        run: |
+      - run: python3 .github/scripts/fix_social_layout.py
+      - run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add 'Internal DX11 Base/MenuSections.cpp'
+          if git diff --cached --quiet; then
+            exit 0
+          fi
           git commit -m 'Fix social checkbox layout after hiding unavailable toggle'
           git push origin HEAD:fix/social-cheat-coexistence
