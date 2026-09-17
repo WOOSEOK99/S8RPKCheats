@@ -15,40 +15,68 @@ namespace DX11Base {
 
     uintptr_t g_capturedLoveAddr = 0;
 
-    // 디버그 모드에서 즉시 경애 필터 적용 전의 원본 관계값을 캡처한다.
-    // 체크 ON 시점이 아니라 실제 hook1 실행(대화/관계 판정) 시점의 값을 본다.
+    // Block1 디버그: 즉시 경애 필터 적용 전 원본 관계값
     static volatile uintptr_t g_loveDebugCapturedAddr = 0;
     static volatile uint32_t g_loveDebugRawValue = 0;
     static volatile uint8_t g_loveDebugCaptureReady = 0;
     static uintptr_t g_loveDebugLastLoggedAddr = 0;
 
+    // Block2 디버그: 저장 데이터 관계 플래그를 0x64와 비교하기 직전 값
+    static volatile uintptr_t g_loveDebugB2CapturedAddr = 0;
+    static volatile uint32_t g_loveDebugB2RawValue = 0;
+    static volatile uint8_t g_loveDebugB2CaptureReady = 0;
+    static uintptr_t g_loveDebugB2LastLoggedAddr = 0;
+    static uint32_t g_loveDebugB2LastLoggedRaw = 0xFFFFFFFFu;
+
     void FlushLoveDebugCaptureLog() {
-        if (!g_loveDebugCaptureReady)
-            return;
+        if (g_loveDebugCaptureReady) {
+            const uintptr_t addr = g_loveDebugCapturedAddr;
+            const uint32_t raw = g_loveDebugRawValue & 0xFFu;
+            g_loveDebugCaptureReady = 0;
 
-        const uintptr_t addr = g_loveDebugCapturedAddr;
-        const uint32_t raw = g_loveDebugRawValue & 0xFFu;
-        g_loveDebugCaptureReady = 0;
+            // 같은 관계 주소가 반복 실행되는 동안에는 한 번만 출력한다.
+            if (addr != 0 && addr != g_loveDebugLastLoggedAddr) {
+                g_loveDebugLastLoggedAddr = addr;
 
-        // 같은 관계 주소가 반복 실행되는 동안에는 한 번만 출력한다.
-        // 다른 장수와 대화해 주소가 바뀌면 새 값을 다시 출력한다.
-        if (addr == 0 || addr == g_loveDebugLastLoggedAddr)
-            return;
-        g_loveDebugLastLoggedAddr = addr;
+                const bool over8 = raw > 8u;
+                const bool bit08 = (raw & 0x08u) != 0;
+                const bool normalPass = over8 && bit08;
+                const bool hateIgnorePass = raw >= 0x63u;
 
-        const bool over8 = raw > 8u;
-        const bool bit08 = (raw & 0x08u) != 0;
-        const bool normalPass = over8 && bit08;
-        const bool hateIgnorePass = raw >= 0x63u;
+                AddLog(u8"[LoveDebug] addr=%p raw=%u (0x%02X) >8=%s bit08=%s Normal=%s HateIgnore=%s",
+                       (void*)addr,
+                       (unsigned)raw,
+                       (unsigned)raw,
+                       over8 ? "YES" : "NO",
+                       bit08 ? "YES" : "NO",
+                       normalPass ? "PASS" : "BLOCK",
+                       hateIgnorePass ? "PASS" : "BLOCK");
+            }
+        }
 
-        AddLog(u8"[LoveDebug] addr=%p raw=%u (0x%02X) >8=%s bit08=%s Normal=%s HateIgnore=%s",
-               (void*)addr,
-               (unsigned)raw,
-               (unsigned)raw,
-               over8 ? "YES" : "NO",
-               bit08 ? "YES" : "NO",
-               normalPass ? "PASS" : "BLOCK",
-               hateIgnorePass ? "PASS" : "BLOCK");
+        if (g_loveDebugB2CaptureReady) {
+            const uintptr_t addr = g_loveDebugB2CapturedAddr;
+            const uint32_t raw = g_loveDebugB2RawValue & 0xFFu;
+            g_loveDebugB2CaptureReady = 0;
+
+            // 같은 주소+같은 값은 중복 출력하지 않는다.
+            // 같은 주소라도 0x64로 바뀌어 다시 들어오면 값 변화는 확인할 수 있다.
+            if (addr != 0 &&
+                (addr != g_loveDebugB2LastLoggedAddr || raw != g_loveDebugB2LastLoggedRaw)) {
+                g_loveDebugB2LastLoggedAddr = addr;
+                g_loveDebugB2LastLoggedRaw = raw;
+
+                const bool was64 = raw == 0x64u;
+                const bool write64 = !was64;
+
+                AddLog(u8"[LoveDebug-B2] addr=%p raw=%u (0x%02X) was64=%s write64=%s",
+                       (void*)addr,
+                       (unsigned)raw,
+                       (unsigned)raw,
+                       was64 ? "YES" : "NO",
+                       write64 ? "YES" : "NO");
+            }
+        }
     }
 
     // 상태 추가
@@ -202,23 +230,63 @@ namespace DX11Base {
         g_cave2Addr = AllocNear(hookAddr, 256);
         if (!g_cave2Addr) return false;
 
-        // hookAddr+4 위치의 오프셋 4바이트를 동적으로 읽음
-        //g_dynOffset = *(uint32_t*)(hookAddr + 3);
-
-        //AddLog("[DEBUG] Cave2 dynOffset: %08X", g_dynOffset);
-
-            // 바이트 덤프
+        // 바이트 덤프
         uint8_t* p = (uint8_t*)hookAddr;
         AddLog("[DEBUG] hook2 bytes: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
             p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10]);
 
-        //g_dynOffset = *(uint32_t*)(hookAddr + 3);
         g_dynOffset = *(uint32_t*)(hookAddr + 4);
         AddLog("[DEBUG] dynOffset from +3: %08X", g_dynOffset);
 
 
         uint8_t* cave = (uint8_t*)g_cave2Addr;
         int idx = 0;
+
+        // 디버그 모드일 때 Block2가 비교할 실제 관계 플래그 주소/원본값을 캡처한다.
+        // ready가 비워질 때까지 추가 이벤트는 덮어쓰지 않아 UI에서 최소 1개씩 확인할 수 있게 한다.
+        cave[idx++] = 0x41; cave[idx++] = 0x51; // push r9
+        cave[idx++] = 0x41; cave[idx++] = 0x53; // push r11
+
+        // mov r9, &bShowDebug
+        cave[idx++] = 0x49; cave[idx++] = 0xB9;
+        *(uintptr_t*)&cave[idx] = (uintptr_t)&bShowDebug; idx += 8;
+        // cmp byte ptr [r9], 0 / je b2_debug_skip
+        cave[idx++] = 0x41; cave[idx++] = 0x80; cave[idx++] = 0x39; cave[idx++] = 0x00;
+        cave[idx++] = 0x74; int pB2DebugSkip = idx; cave[idx++] = 0x00;
+
+        // 이미 UI로 넘길 값이 있으면 덮어쓰지 않는다.
+        cave[idx++] = 0x49; cave[idx++] = 0xB9;
+        *(uintptr_t*)&cave[idx] = (uintptr_t)&g_loveDebugB2CaptureReady; idx += 8;
+        cave[idx++] = 0x41; cave[idx++] = 0x80; cave[idx++] = 0x39; cave[idx++] = 0x00;
+        cave[idx++] = 0x75; int pB2DebugSkip2 = idx; cave[idx++] = 0x00;
+
+        // lea r11, [rdi+r8+dynOffset]
+        cave[idx++] = 0x4E; cave[idx++] = 0x8D; cave[idx++] = 0x9C; cave[idx++] = 0x07;
+        *(uint32_t*)&cave[idx] = g_dynOffset; idx += 4;
+
+        // g_loveDebugB2CapturedAddr = r11
+        cave[idx++] = 0x49; cave[idx++] = 0xB9;
+        *(uintptr_t*)&cave[idx] = (uintptr_t)&g_loveDebugB2CapturedAddr; idx += 8;
+        cave[idx++] = 0x4D; cave[idx++] = 0x89; cave[idx++] = 0x19;
+
+        // r11d = *(uint8_t*)r11
+        cave[idx++] = 0x45; cave[idx++] = 0x0F; cave[idx++] = 0xB6; cave[idx++] = 0x1B;
+
+        // g_loveDebugB2RawValue = r11d
+        cave[idx++] = 0x49; cave[idx++] = 0xB9;
+        *(uintptr_t*)&cave[idx] = (uintptr_t)&g_loveDebugB2RawValue; idx += 8;
+        cave[idx++] = 0x45; cave[idx++] = 0x89; cave[idx++] = 0x19;
+
+        // ready = 1
+        cave[idx++] = 0x49; cave[idx++] = 0xB9;
+        *(uintptr_t*)&cave[idx] = (uintptr_t)&g_loveDebugB2CaptureReady; idx += 8;
+        cave[idx++] = 0x41; cave[idx++] = 0xC6; cave[idx++] = 0x01; cave[idx++] = 0x01;
+
+        // b2_debug_skip
+        cave[pB2DebugSkip] = (uint8_t)(idx - pB2DebugSkip - 1);
+        cave[pB2DebugSkip2] = (uint8_t)(idx - pB2DebugSkip2 - 1);
+        cave[idx++] = 0x41; cave[idx++] = 0x5B; // pop r11
+        cave[idx++] = 0x41; cave[idx++] = 0x59; // pop r9
 
         // cmp 9바이트 전체 복사
         memcpy(&cave[idx], (void*)hookAddr, 9); idx += 9;
@@ -264,6 +332,11 @@ namespace DX11Base {
             g_loveDebugRawValue = 0;
             g_loveDebugCaptureReady = 0;
             g_loveDebugLastLoggedAddr = 0;
+            g_loveDebugB2CapturedAddr = 0;
+            g_loveDebugB2RawValue = 0;
+            g_loveDebugB2CaptureReady = 0;
+            g_loveDebugB2LastLoggedAddr = 0;
+            g_loveDebugB2LastLoggedRaw = 0xFFFFFFFFu;
 
             g_initThreadRunning = true;
             g_loveMode = mode;
@@ -319,6 +392,9 @@ namespace DX11Base {
         else {
             g_loveDebugCaptureReady = 0;
             g_loveDebugLastLoggedAddr = 0;
+            g_loveDebugB2CaptureReady = 0;
+            g_loveDebugB2LastLoggedAddr = 0;
+            g_loveDebugB2LastLoggedRaw = 0xFFFFFFFFu;
 
             // 해제는 빠르므로 스레드 불필요
             if (g_cave1Applied) {
