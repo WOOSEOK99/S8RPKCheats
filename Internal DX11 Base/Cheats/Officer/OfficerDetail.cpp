@@ -331,34 +331,68 @@ namespace DX11Base {
       return 0;
 
     __try {
-      // GetOfficerTalentDetailed()와 동일한 구조:
-      // officerBase + 0x88부터 8바이트 간격으로 기재 데이터 포인터 3개가 배치됩니다.
-      uintptr_t pSlot = *(uintptr_t *)(officerBase + 0x88 + slotIndex * 0x08);
-      if (pSlot < 0x10000)
+      uintptr_t pTrait = *(uintptr_t *)(officerBase + 0x88 + slotIndex * 0x08);
+      if (pTrait < 0x10000)
         return 0;
-      return *(uint16_t *)(pSlot + 0x08);
+      return *(uint16_t *)(pTrait + 0x08);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
       return 0;
     }
   }
 
+  static uintptr_t FindTraitDataPointerByID(uint16_t traitID) {
+    if (traitID == 0)
+      return 0;
+
+    uintptr_t gameBase = GetGameBase();
+    if (!gameBase)
+      return 0;
+
+    __try {
+      uintptr_t officerArr = *(uintptr_t *)(gameBase + 0x3B8);
+      if (officerArr < 0x10000)
+        return 0;
+
+      // 현재 프로젝트의 모든 무장 배열 크기와 동일하게 5102명을 검사합니다.
+      // 각 무장의 3개 기재 슬롯에서 실제 기재 데이터 포인터를 수집하므로
+      // ID만 덮어써 효과 데이터가 어긋나는 문제를 피합니다.
+      for (int officerIndex = 0; officerIndex < 5102; ++officerIndex) {
+        const uintptr_t officerBase = officerArr + static_cast<uintptr_t>(officerIndex) * 0x3D0;
+        for (int slot = 0; slot < 3; ++slot) {
+          const uintptr_t pTrait = *(uintptr_t *)(officerBase + 0x88 + slot * 0x08);
+          if (pTrait < 0x10000)
+            continue;
+          if (*(uint16_t *)(pTrait + 0x08) == traitID)
+            return pTrait;
+        }
+      }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      return 0;
+    }
+    return 0;
+  }
+
   bool SetTraitID(uintptr_t officerBase, int slotIndex, uint16_t traitID) {
     if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 || traitID == 0)
       return false;
 
+    const uintptr_t targetTrait = FindTraitDataPointerByID(traitID);
+    if (targetTrait < 0x10000) {
+      AddLog(u8"[기재변경] ID:%d 기재 데이터 포인터를 찾지 못했습니다.", traitID);
+      return false;
+    }
+
     __try {
-      uintptr_t pSlot = *(uintptr_t *)(officerBase + 0x88 + slotIndex * 0x08);
-      if (pSlot < 0x10000)
-        return false;
-
+      uintptr_t *slotPtr = reinterpret_cast<uintptr_t *>(officerBase + 0x88 + slotIndex * 0x08);
       DWORD old = 0, tmp = 0;
-      if (!VirtualProtect((LPVOID)(pSlot + 0x08), sizeof(uint16_t), PAGE_READWRITE, &old))
+      if (!VirtualProtect(slotPtr, sizeof(uintptr_t), PAGE_READWRITE, &old))
         return false;
 
-      *(uint16_t *)(pSlot + 0x08) = traitID;
-      VirtualProtect((LPVOID)(pSlot + 0x08), sizeof(uint16_t), old, &tmp);
-      AddLog(u8"[기재변경] 슬롯%d → ID:%d 적용", slotIndex + 1, traitID);
+      *slotPtr = targetTrait;
+      VirtualProtect(slotPtr, sizeof(uintptr_t), old, &tmp);
+      AddLog(u8"[기재변경] 슬롯%d → ID:%d 포인터 교체 완료", slotIndex + 1, traitID);
       return true;
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
