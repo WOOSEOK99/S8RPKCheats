@@ -2,7 +2,6 @@
 #include "Framework/imgui.h"
 #include "MenuState.h"
 #include "debug.h"
-#include "Cheats/Social/InstantLoveCave.h"
 #include <cstdarg>
 #include <string>
 #include <vector>
@@ -14,7 +13,6 @@
 
 namespace DX11Base {
   extern bool bShowDebug;
-  void FlushLoveDebugCaptureLog();
 
   std::vector<std::string> g_loveLogs;
   std::mutex g_logMutex;
@@ -71,20 +69,6 @@ namespace DX11Base {
   static char logFilter[256] = "";
 
   void showLoveLogs() {
-    // 즉시 경애 Cave에서 캡처된 원본 관계값이 있으면 기존 디버그 로그에 출력한다.
-    // AddLog 내부에서 g_logMutex를 사용하므로 로그 목록 lock을 잡기 전에 호출해야 한다.
-    FlushLoveDebugCaptureLog();
-
-    // 새 DLL/현재 Cave 설치 상태를 디버그 화면에서 실시간 확인한다.
-    ImGui::Text("LoveDiag Build: Step4");
-    ImGui::Text("Cave1: %s  Hook1: %016llX",
-                g_cave1Applied ? "YES" : "NO",
-                (unsigned long long)g_hook1Addr);
-    ImGui::Text("Cave2: %s  DynOffset: %08X",
-                g_cave2Applied ? "YES" : "NO",
-                (unsigned)g_dynOffset);
-    ImGui::Separator();
-
     // 1. 현재 배율 가져오기
     float scale = ImGui::GetIO().FontGlobalScale;
 
