@@ -935,15 +935,27 @@ namespace DX11Base {
   void DrawSelectedOfficerWindow(ImVec2 mPos, ImVec2 mSize, float scale, bool asChild) {
     // 메타데이터 로딩을 프레임마다 수행하지 않도록 제한 (I/O 스파이크 방지)
     static ULONGLONG s_lastMetaReloadMs = 0;
+    static bool s_prevStandaloneVisible = false;
     ULONGLONG nowMs = GetTickCount64();
     if (s_lastMetaReloadMs == 0 || (nowMs - s_lastMetaReloadMs) >= 2000) {
       LoadOfficerNames();
       LoadEffectDefinitions();
       s_lastMetaReloadMs = nowMs;
     }
+
     if (!asChild && !bShowSelectedOfficerWin) {
+      s_prevStandaloneVisible = false;
       return;
     }
+
+    const bool standaloneJustOpened = !asChild && !s_prevStandaloneVisible;
+    if (!asChild)
+      s_prevStandaloneVisible = true;
+
+    // 단독 '선택 무장' 창을 다시 열었을 때 같은 장수를 계속 가리키더라도
+    // 게임 원본 편집에서 바뀐 0x3D0 데이터를 다시 복사하도록 스냅샷을 무효화합니다.
+    if (standaloneJustOpened)
+      s_capOfficerSnapGame = 0;
 
     if (asChild) {
       ImGui::BeginChild("SelectedOfficerChild", ImVec2(0, 0), true);
