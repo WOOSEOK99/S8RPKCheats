@@ -11,14 +11,16 @@
 namespace DX11Base { 
     void AddLog(const char* fmt, ...);
     uintptr_t FindPattern(uintptr_t start, uintptr_t end, const std::string& pattern);
+    extern bool bShowDebug;
 
     uintptr_t g_capturedLoveAddr = 0;
 
-    // 디버그 모드에서 즉시 경애 필터 적용 전의 원본 관계값을 1회 캡처한다.
+    // 디버그 모드에서 즉시 경애 필터 적용 전의 원본 관계값을 캡처한다.
+    // 체크 ON 시점이 아니라 실제 hook1 실행(대화/관계 판정) 시점의 값을 본다.
     static volatile uintptr_t g_loveDebugCapturedAddr = 0;
     static volatile uint32_t g_loveDebugRawValue = 0;
-    static volatile uint8_t g_loveDebugCaptureArmed = 0;
     static volatile uint8_t g_loveDebugCaptureReady = 0;
+    static uintptr_t g_loveDebugLastLoggedAddr = 0;
 
     void FlushLoveDebugCaptureLog() {
         if (!g_loveDebugCaptureReady)
@@ -27,6 +29,12 @@ namespace DX11Base {
         const uintptr_t addr = g_loveDebugCapturedAddr;
         const uint32_t raw = g_loveDebugRawValue & 0xFFu;
         g_loveDebugCaptureReady = 0;
+
+        // 같은 관계 주소가 반복 실행되는 동안에는 한 번만 출력한다.
+        // 다른 장수와 대화해 주소가 바뀌면 새 값을 다시 출력한다.
+        if (addr == 0 || addr == g_loveDebugLastLoggedAddr)
+            return;
+        g_loveDebugLastLoggedAddr = addr;
 
         const bool over8 = raw > 8u;
         const bool bit08 = (raw & 0x08u) != 0;
@@ -87,14 +95,15 @@ namespace DX11Base {
          cave[idx++] = 0x0F; cave[idx++] = 0xB6; cave[idx++] = 0x8C; cave[idx++] = 0x18;
          cave[idx++] = 0xF0; cave[idx++] = 0x00; cave[idx++] = 0x00; cave[idx++] = 0x00;
 
-         // 3. 디버그용 원본 관계값 1회 캡처 — 필터/수정 전에 수행한다.
+         // 3. 디버그 모드일 때 현재 hook1 실행의 원본 관계값을 캡처한다.
+         // 실제 대화/관계 판정 시점의 값을 보기 위해 매 실행마다 최신값으로 갱신한다.
          // 기존 게임 레지스터를 건드리지 않도록 r9/r11은 push/pop으로 보존한다.
          cave[idx++] = 0x41; cave[idx++] = 0x51; // push r9
          cave[idx++] = 0x41; cave[idx++] = 0x53; // push r11
 
-         // mov r9, &g_loveDebugCaptureArmed
+         // mov r9, &bShowDebug
          cave[idx++] = 0x49; cave[idx++] = 0xB9;
-         *(uintptr_t*)&cave[idx] = (uintptr_t)&g_loveDebugCaptureArmed; idx += 8;
+         *(uintptr_t*)&cave[idx] = (uintptr_t)&bShowDebug; idx += 8;
          // cmp byte ptr [r9], 0 / je debug_skip
          cave[idx++] = 0x41; cave[idx++] = 0x80; cave[idx++] = 0x39; cave[idx++] = 0x00;
          cave[idx++] = 0x74; int pDebugSkip = idx; cave[idx++] = 0x00;
@@ -117,11 +126,6 @@ namespace DX11Base {
          cave[idx++] = 0x49; cave[idx++] = 0xB9;
          *(uintptr_t*)&cave[idx] = (uintptr_t)&g_loveDebugCaptureReady; idx += 8;
          cave[idx++] = 0x41; cave[idx++] = 0xC6; cave[idx++] = 0x01; cave[idx++] = 0x01;
-
-         // armed = 0 (한 번만 캡처)
-         cave[idx++] = 0x49; cave[idx++] = 0xB9;
-         *(uintptr_t*)&cave[idx] = (uintptr_t)&g_loveDebugCaptureArmed; idx += 8;
-         cave[idx++] = 0x41; cave[idx++] = 0xC6; cave[idx++] = 0x01; cave[idx++] = 0x00;
 
          // debug_skip
          cave[pDebugSkip] = (uint8_t)(idx - pDebugSkip - 1);
@@ -255,11 +259,11 @@ namespace DX11Base {
             if (g_cave1Applied && g_cave2Applied) return; // 이미 설치됨
             if (g_initThreadRunning) return;              // 이미 초기화 중
 
-            // 다음 hook1 실행에서 필터 적용 전 원본 관계값을 한 번만 캡처한다.
+            // 새 활성화 세션에서는 첫 대화 대상부터 다시 로그가 나오도록 초기화한다.
             g_loveDebugCapturedAddr = 0;
             g_loveDebugRawValue = 0;
             g_loveDebugCaptureReady = 0;
-            g_loveDebugCaptureArmed = 1;
+            g_loveDebugLastLoggedAddr = 0;
 
             g_initThreadRunning = true;
             g_loveMode = mode;
@@ -313,7 +317,8 @@ namespace DX11Base {
 
         }
         else {
-            g_loveDebugCaptureArmed = 0;
+            g_loveDebugCaptureReady = 0;
+            g_loveDebugLastLoggedAddr = 0;
 
             // 해제는 빠르므로 스레드 불필요
             if (g_cave1Applied) {
