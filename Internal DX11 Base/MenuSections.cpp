@@ -995,6 +995,7 @@ namespace DX11Base {
       }
 
       EndSection(); // 무장 정보
+      DX11Base::TickTraitTextEditorAutoApply();
       DX11Base::DrawTraitTextEditorWindow(scale);
 
       BeginSection();

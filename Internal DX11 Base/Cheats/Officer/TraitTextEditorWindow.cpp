@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "TraitTextEditorWindow.h"
 
 #include "TraitTextEditorData.h"
@@ -22,6 +22,13 @@ static int g_selected = 0;
 static std::array<char, 128> g_nameBuf{};
 static std::array<char, 4096> g_descBuf{};
 static std::string g_status;
+
+// Step 6 자동 적용 상태. 메뉴 렌더링이 시작된 뒤 잠시 기다렸다가 저장값을 적용합니다.
+static bool g_autoLoaded = false;
+static bool g_autoFinished = false;
+static ULONGLONG g_autoFirstTick = 0;
+static ULONGLONG g_autoLastAttempt = 0;
+static int g_autoAttempts = 0;
 
 void CopyToBuffer(const std::string& text, char* dst, size_t size) {
   if (!dst || size == 0)
@@ -120,6 +127,51 @@ bool IsTraitTextEditorWindowOpen() {
   return g_open;
 }
 
+void TickTraitTextEditorAutoApply() {
+  if (g_autoFinished)
+    return;
+
+  if (!g_autoLoaded) {
+    std::string error;
+    if (!LoadTraitTextEdits(&error)) {
+      g_autoFinished = true;
+      if (!error.empty())
+        AddLog(u8"[기재 문구/Step6] 저장값 자동 로드 실패: %s", error.c_str());
+      return;
+    }
+    g_autoLoaded = true;
+    g_loadedOnce = true;
+    if (!HasTraitTextEdits()) {
+      g_autoFinished = true;
+      return;
+    }
+  }
+
+  const ULONGLONG now = GetTickCount64();
+  if (g_autoFirstTick == 0) {
+    g_autoFirstTick = now;
+    return;
+  }
+
+  // D3D/메뉴가 뜬 뒤 3초를 기다리고, 이후 최대 30회만 재시도합니다.
+  if (now - g_autoFirstTick < 3000ull || now - g_autoLastAttempt < 1000ull)
+    return;
+  g_autoLastAttempt = now;
+  ++g_autoAttempts;
+
+  std::string error;
+  if (ApplyAll(error)) {
+    g_autoFinished = true;
+    AddLog(u8"[기재 문구/Step6] 저장된 이름/설명 자동 적용 완료");
+    return;
+  }
+
+  if (g_autoAttempts >= 30) {
+    g_autoFinished = true;
+    AddLog(u8"[기재 문구/Step6] 자동 적용 중단(30회 실패): %s", error.c_str());
+  }
+}
+
 void DrawTraitTextEditorWindow(float scale) {
   if (!g_open)
     return;
@@ -181,14 +233,17 @@ void DrawTraitTextEditorWindow(float scale) {
   if (ImGui::Button(u8"적용", ImVec2(90.0f * scale, 28.0f * scale))) {
     StoreSelectionBuffers();
     std::string error;
-    if (ApplyAll(error))
+    if (ApplyAll(error)) {
+      g_autoFinished = true;
       SetStatus(u8"적용 완료");
-    else
+    } else {
       SetStatus(std::string(u8"적용 실패: ") + error);
+    }
   }
   ImGui::SameLine();
   if (ImGui::Button(u8"적용 해제", ImVec2(90.0f * scale, 28.0f * scale))) {
     std::string error;
+    g_autoFinished = true;
     if (RemoveAll(error))
       SetStatus(u8"적용 해제 완료");
     else
