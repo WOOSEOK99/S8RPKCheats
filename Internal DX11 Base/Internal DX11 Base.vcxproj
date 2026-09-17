@@ -209,6 +209,7 @@
     <ClInclude Include="Cheats\Officer\TraitTextEditorData.h" />
     <ClInclude Include="Cheats\Officer\TraitTextNameHook.h" />
     <ClInclude Include="Cheats\Officer\TraitTextDescHook.h" />
+    <ClInclude Include="Cheats\Officer\TraitTextSpecialDescHook.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerRoster.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerBattleMap.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerOfficerInfo.h" />
@@ -305,6 +306,7 @@
     <ClCompile Include="Cheats\Officer\TraitTextEditorData.cpp" />
     <ClCompile Include="Cheats\Officer\TraitTextNameHook.cpp" />
     <ClCompile Include="Cheats\Officer\TraitTextDescHook.cpp" />
+    <ClCompile Include="Cheats\Officer\TraitTextSpecialDescHook.cpp" />
     <ClCompile Include="Cheats\Officer\TraitViewerRoster.cpp" />
     <ClCompile Include="Cheats\Officer\TraitViewerBattleMap.cpp">
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
