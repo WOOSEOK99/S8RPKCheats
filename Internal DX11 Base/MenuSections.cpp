@@ -568,20 +568,11 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"경애 시 무조건 공명", &bFastRelationship)) {
-        DX11Base::SetFastRelationship(bFastRelationship);
-        NotifyFeatureToggle(u8"경애 시 무조건 공명", bFastRelationship);
-        SaveConfig();
-      }
-
       if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
         DX11Base::SetInfiniteGift(bInfiniteGift);
         NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
         SaveConfig();
       }
-
-      ImGui::SameLine(160.0f * scale);
 
       if (ImGui::Checkbox(u8"담화 실행 무제한", &bInfiniteTalk)) {
         DX11Base::SetInfiniteTalk(bInfiniteTalk);
@@ -589,6 +580,7 @@ namespace DX11Base {
         SaveConfig();
       }
 
+      ImGui::SameLine(160.0f * scale);
       if (::DX11Base::g_loyaltyThreadRunning.load())
         ImGui::BeginDisabled();
       if (ImGui::Checkbox(u8"무장 충성도 100", &bLoyalty)) {
@@ -607,7 +599,6 @@ namespace DX11Base {
         ImGui::EndDisabled();
       }
 
-      ImGui::SameLine(160.0f * scale);
       bool tempMarriage = ::DX11Base::marriageApplied;
       if (ImGui::Checkbox(u8"결혼 무제한", &tempMarriage)) {
         ::DX11Base::SetMarriageCondition(tempMarriage);
