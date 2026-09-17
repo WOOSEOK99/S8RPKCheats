@@ -327,32 +327,42 @@ namespace DX11Base {
   // --- [기재 관련 함수군] ---
 
   uint16_t GetTraitID(uintptr_t officerBase, int slotIndex) {
-    if (officerBase < 0x10000)
+    if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3)
       return 0;
-    uintptr_t pA = *(uintptr_t *)(officerBase + 0x88);
-    if (pA < 0x10000)
+
+    __try {
+      // GetOfficerTalentDetailed()와 동일한 구조:
+      // officerBase + 0x88부터 8바이트 간격으로 기재 데이터 포인터 3개가 배치됩니다.
+      uintptr_t pSlot = *(uintptr_t *)(officerBase + 0x88 + slotIndex * 0x08);
+      if (pSlot < 0x10000)
+        return 0;
+      return *(uint16_t *)(pSlot + 0x08);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
       return 0;
-    uintptr_t pSlot = *(uintptr_t *)(pA + slotIndex * 0x08);
-    if (pSlot < 0x10000)
-      return 0;
-    return *(uint16_t *)(pSlot + 0x08);
+    }
   }
 
-  void SetTraitID(uintptr_t officerBase, int slotIndex, uint16_t traitID) {
-    if (officerBase < 0x10000)
-      return;
-    uintptr_t pA = *(uintptr_t *)(officerBase + 0x88);
-    if (pA < 0x10000)
-      return;
-    uintptr_t pSlot = *(uintptr_t *)(pA + slotIndex * 0x08);
-    if (pSlot < 0x10000)
-      return;
+  bool SetTraitID(uintptr_t officerBase, int slotIndex, uint16_t traitID) {
+    if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 || traitID == 0)
+      return false;
 
-    DWORD old, tmp;
-    if (VirtualProtect((LPVOID)(pSlot + 0x08), 2, PAGE_READWRITE, &old)) {
+    __try {
+      uintptr_t pSlot = *(uintptr_t *)(officerBase + 0x88 + slotIndex * 0x08);
+      if (pSlot < 0x10000)
+        return false;
+
+      DWORD old = 0, tmp = 0;
+      if (!VirtualProtect((LPVOID)(pSlot + 0x08), sizeof(uint16_t), PAGE_READWRITE, &old))
+        return false;
+
       *(uint16_t *)(pSlot + 0x08) = traitID;
-      VirtualProtect((LPVOID)(pSlot + 0x08), 2, old, &tmp);
+      VirtualProtect((LPVOID)(pSlot + 0x08), sizeof(uint16_t), old, &tmp);
       AddLog(u8"[기재변경] 슬롯%d → ID:%d 적용", slotIndex + 1, traitID);
+      return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
     }
   }
 
