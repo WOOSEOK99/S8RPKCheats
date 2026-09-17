@@ -17,72 +17,9 @@ jobs:
         with:
           ref: feature/trait-text-editor-step5-ui
           fetch-depth: 0
-      - name: Wire Step 5 UI
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          p = Path('Internal DX11 Base/MenuSections.cpp')
-          s = p.read_text(encoding='utf-8-sig')
-          inc = '#include "Cheats/Officer/TraitTextEditorWindow.h"\n'
-          anchor = '#include "Cheats/Officer/TraitViewerFeature.h"\n'
-          if inc not in s:
-              if anchor not in s:
-                  raise SystemExit('MenuSections include anchor missing')
-              s = s.replace(anchor, anchor + inc, 1)
-
-          old = '''      ImGui::Spacing();
-      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
-        const bool requested = DX11Base::bTraitViewer;
-        if (!DX11Base::SetTraitViewerFeature(requested))
-          DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
-        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
-        SaveConfig();
-      }
-
-      EndSection(); // 무장 정보
-'''
-          new = '''      ImGui::Spacing();
-      if (ImGui::Checkbox(u8"기재 화면 보이기", &DX11Base::bTraitViewer)) {
-        const bool requested = DX11Base::bTraitViewer;
-        if (!DX11Base::SetTraitViewerFeature(requested))
-          DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
-        NotifyFeatureToggle(u8"기재 화면 보이기", DX11Base::bTraitViewer);
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      if (ImGui::Button(u8"기재 이름 편집", ImVec2(110.0f * scale, 26.0f * scale))) {
-        DX11Base::OpenTraitTextEditorWindow();
-      }
-
-      EndSection(); // 무장 정보
-      DX11Base::DrawTraitTextEditorWindow(scale);
-'''
-          if old in s:
-              s = s.replace(old, new, 1)
-          elif new not in s:
-              raise SystemExit('MenuSections trait viewer block missing')
-          p.write_text(s, encoding='utf-8-sig')
-
-          p = Path('Internal DX11 Base/Internal DX11 Base.vcxproj')
-          s = p.read_text(encoding='utf-8-sig')
-          h = '    <ClInclude Include="Cheats\\Officer\\TraitTextEditorWindow.h" />\n'
-          ha = '    <ClInclude Include="Cheats\\Officer\\TraitTextSpecialDescHook.h" />\n'
-          if 'Cheats\\Officer\\TraitTextEditorWindow.h' not in s:
-              if ha not in s:
-                  raise SystemExit('vcxproj header anchor missing')
-              s = s.replace(ha, ha + h, 1)
-          c = '    <ClCompile Include="Cheats\\Officer\\TraitTextEditorWindow.cpp" />\n'
-          ca = '    <ClCompile Include="Cheats\\Officer\\TraitTextSpecialDescHook.cpp" />\n'
-          if 'Cheats\\Officer\\TraitTextEditorWindow.cpp' not in s:
-              if ca not in s:
-                  raise SystemExit('vcxproj cpp anchor missing')
-              s = s.replace(ca, ca + c, 1)
-          p.write_text(s, encoding='utf-8-sig')
-          PY
+      - name: Apply Step 5 wiring
+        run: python tools/trait_text_editor_step5_patch.py
       - name: Commit wiring
-        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
