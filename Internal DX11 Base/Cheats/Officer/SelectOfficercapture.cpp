@@ -773,6 +773,268 @@ namespace DX11Base {
     }
   }
 
+  // --- [모든 무장 일괄 랜덤 기재 부여] ---
+  static bool s_showBatchRandomTraitWindow = false;
+  static bool s_batchRandomGold = true;
+  static bool s_batchRandomGreen = true;
+  static bool s_batchRandomRed = false;
+  static std::string s_batchRandomStatus;
+
+  static int GetBatchTraitGrade(uint16_t traitId) {
+    // 기본 기재 72개는 모두 황금(grade 1).
+    if ((traitId >= 1 && traitId <= 70) || traitId == 201 || traitId == 202)
+      return 1;
+
+    CustomTraitDisplayInfo custom;
+    if (GetCustomTraitDisplayInfo(traitId, custom))
+      return custom.grade;
+    return 0;
+  }
+
+  static std::vector<uint16_t> BuildBatchRandomTraitPool() {
+    std::vector<uint16_t> ids;
+    ids.reserve(128);
+
+    for (uint16_t id = 1; id <= 70; ++id)
+      ids.push_back(id);
+    ids.push_back(201);
+    ids.push_back(202);
+
+    std::vector<uint16_t> customIds = GetDefinedCustomTraitIds();
+    ids.insert(ids.end(), customIds.begin(), customIds.end());
+
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+  }
+
+  static bool BatchPoolHasGrade(const std::vector<uint16_t>& ids, int grade) {
+    for (uint16_t id : ids) {
+      if (GetBatchTraitGrade(id) == grade)
+        return true;
+    }
+    return false;
+  }
+
+  static std::vector<uintptr_t> CollectValidOfficerBasesForBatch() {
+    std::vector<uintptr_t> officers;
+
+    const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    uintptr_t arrayBase = 0;
+    if (!exe || !TryResolveOfficerRosterArrayBase(exe, &arrayBase) || arrayBase < 0x10000)
+      return officers;
+
+    bool seenIds[5103] = {};
+    officers.reserve(5102);
+
+    for (int i = 0; i < 5102; ++i) {
+      const uintptr_t base = arrayBase + static_cast<uintptr_t>(i) * 0x3D0;
+      const RosterStats stats = SafeReadRosterStats(base);
+      if (!stats.valid || stats.id_08 < 1 || stats.id_08 > 5102)
+        continue;
+      if (seenIds[stats.id_08])
+        continue;
+      if (!IsValidPtr(base + 0x10, 1))
+        continue;
+
+      seenIds[stats.id_08] = true;
+      officers.push_back(base);
+    }
+
+    return officers;
+  }
+
+  static int AssignRandomTraitsToOneOfficerBatch(
+      uintptr_t officerBase,
+      const std::vector<uint16_t>& enabledPool,
+      std::mt19937& rng,
+      int& filledSlots) {
+    std::unordered_set<uint16_t> usedIds;
+    std::vector<int> emptySlots;
+
+    for (int slot = 0; slot < 3; ++slot) {
+      const uint16_t id = GetTraitID(officerBase, slot);
+      if (id != 0)
+        usedIds.insert(id);
+      else
+        emptySlots.push_back(slot);
+    }
+
+    if (emptySlots.empty())
+      return 0;
+
+    std::vector<uint16_t> candidates;
+    candidates.reserve(enabledPool.size());
+    for (uint16_t id : enabledPool) {
+      if (usedIds.count(id) == 0)
+        candidates.push_back(id);
+    }
+
+    if (candidates.empty())
+      return 0;
+
+    std::shuffle(candidates.begin(), candidates.end(), rng);
+
+    int assigned = 0;
+    size_t candidateIndex = 0;
+    for (int slot : emptySlots) {
+      while (candidateIndex < candidates.size()) {
+        const uint16_t traitId = candidates[candidateIndex++];
+        if (usedIds.count(traitId) != 0)
+          continue;
+
+        if (SetTraitID(officerBase, slot, traitId)) {
+          usedIds.insert(traitId);
+          ++assigned;
+          ++filledSlots;
+          break;
+        }
+      }
+    }
+
+    return assigned;
+  }
+
+  void OpenBatchRandomTraitAssignmentWindow() {
+    s_showBatchRandomTraitWindow = true;
+    s_batchRandomStatus.clear();
+  }
+
+  void DrawBatchRandomTraitAssignmentWindow(float scale) {
+    if (!s_showBatchRandomTraitWindow)
+      return;
+
+    ImGui::SetNextWindowSize(ImVec2(470.0f * scale, 0.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin(u8"모든 무장 일괄 랜덤기재 부여###BatchRandomTraits",
+                      &s_showBatchRandomTraitWindow,
+                      ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::End();
+      return;
+    }
+
+    const std::vector<uint16_t> allPool = BuildBatchRandomTraitPool();
+    const bool hasGreen = BatchPoolHasGrade(allPool, 2);
+    const bool hasRed = BatchPoolHasGrade(allPool, 3);
+
+    int goldCount = 0, greenCount = 0, redCount = 0;
+    for (uint16_t id : allPool) {
+      const int grade = GetBatchTraitGrade(id);
+      if (grade == 1) ++goldCount;
+      else if (grade == 2) ++greenCount;
+      else if (grade == 3) ++redCount;
+    }
+
+    ImGui::TextWrapped(u8"모든 유효 무장의 기존 기재는 유지하고, 비어 있는 기재 슬롯만 중복 없이 랜덤으로 채웁니다.");
+    ImGui::Spacing();
+    ImGui::Text(u8"황금 후보: %d개", goldCount);
+    ImGui::SameLine();
+    ImGui::Text(u8"녹색: %d개", greenCount);
+    ImGui::SameLine();
+    ImGui::Text(u8"적색: %d개", redCount);
+    ImGui::Separator();
+
+    ImGui::Checkbox(u8"황금##BatchRandomGold", &s_batchRandomGold);
+    ImGui::SameLine();
+
+    if (!hasGreen)
+      ImGui::BeginDisabled();
+    ImGui::Checkbox(u8"녹색##BatchRandomGreen", &s_batchRandomGreen);
+    if (!hasGreen) {
+      ImGui::EndDisabled();
+      s_batchRandomGreen = false;
+    }
+
+    ImGui::SameLine();
+    if (!hasRed)
+      ImGui::BeginDisabled();
+    ImGui::Checkbox(u8"적색##BatchRandomRed", &s_batchRandomRed);
+    if (!hasRed) {
+      ImGui::EndDisabled();
+      s_batchRandomRed = false;
+    }
+
+    if (!HasCustomTraitConfigFile())
+      ImGui::TextDisabled(u8"※ san8r_traits_config.json 없음: 기본 황금 기재 72개만 사용");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                       u8"※ 이 작업은 모든 무장의 빈 기재 슬롯을 한 번에 변경합니다.");
+
+    const bool noGradeSelected =
+        !s_batchRandomGold && !s_batchRandomGreen && !s_batchRandomRed;
+    if (noGradeSelected)
+      ImGui::BeginDisabled();
+
+    if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여 실행",
+                      ImVec2(-1.0f, 34.0f * scale))) {
+      std::vector<uint16_t> enabledPool;
+      enabledPool.reserve(allPool.size());
+      for (uint16_t id : allPool) {
+        const int grade = GetBatchTraitGrade(id);
+        if ((grade == 1 && s_batchRandomGold) ||
+            (grade == 2 && s_batchRandomGreen) ||
+            (grade == 3 && s_batchRandomRed)) {
+          enabledPool.push_back(id);
+        }
+      }
+
+      const std::vector<uintptr_t> officers = CollectValidOfficerBasesForBatch();
+      if (officers.empty()) {
+        s_batchRandomStatus = u8"무장 배열을 찾지 못했습니다. 인게임 전략 화면에서 다시 시도하세요.";
+      } else if (enabledPool.empty()) {
+        s_batchRandomStatus = u8"선택한 등급에 사용 가능한 기재가 없습니다.";
+      } else {
+        static std::mt19937 rng(
+            static_cast<unsigned int>(
+                std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+
+        int changedOfficers = 0;
+        int filledSlots = 0;
+        int alreadyFull = 0;
+
+        for (uintptr_t base : officers) {
+          bool hasEmpty = false;
+          for (int slot = 0; slot < 3; ++slot) {
+            if (GetTraitID(base, slot) == 0) {
+              hasEmpty = true;
+              break;
+            }
+          }
+
+          if (!hasEmpty) {
+            ++alreadyFull;
+            continue;
+          }
+
+          const int assigned =
+              AssignRandomTraitsToOneOfficerBatch(base, enabledPool, rng, filledSlots);
+          if (assigned > 0)
+            ++changedOfficers;
+        }
+
+        s_batchRandomStatus =
+            std::string(u8"완료: ") + std::to_string(changedOfficers) +
+            u8"명 변경 / " + std::to_string(filledSlots) +
+            u8"개 슬롯 부여 / 이미 3개 보유 " +
+            std::to_string(alreadyFull) + u8"명";
+
+        AddLog(u8"[랜덤기재/일괄] 대상 %d명, 변경 %d명, 부여 슬롯 %d개, 이미 3개 %d명",
+               static_cast<int>(officers.size()), changedOfficers, filledSlots, alreadyFull);
+      }
+    }
+
+    if (noGradeSelected)
+      ImGui::EndDisabled();
+
+    if (!s_batchRandomStatus.empty()) {
+      ImGui::Spacing();
+      ImGui::TextWrapped("%s", s_batchRandomStatus.c_str());
+    }
+
+    ImGui::End();
+  }
+
   void DrawOfficerTalents(uintptr_t pBase, float scale, uintptr_t pGame) {
     LoadOfficerNames(); // [수정] 메타데이터 보장
     LoadEffectDefinitions();
