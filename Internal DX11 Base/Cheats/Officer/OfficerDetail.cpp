@@ -565,6 +565,121 @@ namespace DX11Base {
     return true;
   }
 
+
+  bool ResolveTraitObjectsForBatch(
+      const std::vector<uint16_t>& traitIDs,
+      std::unordered_map<uint16_t, uintptr_t>& outObjects) {
+    outObjects.clear();
+    if (traitIDs.empty())
+      return true;
+
+    std::unordered_set<uint16_t> wanted;
+    wanted.reserve(traitIDs.size());
+    for (uint16_t id : traitIDs) {
+      if (IsAssignableTraitId(id))
+        wanted.insert(id);
+    }
+    if (wanted.empty())
+      return false;
+
+    // 1) 현재 전체 무장 슬롯을 한 번만 훑어 이미 사용 중인 기재 객체를 최대한 캐시합니다.
+    CacheTraitObjectsFromOfficerArray();
+
+    uintptr_t traitVtable = 0;
+    for (uint16_t id : wanted) {
+      auto it = s_traitObjectById.find(id);
+      if (it != s_traitObjectById.end() && ValidateTraitObject(it->second, id)) {
+        outObjects[id] = it->second;
+        if (!traitVtable)
+          TryReadPtr(it->second, traitVtable);
+      }
+    }
+
+    if (outObjects.size() >= wanted.size())
+      return true;
+
+    // 캐시에서 vtable을 못 얻은 경우, 현재 캐시에 있는 아무 정상 기재 객체에서 확보합니다.
+    if (!traitVtable) {
+      for (const auto& entry : s_traitObjectById) {
+        if (ValidateTraitObject(entry.second)) {
+          TryReadPtr(entry.second, traitVtable);
+          if (traitVtable)
+            break;
+        }
+      }
+    }
+    if (!traitVtable)
+      return !outObjects.empty();
+
+    // 2) 누락된 ID들은 프로세스 전체를 ID마다 반복 검색하지 않고,
+    //    읽기 가능한 메모리를 딱 한 번 순회하면서 동시에 수집합니다.
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    uintptr_t address = reinterpret_cast<uintptr_t>(si.lpMinimumApplicationAddress);
+    const uintptr_t maxAddress = reinterpret_cast<uintptr_t>(si.lpMaximumApplicationAddress);
+
+    while (address < maxAddress && outObjects.size() < wanted.size()) {
+      MEMORY_BASIC_INFORMATION mbi{};
+      if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0)
+        break;
+
+      const uintptr_t regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+      if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect) && mbi.RegionSize >= 0x10) {
+        const uintptr_t regionEnd = regionBase + mbi.RegionSize;
+        uintptr_t p = (regionBase + 7) & ~static_cast<uintptr_t>(7);
+
+        __try {
+          for (; p + 0x0A <= regionEnd; p += 8) {
+            if (*reinterpret_cast<uintptr_t*>(p) != traitVtable)
+              continue;
+
+            const uint16_t id = *reinterpret_cast<uint16_t*>(p + 0x08);
+            if (wanted.count(id) == 0 || outObjects.count(id) != 0)
+              continue;
+
+            if (ValidateTraitObject(p, id, traitVtable)) {
+              s_traitObjectById[id] = p;
+              outObjects[id] = p;
+              if (outObjects.size() >= wanted.size())
+                break;
+            }
+          }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+          // 잘못된 한 영역은 건너뛰고 다음 메모리 영역을 계속 탐색합니다.
+        }
+      }
+
+      const uintptr_t next = regionBase + mbi.RegionSize;
+      if (next <= address)
+        break;
+      address = next;
+    }
+
+    return !outObjects.empty();
+  }
+
+  bool SetTraitObjectFast(
+      uintptr_t officerBase, int slotIndex, uint16_t traitID, uintptr_t traitObject) {
+    if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 ||
+        traitID == 0 || traitObject < 0x10000)
+      return false;
+
+    if (!ValidateTraitObject(traitObject, traitID))
+      return false;
+
+    uintptr_t* slotPtr =
+        reinterpret_cast<uintptr_t*>(officerBase + 0x88 + slotIndex * 0x08);
+
+    __try {
+      *slotPtr = traitObject;
+      return *slotPtr == traitObject;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
+  }
+
   uintptr_t GetSelectedOfficerBase() {
     uintptr_t heroBase = g_capturedOfficerBase;
     if (heroBase < 0x10000)
