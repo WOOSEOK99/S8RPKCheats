@@ -987,6 +987,14 @@ namespace DX11Base {
         DX11Base::OpenTraitTextEditorWindow();
       }
 
+      bool dirtyDiag = DX11Base::IsInProgressTraitDirtyDiagnosticsEnabled();
+      if (ImGui::Checkbox(u8"기재 dirty 진단", &dirtyDiag)) {
+        DX11Base::SetInProgressTraitDirtyDiagnostics(dirtyDiag);
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(u8"진행 중 무장 편집의 상위 결정 버튼 활성화 상태를 진단 로그로 기록합니다.");
+      }
+
       if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여", ImVec2(220.0f * scale, 28.0f * scale))) {
         DX11Base::OpenBatchRandomTraitAssignmentWindow();
       }
@@ -998,6 +1006,7 @@ namespace DX11Base {
       }
 
       EndSection(); // 무장 정보
+      DX11Base::TickInProgressTraitDirtyDiagnostics();
       DX11Base::TickTraitTextEditorAutoApply();
       DX11Base::DrawTraitTextEditorWindow(scale);
       DX11Base::DrawBatchRandomTraitAssignmentWindow(scale);
