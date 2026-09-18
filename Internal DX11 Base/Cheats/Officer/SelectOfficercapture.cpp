@@ -933,9 +933,11 @@ namespace DX11Base {
 
     // UI 스레드를 오래 점유하지 않도록 프레임당 32명만 처리합니다.
     constexpr size_t kOfficersPerFrame = 32;
+    const size_t requestedEnd = s_batchRandomJob.cursor + kOfficersPerFrame;
     const size_t end =
-        std::min(s_batchRandomJob.cursor + kOfficersPerFrame,
-                 s_batchRandomJob.officers.size());
+        (requestedEnd < s_batchRandomJob.officers.size())
+            ? requestedEnd
+            : s_batchRandomJob.officers.size();
 
     for (; s_batchRandomJob.cursor < end; ++s_batchRandomJob.cursor) {
       const uintptr_t base = s_batchRandomJob.officers[s_batchRandomJob.cursor];
