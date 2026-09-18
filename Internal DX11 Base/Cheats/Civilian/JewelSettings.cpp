@@ -212,6 +212,24 @@ bool SetAllJewelsOpen(bool enable) {
   return true;
 }
 
+bool AreAllJewelsOpen() {
+  const uintptr_t gameBase = GetGameBase();
+  if (!gameBase)
+    return false;
+
+  const uintptr_t bitmapAddress = gameBase + kJewelOpenBitmapOffset;
+  if (!IsValidPtr(bitmapAddress, kDefinedJewelOpenMask.size()))
+    return false;
+
+  const auto *bitmap = reinterpret_cast<const uint8_t *>(bitmapAddress);
+  for (size_t i = 0; i < kDefinedJewelOpenMask.size(); ++i) {
+    const uint8_t mask = kDefinedJewelOpenMask[i];
+    if (mask != 0 && (bitmap[i] & mask) != mask)
+      return false;
+  }
+  return true;
+}
+
 bool SetAllSecondaryJewelsEnabled(bool enable) {
   if (enable && !EnsureSecondaryJewelHook())
     return false;
