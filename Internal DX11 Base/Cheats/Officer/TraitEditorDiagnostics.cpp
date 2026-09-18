@@ -6,6 +6,7 @@
 #include "../../showlog.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -32,6 +33,181 @@ static bool g_baselineReady = false;
 static uintptr_t g_rosterBase = 0;
 static ULONGLONG g_lastPollMs = 0;
 static std::array<TraitSlotState, kOfficerCount * kTraitSlotCount> g_snapshot{};
+
+struct WriteTraceEvent {
+  uintptr_t rip = 0;
+  uintptr_t address = 0;
+  ULONG accessType = 0;
+};
+
+constexpr LONG kWriteTraceEventCapacity = 128;
+static std::array<WriteTraceEvent, kWriteTraceEventCapacity> g_writeTraceEvents{};
+static volatile LONG g_writeTraceWriteIndex = 0;
+static LONG g_writeTraceReadIndex = 0;
+static PVOID g_writeTraceVeh = nullptr;
+static uintptr_t g_writeTraceOfficerBase = 0;
+static uint16_t g_writeTraceOfficerId = 0;
+static uintptr_t g_writeTracePage = 0;
+static SIZE_T g_writeTracePageSize = 0;
+static DWORD g_writeTraceBaseProtect = 0;
+static bool g_writeTraceArmed = false;
+static thread_local uintptr_t t_guardRearmPage = 0;
+
+LONG CALLBACK TraitWriteTraceVeh(PEXCEPTION_POINTERS ep) {
+  if (!ep || !ep->ExceptionRecord || !ep->ContextRecord)
+    return EXCEPTION_CONTINUE_SEARCH;
+
+  const DWORD code = ep->ExceptionRecord->ExceptionCode;
+
+  if (code == STATUS_GUARD_PAGE_VIOLATION) {
+    if (!g_writeTraceArmed || !g_writeTracePage)
+      return EXCEPTION_CONTINUE_SEARCH;
+
+    const ULONG_PTR accessType = ep->ExceptionRecord->NumberParameters >= 1
+        ? ep->ExceptionRecord->ExceptionInformation[0] : 0;
+    const uintptr_t accessAddress = ep->ExceptionRecord->NumberParameters >= 2
+        ? static_cast<uintptr_t>(ep->ExceptionRecord->ExceptionInformation[1]) : 0;
+
+    const uintptr_t firstSlot = g_writeTraceOfficerBase + kTraitSlotBase;
+    const uintptr_t lastSlotEnd = firstSlot + kTraitSlotCount * sizeof(uintptr_t);
+
+    if (accessType == 1 && accessAddress >= firstSlot && accessAddress < lastSlotEnd) {
+      const LONG index = InterlockedIncrement(&g_writeTraceWriteIndex) - 1;
+      if (index >= 0 && index < kWriteTraceEventCapacity) {
+        g_writeTraceEvents[static_cast<size_t>(index)].rip =
+            static_cast<uintptr_t>(ep->ContextRecord->Rip);
+        g_writeTraceEvents[static_cast<size_t>(index)].address = accessAddress;
+        g_writeTraceEvents[static_cast<size_t>(index)].accessType = static_cast<ULONG>(accessType);
+      }
+    }
+
+    t_guardRearmPage = g_writeTracePage;
+    ep->ContextRecord->EFlags |= 0x100; // trap flag: 다음 명령 후 PAGE_GUARD 재설정
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+
+  if (code == STATUS_SINGLE_STEP && t_guardRearmPage != 0) {
+    DWORD ignored = 0;
+    VirtualProtect(reinterpret_cast<void *>(t_guardRearmPage),
+                   g_writeTracePageSize,
+                   g_writeTraceBaseProtect | PAGE_GUARD,
+                   &ignored);
+    t_guardRearmPage = 0;
+    ep->ContextRecord->EFlags &= ~0x100;
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void DisarmWriteTrace() {
+  if (g_writeTraceArmed && g_writeTracePage && g_writeTracePageSize) {
+    DWORD ignored = 0;
+    VirtualProtect(reinterpret_cast<void *>(g_writeTracePage),
+                   g_writeTracePageSize,
+                   g_writeTraceBaseProtect,
+                   &ignored);
+  }
+
+  g_writeTraceArmed = false;
+  g_writeTraceOfficerBase = 0;
+  g_writeTraceOfficerId = 0;
+  g_writeTracePage = 0;
+  g_writeTracePageSize = 0;
+  g_writeTraceBaseProtect = 0;
+  g_writeTraceWriteIndex = 0;
+  g_writeTraceReadIndex = 0;
+
+  if (g_writeTraceVeh) {
+    RemoveVectoredExceptionHandler(g_writeTraceVeh);
+    g_writeTraceVeh = nullptr;
+  }
+}
+
+bool ArmWriteTrace(uintptr_t officerBase, uint16_t officerId) {
+  if (g_writeTraceArmed)
+    return true;
+
+  SYSTEM_INFO si{};
+  GetSystemInfo(&si);
+  const uintptr_t pageSize = static_cast<uintptr_t>(si.dwPageSize);
+  const uintptr_t page = (officerBase + kTraitSlotBase) & ~(pageSize - 1);
+
+  if (!g_writeTraceVeh) {
+    g_writeTraceVeh = AddVectoredExceptionHandler(1, TraitWriteTraceVeh);
+    if (!g_writeTraceVeh)
+      return false;
+  }
+
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (!VirtualQuery(reinterpret_cast<const void *>(page), &mbi, sizeof(mbi))) {
+    RemoveVectoredExceptionHandler(g_writeTraceVeh);
+    g_writeTraceVeh = nullptr;
+    return false;
+  }
+
+  const DWORD baseProtect = mbi.Protect & ~PAGE_GUARD;
+  DWORD oldProtect = 0;
+  if (!VirtualProtect(reinterpret_cast<void *>(page),
+                      pageSize,
+                      baseProtect | PAGE_GUARD,
+                      &oldProtect)) {
+    RemoveVectoredExceptionHandler(g_writeTraceVeh);
+    g_writeTraceVeh = nullptr;
+    return false;
+  }
+
+  g_writeTraceOfficerBase = officerBase;
+  g_writeTraceOfficerId = officerId;
+  g_writeTracePage = page;
+  g_writeTracePageSize = pageSize;
+  g_writeTraceBaseProtect = oldProtect & ~PAGE_GUARD;
+  g_writeTraceWriteIndex = 0;
+  g_writeTraceReadIndex = 0;
+  g_writeTraceArmed = true;
+
+  AddLog(u8"[기재3 진단] 쓰기 추적 시작 ID:%u base:%p. 이제 기재 추가 후 취소하세요.",
+         static_cast<unsigned>(officerId),
+         reinterpret_cast<void *>(officerBase));
+  return true;
+}
+
+void FlushWriteTraceEvents() {
+  if (!g_writeTraceArmed)
+    return;
+
+  LONG writeCount = g_writeTraceWriteIndex;
+  if (writeCount > kWriteTraceEventCapacity)
+    writeCount = kWriteTraceEventCapacity;
+
+  const uintptr_t exeBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(L"SAN8RPK.exe"));
+
+  while (g_writeTraceReadIndex < writeCount) {
+    const WriteTraceEvent &ev =
+        g_writeTraceEvents[static_cast<size_t>(g_writeTraceReadIndex++)];
+
+    int slot = 0;
+    if (ev.address >= g_writeTraceOfficerBase + kTraitSlotBase) {
+      slot = static_cast<int>((ev.address - (g_writeTraceOfficerBase + kTraitSlotBase)) /
+                              sizeof(uintptr_t)) + 1;
+    }
+
+    if (exeBase && ev.rip >= exeBase) {
+      AddLog(u8"[기재3 진단/WRITE] ID:%u 슬롯%d 주소:%p RIP:SAN8RPK.exe+0x%llX",
+             static_cast<unsigned>(g_writeTraceOfficerId),
+             slot,
+             reinterpret_cast<void *>(ev.address),
+             static_cast<unsigned long long>(ev.rip - exeBase));
+    } else {
+      AddLog(u8"[기재3 진단/WRITE] ID:%u 슬롯%d 주소:%p RIP:%p",
+             static_cast<unsigned>(g_writeTraceOfficerId),
+             slot,
+             reinterpret_cast<void *>(ev.address),
+             reinterpret_cast<void *>(ev.rip));
+    }
+  }
+}
 
 bool ReadU16(uintptr_t address, uint16_t &out) {
   __try {
@@ -176,6 +352,7 @@ void SetInProgressTraitDiagnostics(bool enable) {
   g_baselineReady = false;
   g_rosterBase = 0;
   g_lastPollMs = 0;
+  DisarmWriteTrace();
 
   if (enable) {
     AddLog(u8"[기재3 진단] 시작. 실제 무장 5102명의 기재 슬롯(+88/+90/+98) 변화를 읽기 전용으로 감시합니다.");
@@ -193,6 +370,8 @@ bool IsInProgressTraitDiagnosticsEnabled() {
 void TickInProgressTraitDiagnostics() {
   if (!g_enabled)
     return;
+
+  FlushWriteTraceEvents();
 
   const ULONGLONG now = GetTickCount64();
   if (g_lastPollMs != 0 && now - g_lastPollMs < kPollIntervalMs)
