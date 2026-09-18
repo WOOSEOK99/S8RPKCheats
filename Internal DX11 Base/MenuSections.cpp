@@ -633,6 +633,20 @@ namespace DX11Base {
         ImGui::EndDisabled();
       }
 
+      if (ImGui::Checkbox(u8"교류 대상 친밀도 100", &bFastRelationship)) {
+        DX11Base::SetFastRelationship(bFastRelationship);
+        NotifyFeatureToggle(u8"교류 대상 친밀도 100", bFastRelationship);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           u8"교류로 관계가 갱신되는 대상의 친밀도를 100으로 처리합니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 관계 메뉴를 열 때 목록 전체를 100으로 만드는 기능은 아닙니다.");
+        ImGui::EndTooltip();
+      }
+
       bool tempMarriage = ::DX11Base::marriageApplied;
       if (ImGui::Checkbox(u8"결혼 무제한", &tempMarriage)) {
         ::DX11Base::SetMarriageCondition(tempMarriage);
