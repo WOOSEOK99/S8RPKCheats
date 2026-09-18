@@ -567,106 +567,172 @@ namespace DX11Base {
   }
 
 
-  bool ResolveTraitObjectsForBatch(
+  bool SeedTraitObjectsForBatch(
       const std::vector<uint16_t>& traitIDs,
-      std::unordered_map<uint16_t, uintptr_t>& outObjects) {
+      std::unordered_map<uint16_t, uintptr_t>& outObjects,
+      uintptr_t& outTraitVtable) {
     outObjects.clear();
+    outTraitVtable = 0;
     if (traitIDs.empty())
-      return true;
-
-    std::unordered_set<uint16_t> wanted;
-    wanted.reserve(traitIDs.size());
-    for (uint16_t id : traitIDs) {
-      if (IsAssignableTraitId(id))
-        wanted.insert(id);
-    }
-    if (wanted.empty())
       return false;
 
-    // 1) 현재 전체 무장 슬롯을 딱 한 번 훑어 이미 사용 중인 기재 객체를 캐시합니다.
-    CacheTraitObjectsFromOfficerArray();
+    auto isWanted = [&traitIDs](uint16_t id) {
+      return std::find(traitIDs.begin(), traitIDs.end(), id) != traitIDs.end();
+    };
 
-    uintptr_t traitVtable = 0;
-    uintptr_t sampleTraitObject = 0;
-    for (uint16_t id : wanted) {
-      auto it = s_traitObjectById.find(id);
-      if (it != s_traitObjectById.end() && ValidateTraitObject(it->second, id)) {
-        outObjects[id] = it->second;
-        if (!sampleTraitObject) {
-          sampleTraitObject = it->second;
-          TryReadPtr(it->second, traitVtable);
-        }
-      }
+    // 이미 캐시된 객체가 있으면 먼저 재사용합니다.
+    for (const auto& entry : s_traitObjectById) {
+      if (!ValidateTraitObject(entry.second, entry.first))
+        continue;
+
+      if (!outTraitVtable)
+        TryReadPtr(entry.second, outTraitVtable);
+
+      if (isWanted(entry.first))
+        outObjects[entry.first] = entry.second;
     }
 
-    if (outObjects.size() >= wanted.size())
+    if (outTraitVtable)
       return true;
 
-    if (!sampleTraitObject || !traitVtable) {
-      for (const auto& entry : s_traitObjectById) {
-        if (ValidateTraitObject(entry.second)) {
-          sampleTraitObject = entry.second;
-          TryReadPtr(entry.second, traitVtable);
-          if (sampleTraitObject && traitVtable)
-            break;
-        }
+    // 캐시가 비어 있다면 전체 무장 배열을 끝까지 훑지 않고,
+    // 첫 정상 기재 객체 하나만 찾아 vtable 기준값으로 사용합니다.
+    uintptr_t gameBase = GetGameBase();
+    if (!gameBase)
+      return false;
+
+    uintptr_t officerArr = 0;
+    if (!TryReadPtr(gameBase + 0x3B8, officerArr) || officerArr < 0x10000)
+      return false;
+
+    for (int officerIndex = 0; officerIndex < 5102; ++officerIndex) {
+      const uintptr_t officerBase =
+          officerArr + static_cast<uintptr_t>(officerIndex) * 0x3D0;
+
+      for (int slot = 0; slot < 3; ++slot) {
+        uintptr_t pTrait = 0;
+        if (!TryReadPtr(officerBase + 0x88 + slot * 0x08, pTrait))
+          continue;
+        if (!ValidateTraitObject(pTrait))
+          continue;
+
+        uint16_t id = 0;
+        if (!TryReadU16(pTrait + 0x08, id))
+          continue;
+
+        CacheTraitObject(pTrait);
+        TryReadPtr(pTrait, outTraitVtable);
+        if (isWanted(id))
+          outObjects[id] = pTrait;
+
+        return outTraitVtable != 0;
       }
     }
-    if (!sampleTraitObject || !traitVtable)
+
+    return false;
+  }
+
+  bool ScanTraitObjectsForBatchStep(
+      const std::vector<uint16_t>& traitIDs,
+      std::unordered_map<uint16_t, uintptr_t>& outObjects,
+      uintptr_t traitVtable,
+      uintptr_t& scanAddress,
+      size_t maxReadableBytes,
+      bool& finished) {
+    finished = false;
+    if (traitIDs.empty() || !traitVtable) {
+      finished = true;
+      return false;
+    }
+
+    if (outObjects.size() >= traitIDs.size()) {
+      finished = true;
+      return true;
+    }
+
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const uintptr_t minAddress =
+        reinterpret_cast<uintptr_t>(si.lpMinimumApplicationAddress);
+    const uintptr_t maxAddress =
+        reinterpret_cast<uintptr_t>(si.lpMaximumApplicationAddress);
+
+    if (scanAddress < minAddress)
+      scanAddress = minAddress;
+    if (scanAddress >= maxAddress) {
+      finished = true;
       return !outObjects.empty();
+    }
 
-    // 2) 일괄 기능에서는 프로세스 전체를 검색하지 않습니다.
-    //    이미 확인된 기재 객체와 같은 AllocationBase(게임의 기재 카탈로그 할당 영역)만
-    //    한 번 순회해 누락된 기재를 수집합니다. 이 방식으로 UI 프리징을 피합니다.
-    MEMORY_BASIC_INFORMATION sampleMbi{};
-    if (VirtualQuery(reinterpret_cast<LPCVOID>(sampleTraitObject),
-                     &sampleMbi, sizeof(sampleMbi)) == 0)
-      return !outObjects.empty();
+    size_t scannedReadable = 0;
 
-    const uintptr_t allocationBase =
-        reinterpret_cast<uintptr_t>(sampleMbi.AllocationBase);
-    uintptr_t address = allocationBase;
+    auto isWanted = [&traitIDs](uint16_t id) {
+      return std::find(traitIDs.begin(), traitIDs.end(), id) != traitIDs.end();
+    };
 
-    while (address > 0 && outObjects.size() < wanted.size()) {
+    while (scanAddress < maxAddress && scannedReadable < maxReadableBytes) {
       MEMORY_BASIC_INFORMATION mbi{};
-      if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0)
+      if (VirtualQuery(reinterpret_cast<LPCVOID>(scanAddress), &mbi, sizeof(mbi)) == 0) {
+        finished = true;
         break;
-
-      if (reinterpret_cast<uintptr_t>(mbi.AllocationBase) != allocationBase)
-        break;
+      }
 
       const uintptr_t regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
-      const uintptr_t next = regionBase + mbi.RegionSize;
-      if (next <= address)
+      const uintptr_t regionEnd = regionBase + mbi.RegionSize;
+      if (regionEnd <= scanAddress) {
+        finished = true;
         break;
+      }
 
-      if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect) &&
-          mbi.RegionSize >= 0x10) {
-        const uintptr_t regionEnd = next;
-        uintptr_t p = (regionBase + 7) & ~static_cast<uintptr_t>(7);
+      if (mbi.State != MEM_COMMIT || !IsReadablePage(mbi.Protect) || mbi.RegionSize < 0x10) {
+        scanAddress = regionEnd;
+        continue;
+      }
 
-        for (; p + 0x0A <= regionEnd; p += 8) {
-          uintptr_t vtable = 0;
-          if (!TryReadPtr(p, vtable) || vtable != traitVtable)
-            continue;
+      uintptr_t begin = scanAddress > regionBase ? scanAddress : regionBase;
+      begin = (begin + 7) & ~static_cast<uintptr_t>(7);
 
-          uint16_t id = 0;
-          if (!TryReadU16(p + 0x08, id))
-            continue;
-          if (wanted.count(id) == 0 || outObjects.count(id) != 0)
-            continue;
+      size_t budgetLeft = maxReadableBytes - scannedReadable;
+      uintptr_t budgetEnd = begin + budgetLeft;
+      if (budgetEnd < begin || budgetEnd > regionEnd)
+        budgetEnd = regionEnd;
 
-          if (ValidateTraitObject(p, id, traitVtable)) {
-            s_traitObjectById[id] = p;
-            outObjects[id] = p;
-            if (outObjects.size() >= wanted.size())
-              break;
+      for (uintptr_t p = begin; p + 0x0A <= budgetEnd; p += 8) {
+        uintptr_t vtable = 0;
+        if (!TryReadPtr(p, vtable) || vtable != traitVtable)
+          continue;
+
+        uint16_t id = 0;
+        if (!TryReadU16(p + 0x08, id))
+          continue;
+        if (!isWanted(id) || outObjects.count(id) != 0)
+          continue;
+
+        if (ValidateTraitObject(p, id, traitVtable)) {
+          s_traitObjectById[id] = p;
+          outObjects[id] = p;
+          if (outObjects.size() >= traitIDs.size()) {
+            finished = true;
+            scanAddress = p + 8;
+            return true;
           }
         }
       }
 
-      address = next;
+      const size_t consumed =
+          budgetEnd > begin ? static_cast<size_t>(budgetEnd - begin) : 0;
+      scannedReadable += consumed;
+
+      if (budgetEnd < regionEnd) {
+        scanAddress = budgetEnd;
+        break;
+      }
+
+      scanAddress = regionEnd;
     }
+
+    if (scanAddress >= maxAddress)
+      finished = true;
 
     return !outObjects.empty();
   }
