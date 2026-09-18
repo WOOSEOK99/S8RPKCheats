@@ -119,6 +119,12 @@ namespace DX11Base {
     //  기존 함수들 (변경 없음)
     // ───────────────────────────────────────────────
 
+    uintptr_t GetGameBaseFast() {
+        if (!s_gameBasePtrAddr)
+            return 0;
+        return *reinterpret_cast<uintptr_t *>(s_gameBasePtrAddr);
+    }
+
     uintptr_t GetGameBase() {
         if (!s_gameBasePtrAddr)
             return 0;
