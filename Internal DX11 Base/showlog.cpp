@@ -136,6 +136,11 @@ namespace DX11Base {
     return result;
   }
 
+  void ClearLogs() {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    g_loveLogs.clear();
+  }
+
   void SaveMemoryLog(uintptr_t p1) {
     if (p1 == 0)
       return;
