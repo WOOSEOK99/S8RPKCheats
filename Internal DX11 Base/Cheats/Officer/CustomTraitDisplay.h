@@ -2,11 +2,13 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace DX11Base {
 
@@ -15,6 +17,7 @@ extern HMODULE g_hModule;
 struct CustomTraitDisplayInfo {
   std::string name;
   std::string desc;
+  int grade = 0; // 1=황금, 2=녹색, 3=적색
 };
 
 namespace CustomTraitDisplayDetail {
@@ -78,6 +81,36 @@ inline bool ReadJsonStringValue(const std::string &line, const char *field, std:
     out.push_back(c);
   }
   return false;
+}
+
+inline bool ReadJsonIntValue(const std::string &line, const char *field, int &out) {
+  const std::string key = std::string("\"") + field + "\"";
+  size_t p = line.find(key);
+  if (p == std::string::npos)
+    return false;
+
+  p = line.find(':', p + key.size());
+  if (p == std::string::npos)
+    return false;
+
+  ++p;
+  while (p < line.size() && std::isspace(static_cast<unsigned char>(line[p])))
+    ++p;
+
+  size_t end = p;
+  if (end < line.size() && (line[end] == '-' || line[end] == '+'))
+    ++end;
+  while (end < line.size() && std::isdigit(static_cast<unsigned char>(line[end])))
+    ++end;
+  if (end == p || (end == p + 1 && (line[p] == '-' || line[p] == '+')))
+    return false;
+
+  try {
+    out = std::stoi(line.substr(p, end - p));
+    return true;
+  } catch (...) {
+    return false;
+  }
 }
 
 struct Cache {
@@ -167,6 +200,7 @@ inline bool ReloadIfNeeded() {
     CustomTraitDisplayInfo info;
     ReadJsonStringValue(line, "name", info.name);
     ReadJsonStringValue(line, "desc", info.desc);
+    ReadJsonIntValue(line, "grade", info.grade);
 
     try {
       parsed[std::stoi(key)] = std::move(info);
@@ -199,6 +233,36 @@ inline bool GetCustomTraitDisplayInfo(uint16_t traitId, CustomTraitDisplayInfo &
 
   out = it->second;
   return !out.name.empty() || !out.desc.empty();
+}
+
+inline bool HasCustomTraitConfigFile() {
+  return !CustomTraitDisplayDetail::ResolveConfigPath().empty();
+}
+
+// customNames에 실제 이름이 등록된 항목만 "사용 가능한 커스텀 기재"로 취급합니다.
+// JSON key는 0-base, 게임 기재 ID는 1-base입니다.
+inline std::vector<uint16_t> GetDefinedCustomTraitIds() {
+  CustomTraitDisplayDetail::ReloadIfNeeded();
+
+  std::vector<uint16_t> ids;
+  auto &map = CustomTraitDisplayDetail::GetCache().byIndex;
+  ids.reserve(map.size());
+
+  for (const auto &entry : map) {
+    if (entry.first < 0 || entry.first >= 0xFFFF)
+      continue;
+    if (entry.second.name.empty())
+      continue;
+
+    const uint32_t traitId = static_cast<uint32_t>(entry.first) + 1u;
+    if (traitId == 0 || traitId > 0xFFFF)
+      continue;
+    ids.push_back(static_cast<uint16_t>(traitId));
+  }
+
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  return ids;
 }
 
 } // namespace DX11Base
