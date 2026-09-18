@@ -669,6 +669,10 @@ namespace DX11Base {
           ImGui::SetClipboardText(GetFullLogs().c_str());
           AddLog(u8"[Debug] 로그가 클립보드에 복사되었습니다. (필터 적용됨)");
         }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"로그 클리어", ImVec2(160, 30))) {
+          ClearLogs();
+        }
 
         ImGui::Separator();
         ImGui::Text("GameBase: %llX", gameBase);
