@@ -3,6 +3,7 @@
 #include "Cheats/Civilian/BangmokCity.h"
 #include "Cheats/Civilian/Bigcityconvert.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
+#include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/Civilian/DomesticsMult.h"
 #include "Cheats/Civilian/NonggyeongCity.h"
 #include "Cheats/Civilian/SangeopCity.h"
@@ -512,6 +513,34 @@ namespace DX11Base {
         if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
           NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
           SaveConfig();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextUnformatted(u8"보주 전체 개방");
+        ImGui::SameLine(120.0f * scale);
+        if (ImGui::Button(u8"ON##AllJewelOpen", ImVec2(70.0f * scale, 0.0f))) {
+          if (DX11Base::SetAllJewelsOpen(true))
+            DX11Base::AddNotification(u8"보주 전체 개방 ON");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"OFF##AllJewelOpen", ImVec2(70.0f * scale, 0.0f))) {
+          if (DX11Base::SetAllJewelsOpen(false))
+            DX11Base::AddNotification(u8"보주 전체 개방 OFF");
+        }
+
+        ImGui::TextUnformatted(u8"보조 보주 전체 사용");
+        ImGui::SameLine(120.0f * scale);
+        if (ImGui::Button(u8"ON##AllSecondaryJewel", ImVec2(70.0f * scale, 0.0f))) {
+          if (DX11Base::SetAllSecondaryJewelsEnabled(true))
+            DX11Base::AddNotification(u8"보조 보주 전체 사용 ON");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"OFF##AllSecondaryJewel", ImVec2(70.0f * scale, 0.0f))) {
+          if (DX11Base::SetAllSecondaryJewelsEnabled(false))
+            DX11Base::AddNotification(u8"보조 보주 전체 사용 OFF");
         }
       }
 
