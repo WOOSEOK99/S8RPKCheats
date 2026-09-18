@@ -519,28 +519,17 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextUnformatted(u8"보주 전체 개방");
-        ImGui::SameLine(120.0f * scale);
-        if (ImGui::Button(u8"ON##AllJewelOpen", ImVec2(70.0f * scale, 0.0f))) {
-          if (DX11Base::SetAllJewelsOpen(true))
-            DX11Base::AddNotification(u8"보주 전체 개방 ON");
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(u8"OFF##AllJewelOpen", ImVec2(70.0f * scale, 0.0f))) {
-          if (DX11Base::SetAllJewelsOpen(false))
-            DX11Base::AddNotification(u8"보주 전체 개방 OFF");
+        bool allJewelsOpen = DX11Base::AreAllJewelsOpen();
+        if (ImGui::Checkbox(u8"보주 전체 개방", &allJewelsOpen)) {
+          if (DX11Base::SetAllJewelsOpen(allJewelsOpen))
+            DX11Base::AddNotification(allJewelsOpen ? u8"보주 전체 개방 ON" : u8"보주 전체 개방 OFF");
         }
 
-        ImGui::TextUnformatted(u8"보조 보주 전체 사용");
-        ImGui::SameLine(120.0f * scale);
-        if (ImGui::Button(u8"ON##AllSecondaryJewel", ImVec2(70.0f * scale, 0.0f))) {
-          if (DX11Base::SetAllSecondaryJewelsEnabled(true))
-            DX11Base::AddNotification(u8"보조 보주 전체 사용 ON");
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(u8"OFF##AllSecondaryJewel", ImVec2(70.0f * scale, 0.0f))) {
-          if (DX11Base::SetAllSecondaryJewelsEnabled(false))
-            DX11Base::AddNotification(u8"보조 보주 전체 사용 OFF");
+        bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
+        if (ImGui::Checkbox(u8"보조 보주 전체 사용", &allSecondaryJewels)) {
+          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels))
+            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 전체 사용 ON"
+                                                         : u8"보조 보주 전체 사용 OFF");
         }
       }
 
