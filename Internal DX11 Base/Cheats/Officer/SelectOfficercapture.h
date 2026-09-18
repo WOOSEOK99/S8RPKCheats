@@ -59,6 +59,10 @@ namespace DX11Base {
   void DrawSpecialtyInfoWindow(float scale);
   void UpdateAutoSpecialtyDistribution(bool isCouncil);
 
+  // 메인 UI용: 모든 유효 무장의 빈 기재 슬롯을 등급 필터에 맞춰 랜덤으로 채웁니다.
+  void OpenBatchRandomTraitAssignmentWindow();
+  void DrawBatchRandomTraitAssignmentWindow(float scale);
+
   // 다중 선택 무장 일괄 패치 API
   size_t GetSelectedOfficerIDCount();
   void   ApplyPatchToSelectedOfficers(std::function<void(uintptr_t)> patchFn);
