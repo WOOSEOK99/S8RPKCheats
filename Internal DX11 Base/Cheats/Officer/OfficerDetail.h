@@ -22,9 +22,17 @@ namespace DX11Base {
   // 일괄 랜덤 부여용 고속 경로:
   // 필요한 기재 객체를 전체 메모리 스캔 최대 1회로 준비하고,
   // 이후 슬롯에는 검증된 객체 포인터를 직접 기록합니다.
-  bool ResolveTraitObjectsForBatch(
+  bool SeedTraitObjectsForBatch(
       const std::vector<uint16_t>& traitIDs,
-      std::unordered_map<uint16_t, uintptr_t>& outObjects);
+      std::unordered_map<uint16_t, uintptr_t>& outObjects,
+      uintptr_t& outTraitVtable);
+  bool ScanTraitObjectsForBatchStep(
+      const std::vector<uint16_t>& traitIDs,
+      std::unordered_map<uint16_t, uintptr_t>& outObjects,
+      uintptr_t traitVtable,
+      uintptr_t& scanAddress,
+      size_t maxReadableBytes,
+      bool& finished);
   bool SetTraitObjectFast(
       uintptr_t officerBase, int slot, uint16_t traitID, uintptr_t traitObject);
 
