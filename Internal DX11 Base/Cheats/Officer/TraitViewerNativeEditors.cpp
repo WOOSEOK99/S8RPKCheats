@@ -171,17 +171,37 @@ bool Remove(Runtime&rt,const BlockSpec&s) {
 #include "TraitViewerInProgressData.inc"
 #include "TraitViewerBaseEditorData.inc"
 
-static Runtime g_kirase,g_inProgress,g_baseEditor;
+// 진단 전용: 편집 객체에 기재3 원본(+0x238)을 백업하는 확실한 지점에서
+// editor(RDI) 주소만 기록하고 원본 명령을 그대로 재실행합니다.
+static constexpr char kDirtyDiagCaveB64[] =
+  "SIk9OQAAAEiJjzgCAADpAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+static constexpr Reloc kDirtyDiagRelocs[] = {
+  {0x0F,0x12BA1B0},
+};
+static constexpr AssertSpec kDirtyDiagEnableAsserts[] = {
+  {0x12BA1A9,"48898F38020000"},
+};
+static constexpr PatchSpec kDirtyDiagEnablePatches[] = {
+  {0x12BA1A9,PatchKind::JumpCave,nullptr,7,0x00},
+};
+static constexpr PatchSpec kDirtyDiagDisablePatches[] = {
+  {0x12BA1A9,PatchKind::Bytes,"48898F38020000",0,0},
+};
+static constexpr BlockSpec kDirtyDiagSpec = {
+  "trait dirty diag",0x12BA1A9,0x1000,kDirtyDiagCaveB64,
+  kDirtyDiagRelocs,CountOf(kDirtyDiagRelocs),
+  kDirtyDiagEnableAsserts,CountOf(kDirtyDiagEnableAsserts),
+  nullptr,0,
+  kDirtyDiagEnablePatches,CountOf(kDirtyDiagEnablePatches),
+  kDirtyDiagDisablePatches,CountOf(kDirtyDiagDisablePatches)
+};
+
+static Runtime g_kirase,g_inProgress,g_baseEditor,g_dirtyDiagRuntime;
 
 static bool g_dirtyDiagEnabled = false;
-static uint64_t g_dirtyDiagLastCounter = 0;
-static uintptr_t g_dirtyDiagLastEditor = 0;
-static uintptr_t g_dirtyDiagLastOfficer = 0;
-static uintptr_t g_dirtyDiagLastBackup[3] = {};
-static uintptr_t g_dirtyDiagLastCurrent[3] = {};
-static uint32_t g_dirtyDiagLastState370 = 0;
-static uint32_t g_dirtyDiagLastState374 = 0;
-static uint32_t g_dirtyDiagLastState378 = 0;
+static bool g_dirtyDiagBaselineReady = false;
+static uintptr_t g_dirtyDiagBaselineEditor = 0;
+static unsigned char g_dirtyDiagBaseline[0x400] = {};
 
 bool SafeReadPtrDiag(uintptr_t address, uintptr_t &out) {
   __try {
@@ -194,24 +214,12 @@ bool SafeReadPtrDiag(uintptr_t address, uintptr_t &out) {
   }
 }
 
-bool SafeReadU32Diag(uintptr_t address, uint32_t &out) {
+bool SafeCopyDiag(void *dst, const void *src, size_t size) {
   __try {
-    out = *reinterpret_cast<uint32_t *>(address);
+    std::memcpy(dst, src, size);
     return true;
   }
   __except (EXCEPTION_EXECUTE_HANDLER) {
-    out = 0;
-    return false;
-  }
-}
-
-bool SafeReadU64Diag(uintptr_t address, uint64_t &out) {
-  __try {
-    out = *reinterpret_cast<uint64_t *>(address);
-    return true;
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER) {
-    out = 0;
     return false;
   }
 }
@@ -227,6 +235,40 @@ uint16_t TraitIdFromPtrDiag(uintptr_t p) {
   }
 }
 
+uintptr_t GetDirtyDiagEditor() {
+  if (!g_dirtyDiagRuntime.applied || g_dirtyDiagRuntime.cave < 0x10000)
+    return 0;
+  uintptr_t editor = 0;
+  SafeReadPtrDiag(g_dirtyDiagRuntime.cave + 0x40, editor);
+  return editor;
+}
+
+void LogDirtyDiagTraits(const char *tag, uintptr_t editor) {
+  uintptr_t officer = 0;
+  uintptr_t backup[3] = {};
+  uintptr_t current[3] = {};
+  SafeReadPtrDiag(editor + 0x1A8, officer);
+  SafeReadPtrDiag(editor + 0x228, backup[0]);
+  SafeReadPtrDiag(editor + 0x230, backup[1]);
+  SafeReadPtrDiag(editor + 0x238, backup[2]);
+  if (officer > 0x10000) {
+    SafeReadPtrDiag(officer + 0x88, current[0]);
+    SafeReadPtrDiag(officer + 0x90, current[1]);
+    SafeReadPtrDiag(officer + 0x98, current[2]);
+  }
+  AddLog(
+      u8"[기재 dirty 진단/%s] editor:%p officer:%p 원본:%u/%u/%u 현재:%u/%u/%u",
+      tag,
+      reinterpret_cast<void *>(editor),
+      reinterpret_cast<void *>(officer),
+      static_cast<unsigned>(TraitIdFromPtrDiag(backup[0])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(backup[1])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(backup[2])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(current[0])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(current[1])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(current[2])));
+}
+
 } // namespace
 
 bool SetTraitViewerKirase(bool enable){return enable?Install(g_kirase,kKiraseSpec):Remove(g_kirase,kKiraseSpec);}
@@ -235,19 +277,31 @@ bool SetTraitViewerInProgressEditor(bool enable){return enable?Install(g_inProgr
 bool IsTraitViewerInProgressEditorApplied(){return g_inProgress.applied;}
 
 void SetInProgressTraitDirtyDiagnostics(bool enable) {
-  g_dirtyDiagEnabled = enable;
-  g_dirtyDiagLastCounter = 0;
-  g_dirtyDiagLastEditor = 0;
-  g_dirtyDiagLastOfficer = 0;
-  std::memset(g_dirtyDiagLastBackup, 0, sizeof(g_dirtyDiagLastBackup));
-  std::memset(g_dirtyDiagLastCurrent, 0, sizeof(g_dirtyDiagLastCurrent));
-  g_dirtyDiagLastState370 = 0;
-  g_dirtyDiagLastState374 = 0;
-  g_dirtyDiagLastState378 = 0;
+  if (g_dirtyDiagEnabled == enable)
+    return;
 
-  AddLog(enable
-      ? u8"[기재 dirty 진단] 시작. 기재목록에서 결정 후 무장 편집 화면으로 돌아오세요."
-      : u8"[기재 dirty 진단] 종료.");
+  if (enable) {
+    if (!g_inProgress.applied) {
+      AddLog(u8"[기재 dirty 진단] 시작 실패: 먼저 '기재 화면 보이기'를 활성화하세요.");
+      return;
+    }
+    if (!Install(g_dirtyDiagRuntime,kDirtyDiagSpec)) {
+      AddLog(u8"[기재 dirty 진단] 시작 실패: 12BA1A9 진단 훅 설치 실패.");
+      return;
+    }
+    g_dirtyDiagEnabled = true;
+    g_dirtyDiagBaselineReady = false;
+    g_dirtyDiagBaselineEditor = 0;
+    AddLog(u8"[기재 dirty 진단] 시작 완료. 무장 편집 화면을 새로 열어 editor 주소를 잡으세요.");
+    return;
+  }
+
+  if (g_dirtyDiagRuntime.applied)
+    Remove(g_dirtyDiagRuntime,kDirtyDiagSpec);
+  g_dirtyDiagEnabled = false;
+  g_dirtyDiagBaselineReady = false;
+  g_dirtyDiagBaselineEditor = 0;
+  AddLog(u8"[기재 dirty 진단] 종료.");
 }
 
 bool IsInProgressTraitDirtyDiagnosticsEnabled() {
@@ -255,72 +309,70 @@ bool IsInProgressTraitDirtyDiagnosticsEnabled() {
 }
 
 void TickInProgressTraitDirtyDiagnostics() {
-  if (!g_dirtyDiagEnabled || !g_inProgress.applied || g_inProgress.cave < 0x10000)
+  // 버튼식 비교로 변경. 매 프레임 로그를 발생시키지 않습니다.
+}
+
+void CaptureInProgressTraitDirtyBaseline() {
+  if (!g_dirtyDiagEnabled) {
+    AddLog(u8"[기재 dirty 진단] 기준 캡처 실패: 진단을 먼저 켜세요.");
     return;
-
-  const uintptr_t diag = g_inProgress.cave;
-  uint64_t counter = 0;
-  uintptr_t editor = 0;
-  uintptr_t officer = 0;
-  if (!SafeReadU64Diag(diag + 0x500, counter) ||
-      !SafeReadPtrDiag(diag + 0x508, editor) ||
-      !SafeReadPtrDiag(diag + 0x510, officer))
+  }
+  const uintptr_t editor = GetDirtyDiagEditor();
+  if (editor < 0x10000) {
+    AddLog(u8"[기재 dirty 진단] 기준 캡처 실패: editor 미포착. 무장 편집 화면을 닫았다 다시 여세요.");
     return;
-
-  if (counter == 0 || editor < 0x10000 || officer < 0x10000)
+  }
+  if (!SafeCopyDiag(g_dirtyDiagBaseline,reinterpret_cast<const void *>(editor),sizeof(g_dirtyDiagBaseline))) {
+    AddLog(u8"[기재 dirty 진단] 기준 캡처 실패: editor 메모리 읽기 실패.");
     return;
-  if (counter == g_dirtyDiagLastCounter && editor == g_dirtyDiagLastEditor &&
-      officer == g_dirtyDiagLastOfficer)
+  }
+  g_dirtyDiagBaselineReady = true;
+  g_dirtyDiagBaselineEditor = editor;
+  LogDirtyDiagTraits("기준",editor);
+  AddLog(u8"[기재 dirty 진단] 기준 캡처 완료.");
+}
+
+void CompareInProgressTraitDirtyState() {
+  if (!g_dirtyDiagEnabled || !g_dirtyDiagBaselineReady) {
+    AddLog(u8"[기재 dirty 진단] 비교 실패: 먼저 기준 캡처를 하세요.");
     return;
+  }
 
-  uintptr_t backup[3] = {};
-  uintptr_t current[3] = {};
-  SafeReadPtrDiag(editor + 0x228, backup[0]);
-  SafeReadPtrDiag(editor + 0x230, backup[1]);
-  SafeReadPtrDiag(editor + 0x238, backup[2]);
-  SafeReadPtrDiag(officer + 0x88, current[0]);
-  SafeReadPtrDiag(officer + 0x90, current[1]);
-  SafeReadPtrDiag(officer + 0x98, current[2]);
-
-  uint32_t s370 = 0, s374 = 0, s378 = 0;
-  SafeReadU32Diag(editor + 0x370, s370);
-  SafeReadU32Diag(editor + 0x374, s374);
-  SafeReadU32Diag(editor + 0x378, s378);
-
-  const bool changed =
-      editor != g_dirtyDiagLastEditor ||
-      officer != g_dirtyDiagLastOfficer ||
-      std::memcmp(backup, g_dirtyDiagLastBackup, sizeof(backup)) != 0 ||
-      std::memcmp(current, g_dirtyDiagLastCurrent, sizeof(current)) != 0 ||
-      s370 != g_dirtyDiagLastState370 ||
-      s374 != g_dirtyDiagLastState374 ||
-      s378 != g_dirtyDiagLastState378;
-
-  g_dirtyDiagLastCounter = counter;
-  if (!changed)
+  const uintptr_t editor = GetDirtyDiagEditor();
+  if (editor < 0x10000 || editor != g_dirtyDiagBaselineEditor) {
+    AddLog(u8"[기재 dirty 진단] 비교 실패: editor가 바뀌었습니다. 같은 무장 화면에서 다시 기준 캡처하세요.");
     return;
+  }
 
-  AddLog(
-      u8"[기재 dirty 진단] call:%llu editor:%p officer:%p "
-      u8"원본:%u/%u/%u 현재:%u/%u/%u state370:%08X state374:%08X state378:%08X",
-      static_cast<unsigned long long>(counter),
-      reinterpret_cast<void *>(editor),
-      reinterpret_cast<void *>(officer),
-      static_cast<unsigned>(TraitIdFromPtrDiag(backup[0])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(backup[1])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(backup[2])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(current[0])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(current[1])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(current[2])),
-      s370, s374, s378);
+  unsigned char now[0x400] = {};
+  if (!SafeCopyDiag(now,reinterpret_cast<const void *>(editor),sizeof(now))) {
+    AddLog(u8"[기재 dirty 진단] 비교 실패: editor 메모리 읽기 실패.");
+    return;
+  }
 
-  g_dirtyDiagLastEditor = editor;
-  g_dirtyDiagLastOfficer = officer;
-  std::memcpy(g_dirtyDiagLastBackup, backup, sizeof(backup));
-  std::memcpy(g_dirtyDiagLastCurrent, current, sizeof(current));
-  g_dirtyDiagLastState370 = s370;
-  g_dirtyDiagLastState374 = s374;
-  g_dirtyDiagLastState378 = s378;
+  LogDirtyDiagTraits("현재",editor);
+
+  int logged = 0;
+  for (size_t off = 0; off + 8 <= sizeof(now); off += 8) {
+    uint64_t before = 0, after = 0;
+    std::memcpy(&before,g_dirtyDiagBaseline + off,8);
+    std::memcpy(&after,now + off,8);
+    if (before == after)
+      continue;
+    AddLog(u8"[기재 dirty 진단/DIFF] +0x%03zX : %016llX -> %016llX",
+           off,
+           static_cast<unsigned long long>(before),
+           static_cast<unsigned long long>(after));
+    if (++logged >= 80) {
+      AddLog(u8"[기재 dirty 진단] 변경 항목이 많아 80개까지만 표시합니다.");
+      break;
+    }
+  }
+
+  if (logged == 0)
+    AddLog(u8"[기재 dirty 진단] editor +0x000~+0x3FF 범위에서 변경 없음.");
+  else
+    AddLog(u8"[기재 dirty 진단] 비교 완료: %d개 qword 변경.",logged);
 }
 
 bool SetTraitViewerBaseEditor(bool enable){return enable?Install(g_baseEditor,kBaseEditorSpec):Remove(g_baseEditor,kBaseEditorSpec);}
