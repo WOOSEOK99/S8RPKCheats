@@ -7,6 +7,8 @@
 
 #include <array>
 #include <cstdint>
+#include <fstream>
+#include <string>
 
 namespace DX11Base {
 namespace {
@@ -97,6 +99,49 @@ TraitSlotState ReadSlot(uintptr_t officerBase, int slot) {
   return s;
 }
 
+bool DumpCodeRange(uintptr_t exeBase, uintptr_t offset, size_t size, const char *fileName) {
+  if (!exeBase || !fileName || size == 0)
+    return false;
+
+  std::vector<uint8_t> bytes(size);
+  __try {
+    std::memcpy(bytes.data(), reinterpret_cast<const void *>(exeBase + offset), size);
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+
+  char cwd[MAX_PATH] = {};
+  if (!GetCurrentDirectoryA(MAX_PATH, cwd))
+    return false;
+
+  std::string path = std::string(cwd) + "\\" + fileName;
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out)
+    return false;
+
+  out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  out.close();
+
+  AddLog(u8"[기재3 진단] 코드 덤프 저장: %s (SAN8RPK.exe+0x%llX, 0x%zX bytes)",
+         path.c_str(),
+         static_cast<unsigned long long>(offset),
+         size);
+  return true;
+}
+
+void DumpRelevantEditorCode() {
+  const uintptr_t exeBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(L"SAN8RPK.exe"));
+  if (!exeBase)
+    return;
+
+  // 선택창의 기존 슬롯 읽기/선택 쓰기/남은 슬롯 삭제가 모두 포함된 범위.
+  DumpCodeRange(exeBase, 0x12E2600, 0x600, "trait3_diag_12E2600.bin");
+
+  // 진행 중 편집기 저장/초기화 훅 주변. 취소 복원 경로가 caller 쪽에 있는지도 함께 확인합니다.
+  DumpCodeRange(exeBase, 0x12B6500, 0x800, "trait3_diag_12B6500.bin");
+}
+
 void CaptureBaseline() {
   if (!ResolveRosterBase())
     return;
@@ -126,6 +171,7 @@ void SetInProgressTraitDiagnostics(bool enable) {
   if (enable) {
     AddLog(u8"[기재3 진단] 시작. 실제 무장 5102명의 기재 슬롯(+88/+90/+98) 변화를 읽기 전용으로 감시합니다.");
     AddLog(u8"[기재3 진단] 중요: '변경' 로그가 확인 버튼을 누르기 전에 나오면 실제 무장 데이터가 즉시 바뀐 것입니다.");
+    DumpRelevantEditorCode();
   } else {
     AddLog(u8"[기재3 진단] 종료.");
   }
