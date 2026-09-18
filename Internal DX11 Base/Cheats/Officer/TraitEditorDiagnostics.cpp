@@ -101,17 +101,23 @@ TraitSlotState ReadSlot(uintptr_t officerBase, int slot) {
   return s;
 }
 
+bool SafeCopyMemory(void *dst, const void *src, size_t size) {
+  __try {
+    std::memcpy(dst, src, size);
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
 bool DumpCodeRange(uintptr_t exeBase, uintptr_t offset, size_t size, const char *fileName) {
   if (!exeBase || !fileName || size == 0)
     return false;
 
   std::vector<uint8_t> bytes(size);
-  __try {
-    std::memcpy(bytes.data(), reinterpret_cast<const void *>(exeBase + offset), size);
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER) {
+  if (!SafeCopyMemory(bytes.data(), reinterpret_cast<const void *>(exeBase + offset), size))
     return false;
-  }
 
   char cwd[MAX_PATH] = {};
   if (!GetCurrentDirectoryA(MAX_PATH, cwd))
