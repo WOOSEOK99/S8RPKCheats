@@ -645,25 +645,23 @@ namespace DX11Base {
         const uintptr_t regionEnd = next;
         uintptr_t p = (regionBase + 7) & ~static_cast<uintptr_t>(7);
 
-        __try {
-          for (; p + 0x0A <= regionEnd; p += 8) {
-            if (*reinterpret_cast<uintptr_t*>(p) != traitVtable)
-              continue;
+        for (; p + 0x0A <= regionEnd; p += 8) {
+          uintptr_t vtable = 0;
+          if (!TryReadPtr(p, vtable) || vtable != traitVtable)
+            continue;
 
-            const uint16_t id = *reinterpret_cast<uint16_t*>(p + 0x08);
-            if (wanted.count(id) == 0 || outObjects.count(id) != 0)
-              continue;
+          uint16_t id = 0;
+          if (!TryReadU16(p + 0x08, id))
+            continue;
+          if (wanted.count(id) == 0 || outObjects.count(id) != 0)
+            continue;
 
-            if (ValidateTraitObject(p, id, traitVtable)) {
-              s_traitObjectById[id] = p;
-              outObjects[id] = p;
-              if (outObjects.size() >= wanted.size())
-                break;
-            }
+          if (ValidateTraitObject(p, id, traitVtable)) {
+            s_traitObjectById[id] = p;
+            outObjects[id] = p;
+            if (outObjects.size() >= wanted.size())
+              break;
           }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-          // 비정상 페이지 하나 때문에 전체 준비가 중단되지 않도록 다음 region으로 진행합니다.
         }
       }
 
