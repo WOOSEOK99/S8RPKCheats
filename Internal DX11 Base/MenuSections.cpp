@@ -987,9 +987,20 @@ namespace DX11Base {
         DX11Base::OpenTraitTextEditorWindow();
       }
 
+      if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여", ImVec2(220.0f * scale, 28.0f * scale))) {
+        DX11Base::OpenBatchRandomTraitAssignmentWindow();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"모든 유효 무장의 기존 기재는 유지하고 빈 슬롯만 랜덤으로 채웁니다.");
+        ImGui::TextUnformatted(u8"실행 전 황금/녹색/적색 등급을 선택할 수 있습니다.");
+        ImGui::EndTooltip();
+      }
+
       EndSection(); // 무장 정보
       DX11Base::TickTraitTextEditorAutoApply();
       DX11Base::DrawTraitTextEditorWindow(scale);
+      DX11Base::DrawBatchRandomTraitAssignmentWindow(scale);
 
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
