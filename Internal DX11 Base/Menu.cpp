@@ -3,6 +3,7 @@
 #include "BattleMonitor.h"
 #include "Cheats.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
+#include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/Officer/OfficerDetail.h"
 #include "Cheats/Officer/RoninMonitor.h"
@@ -393,6 +394,9 @@ namespace DX11Base {
       if (p1Ready)
         *(unsigned char *)(p1 + 0xEE) = 200;
     }
+
+    // 저장게임 로드 시 보주 개방 비트맵이 세이브 데이터로 덮이는 경우 자동 재적용.
+    DX11Base::TickJewelSettings();
 
     // 보주 무한 (매 프레임 VirtualQuery 낭비 방지: gameBaseReady가 0x6000까지 보장)
     if (bFastJewel) {
