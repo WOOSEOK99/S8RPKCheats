@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <cstring>
 #include <unordered_map>
+#include <unordered_set>
 #include "OfficerDetail.h"
 #include "../../Cheats.h"
 #include "../../MenuState.h"
@@ -582,50 +583,66 @@ namespace DX11Base {
     if (wanted.empty())
       return false;
 
-    // 1) 현재 전체 무장 슬롯을 한 번만 훑어 이미 사용 중인 기재 객체를 최대한 캐시합니다.
+    // 1) 현재 전체 무장 슬롯을 딱 한 번 훑어 이미 사용 중인 기재 객체를 캐시합니다.
     CacheTraitObjectsFromOfficerArray();
 
     uintptr_t traitVtable = 0;
+    uintptr_t sampleTraitObject = 0;
     for (uint16_t id : wanted) {
       auto it = s_traitObjectById.find(id);
       if (it != s_traitObjectById.end() && ValidateTraitObject(it->second, id)) {
         outObjects[id] = it->second;
-        if (!traitVtable)
+        if (!sampleTraitObject) {
+          sampleTraitObject = it->second;
           TryReadPtr(it->second, traitVtable);
+        }
       }
     }
 
     if (outObjects.size() >= wanted.size())
       return true;
 
-    // 캐시에서 vtable을 못 얻은 경우, 현재 캐시에 있는 아무 정상 기재 객체에서 확보합니다.
-    if (!traitVtable) {
+    if (!sampleTraitObject || !traitVtable) {
       for (const auto& entry : s_traitObjectById) {
         if (ValidateTraitObject(entry.second)) {
+          sampleTraitObject = entry.second;
           TryReadPtr(entry.second, traitVtable);
-          if (traitVtable)
+          if (sampleTraitObject && traitVtable)
             break;
         }
       }
     }
-    if (!traitVtable)
+    if (!sampleTraitObject || !traitVtable)
       return !outObjects.empty();
 
-    // 2) 누락된 ID들은 프로세스 전체를 ID마다 반복 검색하지 않고,
-    //    읽기 가능한 메모리를 딱 한 번 순회하면서 동시에 수집합니다.
-    SYSTEM_INFO si{};
-    GetSystemInfo(&si);
-    uintptr_t address = reinterpret_cast<uintptr_t>(si.lpMinimumApplicationAddress);
-    const uintptr_t maxAddress = reinterpret_cast<uintptr_t>(si.lpMaximumApplicationAddress);
+    // 2) 일괄 기능에서는 프로세스 전체를 검색하지 않습니다.
+    //    이미 확인된 기재 객체와 같은 AllocationBase(게임의 기재 카탈로그 할당 영역)만
+    //    한 번 순회해 누락된 기재를 수집합니다. 이 방식으로 UI 프리징을 피합니다.
+    MEMORY_BASIC_INFORMATION sampleMbi{};
+    if (VirtualQuery(reinterpret_cast<LPCVOID>(sampleTraitObject),
+                     &sampleMbi, sizeof(sampleMbi)) == 0)
+      return !outObjects.empty();
 
-    while (address < maxAddress && outObjects.size() < wanted.size()) {
+    const uintptr_t allocationBase =
+        reinterpret_cast<uintptr_t>(sampleMbi.AllocationBase);
+    uintptr_t address = allocationBase;
+
+    while (address > 0 && outObjects.size() < wanted.size()) {
       MEMORY_BASIC_INFORMATION mbi{};
       if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0)
         break;
 
+      if (reinterpret_cast<uintptr_t>(mbi.AllocationBase) != allocationBase)
+        break;
+
       const uintptr_t regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
-      if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect) && mbi.RegionSize >= 0x10) {
-        const uintptr_t regionEnd = regionBase + mbi.RegionSize;
+      const uintptr_t next = regionBase + mbi.RegionSize;
+      if (next <= address)
+        break;
+
+      if (mbi.State == MEM_COMMIT && IsReadablePage(mbi.Protect) &&
+          mbi.RegionSize >= 0x10) {
+        const uintptr_t regionEnd = next;
         uintptr_t p = (regionBase + 7) & ~static_cast<uintptr_t>(7);
 
         __try {
@@ -646,13 +663,10 @@ namespace DX11Base {
           }
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
-          // 잘못된 한 영역은 건너뛰고 다음 메모리 영역을 계속 탐색합니다.
+          // 비정상 페이지 하나 때문에 전체 준비가 중단되지 않도록 다음 region으로 진행합니다.
         }
       }
 
-      const uintptr_t next = regionBase + mbi.RegionSize;
-      if (next <= address)
-        break;
       address = next;
     }
 
