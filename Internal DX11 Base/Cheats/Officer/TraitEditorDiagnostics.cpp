@@ -51,6 +51,19 @@ bool ReadPtr(uintptr_t address, uintptr_t &out) {
   }
 }
 
+bool CanReadRoster(uintptr_t roster) {
+  if (roster < 0x10000)
+    return false;
+
+  uint16_t firstId = 0;
+  uint16_t lastId = 0;
+  const uintptr_t lastOfficer =
+      roster + static_cast<uintptr_t>(kOfficerCount - 1) * kOfficerStride;
+
+  return ReadU16(roster + 0x08, firstId) &&
+         ReadU16(lastOfficer + 0x08, lastId);
+}
+
 uint16_t ReadTraitId(uintptr_t traitPtr) {
   if (traitPtr < 0x10000)
     return 0;
@@ -70,7 +83,7 @@ bool ResolveRosterBase() {
   if (!TryResolveOfficerRosterArrayBase(exeBase, &roster) || roster < 0x10000)
     return false;
 
-  if (!IsValidPtr(roster, kOfficerStride))
+  if (!CanReadRoster(roster))
     return false;
 
   g_rosterBase = roster;
@@ -136,7 +149,7 @@ void TickInProgressTraitDiagnostics() {
     return;
   }
 
-  if (g_rosterBase < 0x10000 || !IsValidPtr(g_rosterBase, kOfficerStride)) {
+  if (!CanReadRoster(g_rosterBase)) {
     g_baselineReady = false;
     g_rosterBase = 0;
     AddLog(u8"[기재3 진단] 무장 배열 주소가 바뀌어 기준 스냅샷을 다시 잡습니다.");
