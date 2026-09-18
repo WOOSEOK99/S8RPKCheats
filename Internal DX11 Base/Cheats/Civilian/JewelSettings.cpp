@@ -48,6 +48,11 @@ std::atomic_bool g_allSecondaryJewelsEnabled{false};
 SecondaryJewelJudgeFn g_originalSecondaryJewelJudge = nullptr;
 bool g_secondaryJewelHookInstalled = false;
 
+// 0 = 미확인, 1 = 런타임 데이터 없음, 2 = 런타임 데이터 존재.
+// 원 version.dll도 ID별 캐시를 사용해 hot path에서 반복 포인터 검증을 피합니다.
+std::array<uint8_t, kMaxSecondaryJewelId + 1> g_secondaryRuntimeCache{};
+uintptr_t g_secondaryRuntimeCacheBase = 0;
+
 bool IsDefinedSecondaryJewelId(uint16_t jewelId) {
   if (jewelId < 1 || jewelId > kMaxSecondaryJewelId)
     return false;
@@ -58,56 +63,77 @@ bool IsDefinedSecondaryJewelId(uint16_t jewelId) {
   return (kDefinedSecondaryJewelMask[byteIndex] & bitMask) != 0;
 }
 
-bool IsJewelOpen(uintptr_t gameBase, uint16_t rawJewelId) {
+bool IsJewelOpenFast(uintptr_t gameBase, uint16_t rawJewelId) {
   const uint32_t byteIndex = static_cast<uint32_t>(rawJewelId) >> 3;
   if (byteIndex >= kDefinedJewelOpenMask.size())
     return false;
 
   const uintptr_t address = gameBase + kJewelOpenBitmapOffset + byteIndex;
-  if (!IsValidPtr(address, 1))
-    return false;
-
   const uint8_t bitMask = static_cast<uint8_t>(1u << (rawJewelId & 7));
-  return ((*reinterpret_cast<const uint8_t *>(address)) & bitMask) != 0;
+
+  __try {
+    return ((*reinterpret_cast<const uint8_t *>(address)) & bitMask) != 0;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
 }
 
-// 원 DLL은 강제 판정 전에 해당 보주의 런타임 데이터 포인터가 실제로 존재하는지도 확인합니다.
-// 동일한 안전 조건을 유지해, 아직 생성되지 않은/정의되지 않은 객체를 TRUE로 만들지 않습니다.
-bool HasSecondaryJewelRuntimeData(uintptr_t gameBase, uint16_t jewelId) {
+bool ProbeSecondaryJewelRuntimeData(uintptr_t gameBase, uint16_t jewelId) {
   const uintptr_t slot =
       gameBase + sizeof(uintptr_t) *
                      (static_cast<uintptr_t>(jewelId) + kSecondaryJewelObjectTableIndexBase);
-  if (!IsValidPtr(slot, sizeof(uintptr_t)))
+
+  __try {
+    const uintptr_t first = *reinterpret_cast<const uintptr_t *>(slot);
+    if (!first)
+      return false;
+
+    const uintptr_t second = *reinterpret_cast<const uintptr_t *>(first);
+    return second != 0;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+bool HasSecondaryJewelRuntimeDataCached(uintptr_t gameBase, uint16_t jewelId) {
+  if (jewelId > kMaxSecondaryJewelId)
     return false;
 
-  const uintptr_t first = *reinterpret_cast<const uintptr_t *>(slot);
-  if (!first || !IsValidPtr(first, sizeof(uintptr_t)))
-    return false;
+  // 세이브/시나리오 전환 등으로 gameBase가 바뀌면 캐시를 다시 계산합니다.
+  if (g_secondaryRuntimeCacheBase != gameBase) {
+    g_secondaryRuntimeCache.fill(0);
+    g_secondaryRuntimeCacheBase = gameBase;
+  }
 
-  const uintptr_t second = *reinterpret_cast<const uintptr_t *>(first);
-  return second && IsValidPtr(second, sizeof(uintptr_t));
+  uint8_t &cached = g_secondaryRuntimeCache[jewelId];
+  if (cached == 0)
+    cached = ProbeSecondaryJewelRuntimeData(gameBase, jewelId) ? 2 : 1;
+
+  return cached == 2;
 }
 
 bool __fastcall HookSecondaryJewelJudge(uint16_t jewelId) {
-  // 원본에서 이미 사용 가능한 보주는 그대로 유지합니다.
-  if (g_originalSecondaryJewelJudge && g_originalSecondaryJewelJudge(jewelId))
-    return true;
+  // 원 version.dll과 동일하게 "강제 경로"를 먼저 검사하고,
+  // 강제 조건이 충족되지 않을 때만 게임 원본 판정으로 넘깁니다.
+  if (g_allSecondaryJewelsEnabled.load(std::memory_order_relaxed) &&
+      IsDefinedSecondaryJewelId(jewelId)) {
+    const uintptr_t gameBase = GetGameBaseFast();
+    if (gameBase) {
+      const uint16_t rawJewelId =
+          static_cast<uint16_t>(jewelId + kRawJewelIdBias);
 
-  if (!g_allSecondaryJewelsEnabled.load(std::memory_order_relaxed))
-    return false;
+      if (IsJewelOpenFast(gameBase, rawJewelId) &&
+          HasSecondaryJewelRuntimeDataCached(gameBase, jewelId)) {
+        return true;
+      }
+    }
+  }
 
-  if (!IsDefinedSecondaryJewelId(jewelId))
-    return false;
-
-  const uintptr_t gameBase = GetGameBase();
-  if (!gameBase)
-    return false;
-
-  const uint16_t rawJewelId = static_cast<uint16_t>(jewelId + kRawJewelIdBias);
-  if (!IsJewelOpen(gameBase, rawJewelId))
-    return false;
-
-  return HasSecondaryJewelRuntimeData(gameBase, jewelId);
+  return g_originalSecondaryJewelJudge
+             ? g_originalSecondaryJewelJudge(jewelId)
+             : false;
 }
 
 bool EnsureSecondaryJewelHook() {
@@ -189,6 +215,11 @@ bool SetAllJewelsOpen(bool enable) {
 bool SetAllSecondaryJewelsEnabled(bool enable) {
   if (enable && !EnsureSecondaryJewelHook())
     return false;
+
+  if (enable) {
+    g_secondaryRuntimeCache.fill(0);
+    g_secondaryRuntimeCacheBase = 0;
+  }
 
   g_allSecondaryJewelsEnabled.store(enable, std::memory_order_relaxed);
   AddLog(enable ? u8"[보주] 보조 보주 전체 사용 ON"
