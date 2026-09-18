@@ -67,7 +67,7 @@ void SetFastRelationship(bool enable) {
       g_fastIntimacyAddr = FindPattern(begin, end, "0F B6 CB 3A DA 0F 4F CA");
 
     if (!g_fastIntimacyAddr) {
-      AddLog(u8"[Relationship] 교류 대상 친밀도 패턴을 찾지 못했습니다.");
+      AddLog(u8"[Relationship] 즉시 경애 패턴을 찾지 못했습니다.");
       return;
     }
 
@@ -81,12 +81,12 @@ void SetFastRelationship(bool enable) {
     };
 
     if (!PatchBytes(g_fastIntimacyAddr, kPatch, sizeof(kPatch))) {
-      AddLog(u8"[Relationship] 교류 대상 친밀도 100 패치 쓰기 실패");
+      AddLog(u8"[Relationship] 즉시 경애 패치 쓰기 실패");
       return;
     }
 
     g_fastIntimacyApplied = true;
-    AddLog(u8"[Relationship] 교류 대상 친밀도 100 적용 (CT ID 321)");
+    AddLog(u8"[Relationship] 즉시 경애 맺기 적용 (CT ID 321)");
     return;
   }
 
@@ -98,7 +98,7 @@ void SetFastRelationship(bool enable) {
   FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_fastIntimacyAddr,
                         sizeof(g_fastIntimacyOriginal));
   g_fastIntimacyApplied = false;
-  AddLog(u8"[Relationship] 교류 대상 친밀도 100 해제");
+  AddLog(u8"[Relationship] 즉시 경애 맺기 해제");
 }
 
 } // namespace DX11Base
