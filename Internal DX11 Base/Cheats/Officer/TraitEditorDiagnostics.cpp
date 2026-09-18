@@ -146,8 +146,9 @@ void DumpRelevantEditorCode() {
   // 선택창의 기존 슬롯 읽기/선택 쓰기/남은 슬롯 삭제가 모두 포함된 범위.
   DumpCodeRange(exeBase, 0x12E2600, 0x600, "trait3_diag_12E2600.bin");
 
-  // 진행 중 편집기 저장/초기화 훅 주변. 취소 복원 경로가 caller 쪽에 있는지도 함께 확인합니다.
-  DumpCodeRange(exeBase, 0x12B6500, 0x800, "trait3_diag_12B6500.bin");
+  // 진행 중 편집기 저장/초기화/취소 복원 전체 범위.
+  // 12B6990의 취소 복원 함수와 12B9C48 훅 주변까지 함께 포함합니다.
+  DumpCodeRange(exeBase, 0x12B5F00, 0x5000, "trait3_diag_12B5F00_5000.bin");
 }
 
 void CaptureBaseline() {
