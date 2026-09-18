@@ -11,6 +11,7 @@
 #include "../../MenuState.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
+#include "OfficerRosterResolve.h"
 #include "CustomTraitDisplay.h"
 #include "../Civilian/CityData.h"
 #include "../../Framework/imgui.h"
@@ -580,34 +581,9 @@ namespace DX11Base {
       return std::find(traitIDs.begin(), traitIDs.end(), id) != traitIDs.end();
     };
 
-    // 이미 캐시된 객체가 있으면 먼저 재사용합니다.
-    for (const auto& entry : s_traitObjectById) {
-      if (!ValidateTraitObject(entry.second, entry.first))
-        continue;
-
-      if (!outTraitVtable)
-        TryReadPtr(entry.second, outTraitVtable);
-
-      if (isWanted(entry.first))
-        outObjects[entry.first] = entry.second;
-    }
-
-    if (outTraitVtable)
-      return true;
-
-    // 캐시가 비어 있다면 전체 무장 배열을 끝까지 훑지 않고,
-    // 첫 정상 기재 객체 하나만 찾아 vtable 기준값으로 사용합니다.
-    uintptr_t gameBase = GetGameBase();
-    if (!gameBase)
-      return false;
-
-    uintptr_t officerArr = 0;
-    if (!TryReadPtr(gameBase + 0x3B8, officerArr) || officerArr < 0x10000)
-      return false;
-
-    for (int officerIndex = 0; officerIndex < 5102; ++officerIndex) {
-      const uintptr_t officerBase =
-          officerArr + static_cast<uintptr_t>(officerIndex) * 0x3D0;
+    auto seedFromOfficer = [&](uintptr_t officerBase) -> bool {
+      if (officerBase < 0x10000)
+        return false;
 
       for (int slot = 0; slot < 3; ++slot) {
         uintptr_t pTrait = 0;
@@ -621,12 +597,70 @@ namespace DX11Base {
           continue;
 
         CacheTraitObject(pTrait);
-        TryReadPtr(pTrait, outTraitVtable);
+
+        uintptr_t vtable = 0;
+        if (!TryReadPtr(pTrait, vtable) || vtable < 0x10000)
+          continue;
+
+        if (!outTraitVtable)
+          outTraitVtable = vtable;
+
         if (isWanted(id))
           outObjects[id] = pTrait;
 
-        return outTraitVtable != 0;
+        return true;
       }
+
+      return false;
+    };
+
+    // 0) 이미 개별 편집에서 발견했던 기재 객체 캐시가 있으면 그대로 재사용.
+    for (const auto& entry : s_traitObjectById) {
+      if (!ValidateTraitObject(entry.second, entry.first))
+        continue;
+
+      uintptr_t vtable = 0;
+      if (!TryReadPtr(entry.second, vtable) || vtable < 0x10000)
+        continue;
+
+      if (!outTraitVtable)
+        outTraitVtable = vtable;
+
+      if (isWanted(entry.first))
+        outObjects[entry.first] = entry.second;
+    }
+    if (outTraitVtable)
+      return true;
+
+    // 1) 개별 편집과 동일하게 현재 선택 무장의 기존 기재에서 먼저 기준 객체를 잡습니다.
+    if (seedFromOfficer(g_capturedOfficerBase))
+      return true;
+
+    // 2) 선택 무장이 없다면 주인공의 기존 기재를 사용합니다.
+    if (seedFromOfficer(g_savedHeroAddr))
+      return true;
+
+    // 3) 마지막으로 [모든 무장] UI가 실제로 쓰는 동일한 roster resolver를 사용합니다.
+    const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    uintptr_t officerArr = 0;
+    if (!exe || !TryResolveOfficerRosterArrayBase(exe, &officerArr) ||
+        officerArr < 0x10000)
+      return false;
+
+    bool seenIds[5103] = {};
+    for (int officerIndex = 0; officerIndex < 5102; ++officerIndex) {
+      const uintptr_t officerBase =
+          officerArr + static_cast<uintptr_t>(officerIndex) * 0x3D0;
+
+      uint16_t officerId = 0;
+      if (!TryReadU16(officerBase + 0x08, officerId))
+        continue;
+      if (officerId < 1 || officerId > 5102 || seenIds[officerId])
+        continue;
+      seenIds[officerId] = true;
+
+      if (seedFromOfficer(officerBase))
+        return true;
     }
 
     return false;
