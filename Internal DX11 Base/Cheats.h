@@ -8,6 +8,8 @@ namespace DX11Base {
 
   // Return resolved gameBase address (二쇱씤怨??뺣낫 踰좎씠??
   uintptr_t GetGameBase();
+  // Hot-path helper: resolved global pointer only, no VirtualQuery/cache probing.
+  uintptr_t GetGameBaseFast();
 
   // Return resolved base address for traits (0 if not found)
   uintptr_t GetTraitsBase();
