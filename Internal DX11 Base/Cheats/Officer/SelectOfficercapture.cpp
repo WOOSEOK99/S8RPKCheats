@@ -780,8 +780,20 @@ namespace DX11Base {
   static bool s_batchRandomRed = false;
   static std::string s_batchRandomStatus;
 
+  struct BatchRandomTraitJob {
+    bool running = false;
+    std::vector<uintptr_t> officers;
+    std::vector<uint16_t> pool;
+    std::unordered_map<uint16_t, uintptr_t> traitObjects;
+    size_t cursor = 0;
+    int changedOfficers = 0;
+    int filledSlots = 0;
+    int alreadyFull = 0;
+    int failedOfficers = 0;
+  };
+  static BatchRandomTraitJob s_batchRandomJob;
+
   static int GetBatchTraitGrade(uint16_t traitId) {
-    // 기본 기재 72개는 모두 황금(grade 1).
     if ((traitId >= 1 && traitId <= 70) || traitId == 201 || traitId == 202)
       return 1;
 
@@ -844,30 +856,40 @@ namespace DX11Base {
     return officers;
   }
 
-  static int AssignRandomTraitsToOneOfficerBatch(
+  static int AssignRandomTraitsToOneOfficerBatchFast(
       uintptr_t officerBase,
       const std::vector<uint16_t>& enabledPool,
+      const std::unordered_map<uint16_t, uintptr_t>& traitObjects,
       std::mt19937& rng,
       int& filledSlots) {
+    uint16_t currentIds[3] = {
+      GetTraitID(officerBase, 0),
+      GetTraitID(officerBase, 1),
+      GetTraitID(officerBase, 2)
+    };
+
     std::unordered_set<uint16_t> usedIds;
-    std::vector<int> emptySlots;
+    int emptySlots[3] = {};
+    int emptyCount = 0;
 
     for (int slot = 0; slot < 3; ++slot) {
-      const uint16_t id = GetTraitID(officerBase, slot);
-      if (id != 0)
-        usedIds.insert(id);
+      if (currentIds[slot] != 0)
+        usedIds.insert(currentIds[slot]);
       else
-        emptySlots.push_back(slot);
+        emptySlots[emptyCount++] = slot;
     }
 
-    if (emptySlots.empty())
-      return 0;
+    if (emptyCount == 0)
+      return -1; // already full
 
     std::vector<uint16_t> candidates;
     candidates.reserve(enabledPool.size());
     for (uint16_t id : enabledPool) {
-      if (usedIds.count(id) == 0)
-        candidates.push_back(id);
+      if (usedIds.count(id) != 0)
+        continue;
+      if (traitObjects.count(id) == 0)
+        continue;
+      candidates.push_back(id);
     }
 
     if (candidates.empty())
@@ -877,13 +899,19 @@ namespace DX11Base {
 
     int assigned = 0;
     size_t candidateIndex = 0;
-    for (int slot : emptySlots) {
+    for (int i = 0; i < emptyCount; ++i) {
+      const int slot = emptySlots[i];
+
       while (candidateIndex < candidates.size()) {
         const uint16_t traitId = candidates[candidateIndex++];
         if (usedIds.count(traitId) != 0)
           continue;
 
-        if (SetTraitID(officerBase, slot, traitId)) {
+        auto objIt = traitObjects.find(traitId);
+        if (objIt == traitObjects.end())
+          continue;
+
+        if (SetTraitObjectFast(officerBase, slot, traitId, objIt->second)) {
           usedIds.insert(traitId);
           ++assigned;
           ++filledSlots;
@@ -895,12 +923,71 @@ namespace DX11Base {
     return assigned;
   }
 
+  static void TickBatchRandomTraitJob() {
+    if (!s_batchRandomJob.running)
+      return;
+
+    static std::mt19937 rng(
+        static_cast<unsigned int>(
+            std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+
+    // UI 스레드를 오래 점유하지 않도록 프레임당 32명만 처리합니다.
+    constexpr size_t kOfficersPerFrame = 32;
+    const size_t end =
+        std::min(s_batchRandomJob.cursor + kOfficersPerFrame,
+                 s_batchRandomJob.officers.size());
+
+    for (; s_batchRandomJob.cursor < end; ++s_batchRandomJob.cursor) {
+      const uintptr_t base = s_batchRandomJob.officers[s_batchRandomJob.cursor];
+      const int result = AssignRandomTraitsToOneOfficerBatchFast(
+          base,
+          s_batchRandomJob.pool,
+          s_batchRandomJob.traitObjects,
+          rng,
+          s_batchRandomJob.filledSlots);
+
+      if (result < 0)
+        ++s_batchRandomJob.alreadyFull;
+      else if (result > 0)
+        ++s_batchRandomJob.changedOfficers;
+      else
+        ++s_batchRandomJob.failedOfficers;
+    }
+
+    if (s_batchRandomJob.cursor >= s_batchRandomJob.officers.size()) {
+      s_batchRandomJob.running = false;
+      s_batchRandomStatus =
+          std::string(u8"완료: ") +
+          std::to_string(s_batchRandomJob.changedOfficers) +
+          u8"명 변경 / " +
+          std::to_string(s_batchRandomJob.filledSlots) +
+          u8"개 슬롯 부여 / 이미 3개 보유 " +
+          std::to_string(s_batchRandomJob.alreadyFull) +
+          u8"명 / 미변경 " +
+          std::to_string(s_batchRandomJob.failedOfficers) + u8"명";
+
+      AddLog(u8"[랜덤기재/일괄] 대상 %d명, 변경 %d명, 부여 슬롯 %d개, 이미 3개 %d명, 미변경 %d명",
+             static_cast<int>(s_batchRandomJob.officers.size()),
+             s_batchRandomJob.changedOfficers,
+             s_batchRandomJob.filledSlots,
+             s_batchRandomJob.alreadyFull,
+             s_batchRandomJob.failedOfficers);
+    }
+  }
+
   void OpenBatchRandomTraitAssignmentWindow() {
     s_showBatchRandomTraitWindow = true;
-    s_batchRandomStatus.clear();
+    if (!s_batchRandomJob.running)
+      s_batchRandomStatus.clear();
   }
 
   void DrawBatchRandomTraitAssignmentWindow(float scale) {
+    if (!s_showBatchRandomTraitWindow && !s_batchRandomJob.running)
+      return;
+
+    // 창이 닫혀도 이미 시작한 작업은 계속 조금씩 진행합니다.
+    TickBatchRandomTraitJob();
+
     if (!s_showBatchRandomTraitWindow)
       return;
 
@@ -933,6 +1020,9 @@ namespace DX11Base {
     ImGui::Text(u8"적색: %d개", redCount);
     ImGui::Separator();
 
+    if (s_batchRandomJob.running)
+      ImGui::BeginDisabled();
+
     ImGui::Checkbox(u8"황금##BatchRandomGold", &s_batchRandomGold);
     ImGui::SameLine();
 
@@ -953,79 +1043,88 @@ namespace DX11Base {
       s_batchRandomRed = false;
     }
 
+    if (s_batchRandomJob.running)
+      ImGui::EndDisabled();
+
     if (!HasCustomTraitConfigFile())
       ImGui::TextDisabled(u8"※ san8r_traits_config.json 없음: 기본 황금 기재 72개만 사용");
 
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
-                       u8"※ 이 작업은 모든 무장의 빈 기재 슬롯을 한 번에 변경합니다.");
+                       u8"※ 기존 기재는 유지하고 빈 슬롯만 변경합니다.");
 
-    const bool noGradeSelected =
-        !s_batchRandomGold && !s_batchRandomGreen && !s_batchRandomRed;
-    if (noGradeSelected)
-      ImGui::BeginDisabled();
+    if (s_batchRandomJob.running) {
+      const float progress = s_batchRandomJob.officers.empty()
+          ? 0.0f
+          : static_cast<float>(s_batchRandomJob.cursor) /
+            static_cast<float>(s_batchRandomJob.officers.size());
 
-    if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여 실행",
-                      ImVec2(-1.0f, 34.0f * scale))) {
-      std::vector<uint16_t> enabledPool;
-      enabledPool.reserve(allPool.size());
-      for (uint16_t id : allPool) {
-        const int grade = GetBatchTraitGrade(id);
-        if ((grade == 1 && s_batchRandomGold) ||
-            (grade == 2 && s_batchRandomGreen) ||
-            (grade == 3 && s_batchRandomRed)) {
-          enabledPool.push_back(id);
+      char progressText[128];
+      snprintf(progressText, sizeof(progressText),
+               u8"%zu / %zu명", s_batchRandomJob.cursor,
+               s_batchRandomJob.officers.size());
+      ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), progressText);
+      ImGui::TextDisabled(u8"처리 중... 게임/UI가 멈추지 않도록 프레임 단위로 나누어 적용합니다.");
+    } else {
+      const bool noGradeSelected =
+          !s_batchRandomGold && !s_batchRandomGreen && !s_batchRandomRed;
+
+      if (noGradeSelected)
+        ImGui::BeginDisabled();
+
+      if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여 실행",
+                        ImVec2(-1.0f, 34.0f * scale))) {
+        std::vector<uint16_t> enabledPool;
+        enabledPool.reserve(allPool.size());
+        for (uint16_t id : allPool) {
+          const int grade = GetBatchTraitGrade(id);
+          if ((grade == 1 && s_batchRandomGold) ||
+              (grade == 2 && s_batchRandomGreen) ||
+              (grade == 3 && s_batchRandomRed)) {
+            enabledPool.push_back(id);
+          }
+        }
+
+        std::vector<uintptr_t> officers = CollectValidOfficerBasesForBatch();
+        if (officers.empty()) {
+          s_batchRandomStatus =
+              u8"무장 배열을 찾지 못했습니다. 인게임 전략 화면에서 다시 시도하세요.";
+        } else if (enabledPool.empty()) {
+          s_batchRandomStatus =
+              u8"선택한 등급에 사용 가능한 기재가 없습니다.";
+        } else {
+          std::unordered_map<uint16_t, uintptr_t> resolvedObjects;
+          ResolveTraitObjectsForBatch(enabledPool, resolvedObjects);
+
+          std::vector<uint16_t> resolvedPool;
+          resolvedPool.reserve(enabledPool.size());
+          for (uint16_t id : enabledPool) {
+            if (resolvedObjects.count(id) != 0)
+              resolvedPool.push_back(id);
+          }
+
+          if (resolvedPool.empty()) {
+            s_batchRandomStatus =
+                u8"사용 가능한 기재 객체를 찾지 못했습니다.";
+          } else {
+            s_batchRandomJob = {};
+            s_batchRandomJob.running = true;
+            s_batchRandomJob.officers = std::move(officers);
+            s_batchRandomJob.pool = std::move(resolvedPool);
+            s_batchRandomJob.traitObjects = std::move(resolvedObjects);
+            s_batchRandomStatus =
+                std::string(u8"처리 시작: ") +
+                std::to_string(s_batchRandomJob.officers.size()) +
+                u8"명 / 해석된 기재 " +
+                std::to_string(s_batchRandomJob.pool.size()) + u8"개";
+          }
         }
       }
 
-      const std::vector<uintptr_t> officers = CollectValidOfficerBasesForBatch();
-      if (officers.empty()) {
-        s_batchRandomStatus = u8"무장 배열을 찾지 못했습니다. 인게임 전략 화면에서 다시 시도하세요.";
-      } else if (enabledPool.empty()) {
-        s_batchRandomStatus = u8"선택한 등급에 사용 가능한 기재가 없습니다.";
-      } else {
-        static std::mt19937 rng(
-            static_cast<unsigned int>(
-                std::chrono::high_resolution_clock::now().time_since_epoch().count()));
-
-        int changedOfficers = 0;
-        int filledSlots = 0;
-        int alreadyFull = 0;
-
-        for (uintptr_t base : officers) {
-          bool hasEmpty = false;
-          for (int slot = 0; slot < 3; ++slot) {
-            if (GetTraitID(base, slot) == 0) {
-              hasEmpty = true;
-              break;
-            }
-          }
-
-          if (!hasEmpty) {
-            ++alreadyFull;
-            continue;
-          }
-
-          const int assigned =
-              AssignRandomTraitsToOneOfficerBatch(base, enabledPool, rng, filledSlots);
-          if (assigned > 0)
-            ++changedOfficers;
-        }
-
-        s_batchRandomStatus =
-            std::string(u8"완료: ") + std::to_string(changedOfficers) +
-            u8"명 변경 / " + std::to_string(filledSlots) +
-            u8"개 슬롯 부여 / 이미 3개 보유 " +
-            std::to_string(alreadyFull) + u8"명";
-
-        AddLog(u8"[랜덤기재/일괄] 대상 %d명, 변경 %d명, 부여 슬롯 %d개, 이미 3개 %d명",
-               static_cast<int>(officers.size()), changedOfficers, filledSlots, alreadyFull);
-      }
+      if (noGradeSelected)
+        ImGui::EndDisabled();
     }
-
-    if (noGradeSelected)
-      ImGui::EndDisabled();
 
     if (!s_batchRandomStatus.empty()) {
       ImGui::Spacing();
