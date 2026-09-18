@@ -13,12 +13,14 @@
 #include "OfficerRosterResolve.h"
 #include "RoninMonitor.h" // 알림 동기화용 추가
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <psapi.h>
+#include <random>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -811,6 +813,44 @@ namespace DX11Base {
              " (ID " + std::to_string(traitId) + ")";
     };
 
+    auto traitGrade = [](uint16_t traitId) -> int {
+      // 게임 기본 기재 72개는 모두 황금(grade 1).
+      if ((traitId >= 1 && traitId <= 70) || traitId == 201 || traitId == 202)
+        return 1;
+
+      CustomTraitDisplayInfo custom;
+      if (GetCustomTraitDisplayInfo(traitId, custom))
+        return custom.grade;
+      return 0;
+    };
+
+    auto buildAvailableTraitIds = []() {
+      std::vector<uint16_t> ids;
+      ids.reserve(96);
+
+      for (uint16_t id = 1; id <= 70; ++id)
+        ids.push_back(id);
+      ids.push_back(201);
+      ids.push_back(202);
+
+      std::vector<uint16_t> customIds = GetDefinedCustomTraitIds();
+      ids.insert(ids.end(), customIds.begin(), customIds.end());
+
+      std::sort(ids.begin(), ids.end());
+      ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+      return ids;
+    };
+
+    const std::vector<uint16_t> availableTraitIds = buildAvailableTraitIds();
+
+    bool hasGreenTraits = false;
+    bool hasRedTraits = false;
+    for (uint16_t id : availableTraitIds) {
+      const int grade = traitGrade(id);
+      hasGreenTraits = hasGreenTraits || grade == 2;
+      hasRedTraits = hasRedTraits || grade == 3;
+    }
+
     if (cacheKey > 0x10000 && ImGui::BeginTable("TraitDirectEditTable", 2,
         ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp |
         ImGuiTableFlags_NoSavedSettings)) {
@@ -830,16 +870,15 @@ namespace DX11Base {
         ImGui::SetNextItemWidth(-1.0f);
 
         if (ImGui::BeginCombo("##TraitDirectSelect", preview.c_str())) {
-          // 현재 게임 기본 기재 1~70, 사용자 정의 영역 71~200,
-          // 그리고 기본 특수 기재 201~202를 한 목록에서 선택합니다.
-          for (int traitId = 1; traitId <= 202; ++traitId) {
-            const std::string label = traitChoiceLabel(static_cast<uint16_t>(traitId));
+          // 기본 72개 + san8r_traits_config.json에 실제 등록된 커스텀 기재만 표시합니다.
+          for (uint16_t traitId : availableTraitIds) {
+            const std::string label = traitChoiceLabel(traitId);
             const bool selected = (currentId == traitId);
             if (ImGui::Selectable(label.c_str(), selected)) {
-              if (SetTraitID(cacheKey, slot, static_cast<uint16_t>(traitId))) {
+              if (SetTraitID(cacheKey, slot, traitId)) {
                 s_forceTalentCacheRefresh = true;
               } else {
-                AddLog(u8"[기재변경] 슬롯%d 변경 실패 (ID:%d)", slot + 1, traitId);
+                AddLog(u8"[기재변경] 슬롯%d 변경 실패 (ID:%d)", slot + 1, static_cast<int>(traitId));
               }
             }
             if (selected)
@@ -850,6 +889,111 @@ namespace DX11Base {
         ImGui::PopID();
       }
       ImGui::EndTable();
+      ImGui::Spacing();
+
+      static bool s_randomGradeGold = true;
+      static bool s_randomGradeGreen = true;
+      static bool s_randomGradeRed = false;
+
+      ImGui::TextDisabled(u8"랜덤 대상");
+      ImGui::SameLine();
+      ImGui::Checkbox(u8"황금##RandomTraitGrade1", &s_randomGradeGold);
+      ImGui::SameLine();
+
+      if (!hasGreenTraits)
+        ImGui::BeginDisabled();
+      ImGui::Checkbox(u8"녹색##RandomTraitGrade2", &s_randomGradeGreen);
+      if (!hasGreenTraits) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip(u8"san8r_traits_config.json에 grade 2 기재가 없습니다.");
+      }
+
+      ImGui::SameLine();
+      if (!hasRedTraits)
+        ImGui::BeginDisabled();
+      ImGui::Checkbox(u8"적색##RandomTraitGrade3", &s_randomGradeRed);
+      if (!hasRedTraits) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip(u8"san8r_traits_config.json에 grade 3 기재가 없습니다.");
+      }
+
+      if (ImGui::Button(u8"랜덤 기재 부여", ImVec2(-1.0f, 0.0f))) {
+        std::unordered_set<uint16_t> usedIds;
+        std::vector<int> emptySlots;
+        for (int slot = 0; slot < 3; ++slot) {
+          const uint16_t id = GetTraitID(cacheKey, slot);
+          if (id != 0)
+            usedIds.insert(id);
+          else
+            emptySlots.push_back(slot);
+        }
+
+        if (emptySlots.empty()) {
+          AddLog(u8"[랜덤기재] 빈 기재 슬롯이 없어 변경하지 않았습니다.");
+        } else {
+          std::vector<uint16_t> candidates;
+          candidates.reserve(availableTraitIds.size());
+
+          for (uint16_t id : availableTraitIds) {
+            if (usedIds.count(id) != 0)
+              continue;
+
+            const int grade = traitGrade(id);
+            const bool gradeEnabled =
+                (grade == 1 && s_randomGradeGold) ||
+                (grade == 2 && s_randomGradeGreen) ||
+                (grade == 3 && s_randomGradeRed);
+            if (gradeEnabled)
+              candidates.push_back(id);
+          }
+
+          if (candidates.empty()) {
+            AddLog(u8"[랜덤기재] 선택된 등급에 부여 가능한 기재가 없습니다.");
+          } else {
+            static std::mt19937 rng(
+                static_cast<unsigned int>(
+                    std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+            std::shuffle(candidates.begin(), candidates.end(), rng);
+
+            int assignedCount = 0;
+            size_t candidateIndex = 0;
+
+            for (int slot : emptySlots) {
+              bool assigned = false;
+              while (candidateIndex < candidates.size()) {
+                const uint16_t traitId = candidates[candidateIndex++];
+                if (usedIds.count(traitId) != 0)
+                  continue;
+
+                if (SetTraitID(cacheKey, slot, traitId)) {
+                  usedIds.insert(traitId);
+                  ++assignedCount;
+                  assigned = true;
+                  s_forceTalentCacheRefresh = true;
+                  AddLog(u8"[랜덤기재] 슬롯%d → %s", slot + 1, traitChoiceLabel(traitId).c_str());
+                  break;
+                }
+              }
+
+              if (!assigned)
+                break;
+            }
+
+            if (assignedCount > 0) {
+              AddLog(u8"[랜덤기재] 빈 슬롯 %d개 중 %d개 부여 완료",
+                     static_cast<int>(emptySlots.size()), assignedCount);
+            } else {
+              AddLog(u8"[랜덤기재] 후보 기재 객체를 찾지 못해 부여하지 못했습니다.");
+            }
+          }
+        }
+      }
+
+      if (!HasCustomTraitConfigFile()) {
+        ImGui::TextDisabled(u8"※ san8r_traits_config.json 없음: 기본 황금 기재 72개만 사용");
+      }
       ImGui::Spacing();
     }
 
