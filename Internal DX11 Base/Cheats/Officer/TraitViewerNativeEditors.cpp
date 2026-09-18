@@ -359,14 +359,34 @@ void CompareInProgressTraitDirtyState() {
     std::memcpy(&after,now + off,8);
     if (before == after)
       continue;
-    AddLog(u8"[기재 dirty 진단/DIFF] +0x%03zX : %016llX -> %016llX",
+    const uint16_t beforeTrait = TraitIdFromPtrDiag(static_cast<uintptr_t>(before));
+    const uint16_t afterTrait = TraitIdFromPtrDiag(static_cast<uintptr_t>(after));
+    AddLog(u8"[기재 dirty 진단/DIFF] +0x%03zX : %016llX -> %016llX (기재ID:%u->%u)",
            off,
            static_cast<unsigned long long>(before),
-           static_cast<unsigned long long>(after));
+           static_cast<unsigned long long>(after),
+           static_cast<unsigned>(beforeTrait),
+           static_cast<unsigned>(afterTrait));
     if (++logged >= 80) {
       AddLog(u8"[기재 dirty 진단] 변경 항목이 많아 80개까지만 표시합니다.");
       break;
     }
+  }
+
+  const size_t candidates[] = {
+      0x068,0x080,0x090,0x098,0x0A0,0x0B0,
+      0x2F8,0x310,0x320,0x328,0x330,0x340
+  };
+  for (size_t off : candidates) {
+    uint64_t before = 0, after = 0;
+    std::memcpy(&before,g_dirtyDiagBaseline + off,8);
+    std::memcpy(&after,now + off,8);
+    AddLog(u8"[기재 dirty 진단/CAND] +0x%03zX 기재ID:%u->%u ptr:%016llX->%016llX",
+           off,
+           static_cast<unsigned>(TraitIdFromPtrDiag(static_cast<uintptr_t>(before))),
+           static_cast<unsigned>(TraitIdFromPtrDiag(static_cast<uintptr_t>(after))),
+           static_cast<unsigned long long>(before),
+           static_cast<unsigned long long>(after));
   }
 
   if (logged == 0)
