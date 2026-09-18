@@ -173,12 +173,156 @@ bool Remove(Runtime&rt,const BlockSpec&s) {
 
 static Runtime g_kirase,g_inProgress,g_baseEditor;
 
+static bool g_dirtyDiagEnabled = false;
+static uint64_t g_dirtyDiagLastCounter = 0;
+static uintptr_t g_dirtyDiagLastEditor = 0;
+static uintptr_t g_dirtyDiagLastOfficer = 0;
+static uintptr_t g_dirtyDiagLastBackup[3] = {};
+static uintptr_t g_dirtyDiagLastCurrent[3] = {};
+static uint32_t g_dirtyDiagLastState370 = 0;
+static uint32_t g_dirtyDiagLastState374 = 0;
+static uint32_t g_dirtyDiagLastState378 = 0;
+
+bool SafeReadPtrDiag(uintptr_t address, uintptr_t &out) {
+  __try {
+    out = *reinterpret_cast<uintptr_t *>(address);
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    out = 0;
+    return false;
+  }
+}
+
+bool SafeReadU32Diag(uintptr_t address, uint32_t &out) {
+  __try {
+    out = *reinterpret_cast<uint32_t *>(address);
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    out = 0;
+    return false;
+  }
+}
+
+bool SafeReadU64Diag(uintptr_t address, uint64_t &out) {
+  __try {
+    out = *reinterpret_cast<uint64_t *>(address);
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    out = 0;
+    return false;
+  }
+}
+
+uint16_t TraitIdFromPtrDiag(uintptr_t p) {
+  if (p < 0x10000)
+    return 0;
+  __try {
+    return *reinterpret_cast<uint16_t *>(p + 0x08);
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return 0;
+  }
+}
+
 } // namespace
 
 bool SetTraitViewerKirase(bool enable){return enable?Install(g_kirase,kKiraseSpec):Remove(g_kirase,kKiraseSpec);}
 bool IsTraitViewerKiraseApplied(){return g_kirase.applied;}
 bool SetTraitViewerInProgressEditor(bool enable){return enable?Install(g_inProgress,kInProgressSpec):Remove(g_inProgress,kInProgressSpec);}
 bool IsTraitViewerInProgressEditorApplied(){return g_inProgress.applied;}
+
+void SetInProgressTraitDirtyDiagnostics(bool enable) {
+  g_dirtyDiagEnabled = enable;
+  g_dirtyDiagLastCounter = 0;
+  g_dirtyDiagLastEditor = 0;
+  g_dirtyDiagLastOfficer = 0;
+  std::memset(g_dirtyDiagLastBackup, 0, sizeof(g_dirtyDiagLastBackup));
+  std::memset(g_dirtyDiagLastCurrent, 0, sizeof(g_dirtyDiagLastCurrent));
+  g_dirtyDiagLastState370 = 0;
+  g_dirtyDiagLastState374 = 0;
+  g_dirtyDiagLastState378 = 0;
+
+  AddLog(enable
+      ? u8"[기재 dirty 진단] 시작. 기재목록에서 결정 후 무장 편집 화면으로 돌아오세요."
+      : u8"[기재 dirty 진단] 종료.");
+}
+
+bool IsInProgressTraitDirtyDiagnosticsEnabled() {
+  return g_dirtyDiagEnabled;
+}
+
+void TickInProgressTraitDirtyDiagnostics() {
+  if (!g_dirtyDiagEnabled || !g_inProgress.applied || g_inProgress.cave < 0x10000)
+    return;
+
+  const uintptr_t diag = g_inProgress.cave;
+  uint64_t counter = 0;
+  uintptr_t editor = 0;
+  uintptr_t officer = 0;
+  if (!SafeReadU64Diag(diag + 0x500, counter) ||
+      !SafeReadPtrDiag(diag + 0x508, editor) ||
+      !SafeReadPtrDiag(diag + 0x510, officer))
+    return;
+
+  if (counter == 0 || editor < 0x10000 || officer < 0x10000)
+    return;
+  if (counter == g_dirtyDiagLastCounter && editor == g_dirtyDiagLastEditor &&
+      officer == g_dirtyDiagLastOfficer)
+    return;
+
+  uintptr_t backup[3] = {};
+  uintptr_t current[3] = {};
+  SafeReadPtrDiag(editor + 0x228, backup[0]);
+  SafeReadPtrDiag(editor + 0x230, backup[1]);
+  SafeReadPtrDiag(editor + 0x238, backup[2]);
+  SafeReadPtrDiag(officer + 0x88, current[0]);
+  SafeReadPtrDiag(officer + 0x90, current[1]);
+  SafeReadPtrDiag(officer + 0x98, current[2]);
+
+  uint32_t s370 = 0, s374 = 0, s378 = 0;
+  SafeReadU32Diag(editor + 0x370, s370);
+  SafeReadU32Diag(editor + 0x374, s374);
+  SafeReadU32Diag(editor + 0x378, s378);
+
+  const bool changed =
+      editor != g_dirtyDiagLastEditor ||
+      officer != g_dirtyDiagLastOfficer ||
+      std::memcmp(backup, g_dirtyDiagLastBackup, sizeof(backup)) != 0 ||
+      std::memcmp(current, g_dirtyDiagLastCurrent, sizeof(current)) != 0 ||
+      s370 != g_dirtyDiagLastState370 ||
+      s374 != g_dirtyDiagLastState374 ||
+      s378 != g_dirtyDiagLastState378;
+
+  g_dirtyDiagLastCounter = counter;
+  if (!changed)
+    return;
+
+  AddLog(
+      u8"[기재 dirty 진단] call:%llu editor:%p officer:%p "
+      u8"원본:%u/%u/%u 현재:%u/%u/%u state370:%08X state374:%08X state378:%08X",
+      static_cast<unsigned long long>(counter),
+      reinterpret_cast<void *>(editor),
+      reinterpret_cast<void *>(officer),
+      static_cast<unsigned>(TraitIdFromPtrDiag(backup[0])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(backup[1])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(backup[2])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(current[0])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(current[1])),
+      static_cast<unsigned>(TraitIdFromPtrDiag(current[2])),
+      s370, s374, s378);
+
+  g_dirtyDiagLastEditor = editor;
+  g_dirtyDiagLastOfficer = officer;
+  std::memcpy(g_dirtyDiagLastBackup, backup, sizeof(backup));
+  std::memcpy(g_dirtyDiagLastCurrent, current, sizeof(current));
+  g_dirtyDiagLastState370 = s370;
+  g_dirtyDiagLastState374 = s374;
+  g_dirtyDiagLastState378 = s378;
+}
+
 bool SetTraitViewerBaseEditor(bool enable){return enable?Install(g_baseEditor,kBaseEditorSpec):Remove(g_baseEditor,kBaseEditorSpec);}
 bool IsTraitViewerBaseEditorApplied(){return g_baseEditor.applied;}
 
