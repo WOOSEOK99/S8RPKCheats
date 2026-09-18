@@ -125,28 +125,49 @@ bool ApplyPatch(uintptr_t base,uintptr_t cave,const PatchSpec&p) {
 bool Install(Runtime&rt,const BlockSpec&s) {
   if(rt.applied)return true;
   auto m=GetModuleHandleW(L"SAN8RPK.exe");
-  if(!m)return false;
+  if(!m){
+    AddLog(u8"[기재 화면/%s] 설치 실패: SAN8RPK.exe 모듈을 찾지 못함",s.name);
+    return false;
+  }
   const uintptr_t base=reinterpret_cast<uintptr_t>(m);
   if(!Verify(base,s.enableAsserts,s.enableAssertCount,s.name,"ENABLE"))return false;
   const uintptr_t cave=AllocNear(base+s.anchorOffset,s.allocationSize);
-  if(!cave)return false;
+  if(!cave){
+    AddLog(u8"[기재 화면/%s] 설치 실패: 코드케이브 할당 실패 (anchor +0x%llX, size 0x%zX)",
+           s.name,
+           static_cast<unsigned long long>(s.anchorOffset),
+           s.allocationSize);
+    return false;
+  }
   std::vector<uint8_t>code;
   if(!DecodeBase64(s.caveB64,code)||code.empty()||code.size()>s.allocationSize){
+    AddLog(u8"[기재 화면/%s] 설치 실패: 코드케이브 디코드/크기 오류 (decoded 0x%zX, alloc 0x%zX)",
+           s.name, code.size(), s.allocationSize);
     VirtualFree(reinterpret_cast<void*>(cave),0,MEM_RELEASE);
     return false;
   }
   for(size_t i=0;i<s.relocCount;++i){
     if(!PutRel32(code,s.relocs[i].offset,cave,base+s.relocs[i].targetOffset)){
+      AddLog(u8"[기재 화면/%s] 설치 실패: relocation #%zu 실패 (code+0x%zX -> exe+0x%llX)",
+             s.name,
+             i,
+             s.relocs[i].offset,
+             static_cast<unsigned long long>(s.relocs[i].targetOffset));
       VirtualFree(reinterpret_cast<void*>(cave),0,MEM_RELEASE);
       return false;
     }
   }
   if(!WriteMemory(cave,code.data(),code.size())){
+    AddLog(u8"[기재 화면/%s] 설치 실패: 코드케이브 메모리 쓰기 실패",s.name);
     VirtualFree(reinterpret_cast<void*>(cave),0,MEM_RELEASE);
     return false;
   }
   for(size_t i=0;i<s.enablePatchCount;++i){
     if(!ApplyPatch(base,cave,s.enablePatches[i])){
+      AddLog(u8"[기재 화면/%s] 설치 실패: patch #%zu 실패 (exe+0x%llX)",
+             s.name,
+             i,
+             static_cast<unsigned long long>(s.enablePatches[i].offset));
       for(size_t j=0;j<s.disablePatchCount;++j)ApplyPatch(base,cave,s.disablePatches[j]);
       VirtualFree(reinterpret_cast<void*>(cave),0,MEM_RELEASE);
       return false;
