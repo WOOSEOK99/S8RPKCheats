@@ -35,3 +35,51 @@ static constexpr PatchSpec kInProgressDisablePatches[] = {
   {0x12B9C48,PatchKind::Bytes,"488B054900BE01",0,0},{0x12B7030,PatchKind::Bytes,"4053554155",0,0},
 };
 static constexpr BlockSpec kInProgressSpec = {"CT 91512",0x12B67EE,0x8192,kInProgressCaveB64,kInProgressRelocs,CountOf(kInProgressRelocs),kInProgressEnableAsserts,CountOf(kInProgressEnableAsserts),kInProgressDisableAsserts,CountOf(kInProgressDisableAsserts),kInProgressEnablePatches,CountOf(kInProgressEnablePatches),kInProgressDisablePatches,CountOf(kInProgressDisablePatches)};
+
+
+static constexpr char kInProgressCancelFixCaveB64[] =
+  "x4J0AwAA/////0iLgTgCAABIi5GoAQAASImCmAAAAMeCdAMAAP/////pAAAAAMzMzMzMzMzMzMzMzMzMzEiLgpAAAABIOYEwAgAAD4UAAAAASIuCmAAAAEg5gTgCAAAPhQAAAADpAAAAAA==";
+
+static constexpr Reloc kInProgressCancelFixRelocs[] = {
+  {0x2A,0x12B69D7},
+  {0x50,0x12B6C9A},
+  {0x64,0x12B6C9A},
+  {0x69,0x12B6BBF},
+};
+
+static constexpr AssertSpec kInProgressCancelFixEnableAsserts[] = {
+  // 취소 복원: 슬롯2 복원 직후의 dirty 플래그 갱신 지점.
+  {0x12B69CD,"C78274030000FFFFFFFF"},
+  // 변경 감지: 슬롯2 비교 시작 지점.
+  {0x12B6BAB,"488B8290000000"},
+  // 편집창 진입 시 슬롯3 원본은 이미 editor+0x238에 백업됨.
+  {0x12BA1A2,"488B8898000000"},
+  {0x12BA1A9,"48898F38020000"},
+};
+
+static constexpr PatchSpec kInProgressCancelFixEnablePatches[] = {
+  {0x12B69CD,PatchKind::JumpCave,nullptr,10,0x00},
+  {0x12B6BAB,PatchKind::JumpCave,nullptr,7,0x40},
+};
+
+static constexpr PatchSpec kInProgressCancelFixDisablePatches[] = {
+  {0x12B6BAB,PatchKind::Bytes,"488B8290000000",0,0},
+  {0x12B69CD,PatchKind::Bytes,"C78274030000FFFFFFFF",0,0},
+};
+
+static constexpr BlockSpec kInProgressCancelFixSpec = {
+  "CT 91512 cancel-fix",
+  0x12B69CD,
+  0x1000,
+  kInProgressCancelFixCaveB64,
+  kInProgressCancelFixRelocs,
+  CountOf(kInProgressCancelFixRelocs),
+  kInProgressCancelFixEnableAsserts,
+  CountOf(kInProgressCancelFixEnableAsserts),
+  nullptr,
+  0,
+  kInProgressCancelFixEnablePatches,
+  CountOf(kInProgressCancelFixEnablePatches),
+  kInProgressCancelFixDisablePatches,
+  CountOf(kInProgressCancelFixDisablePatches)
+};
