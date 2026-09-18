@@ -782,9 +782,13 @@ namespace DX11Base {
 
   struct BatchRandomTraitJob {
     bool running = false;
+    bool scanningTraits = false;
     std::vector<uintptr_t> officers;
+    std::vector<uint16_t> requestedPool;
     std::vector<uint16_t> pool;
     std::unordered_map<uint16_t, uintptr_t> traitObjects;
+    uintptr_t traitVtable = 0;
+    uintptr_t scanAddress = 0;
     size_t cursor = 0;
     int changedOfficers = 0;
     int filledSlots = 0;
@@ -927,11 +931,50 @@ namespace DX11Base {
     if (!s_batchRandomJob.running)
       return;
 
+    // 1단계: 기재 객체 카탈로그를 프로세스 메모리에서 프레임 분할로 검색합니다.
+    if (s_batchRandomJob.scanningTraits) {
+      bool scanFinished = false;
+      constexpr size_t kReadableBytesPerFrame = 8 * 1024 * 1024;
+
+      ScanTraitObjectsForBatchStep(
+          s_batchRandomJob.requestedPool,
+          s_batchRandomJob.traitObjects,
+          s_batchRandomJob.traitVtable,
+          s_batchRandomJob.scanAddress,
+          kReadableBytesPerFrame,
+          scanFinished);
+
+      if (!scanFinished)
+        return;
+
+      s_batchRandomJob.pool.clear();
+      s_batchRandomJob.pool.reserve(s_batchRandomJob.requestedPool.size());
+      for (uint16_t id : s_batchRandomJob.requestedPool) {
+        if (s_batchRandomJob.traitObjects.count(id) != 0)
+          s_batchRandomJob.pool.push_back(id);
+      }
+
+      if (s_batchRandomJob.pool.empty()) {
+        s_batchRandomJob.running = false;
+        s_batchRandomJob.scanningTraits = false;
+        s_batchRandomStatus =
+            u8"기재 객체 검색은 완료했지만 사용할 수 있는 기재 객체를 찾지 못했습니다.";
+        return;
+      }
+
+      s_batchRandomJob.scanningTraits = false;
+      s_batchRandomJob.cursor = 0;
+      s_batchRandomStatus =
+          std::string(u8"기재 객체 검색 완료: ") +
+          std::to_string(s_batchRandomJob.pool.size()) + u8"개 / 무장 적용 시작";
+      return;
+    }
+
+    // 2단계: UI 스레드를 오래 점유하지 않도록 프레임당 32명만 처리합니다.
     static std::mt19937 rng(
         static_cast<unsigned int>(
             std::chrono::high_resolution_clock::now().time_since_epoch().count()));
 
-    // UI 스레드를 오래 점유하지 않도록 프레임당 32명만 처리합니다.
     constexpr size_t kOfficersPerFrame = 32;
     const size_t requestedEnd = s_batchRandomJob.cursor + kOfficersPerFrame;
     const size_t end =
@@ -1057,17 +1100,25 @@ namespace DX11Base {
                        u8"※ 기존 기재는 유지하고 빈 슬롯만 변경합니다.");
 
     if (s_batchRandomJob.running) {
-      const float progress = s_batchRandomJob.officers.empty()
-          ? 0.0f
-          : static_cast<float>(s_batchRandomJob.cursor) /
-            static_cast<float>(s_batchRandomJob.officers.size());
+      if (s_batchRandomJob.scanningTraits) {
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
+                           u8"기재 객체 검색 중... %zu / %zu개 발견",
+                           s_batchRandomJob.traitObjects.size(),
+                           s_batchRandomJob.requestedPool.size());
+        ImGui::TextDisabled(u8"프로세스 메모리를 여러 프레임에 나누어 검색하고 있습니다.");
+      } else {
+        const float progress = s_batchRandomJob.officers.empty()
+            ? 0.0f
+            : static_cast<float>(s_batchRandomJob.cursor) /
+              static_cast<float>(s_batchRandomJob.officers.size());
 
-      char progressText[128];
-      snprintf(progressText, sizeof(progressText),
-               u8"%zu / %zu명", s_batchRandomJob.cursor,
-               s_batchRandomJob.officers.size());
-      ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), progressText);
-      ImGui::TextDisabled(u8"처리 중... 게임/UI가 멈추지 않도록 프레임 단위로 나누어 적용합니다.");
+        char progressText[128];
+        snprintf(progressText, sizeof(progressText),
+                 u8"%zu / %zu명", s_batchRandomJob.cursor,
+                 s_batchRandomJob.officers.size());
+        ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), progressText);
+        ImGui::TextDisabled(u8"적용 중... 게임/UI가 멈추지 않도록 프레임 단위로 나누어 처리합니다.");
+      }
     } else {
       const bool noGradeSelected =
           !s_batchRandomGold && !s_batchRandomGreen && !s_batchRandomRed;
@@ -1096,30 +1147,38 @@ namespace DX11Base {
           s_batchRandomStatus =
               u8"선택한 등급에 사용 가능한 기재가 없습니다.";
         } else {
-          std::unordered_map<uint16_t, uintptr_t> resolvedObjects;
-          ResolveTraitObjectsForBatch(enabledPool, resolvedObjects);
+          s_batchRandomJob = {};
+          s_batchRandomJob.running = true;
+          s_batchRandomJob.officers = std::move(officers);
+          s_batchRandomJob.requestedPool = std::move(enabledPool);
 
-          std::vector<uint16_t> resolvedPool;
-          resolvedPool.reserve(enabledPool.size());
-          for (uint16_t id : enabledPool) {
-            if (resolvedObjects.count(id) != 0)
-              resolvedPool.push_back(id);
-          }
-
-          if (resolvedPool.empty()) {
+          if (!SeedTraitObjectsForBatch(
+                  s_batchRandomJob.requestedPool,
+                  s_batchRandomJob.traitObjects,
+                  s_batchRandomJob.traitVtable)) {
+            s_batchRandomJob.running = false;
             s_batchRandomStatus =
-                u8"사용 가능한 기재 객체를 찾지 못했습니다.";
+                u8"기재 객체 형식(vtable)을 확인할 기준 기재를 찾지 못했습니다.";
           } else {
-            s_batchRandomJob = {};
-            s_batchRandomJob.running = true;
-            s_batchRandomJob.officers = std::move(officers);
-            s_batchRandomJob.pool = std::move(resolvedPool);
-            s_batchRandomJob.traitObjects = std::move(resolvedObjects);
-            s_batchRandomStatus =
-                std::string(u8"처리 시작: ") +
-                std::to_string(s_batchRandomJob.officers.size()) +
-                u8"명 / 해석된 기재 " +
-                std::to_string(s_batchRandomJob.pool.size()) + u8"개";
+            s_batchRandomJob.scanningTraits =
+                s_batchRandomJob.traitObjects.size() <
+                s_batchRandomJob.requestedPool.size();
+
+            if (!s_batchRandomJob.scanningTraits) {
+              s_batchRandomJob.pool = s_batchRandomJob.requestedPool;
+              s_batchRandomStatus =
+                  std::string(u8"기재 객체 준비 완료: ") +
+                  std::to_string(s_batchRandomJob.pool.size()) +
+                  u8"개 / 무장 적용 시작";
+            } else {
+              s_batchRandomJob.scanAddress = 0;
+              s_batchRandomStatus =
+                  std::string(u8"기재 객체 검색 시작: 현재 ") +
+                  std::to_string(s_batchRandomJob.traitObjects.size()) +
+                  u8" / " +
+                  std::to_string(s_batchRandomJob.requestedPool.size()) +
+                  u8"개 확인";
+            }
           }
         }
       }
