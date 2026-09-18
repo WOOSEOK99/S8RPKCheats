@@ -13,12 +13,14 @@
 #include "OfficerRosterResolve.h"
 #include "RoninMonitor.h" // 알림 동기화용 추가
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <psapi.h>
+#include <random>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -771,6 +773,428 @@ namespace DX11Base {
     }
   }
 
+  // --- [모든 무장 일괄 랜덤 기재 부여] ---
+  static bool s_showBatchRandomTraitWindow = false;
+  static bool s_batchRandomGold = true;
+  static bool s_batchRandomGreen = true;
+  static bool s_batchRandomRed = false;
+  static std::string s_batchRandomStatus;
+
+  struct BatchRandomTraitJob {
+    bool running = false;
+    bool scanningTraits = false;
+    std::vector<uintptr_t> officers;
+    std::vector<uint16_t> requestedPool;
+    std::vector<uint16_t> pool;
+    std::unordered_map<uint16_t, uintptr_t> traitObjects;
+    uintptr_t traitVtable = 0;
+    uintptr_t scanAddress = 0;
+    size_t cursor = 0;
+    int changedOfficers = 0;
+    int filledSlots = 0;
+    int alreadyFull = 0;
+    int failedOfficers = 0;
+  };
+  static BatchRandomTraitJob s_batchRandomJob;
+
+  static int GetBatchTraitGrade(uint16_t traitId) {
+    if ((traitId >= 1 && traitId <= 70) || traitId == 201 || traitId == 202)
+      return 1;
+
+    CustomTraitDisplayInfo custom;
+    if (GetCustomTraitDisplayInfo(traitId, custom))
+      return custom.grade;
+    return 0;
+  }
+
+  static std::vector<uint16_t> BuildBatchRandomTraitPool() {
+    std::vector<uint16_t> ids;
+    ids.reserve(128);
+
+    for (uint16_t id = 1; id <= 70; ++id)
+      ids.push_back(id);
+    ids.push_back(201);
+    ids.push_back(202);
+
+    std::vector<uint16_t> customIds = GetDefinedCustomTraitIds();
+    ids.insert(ids.end(), customIds.begin(), customIds.end());
+
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+  }
+
+  static bool BatchPoolHasGrade(const std::vector<uint16_t>& ids, int grade) {
+    for (uint16_t id : ids) {
+      if (GetBatchTraitGrade(id) == grade)
+        return true;
+    }
+    return false;
+  }
+
+  static std::vector<uintptr_t> CollectValidOfficerBasesForBatch() {
+    std::vector<uintptr_t> officers;
+
+    const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    uintptr_t arrayBase = 0;
+    if (!exe || !TryResolveOfficerRosterArrayBase(exe, &arrayBase) || arrayBase < 0x10000)
+      return officers;
+
+    bool seenIds[5103] = {};
+    officers.reserve(5102);
+
+    for (int i = 0; i < 5102; ++i) {
+      const uintptr_t base = arrayBase + static_cast<uintptr_t>(i) * 0x3D0;
+      const RosterStats stats = SafeReadRosterStats(base);
+      if (!stats.valid || stats.id_08 < 1 || stats.id_08 > 5102)
+        continue;
+      if (seenIds[stats.id_08])
+        continue;
+      if (!IsValidPtr(base + 0x10, 1))
+        continue;
+
+      seenIds[stats.id_08] = true;
+      officers.push_back(base);
+    }
+
+    return officers;
+  }
+
+  static int AssignRandomTraitsToOneOfficerBatchFast(
+      uintptr_t officerBase,
+      const std::vector<uint16_t>& enabledPool,
+      const std::unordered_map<uint16_t, uintptr_t>& traitObjects,
+      std::mt19937& rng,
+      int& filledSlots) {
+    uint16_t currentIds[3] = {
+      GetTraitID(officerBase, 0),
+      GetTraitID(officerBase, 1),
+      GetTraitID(officerBase, 2)
+    };
+
+    std::unordered_set<uint16_t> usedIds;
+    int emptySlots[3] = {};
+    int emptyCount = 0;
+
+    for (int slot = 0; slot < 3; ++slot) {
+      if (currentIds[slot] != 0)
+        usedIds.insert(currentIds[slot]);
+      else
+        emptySlots[emptyCount++] = slot;
+    }
+
+    if (emptyCount == 0)
+      return -1; // already full
+
+    std::vector<uint16_t> candidates;
+    candidates.reserve(enabledPool.size());
+    for (uint16_t id : enabledPool) {
+      if (usedIds.count(id) != 0)
+        continue;
+      if (traitObjects.count(id) == 0)
+        continue;
+      candidates.push_back(id);
+    }
+
+    if (candidates.empty())
+      return 0;
+
+    std::shuffle(candidates.begin(), candidates.end(), rng);
+
+    int assigned = 0;
+    size_t candidateIndex = 0;
+    for (int i = 0; i < emptyCount; ++i) {
+      const int slot = emptySlots[i];
+
+      while (candidateIndex < candidates.size()) {
+        const uint16_t traitId = candidates[candidateIndex++];
+        if (usedIds.count(traitId) != 0)
+          continue;
+
+        auto objIt = traitObjects.find(traitId);
+        if (objIt == traitObjects.end())
+          continue;
+
+        if (SetTraitObjectFast(officerBase, slot, traitId, objIt->second)) {
+          usedIds.insert(traitId);
+          ++assigned;
+          ++filledSlots;
+          break;
+        }
+      }
+    }
+
+    return assigned;
+  }
+
+  static void TickBatchRandomTraitJob() {
+    if (!s_batchRandomJob.running)
+      return;
+
+    // 1단계: 기재 객체 카탈로그를 프로세스 메모리에서 프레임 분할로 검색합니다.
+    if (s_batchRandomJob.scanningTraits) {
+      bool scanFinished = false;
+      constexpr size_t kReadableBytesPerFrame = 8 * 1024 * 1024;
+
+      ScanTraitObjectsForBatchStep(
+          s_batchRandomJob.requestedPool,
+          s_batchRandomJob.traitObjects,
+          s_batchRandomJob.traitVtable,
+          s_batchRandomJob.scanAddress,
+          kReadableBytesPerFrame,
+          scanFinished);
+
+      if (!scanFinished)
+        return;
+
+      s_batchRandomJob.pool.clear();
+      s_batchRandomJob.pool.reserve(s_batchRandomJob.requestedPool.size());
+      for (uint16_t id : s_batchRandomJob.requestedPool) {
+        if (s_batchRandomJob.traitObjects.count(id) != 0)
+          s_batchRandomJob.pool.push_back(id);
+      }
+
+      if (s_batchRandomJob.pool.empty()) {
+        s_batchRandomJob.running = false;
+        s_batchRandomJob.scanningTraits = false;
+        s_batchRandomStatus =
+            u8"기재 객체 검색은 완료했지만 사용할 수 있는 기재 객체를 찾지 못했습니다.";
+        return;
+      }
+
+      s_batchRandomJob.scanningTraits = false;
+      s_batchRandomJob.cursor = 0;
+      s_batchRandomStatus =
+          std::string(u8"기재 객체 검색 완료: ") +
+          std::to_string(s_batchRandomJob.pool.size()) + u8"개 / 무장 적용 시작";
+      return;
+    }
+
+    // 2단계: UI 스레드를 오래 점유하지 않도록 프레임당 32명만 처리합니다.
+    static std::mt19937 rng(
+        static_cast<unsigned int>(
+            std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+
+    constexpr size_t kOfficersPerFrame = 32;
+    const size_t requestedEnd = s_batchRandomJob.cursor + kOfficersPerFrame;
+    const size_t end =
+        (requestedEnd < s_batchRandomJob.officers.size())
+            ? requestedEnd
+            : s_batchRandomJob.officers.size();
+
+    for (; s_batchRandomJob.cursor < end; ++s_batchRandomJob.cursor) {
+      const uintptr_t base = s_batchRandomJob.officers[s_batchRandomJob.cursor];
+      const int result = AssignRandomTraitsToOneOfficerBatchFast(
+          base,
+          s_batchRandomJob.pool,
+          s_batchRandomJob.traitObjects,
+          rng,
+          s_batchRandomJob.filledSlots);
+
+      if (result < 0)
+        ++s_batchRandomJob.alreadyFull;
+      else if (result > 0)
+        ++s_batchRandomJob.changedOfficers;
+      else
+        ++s_batchRandomJob.failedOfficers;
+    }
+
+    if (s_batchRandomJob.cursor >= s_batchRandomJob.officers.size()) {
+      s_batchRandomJob.running = false;
+      s_batchRandomStatus =
+          std::string(u8"완료: ") +
+          std::to_string(s_batchRandomJob.changedOfficers) +
+          u8"명 변경 / " +
+          std::to_string(s_batchRandomJob.filledSlots) +
+          u8"개 슬롯 부여 / 이미 3개 보유 " +
+          std::to_string(s_batchRandomJob.alreadyFull) +
+          u8"명 / 미변경 " +
+          std::to_string(s_batchRandomJob.failedOfficers) + u8"명";
+
+      AddLog(u8"[랜덤기재/일괄] 대상 %d명, 변경 %d명, 부여 슬롯 %d개, 이미 3개 %d명, 미변경 %d명",
+             static_cast<int>(s_batchRandomJob.officers.size()),
+             s_batchRandomJob.changedOfficers,
+             s_batchRandomJob.filledSlots,
+             s_batchRandomJob.alreadyFull,
+             s_batchRandomJob.failedOfficers);
+    }
+  }
+
+  void OpenBatchRandomTraitAssignmentWindow() {
+    s_showBatchRandomTraitWindow = true;
+    if (!s_batchRandomJob.running)
+      s_batchRandomStatus.clear();
+  }
+
+  void DrawBatchRandomTraitAssignmentWindow(float scale) {
+    if (!s_showBatchRandomTraitWindow && !s_batchRandomJob.running)
+      return;
+
+    // 창이 닫혀도 이미 시작한 작업은 계속 조금씩 진행합니다.
+    TickBatchRandomTraitJob();
+
+    if (!s_showBatchRandomTraitWindow)
+      return;
+
+    ImGui::SetNextWindowSize(ImVec2(470.0f * scale, 0.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin(u8"모든 무장 일괄 랜덤기재 부여###BatchRandomTraits",
+                      &s_showBatchRandomTraitWindow,
+                      ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::End();
+      return;
+    }
+
+    const std::vector<uint16_t> allPool = BuildBatchRandomTraitPool();
+    const bool hasGreen = BatchPoolHasGrade(allPool, 2);
+    const bool hasRed = BatchPoolHasGrade(allPool, 3);
+
+    int goldCount = 0, greenCount = 0, redCount = 0;
+    for (uint16_t id : allPool) {
+      const int grade = GetBatchTraitGrade(id);
+      if (grade == 1) ++goldCount;
+      else if (grade == 2) ++greenCount;
+      else if (grade == 3) ++redCount;
+    }
+
+    ImGui::TextWrapped(u8"모든 유효 무장의 기존 기재는 유지하고, 비어 있는 기재 슬롯만 중복 없이 랜덤으로 채웁니다.");
+    ImGui::Spacing();
+    ImGui::Text(u8"황금 후보: %d개", goldCount);
+    ImGui::SameLine();
+    ImGui::Text(u8"녹색: %d개", greenCount);
+    ImGui::SameLine();
+    ImGui::Text(u8"적색: %d개", redCount);
+    ImGui::Separator();
+
+    if (s_batchRandomJob.running)
+      ImGui::BeginDisabled();
+
+    ImGui::Checkbox(u8"황금##BatchRandomGold", &s_batchRandomGold);
+    ImGui::SameLine();
+
+    if (!hasGreen)
+      ImGui::BeginDisabled();
+    ImGui::Checkbox(u8"녹색##BatchRandomGreen", &s_batchRandomGreen);
+    if (!hasGreen) {
+      ImGui::EndDisabled();
+      s_batchRandomGreen = false;
+    }
+
+    ImGui::SameLine();
+    if (!hasRed)
+      ImGui::BeginDisabled();
+    ImGui::Checkbox(u8"적색##BatchRandomRed", &s_batchRandomRed);
+    if (!hasRed) {
+      ImGui::EndDisabled();
+      s_batchRandomRed = false;
+    }
+
+    if (s_batchRandomJob.running)
+      ImGui::EndDisabled();
+
+    if (!HasCustomTraitConfigFile())
+      ImGui::TextDisabled(u8"※ san8r_traits_config.json 없음: 기본 황금 기재 72개만 사용");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                       u8"※ 기존 기재는 유지하고 빈 슬롯만 변경합니다.");
+
+    if (s_batchRandomJob.running) {
+      if (s_batchRandomJob.scanningTraits) {
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
+                           u8"기재 객체 검색 중... %zu / %zu개 발견",
+                           s_batchRandomJob.traitObjects.size(),
+                           s_batchRandomJob.requestedPool.size());
+        ImGui::TextDisabled(u8"프로세스 메모리를 여러 프레임에 나누어 검색하고 있습니다.");
+      } else {
+        const float progress = s_batchRandomJob.officers.empty()
+            ? 0.0f
+            : static_cast<float>(s_batchRandomJob.cursor) /
+              static_cast<float>(s_batchRandomJob.officers.size());
+
+        char progressText[128];
+        snprintf(progressText, sizeof(progressText),
+                 u8"%zu / %zu명", s_batchRandomJob.cursor,
+                 s_batchRandomJob.officers.size());
+        ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), progressText);
+        ImGui::TextDisabled(u8"적용 중... 게임/UI가 멈추지 않도록 프레임 단위로 나누어 처리합니다.");
+      }
+    } else {
+      const bool noGradeSelected =
+          !s_batchRandomGold && !s_batchRandomGreen && !s_batchRandomRed;
+
+      if (noGradeSelected)
+        ImGui::BeginDisabled();
+
+      if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여 실행",
+                        ImVec2(-1.0f, 34.0f * scale))) {
+        std::vector<uint16_t> enabledPool;
+        enabledPool.reserve(allPool.size());
+        for (uint16_t id : allPool) {
+          const int grade = GetBatchTraitGrade(id);
+          if ((grade == 1 && s_batchRandomGold) ||
+              (grade == 2 && s_batchRandomGreen) ||
+              (grade == 3 && s_batchRandomRed)) {
+            enabledPool.push_back(id);
+          }
+        }
+
+        std::vector<uintptr_t> officers = CollectValidOfficerBasesForBatch();
+        if (officers.empty()) {
+          s_batchRandomStatus =
+              u8"무장 배열을 찾지 못했습니다. 인게임 전략 화면에서 다시 시도하세요.";
+        } else if (enabledPool.empty()) {
+          s_batchRandomStatus =
+              u8"선택한 등급에 사용 가능한 기재가 없습니다.";
+        } else {
+          s_batchRandomJob = {};
+          s_batchRandomJob.running = true;
+          s_batchRandomJob.officers = std::move(officers);
+          s_batchRandomJob.requestedPool = std::move(enabledPool);
+
+          if (!SeedTraitObjectsForBatch(
+                  s_batchRandomJob.requestedPool,
+                  s_batchRandomJob.traitObjects,
+                  s_batchRandomJob.traitVtable)) {
+            s_batchRandomJob.running = false;
+            s_batchRandomStatus =
+                u8"기재 객체 형식(vtable)을 확인할 기준 기재를 찾지 못했습니다.";
+          } else {
+            s_batchRandomJob.scanningTraits =
+                s_batchRandomJob.traitObjects.size() <
+                s_batchRandomJob.requestedPool.size();
+
+            if (!s_batchRandomJob.scanningTraits) {
+              s_batchRandomJob.pool = s_batchRandomJob.requestedPool;
+              s_batchRandomStatus =
+                  std::string(u8"기재 객체 준비 완료: ") +
+                  std::to_string(s_batchRandomJob.pool.size()) +
+                  u8"개 / 무장 적용 시작";
+            } else {
+              s_batchRandomJob.scanAddress = 0;
+              s_batchRandomStatus =
+                  std::string(u8"기재 객체 검색 시작: 현재 ") +
+                  std::to_string(s_batchRandomJob.traitObjects.size()) +
+                  u8" / " +
+                  std::to_string(s_batchRandomJob.requestedPool.size()) +
+                  u8"개 확인";
+            }
+          }
+        }
+      }
+
+      if (noGradeSelected)
+        ImGui::EndDisabled();
+    }
+
+    if (!s_batchRandomStatus.empty()) {
+      ImGui::Spacing();
+      ImGui::TextWrapped("%s", s_batchRandomStatus.c_str());
+    }
+
+    ImGui::End();
+  }
+
   void DrawOfficerTalents(uintptr_t pBase, float scale, uintptr_t pGame) {
     LoadOfficerNames(); // [수정] 메타데이터 보장
     LoadEffectDefinitions();
@@ -811,6 +1235,44 @@ namespace DX11Base {
              " (ID " + std::to_string(traitId) + ")";
     };
 
+    auto traitGrade = [](uint16_t traitId) -> int {
+      // 게임 기본 기재 72개는 모두 황금(grade 1).
+      if ((traitId >= 1 && traitId <= 70) || traitId == 201 || traitId == 202)
+        return 1;
+
+      CustomTraitDisplayInfo custom;
+      if (GetCustomTraitDisplayInfo(traitId, custom))
+        return custom.grade;
+      return 0;
+    };
+
+    auto buildAvailableTraitIds = []() {
+      std::vector<uint16_t> ids;
+      ids.reserve(96);
+
+      for (uint16_t id = 1; id <= 70; ++id)
+        ids.push_back(id);
+      ids.push_back(201);
+      ids.push_back(202);
+
+      std::vector<uint16_t> customIds = GetDefinedCustomTraitIds();
+      ids.insert(ids.end(), customIds.begin(), customIds.end());
+
+      std::sort(ids.begin(), ids.end());
+      ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+      return ids;
+    };
+
+    const std::vector<uint16_t> availableTraitIds = buildAvailableTraitIds();
+
+    bool hasGreenTraits = false;
+    bool hasRedTraits = false;
+    for (uint16_t id : availableTraitIds) {
+      const int grade = traitGrade(id);
+      hasGreenTraits = hasGreenTraits || grade == 2;
+      hasRedTraits = hasRedTraits || grade == 3;
+    }
+
     if (cacheKey > 0x10000 && ImGui::BeginTable("TraitDirectEditTable", 2,
         ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp |
         ImGuiTableFlags_NoSavedSettings)) {
@@ -830,16 +1292,15 @@ namespace DX11Base {
         ImGui::SetNextItemWidth(-1.0f);
 
         if (ImGui::BeginCombo("##TraitDirectSelect", preview.c_str())) {
-          // 현재 게임 기본 기재 1~70, 사용자 정의 영역 71~200,
-          // 그리고 기본 특수 기재 201~202를 한 목록에서 선택합니다.
-          for (int traitId = 1; traitId <= 202; ++traitId) {
-            const std::string label = traitChoiceLabel(static_cast<uint16_t>(traitId));
+          // 기본 72개 + san8r_traits_config.json에 실제 등록된 커스텀 기재만 표시합니다.
+          for (uint16_t traitId : availableTraitIds) {
+            const std::string label = traitChoiceLabel(traitId);
             const bool selected = (currentId == traitId);
             if (ImGui::Selectable(label.c_str(), selected)) {
-              if (SetTraitID(cacheKey, slot, static_cast<uint16_t>(traitId))) {
+              if (SetTraitID(cacheKey, slot, traitId)) {
                 s_forceTalentCacheRefresh = true;
               } else {
-                AddLog(u8"[기재변경] 슬롯%d 변경 실패 (ID:%d)", slot + 1, traitId);
+                AddLog(u8"[기재변경] 슬롯%d 변경 실패 (ID:%d)", slot + 1, static_cast<int>(traitId));
               }
             }
             if (selected)
@@ -850,6 +1311,111 @@ namespace DX11Base {
         ImGui::PopID();
       }
       ImGui::EndTable();
+      ImGui::Spacing();
+
+      static bool s_randomGradeGold = true;
+      static bool s_randomGradeGreen = true;
+      static bool s_randomGradeRed = false;
+
+      ImGui::TextDisabled(u8"랜덤 대상");
+      ImGui::SameLine();
+      ImGui::Checkbox(u8"황금##RandomTraitGrade1", &s_randomGradeGold);
+      ImGui::SameLine();
+
+      if (!hasGreenTraits)
+        ImGui::BeginDisabled();
+      ImGui::Checkbox(u8"녹색##RandomTraitGrade2", &s_randomGradeGreen);
+      if (!hasGreenTraits) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip(u8"san8r_traits_config.json에 grade 2 기재가 없습니다.");
+      }
+
+      ImGui::SameLine();
+      if (!hasRedTraits)
+        ImGui::BeginDisabled();
+      ImGui::Checkbox(u8"적색##RandomTraitGrade3", &s_randomGradeRed);
+      if (!hasRedTraits) {
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip(u8"san8r_traits_config.json에 grade 3 기재가 없습니다.");
+      }
+
+      if (ImGui::Button(u8"랜덤 기재 부여", ImVec2(-1.0f, 0.0f))) {
+        std::unordered_set<uint16_t> usedIds;
+        std::vector<int> emptySlots;
+        for (int slot = 0; slot < 3; ++slot) {
+          const uint16_t id = GetTraitID(cacheKey, slot);
+          if (id != 0)
+            usedIds.insert(id);
+          else
+            emptySlots.push_back(slot);
+        }
+
+        if (emptySlots.empty()) {
+          AddLog(u8"[랜덤기재] 빈 기재 슬롯이 없어 변경하지 않았습니다.");
+        } else {
+          std::vector<uint16_t> candidates;
+          candidates.reserve(availableTraitIds.size());
+
+          for (uint16_t id : availableTraitIds) {
+            if (usedIds.count(id) != 0)
+              continue;
+
+            const int grade = traitGrade(id);
+            const bool gradeEnabled =
+                (grade == 1 && s_randomGradeGold) ||
+                (grade == 2 && s_randomGradeGreen) ||
+                (grade == 3 && s_randomGradeRed);
+            if (gradeEnabled)
+              candidates.push_back(id);
+          }
+
+          if (candidates.empty()) {
+            AddLog(u8"[랜덤기재] 선택된 등급에 부여 가능한 기재가 없습니다.");
+          } else {
+            static std::mt19937 rng(
+                static_cast<unsigned int>(
+                    std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+            std::shuffle(candidates.begin(), candidates.end(), rng);
+
+            int assignedCount = 0;
+            size_t candidateIndex = 0;
+
+            for (int slot : emptySlots) {
+              bool assigned = false;
+              while (candidateIndex < candidates.size()) {
+                const uint16_t traitId = candidates[candidateIndex++];
+                if (usedIds.count(traitId) != 0)
+                  continue;
+
+                if (SetTraitID(cacheKey, slot, traitId)) {
+                  usedIds.insert(traitId);
+                  ++assignedCount;
+                  assigned = true;
+                  s_forceTalentCacheRefresh = true;
+                  AddLog(u8"[랜덤기재] 슬롯%d → %s", slot + 1, traitChoiceLabel(traitId).c_str());
+                  break;
+                }
+              }
+
+              if (!assigned)
+                break;
+            }
+
+            if (assignedCount > 0) {
+              AddLog(u8"[랜덤기재] 빈 슬롯 %d개 중 %d개 부여 완료",
+                     static_cast<int>(emptySlots.size()), assignedCount);
+            } else {
+              AddLog(u8"[랜덤기재] 후보 기재 객체를 찾지 못해 부여하지 못했습니다.");
+            }
+          }
+        }
+      }
+
+      if (!HasCustomTraitConfigFile()) {
+        ImGui::TextDisabled(u8"※ san8r_traits_config.json 없음: 기본 황금 기재 72개만 사용");
+      }
       ImGui::Spacing();
     }
 

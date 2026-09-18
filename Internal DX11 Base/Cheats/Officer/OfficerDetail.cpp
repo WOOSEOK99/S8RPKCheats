@@ -5,11 +5,14 @@
 #include <iomanip>
 #include <cstring>
 #include <unordered_map>
+#include <unordered_set>
 #include "OfficerDetail.h"
 #include "../../Cheats.h"
 #include "../../MenuState.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
+#include "OfficerRosterResolve.h"
+#include "CustomTraitDisplay.h"
 #include "../Civilian/CityData.h"
 #include "../../Framework/imgui.h"
 #include "../../showlog.h"
@@ -359,6 +362,21 @@ namespace DX11Base {
            p == PAGE_EXECUTE_READ || p == PAGE_EXECUTE_READWRITE || p == PAGE_EXECUTE_WRITECOPY;
   }
 
+  static bool IsBuiltInTraitId(uint16_t id) {
+    return (id >= 1 && id <= 70) || id == 201 || id == 202;
+  }
+
+  static bool IsConfiguredCustomTraitId(uint16_t id) {
+    if (id == 0)
+      return false;
+    CustomTraitDisplayInfo info;
+    return GetCustomTraitDisplayInfo(id, info) && !info.name.empty();
+  }
+
+  static bool IsAssignableTraitId(uint16_t id) {
+    return IsBuiltInTraitId(id) || IsConfiguredCustomTraitId(id);
+  }
+
   static bool ValidateTraitObject(uintptr_t pTrait, uint16_t expectedId = 0, uintptr_t expectedVtable = 0) {
     if (pTrait < 0x10000)
       return false;
@@ -371,7 +389,7 @@ namespace DX11Base {
       return false;
     if (expectedVtable != 0 && vtable != expectedVtable)
       return false;
-    return id >= 1 && id <= 202;
+    return IsAssignableTraitId(id);
   }
 
   static void CacheTraitObject(uintptr_t pTrait) {
@@ -547,6 +565,231 @@ namespace DX11Base {
 
     AddLog(u8"[기재변경] 슬롯%d → ID:%d 변경 및 검증 완료", slotIndex + 1, traitID);
     return true;
+  }
+
+
+  bool SeedTraitObjectsForBatch(
+      const std::vector<uint16_t>& traitIDs,
+      std::unordered_map<uint16_t, uintptr_t>& outObjects,
+      uintptr_t& outTraitVtable) {
+    outObjects.clear();
+    outTraitVtable = 0;
+    if (traitIDs.empty())
+      return false;
+
+    auto isWanted = [&traitIDs](uint16_t id) {
+      return std::find(traitIDs.begin(), traitIDs.end(), id) != traitIDs.end();
+    };
+
+    auto seedFromOfficer = [&](uintptr_t officerBase) -> bool {
+      if (officerBase < 0x10000)
+        return false;
+
+      for (int slot = 0; slot < 3; ++slot) {
+        uintptr_t pTrait = 0;
+        if (!TryReadPtr(officerBase + 0x88 + slot * 0x08, pTrait))
+          continue;
+        if (!ValidateTraitObject(pTrait))
+          continue;
+
+        uint16_t id = 0;
+        if (!TryReadU16(pTrait + 0x08, id))
+          continue;
+
+        CacheTraitObject(pTrait);
+
+        uintptr_t vtable = 0;
+        if (!TryReadPtr(pTrait, vtable) || vtable < 0x10000)
+          continue;
+
+        if (!outTraitVtable)
+          outTraitVtable = vtable;
+
+        if (isWanted(id))
+          outObjects[id] = pTrait;
+
+        return true;
+      }
+
+      return false;
+    };
+
+    // 0) 이미 개별 편집에서 발견했던 기재 객체 캐시가 있으면 그대로 재사용.
+    for (const auto& entry : s_traitObjectById) {
+      if (!ValidateTraitObject(entry.second, entry.first))
+        continue;
+
+      uintptr_t vtable = 0;
+      if (!TryReadPtr(entry.second, vtable) || vtable < 0x10000)
+        continue;
+
+      if (!outTraitVtable)
+        outTraitVtable = vtable;
+
+      if (isWanted(entry.first))
+        outObjects[entry.first] = entry.second;
+    }
+    if (outTraitVtable)
+      return true;
+
+    // 1) 개별 편집과 동일하게 현재 선택 무장의 기존 기재에서 먼저 기준 객체를 잡습니다.
+    if (seedFromOfficer(g_capturedOfficerBase))
+      return true;
+
+    // 2) 선택 무장이 없다면 주인공의 기존 기재를 사용합니다.
+    if (seedFromOfficer(g_savedHeroAddr))
+      return true;
+
+    // 3) 마지막으로 [모든 무장] UI가 실제로 쓰는 동일한 roster resolver를 사용합니다.
+    const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    uintptr_t officerArr = 0;
+    if (!exe || !TryResolveOfficerRosterArrayBase(exe, &officerArr) ||
+        officerArr < 0x10000)
+      return false;
+
+    bool seenIds[5103] = {};
+    for (int officerIndex = 0; officerIndex < 5102; ++officerIndex) {
+      const uintptr_t officerBase =
+          officerArr + static_cast<uintptr_t>(officerIndex) * 0x3D0;
+
+      uint16_t officerId = 0;
+      if (!TryReadU16(officerBase + 0x08, officerId))
+        continue;
+      if (officerId < 1 || officerId > 5102 || seenIds[officerId])
+        continue;
+      seenIds[officerId] = true;
+
+      if (seedFromOfficer(officerBase))
+        return true;
+    }
+
+    return false;
+  }
+
+  bool ScanTraitObjectsForBatchStep(
+      const std::vector<uint16_t>& traitIDs,
+      std::unordered_map<uint16_t, uintptr_t>& outObjects,
+      uintptr_t traitVtable,
+      uintptr_t& scanAddress,
+      size_t maxReadableBytes,
+      bool& finished) {
+    finished = false;
+    if (traitIDs.empty() || !traitVtable) {
+      finished = true;
+      return false;
+    }
+
+    if (outObjects.size() >= traitIDs.size()) {
+      finished = true;
+      return true;
+    }
+
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const uintptr_t minAddress =
+        reinterpret_cast<uintptr_t>(si.lpMinimumApplicationAddress);
+    const uintptr_t maxAddress =
+        reinterpret_cast<uintptr_t>(si.lpMaximumApplicationAddress);
+
+    if (scanAddress < minAddress)
+      scanAddress = minAddress;
+    if (scanAddress >= maxAddress) {
+      finished = true;
+      return !outObjects.empty();
+    }
+
+    size_t scannedReadable = 0;
+
+    auto isWanted = [&traitIDs](uint16_t id) {
+      return std::find(traitIDs.begin(), traitIDs.end(), id) != traitIDs.end();
+    };
+
+    while (scanAddress < maxAddress && scannedReadable < maxReadableBytes) {
+      MEMORY_BASIC_INFORMATION mbi{};
+      if (VirtualQuery(reinterpret_cast<LPCVOID>(scanAddress), &mbi, sizeof(mbi)) == 0) {
+        finished = true;
+        break;
+      }
+
+      const uintptr_t regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+      const uintptr_t regionEnd = regionBase + mbi.RegionSize;
+      if (regionEnd <= scanAddress) {
+        finished = true;
+        break;
+      }
+
+      if (mbi.State != MEM_COMMIT || !IsReadablePage(mbi.Protect) || mbi.RegionSize < 0x10) {
+        scanAddress = regionEnd;
+        continue;
+      }
+
+      uintptr_t begin = scanAddress > regionBase ? scanAddress : regionBase;
+      begin = (begin + 7) & ~static_cast<uintptr_t>(7);
+
+      size_t budgetLeft = maxReadableBytes - scannedReadable;
+      uintptr_t budgetEnd = begin + budgetLeft;
+      if (budgetEnd < begin || budgetEnd > regionEnd)
+        budgetEnd = regionEnd;
+
+      for (uintptr_t p = begin; p + 0x0A <= budgetEnd; p += 8) {
+        uintptr_t vtable = 0;
+        if (!TryReadPtr(p, vtable) || vtable != traitVtable)
+          continue;
+
+        uint16_t id = 0;
+        if (!TryReadU16(p + 0x08, id))
+          continue;
+        if (!isWanted(id) || outObjects.count(id) != 0)
+          continue;
+
+        if (ValidateTraitObject(p, id, traitVtable)) {
+          s_traitObjectById[id] = p;
+          outObjects[id] = p;
+          if (outObjects.size() >= traitIDs.size()) {
+            finished = true;
+            scanAddress = p + 8;
+            return true;
+          }
+        }
+      }
+
+      const size_t consumed =
+          budgetEnd > begin ? static_cast<size_t>(budgetEnd - begin) : 0;
+      scannedReadable += consumed;
+
+      if (budgetEnd < regionEnd) {
+        scanAddress = budgetEnd;
+        break;
+      }
+
+      scanAddress = regionEnd;
+    }
+
+    if (scanAddress >= maxAddress)
+      finished = true;
+
+    return !outObjects.empty();
+  }
+
+  bool SetTraitObjectFast(
+      uintptr_t officerBase, int slotIndex, uint16_t traitID, uintptr_t traitObject) {
+    if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 ||
+        traitID == 0 || traitObject < 0x10000)
+      return false;
+
+    if (!ValidateTraitObject(traitObject, traitID))
+      return false;
+
+    uintptr_t* slotPtr =
+        reinterpret_cast<uintptr_t*>(officerBase + 0x88 + slotIndex * 0x08);
+
+    __try {
+      *slotPtr = traitObject;
+      return *slotPtr == traitObject;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
   }
 
   uintptr_t GetSelectedOfficerBase() {
