@@ -22,6 +22,7 @@
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/Officer/OfficerDetail.h"
 #include "Cheats/Officer/TraitViewerFeature.h"
+#include "Cheats/Officer/TraitViewerNativeEditors.h"
 #include "Cheats/Officer/TraitTextEditorWindow.h"
 #include "Cheats/System/FactionTechEditor.h"
 #include "Cheats/System/StartSetting.h"
