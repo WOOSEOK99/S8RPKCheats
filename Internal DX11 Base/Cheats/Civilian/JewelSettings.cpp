@@ -1,9 +1,9 @@
+#include "../../pch.h"
 #include "JewelSettings.h"
 
 #include "../../Cheats.h"
 #include "../../Hooking/MinHook.h"
 #include "../../showlog.h"
-#include "../../pch.h"
 
 #include <array>
 #include <atomic>
