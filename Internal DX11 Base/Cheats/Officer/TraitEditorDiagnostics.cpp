@@ -30,21 +30,25 @@ static ULONGLONG g_lastPollMs = 0;
 static std::array<TraitSlotState, kOfficerCount * kTraitSlotCount> g_snapshot{};
 
 bool ReadU16(uintptr_t address, uint16_t &out) {
-  if (!IsValidPtr(address, sizeof(uint16_t))) {
+  __try {
+    out = *reinterpret_cast<uint16_t *>(address);
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
     out = 0;
     return false;
   }
-  out = *reinterpret_cast<uint16_t *>(address);
-  return true;
 }
 
 bool ReadPtr(uintptr_t address, uintptr_t &out) {
-  if (!IsValidPtr(address, sizeof(uintptr_t))) {
+  __try {
+    out = *reinterpret_cast<uintptr_t *>(address);
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
     out = 0;
     return false;
   }
-  out = *reinterpret_cast<uintptr_t *>(address);
-  return true;
 }
 
 uint16_t ReadTraitId(uintptr_t traitPtr) {
