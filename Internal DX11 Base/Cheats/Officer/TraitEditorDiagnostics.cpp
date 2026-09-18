@@ -40,7 +40,7 @@ struct WriteTraceEvent {
   ULONG accessType = 0;
 };
 
-constexpr LONG kWriteTraceEventCapacity = 128;
+constexpr LONG kWriteTraceEventCapacity = 512;
 static std::array<WriteTraceEvent, kWriteTraceEventCapacity> g_writeTraceEvents{};
 static volatile LONG g_writeTraceWriteIndex = 0;
 static LONG g_writeTraceReadIndex = 0;
@@ -68,10 +68,12 @@ LONG CALLBACK TraitWriteTraceVeh(PEXCEPTION_POINTERS ep) {
     const uintptr_t accessAddress = ep->ExceptionRecord->NumberParameters >= 2
         ? static_cast<uintptr_t>(ep->ExceptionRecord->ExceptionInformation[1]) : 0;
 
-    const uintptr_t firstSlot = g_writeTraceOfficerBase + kTraitSlotBase;
-    const uintptr_t lastSlotEnd = firstSlot + kTraitSlotCount * sizeof(uintptr_t);
+    const uintptr_t officerBegin = g_writeTraceOfficerBase;
+    const uintptr_t officerEnd = officerBegin + kOfficerStride;
 
-    if (accessType == 1 && accessAddress >= firstSlot && accessAddress < lastSlotEnd) {
+    // 취소 복원은 슬롯 주소를 직접 쓰지 않고 무장 구조체의 더 앞쪽부터
+    // 블록 복사할 수 있으므로, 타깃 무장 구조체 전체의 write 시작점을 기록합니다.
+    if (accessType == 1 && accessAddress >= officerBegin && accessAddress < officerEnd) {
       const LONG index = InterlockedIncrement(&g_writeTraceWriteIndex) - 1;
       if (index >= 0 && index < kWriteTraceEventCapacity) {
         g_writeTraceEvents[static_cast<size_t>(index)].rip =
@@ -187,23 +189,33 @@ void FlushWriteTraceEvents() {
     const WriteTraceEvent &ev =
         g_writeTraceEvents[static_cast<size_t>(g_writeTraceReadIndex++)];
 
+    const uintptr_t offset = ev.address >= g_writeTraceOfficerBase
+        ? ev.address - g_writeTraceOfficerBase
+        : 0;
+
     int slot = 0;
-    if (ev.address >= g_writeTraceOfficerBase + kTraitSlotBase) {
-      slot = static_cast<int>((ev.address - (g_writeTraceOfficerBase + kTraitSlotBase)) /
-                              sizeof(uintptr_t)) + 1;
+    if (offset >= kTraitSlotBase &&
+        offset < kTraitSlotBase + kTraitSlotCount * sizeof(uintptr_t)) {
+      slot = static_cast<int>((offset - kTraitSlotBase) / sizeof(uintptr_t)) + 1;
     }
 
     if (exeBase && ev.rip >= exeBase) {
-      AddLog(u8"[기재3 진단/WRITE] ID:%u 슬롯%d 주소:%p RIP:SAN8RPK.exe+0x%llX",
-             static_cast<unsigned>(g_writeTraceOfficerId),
-             slot,
-             reinterpret_cast<void *>(ev.address),
-             static_cast<unsigned long long>(ev.rip - exeBase));
+      if (slot > 0) {
+        AddLog(u8"[기재3 진단/WRITE] ID:%u 슬롯%d +0x%llX RIP:SAN8RPK.exe+0x%llX",
+               static_cast<unsigned>(g_writeTraceOfficerId),
+               slot,
+               static_cast<unsigned long long>(offset),
+               static_cast<unsigned long long>(ev.rip - exeBase));
+      } else {
+        AddLog(u8"[기재3 진단/WRITE] ID:%u 구조체+0x%llX RIP:SAN8RPK.exe+0x%llX",
+               static_cast<unsigned>(g_writeTraceOfficerId),
+               static_cast<unsigned long long>(offset),
+               static_cast<unsigned long long>(ev.rip - exeBase));
+      }
     } else {
-      AddLog(u8"[기재3 진단/WRITE] ID:%u 슬롯%d 주소:%p RIP:%p",
+      AddLog(u8"[기재3 진단/WRITE] ID:%u 구조체+0x%llX RIP:%p",
              static_cast<unsigned>(g_writeTraceOfficerId),
-             slot,
-             reinterpret_cast<void *>(ev.address),
+             static_cast<unsigned long long>(offset),
              reinterpret_cast<void *>(ev.rip));
     }
   }
