@@ -171,14 +171,32 @@ bool Remove(Runtime&rt,const BlockSpec&s) {
 #include "TraitViewerInProgressData.inc"
 #include "TraitViewerBaseEditorData.inc"
 
-static Runtime g_kirase,g_inProgress,g_baseEditor;
+static Runtime g_kirase,g_inProgress,g_inProgressCancelFix,g_baseEditor;
 
 } // namespace
 
 bool SetTraitViewerKirase(bool enable){return enable?Install(g_kirase,kKiraseSpec):Remove(g_kirase,kKiraseSpec);}
 bool IsTraitViewerKiraseApplied(){return g_kirase.applied;}
-bool SetTraitViewerInProgressEditor(bool enable){return enable?Install(g_inProgress,kInProgressSpec):Remove(g_inProgress,kInProgressSpec);}
-bool IsTraitViewerInProgressEditorApplied(){return g_inProgress.applied;}
+bool SetTraitViewerInProgressEditor(bool enable){
+  if(enable){
+    if(!Install(g_inProgress,kInProgressSpec))
+      return false;
+    if(!Install(g_inProgressCancelFix,kInProgressCancelFixSpec)){
+      Remove(g_inProgress,kInProgressSpec);
+      return false;
+    }
+    return true;
+  }
+
+  if(!Remove(g_inProgressCancelFix,kInProgressCancelFixSpec))
+    return false;
+  if(!Remove(g_inProgress,kInProgressSpec)){
+    Install(g_inProgressCancelFix,kInProgressCancelFixSpec);
+    return false;
+  }
+  return true;
+}
+bool IsTraitViewerInProgressEditorApplied(){return g_inProgress.applied && g_inProgressCancelFix.applied;}
 bool SetTraitViewerBaseEditor(bool enable){return enable?Install(g_baseEditor,kBaseEditorSpec):Remove(g_baseEditor,kBaseEditorSpec);}
 bool IsTraitViewerBaseEditorApplied(){return g_baseEditor.applied;}
 
