@@ -53,7 +53,6 @@ namespace DX11Base {
   void SetMarriageCondition(bool enable);
 
   // 람다 대용 래퍼 함수들
-  void ApplyLoveNormal(bool e) { SetInstantLoveCave(e, LoveMode::Normal); }
   void ApplyLoveHate(bool e) { SetInstantLoveCave(e, LoveMode::HateIgnore); }
 
   struct ConfigEntry {
@@ -72,7 +71,6 @@ namespace DX11Base {
   static bool s_appNonggyeongCity = false;
   static bool s_appSangeopCity = false;
   static bool s_appAttitude = false;
-  static bool s_appLoveNormal = false;
   static bool s_appLoveHate = false;
   static bool s_appLoyalty = false;
   static bool s_appResonance = false;
@@ -113,7 +111,6 @@ namespace DX11Base {
       {"bNonggyeongCity", u8"농경도시 버프", &bNonggyeongCity, &s_appNonggyeongCity, SetNonggyeongCity, false, true},
       {"bSangeopCity", u8"상업도시 버프", &bSangeopCity, &s_appSangeopCity, SetSangeopCity, false, true},
       {"bAttitudeHack", u8"견문시 민심최대", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false, true},
-      {"bLoveCave", u8"경애/의형제 조건 완화", &bLoveCave, &s_appLoveNormal, ApplyLoveNormal, false, true},
       {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false, true},
       {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false, true},
       {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false, true},
