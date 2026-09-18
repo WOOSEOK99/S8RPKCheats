@@ -10,6 +10,7 @@
 #include "../../MenuState.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
+#include "CustomTraitDisplay.h"
 #include "../Civilian/CityData.h"
 #include "../../Framework/imgui.h"
 #include "../../showlog.h"
@@ -359,6 +360,21 @@ namespace DX11Base {
            p == PAGE_EXECUTE_READ || p == PAGE_EXECUTE_READWRITE || p == PAGE_EXECUTE_WRITECOPY;
   }
 
+  static bool IsBuiltInTraitId(uint16_t id) {
+    return (id >= 1 && id <= 70) || id == 201 || id == 202;
+  }
+
+  static bool IsConfiguredCustomTraitId(uint16_t id) {
+    if (id == 0)
+      return false;
+    CustomTraitDisplayInfo info;
+    return GetCustomTraitDisplayInfo(id, info) && !info.name.empty();
+  }
+
+  static bool IsAssignableTraitId(uint16_t id) {
+    return IsBuiltInTraitId(id) || IsConfiguredCustomTraitId(id);
+  }
+
   static bool ValidateTraitObject(uintptr_t pTrait, uint16_t expectedId = 0, uintptr_t expectedVtable = 0) {
     if (pTrait < 0x10000)
       return false;
@@ -371,7 +387,7 @@ namespace DX11Base {
       return false;
     if (expectedVtable != 0 && vtable != expectedVtable)
       return false;
-    return id >= 1 && id <= 202;
+    return IsAssignableTraitId(id);
   }
 
   static void CacheTraitObject(uintptr_t pTrait) {
