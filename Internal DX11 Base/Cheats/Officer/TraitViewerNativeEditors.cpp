@@ -200,8 +200,22 @@ static Runtime g_kirase,g_inProgress,g_baseEditor,g_dirtyDiagRuntime;
 
 static bool g_dirtyDiagEnabled = false;
 static bool g_dirtyDiagBaselineReady = false;
-static uintptr_t g_dirtyDiagBaselineEditor = 0;
-static unsigned char g_dirtyDiagBaseline[0x400] = {};
+static uintptr_t g_dirtyDiagTraceOfficer = 0;
+
+struct TraitReadTraceEvent {
+  uintptr_t rip = 0;
+  uintptr_t address = 0;
+};
+
+constexpr LONG kTraitReadTraceCapacity = 1024;
+static TraitReadTraceEvent g_traitReadTraceEvents[kTraitReadTraceCapacity] = {};
+static volatile LONG g_traitReadTraceWriteIndex = 0;
+static PVOID g_traitReadTraceVeh = nullptr;
+static uintptr_t g_traitReadTracePage = 0;
+static SIZE_T g_traitReadTracePageSize = 0;
+static DWORD g_traitReadTraceBaseProtect = 0;
+static bool g_traitReadTraceArmed = false;
+static thread_local uintptr_t t_traitReadTraceRearmPage = 0;
 
 bool SafeReadPtrDiag(uintptr_t address, uintptr_t &out) {
   __try {
@@ -243,30 +257,218 @@ uintptr_t GetDirtyDiagEditor() {
   return editor;
 }
 
-void LogDirtyDiagTraits(const char *tag, uintptr_t editor) {
-  uintptr_t officer = 0;
-  uintptr_t backup[3] = {};
-  uintptr_t current[3] = {};
-  SafeReadPtrDiag(editor + 0x1A8, officer);
-  SafeReadPtrDiag(editor + 0x228, backup[0]);
-  SafeReadPtrDiag(editor + 0x230, backup[1]);
-  SafeReadPtrDiag(editor + 0x238, backup[2]);
-  if (officer > 0x10000) {
-    SafeReadPtrDiag(officer + 0x88, current[0]);
-    SafeReadPtrDiag(officer + 0x90, current[1]);
-    SafeReadPtrDiag(officer + 0x98, current[2]);
+void ReadOfficerTraitIdsDiag(uintptr_t officer, uint16_t ids[3]) {
+  ids[0] = ids[1] = ids[2] = 0;
+  if (officer < 0x10000)
+    return;
+  for (int i = 0; i < 3; ++i) {
+    uintptr_t p = 0;
+    if (SafeReadPtrDiag(officer + 0x88 + static_cast<uintptr_t>(i) * 8, p))
+      ids[i] = TraitIdFromPtrDiag(p);
   }
-  AddLog(
-      u8"[기재 dirty 진단/%s] editor:%p officer:%p 원본:%u/%u/%u 현재:%u/%u/%u",
-      tag,
-      reinterpret_cast<void *>(editor),
-      reinterpret_cast<void *>(officer),
-      static_cast<unsigned>(TraitIdFromPtrDiag(backup[0])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(backup[1])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(backup[2])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(current[0])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(current[1])),
-      static_cast<unsigned>(TraitIdFromPtrDiag(current[2])));
+}
+
+LONG CALLBACK TraitReadTraceVeh(PEXCEPTION_POINTERS ep) {
+  if (!ep || !ep->ExceptionRecord || !ep->ContextRecord)
+    return EXCEPTION_CONTINUE_SEARCH;
+
+  const DWORD code = ep->ExceptionRecord->ExceptionCode;
+
+  if (code == STATUS_GUARD_PAGE_VIOLATION) {
+    if (!g_traitReadTraceArmed || !g_traitReadTracePage)
+      return EXCEPTION_CONTINUE_SEARCH;
+
+    const ULONG_PTR accessType =
+        ep->ExceptionRecord->NumberParameters >= 1
+            ? ep->ExceptionRecord->ExceptionInformation[0]
+            : 0;
+    const uintptr_t accessAddress =
+        ep->ExceptionRecord->NumberParameters >= 2
+            ? static_cast<uintptr_t>(ep->ExceptionRecord->ExceptionInformation[1])
+            : 0;
+
+    const uintptr_t firstSlot = g_dirtyDiagTraceOfficer + 0x88;
+    const uintptr_t lastSlotEnd = firstSlot + 3 * sizeof(uintptr_t);
+
+    // ExceptionInformation[0] == 0 : read
+    if (accessType == 0 && accessAddress >= firstSlot && accessAddress < lastSlotEnd) {
+      const LONG index = InterlockedIncrement(&g_traitReadTraceWriteIndex) - 1;
+      if (index >= 0 && index < kTraitReadTraceCapacity) {
+        g_traitReadTraceEvents[index].rip = static_cast<uintptr_t>(ep->ContextRecord->Rip);
+        g_traitReadTraceEvents[index].address = accessAddress;
+      }
+    }
+
+    // PAGE_GUARD는 한 번 접근하면 풀리므로 다음 명령에서 다시 겁니다.
+    t_traitReadTraceRearmPage = g_traitReadTracePage;
+    ep->ContextRecord->EFlags |= 0x100;
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+
+  if (code == STATUS_SINGLE_STEP && t_traitReadTraceRearmPage != 0) {
+    DWORD ignored = 0;
+    VirtualProtect(reinterpret_cast<void *>(t_traitReadTraceRearmPage),
+                   g_traitReadTracePageSize,
+                   g_traitReadTraceBaseProtect | PAGE_GUARD,
+                   &ignored);
+    t_traitReadTraceRearmPage = 0;
+    ep->ContextRecord->EFlags &= ~0x100;
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void DisarmTraitReadTrace() {
+  if (g_traitReadTraceArmed && g_traitReadTracePage && g_traitReadTracePageSize) {
+    DWORD ignored = 0;
+    VirtualProtect(reinterpret_cast<void *>(g_traitReadTracePage),
+                   g_traitReadTracePageSize,
+                   g_traitReadTraceBaseProtect,
+                   &ignored);
+  }
+
+  g_traitReadTraceArmed = false;
+  g_traitReadTracePage = 0;
+  g_traitReadTracePageSize = 0;
+  g_traitReadTraceBaseProtect = 0;
+  t_traitReadTraceRearmPage = 0;
+
+  if (g_traitReadTraceVeh) {
+    RemoveVectoredExceptionHandler(g_traitReadTraceVeh);
+    g_traitReadTraceVeh = nullptr;
+  }
+}
+
+bool ArmTraitReadTrace(uintptr_t officer) {
+  DisarmTraitReadTrace();
+  g_traitReadTraceWriteIndex = 0;
+  std::memset(g_traitReadTraceEvents, 0, sizeof(g_traitReadTraceEvents));
+
+  if (officer < 0x10000)
+    return false;
+
+  SYSTEM_INFO si{};
+  GetSystemInfo(&si);
+  const uintptr_t pageSize = static_cast<uintptr_t>(si.dwPageSize);
+  const uintptr_t page = (officer + 0x88) & ~(pageSize - 1);
+
+  g_traitReadTraceVeh = AddVectoredExceptionHandler(1, TraitReadTraceVeh);
+  if (!g_traitReadTraceVeh)
+    return false;
+
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (!VirtualQuery(reinterpret_cast<const void *>(page), &mbi, sizeof(mbi))) {
+    RemoveVectoredExceptionHandler(g_traitReadTraceVeh);
+    g_traitReadTraceVeh = nullptr;
+    return false;
+  }
+
+  const DWORD baseProtect = mbi.Protect & ~PAGE_GUARD;
+  DWORD oldProtect = 0;
+  if (!VirtualProtect(reinterpret_cast<void *>(page),
+                      pageSize,
+                      baseProtect | PAGE_GUARD,
+                      &oldProtect)) {
+    RemoveVectoredExceptionHandler(g_traitReadTraceVeh);
+    g_traitReadTraceVeh = nullptr;
+    return false;
+  }
+
+  g_traitReadTracePage = page;
+  g_traitReadTracePageSize = pageSize;
+  g_traitReadTraceBaseProtect = oldProtect & ~PAGE_GUARD;
+  g_traitReadTraceArmed = true;
+  return true;
+}
+
+bool IsRipFromGameExe(uintptr_t rip, uintptr_t exeBase) {
+  if (!exeBase || rip < exeBase)
+    return false;
+
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (!VirtualQuery(reinterpret_cast<const void *>(rip), &mbi, sizeof(mbi)))
+    return false;
+
+  return reinterpret_cast<uintptr_t>(mbi.AllocationBase) == exeBase;
+}
+
+void FormatCodeBytesDiag(uintptr_t rip, char *out, size_t outSize) {
+  if (!out || outSize == 0)
+    return;
+
+  out[0] = '\0';
+  unsigned char bytes[20] = {};
+  if (!SafeCopyDiag(bytes, reinterpret_cast<const void *>(rip), sizeof(bytes)))
+    return;
+
+  size_t used = 0;
+  for (size_t i = 0; i < sizeof(bytes); ++i) {
+    if (used + 4 >= outSize)
+      break;
+    const int n = sprintf_s(out + used, outSize - used, i ? " %02X" : "%02X", bytes[i]);
+    if (n <= 0)
+      break;
+    used += static_cast<size_t>(n);
+  }
+}
+
+void FlushTraitReadTrace() {
+  LONG count = g_traitReadTraceWriteIndex;
+  if (count < 0)
+    count = 0;
+  if (count > kTraitReadTraceCapacity)
+    count = kTraitReadTraceCapacity;
+
+  struct UniqueRead {
+    uintptr_t rip = 0;
+    int slot = 0;
+    int count = 0;
+  };
+
+  std::vector<UniqueRead> unique;
+  unique.reserve(static_cast<size_t>(count));
+
+  const uintptr_t firstSlot = g_dirtyDiagTraceOfficer + 0x88;
+  const uintptr_t exeBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(L"SAN8RPK.exe"));
+
+  for (LONG i = 0; i < count; ++i) {
+    const auto &ev = g_traitReadTraceEvents[i];
+    if (!IsRipFromGameExe(ev.rip, exeBase))
+      continue;
+
+    const int slot =
+        static_cast<int>((ev.address - firstSlot) / sizeof(uintptr_t)) + 1;
+
+    bool found = false;
+    for (auto &u : unique) {
+      if (u.rip == ev.rip && u.slot == slot) {
+        ++u.count;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      unique.push_back({ev.rip, slot, 1});
+  }
+
+  AddLog(u8"[기재 dirty READ] 고유 접근:%d 전체 이벤트:%d",
+         static_cast<int>(unique.size()),
+         static_cast<int>(count));
+
+  for (const auto &u : unique) {
+    char codeBytes[128] = {};
+    FormatCodeBytesDiag(u.rip, codeBytes, sizeof(codeBytes));
+    AddLog(u8"[기재 dirty READ] RIP:SAN8RPK.exe+0x%llX 슬롯%d 횟수:%d CODE:%s",
+           static_cast<unsigned long long>(u.rip - exeBase),
+           u.slot,
+           u.count,
+           codeBytes);
+  }
+
+  if (g_traitReadTraceWriteIndex > kTraitReadTraceCapacity)
+    AddLog(u8"[기재 dirty READ] 이벤트가 1024개를 넘어 일부가 생략되었습니다.");
 }
 
 } // namespace
@@ -285,22 +487,26 @@ void SetInProgressTraitDirtyDiagnostics(bool enable) {
       AddLog(u8"[기재 dirty 진단] 시작 실패: 먼저 '기재 화면 보이기'를 활성화하세요.");
       return;
     }
+
     if (!Install(g_dirtyDiagRuntime,kDirtyDiagSpec)) {
-      AddLog(u8"[기재 dirty 진단] 시작 실패: 12BA1A9 진단 훅 설치 실패.");
+      AddLog(u8"[기재 dirty 진단] 시작 실패: 무장 편집 포착 훅 설치 실패.");
       return;
     }
+
     g_dirtyDiagEnabled = true;
     g_dirtyDiagBaselineReady = false;
-    g_dirtyDiagBaselineEditor = 0;
-    AddLog(u8"[기재 dirty 진단] 시작 완료. 무장 편집 화면을 새로 열어 editor 주소를 잡으세요.");
+    g_dirtyDiagTraceOfficer = 0;
+    AddLog(u8"[기재 dirty 진단] 시작 완료. 무장 편집 화면을 새로 연 뒤 '기준 캡처'를 누르세요.");
     return;
   }
 
+  DisarmTraitReadTrace();
   if (g_dirtyDiagRuntime.applied)
     Remove(g_dirtyDiagRuntime,kDirtyDiagSpec);
+
   g_dirtyDiagEnabled = false;
   g_dirtyDiagBaselineReady = false;
-  g_dirtyDiagBaselineEditor = 0;
+  g_dirtyDiagTraceOfficer = 0;
   AddLog(u8"[기재 dirty 진단] 종료.");
 }
 
@@ -309,7 +515,6 @@ bool IsInProgressTraitDirtyDiagnosticsEnabled() {
 }
 
 void TickInProgressTraitDirtyDiagnostics() {
-  // 버튼식 비교로 변경. 매 프레임 로그를 발생시키지 않습니다.
 }
 
 void CaptureInProgressTraitDirtyBaseline() {
@@ -317,82 +522,58 @@ void CaptureInProgressTraitDirtyBaseline() {
     AddLog(u8"[기재 dirty 진단] 기준 캡처 실패: 진단을 먼저 켜세요.");
     return;
   }
+
   const uintptr_t editor = GetDirtyDiagEditor();
-  if (editor < 0x10000) {
-    AddLog(u8"[기재 dirty 진단] 기준 캡처 실패: editor 미포착. 무장 편집 화면을 닫았다 다시 여세요.");
+  uintptr_t officer = 0;
+  if (editor < 0x10000 ||
+      !SafeReadPtrDiag(editor + 0x1A8, officer) ||
+      officer < 0x10000) {
+    AddLog(u8"[기재 dirty 진단] 기준 캡처 실패: 무장 주소 미포착. 무장 편집 화면을 닫았다 다시 여세요.");
     return;
   }
-  if (!SafeCopyDiag(g_dirtyDiagBaseline,reinterpret_cast<const void *>(editor),sizeof(g_dirtyDiagBaseline))) {
-    AddLog(u8"[기재 dirty 진단] 기준 캡처 실패: editor 메모리 읽기 실패.");
+
+  g_dirtyDiagTraceOfficer = officer;
+
+  uint16_t ids[3] = {};
+  ReadOfficerTraitIdsDiag(officer, ids);
+  AddLog(u8"[기재 dirty 진단/기준] officer:%p 현재:%u/%u/%u",
+         reinterpret_cast<void *>(officer),
+         static_cast<unsigned>(ids[0]),
+         static_cast<unsigned>(ids[1]),
+         static_cast<unsigned>(ids[2]));
+
+  if (!ArmTraitReadTrace(officer)) {
+    g_dirtyDiagTraceOfficer = 0;
+    AddLog(u8"[기재 dirty 진단] READ 추적 시작 실패.");
     return;
   }
+
   g_dirtyDiagBaselineReady = true;
-  g_dirtyDiagBaselineEditor = editor;
-  LogDirtyDiagTraits("기준",editor);
-  AddLog(u8"[기재 dirty 진단] 기준 캡처 완료.");
+  AddLog(u8"[기재 dirty 진단] READ 추적 시작. 기재를 변경하고 기재 목록의 '결정'으로 돌아온 뒤 '현재 비교'를 누르세요.");
 }
 
 void CompareInProgressTraitDirtyState() {
-  if (!g_dirtyDiagEnabled || !g_dirtyDiagBaselineReady) {
+  if (!g_dirtyDiagEnabled ||
+      !g_dirtyDiagBaselineReady ||
+      g_dirtyDiagTraceOfficer < 0x10000) {
     AddLog(u8"[기재 dirty 진단] 비교 실패: 먼저 기준 캡처를 하세요.");
     return;
   }
 
-  const uintptr_t editor = GetDirtyDiagEditor();
-  if (editor < 0x10000 || editor != g_dirtyDiagBaselineEditor) {
-    AddLog(u8"[기재 dirty 진단] 비교 실패: editor가 바뀌었습니다. 같은 무장 화면에서 다시 기준 캡처하세요.");
-    return;
-  }
+  // 로그를 뽑은 뒤 PAGE_GUARD를 반드시 해제합니다.
+  FlushTraitReadTrace();
+  DisarmTraitReadTrace();
 
-  unsigned char now[0x400] = {};
-  if (!SafeCopyDiag(now,reinterpret_cast<const void *>(editor),sizeof(now))) {
-    AddLog(u8"[기재 dirty 진단] 비교 실패: editor 메모리 읽기 실패.");
-    return;
-  }
+  uint16_t ids[3] = {};
+  ReadOfficerTraitIdsDiag(g_dirtyDiagTraceOfficer, ids);
+  AddLog(u8"[기재 dirty 진단/현재] officer:%p 현재:%u/%u/%u",
+         reinterpret_cast<void *>(g_dirtyDiagTraceOfficer),
+         static_cast<unsigned>(ids[0]),
+         static_cast<unsigned>(ids[1]),
+         static_cast<unsigned>(ids[2]));
 
-  LogDirtyDiagTraits("현재",editor);
-
-  int logged = 0;
-  for (size_t off = 0; off + 8 <= sizeof(now); off += 8) {
-    uint64_t before = 0, after = 0;
-    std::memcpy(&before,g_dirtyDiagBaseline + off,8);
-    std::memcpy(&after,now + off,8);
-    if (before == after)
-      continue;
-    const uint16_t beforeTrait = TraitIdFromPtrDiag(static_cast<uintptr_t>(before));
-    const uint16_t afterTrait = TraitIdFromPtrDiag(static_cast<uintptr_t>(after));
-    AddLog(u8"[기재 dirty 진단/DIFF] +0x%03zX : %016llX -> %016llX (기재ID:%u->%u)",
-           off,
-           static_cast<unsigned long long>(before),
-           static_cast<unsigned long long>(after),
-           static_cast<unsigned>(beforeTrait),
-           static_cast<unsigned>(afterTrait));
-    if (++logged >= 80) {
-      AddLog(u8"[기재 dirty 진단] 변경 항목이 많아 80개까지만 표시합니다.");
-      break;
-    }
-  }
-
-  const size_t candidates[] = {
-      0x068,0x080,0x090,0x098,0x0A0,0x0B0,
-      0x2F8,0x310,0x320,0x328,0x330,0x340
-  };
-  for (size_t off : candidates) {
-    uint64_t before = 0, after = 0;
-    std::memcpy(&before,g_dirtyDiagBaseline + off,8);
-    std::memcpy(&after,now + off,8);
-    AddLog(u8"[기재 dirty 진단/CAND] +0x%03zX 기재ID:%u->%u ptr:%016llX->%016llX",
-           off,
-           static_cast<unsigned>(TraitIdFromPtrDiag(static_cast<uintptr_t>(before))),
-           static_cast<unsigned>(TraitIdFromPtrDiag(static_cast<uintptr_t>(after))),
-           static_cast<unsigned long long>(before),
-           static_cast<unsigned long long>(after));
-  }
-
-  if (logged == 0)
-    AddLog(u8"[기재 dirty 진단] editor +0x000~+0x3FF 범위에서 변경 없음.");
-  else
-    AddLog(u8"[기재 dirty 진단] 비교 완료: %d개 qword 변경.",logged);
+  g_dirtyDiagBaselineReady = false;
+  AddLog(u8"[기재 dirty 진단] READ 추적 종료. 다음 테스트는 다시 '기준 캡처'부터 시작하세요.");
 }
 
 bool SetTraitViewerBaseEditor(bool enable){return enable?Install(g_baseEditor,kBaseEditorSpec):Remove(g_baseEditor,kBaseEditorSpec);}
