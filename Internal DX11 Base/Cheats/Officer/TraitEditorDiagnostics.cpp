@@ -407,6 +407,13 @@ void TickInProgressTraitDiagnostics() {
       if (current.ptr == previous.ptr && current.traitId == previous.traitId)
         continue;
 
+      if (!g_writeTraceArmed) {
+        if (!ArmWriteTrace(officerBase, officerId)) {
+          AddLog(u8"[기재3 진단] 쓰기 추적 시작 실패 ID:%u",
+                 static_cast<unsigned>(officerId));
+        }
+      }
+
       if (logCount < kMaxLogsPerPoll) {
         AddLog(
           u8"[기재3 진단] 실제무장 변경 ID:%u 슬롯%d(+0x%02X) 기재:%u→%u 포인터:%p→%p",
