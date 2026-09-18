@@ -8,14 +8,16 @@ static constexpr char kInProgressCaveB64[] =
   "OQZ0E2YPH0QAAEiNSQJB/8BmgzkAdfNJiwdIi9ZJi8//kMABAAAPt0cIiYOoAQAAg/0DcjYz2+s9SYuFqAEAAEmLPAZIhf8PhG7///9IiwdIi8//UEiEwA+E"
   "Xf///0C2AboBAAAA6VX///9Ji4WoAQAASYscBkmLtWACAABIhdt0ZEiLA0iLy/9QSITAdFcPtksuM/+D6QF0IoPpAXQRg/kBdSq6PAMAAL+QAAAA6xa6OwMA"
   "AL+PAAAA6wq6OgMAAL+FAAAASIvO6AAAAACF/3QUSI2OQAEAAESLx7oCAAAA6AAAAAD/xUmDxgiD/QMPjKv+//9Mi3wkIEiLfCRgSIt0JFhIg8QoQV5BXV1b"
-  "ww==";
+  "w8zMzMzMzMzMzMzMzMzMzMzMzMzMzEmLgDgCAABJi4ioAQAASImBmAAAAMeBdAMAAP/////pAAAAAA==";
 static constexpr Reloc kInProgressRelocs[] = {
   {0x36,0x2E99C98},{0x92,0x14ED0},{0xCE,0x1EDE250},{0xD5,0x25EE270},{0x13B,0x14ED0},{0x185,0x1D0D250},
   {0x1F8,0x170E2D0},{0x20B,0x14C70},{0x2E6,0x162C650},{0x2FE,0x1D17280},{0xF,0x12B67F5},{0x3B,0x12B9C4F},{0x6C,0x12B7035},
+  {0x360,0x12B4E23},
 };
 static constexpr AssertSpec kInProgressEnableAsserts[] = {
   {0x12B67EE,"48899090000000"},{0x12B5F7A,"BA60020000"},{0x12B9C48,"488B054900BE01"},{0x12B7030,"4053554155"},
   {0x12E273A,"83FF02"},{0x12E280E,"C7458402000000"},{0x12E2A33,"83FA02"},{0x12E2A41,"83FA02"},{0x12E2A6D,"83FA02"},
+  {0x12B4E1C,"498B88A8010000"},
 };
 static constexpr AssertSpec kInProgressDisableAsserts[] = {
   {0x12E273A,"83FF03"},{0x12E280E,"C7458403000000"},{0x12E2A33,"83FA03"},{0x12E2A41,"83FA03"},{0x12E2A6D,"83FA03"},
@@ -27,8 +29,10 @@ static constexpr PatchSpec kInProgressEnablePatches[] = {
   {0x12B67EE,PatchKind::JumpCave,nullptr,7,0x0},
   {0x12E273C,PatchKind::Bytes,"03",0,0},{0x12E2811,PatchKind::Bytes,"03",0,0},{0x12E2A35,PatchKind::Bytes,"03",0,0},
   {0x12E2A43,PatchKind::Bytes,"03",0,0},{0x12E2A6F,PatchKind::Bytes,"03",0,0},
+  {0x12B4E1C,PatchKind::JumpCave,nullptr,7,0x340},
 };
 static constexpr PatchSpec kInProgressDisablePatches[] = {
+  {0x12B4E1C,PatchKind::Bytes,"498B88A8010000",0,0},
   {0x12E273C,PatchKind::Bytes,"02",0,0},{0x12E2811,PatchKind::Bytes,"02",0,0},{0x12E2A35,PatchKind::Bytes,"02",0,0},
   {0x12E2A43,PatchKind::Bytes,"02",0,0},{0x12E2A6F,PatchKind::Bytes,"02",0,0},
   {0x12B67EE,PatchKind::Bytes,"48899090000000",0,0},{0x12B5F7A,PatchKind::Bytes,"BA60020000",0,0},
