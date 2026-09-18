@@ -527,9 +527,11 @@ namespace DX11Base {
 
         bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
         if (ImGui::Checkbox(u8"보조 보주 전체 사용", &allSecondaryJewels)) {
-          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels))
+          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels)) {
             DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 전체 사용 ON"
                                                          : u8"보조 보주 전체 사용 OFF");
+            SaveConfig();
+          }
         }
       }
 
