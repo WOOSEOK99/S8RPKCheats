@@ -519,10 +519,12 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing();
 
-        bool allJewelsOpen = DX11Base::AreAllJewelsOpen();
+        bool allJewelsOpen = DX11Base::IsAllJewelsOpenPreferred();
         if (ImGui::Checkbox(u8"보주 전체 개방", &allJewelsOpen)) {
-          if (DX11Base::SetAllJewelsOpen(allJewelsOpen))
+          if (DX11Base::SetAllJewelsOpen(allJewelsOpen)) {
             DX11Base::AddNotification(allJewelsOpen ? u8"보주 전체 개방 ON" : u8"보주 전체 개방 OFF");
+            SaveConfig();
+          }
         }
 
         if (ImGui::IsItemHovered()) {

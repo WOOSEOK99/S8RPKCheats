@@ -68,6 +68,7 @@ namespace DX11Base {
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
+    UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
   }
 
@@ -89,6 +90,14 @@ namespace DX11Base {
       bTraitViewer = IsTraitViewerFeatureApplied();
     AddLog(u8"[Config] 기재 화면 보이기 설정 로드%s: %s",
            hasTraitViewerSetting ? "" : "(기본값)", bTraitViewer ? "ON" : "OFF");
+
+    bool savedAllJewelsOpen = false;
+    const bool hasAllJewelOpenSetting =
+        LoadBoolConfigValue("bAllJewelsOpen", savedAllJewelsOpen);
+    SetAllJewelsOpenPreference(savedAllJewelsOpen);
+    AddLog(u8"[Config] 보주 전체 개방 설정 로드%s: %s",
+           hasAllJewelOpenSetting ? "" : "(기본값)",
+           savedAllJewelsOpen ? "ON" : "OFF");
 
     bool savedAllSecondaryJewels = false;
     const bool hasAllSecondaryJewelSetting =
