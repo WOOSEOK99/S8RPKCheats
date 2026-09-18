@@ -5,6 +5,7 @@
 #undef SaveConfig
 
 #include "Cheats/Officer/TraitViewerFeature.h"
+#include "Cheats/Civilian/JewelSettings.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -67,6 +68,7 @@ namespace DX11Base {
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
+    UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
   }
 
   void LoadConfig() {
@@ -87,5 +89,15 @@ namespace DX11Base {
       bTraitViewer = IsTraitViewerFeatureApplied();
     AddLog(u8"[Config] 기재 화면 보이기 설정 로드%s: %s",
            hasTraitViewerSetting ? "" : "(기본값)", bTraitViewer ? "ON" : "OFF");
+
+    bool savedAllSecondaryJewels = false;
+    const bool hasAllSecondaryJewelSetting =
+        LoadBoolConfigValue("bAllSecondaryJewels", savedAllSecondaryJewels);
+    if (!SetAllSecondaryJewelsEnabled(savedAllSecondaryJewels)) {
+      savedAllSecondaryJewels = IsAllSecondaryJewelsEnabled();
+    }
+    AddLog(u8"[Config] 보조 보주 전체 사용 설정 로드%s: %s",
+           hasAllSecondaryJewelSetting ? "" : "(기본값)",
+           savedAllSecondaryJewels ? "ON" : "OFF");
   }
 } // namespace DX11Base
