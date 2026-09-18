@@ -119,7 +119,7 @@ namespace DX11Base {
       {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false, true},
       {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false, true},
       {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false, true},
-      {"bFastRelationship", u8"경애시 무조건 공명", &bFastRelationship, &s_appRelation, SetFastRelationship, false, true},
+      {"bFastRelationship", u8"교류 대상 친밀도 100", &bFastRelationship, &s_appRelation, SetFastRelationship, false, true},
       {"marriageApplied", u8"결혼 무제한", &marriageApplied, &s_appMarriage, SetMarriageCondition, false, true},
       {"bSelfHeal", u8"전쟁: 자가 회복", &bSelfHeal, &s_appSelfHeal, SetSelfHeal, true, true},
       {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true, true},
