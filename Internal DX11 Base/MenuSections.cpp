@@ -9,6 +9,7 @@
 #include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/Civilian/Techzero.h"
 #include "Cheats/Officer/OfficerRosterResolve.h"
+#include "Cheats/Officer/TraitEditorDiagnostics.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Social/Fastrelationship.h"
 #include "Cheats/Social/Infinitegift.h"
@@ -967,7 +968,17 @@ namespace DX11Base {
         DX11Base::OpenTraitTextEditorWindow();
       }
 
+      ImGui::SameLine();
+      bool traitDiagEnabled = DX11Base::IsInProgressTraitDiagnosticsEnabled();
+      if (ImGui::Checkbox(u8"기재3 진단 로그", &traitDiagEnabled)) {
+        DX11Base::SetInProgressTraitDiagnostics(traitDiagEnabled);
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(u8"진행 중 게임 원본 편집기에서 실제 무장 기재 슬롯이 언제 바뀌는지 읽기 전용으로 기록합니다.");
+      }
+
       EndSection(); // 무장 정보
+      DX11Base::TickInProgressTraitDiagnostics();
       DX11Base::TickTraitTextEditorAutoApply();
       DX11Base::DrawTraitTextEditorWindow(scale);
 
