@@ -2,6 +2,8 @@
 #include "../../Framework/imgui.h"
 #include "../../pch.h"
 #include <string>
+#include <vector>
+#include <unordered_map>
 
 namespace DX11Base {
   extern bool bShowOfficerDetail;
@@ -16,6 +18,16 @@ namespace DX11Base {
   
   uint16_t GetTraitID(uintptr_t base, int slot);
   bool SetTraitID(uintptr_t base, int slot, uint16_t traitID);
+
+  // 일괄 랜덤 부여용 고속 경로:
+  // 필요한 기재 객체를 전체 메모리 스캔 최대 1회로 준비하고,
+  // 이후 슬롯에는 검증된 객체 포인터를 직접 기록합니다.
+  bool ResolveTraitObjectsForBatch(
+      const std::vector<uint16_t>& traitIDs,
+      std::unordered_map<uint16_t, uintptr_t>& outObjects);
+  bool SetTraitObjectFast(
+      uintptr_t officerBase, int slot, uint16_t traitID, uintptr_t traitObject);
+
   uintptr_t GetSelectedOfficerBase();
 
   void RenderBasicTab(uintptr_t pBase, float scale, bool isCaptured);
