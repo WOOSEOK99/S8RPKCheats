@@ -13,6 +13,8 @@ bool IsTraitViewerInProgressEditorApplied();
 void SetInProgressTraitDirtyDiagnostics(bool enable);
 bool IsInProgressTraitDirtyDiagnosticsEnabled();
 void TickInProgressTraitDirtyDiagnostics();
+void CaptureInProgressTraitDirtyBaseline();
+void CompareInProgressTraitDirtyState();
 
 bool SetTraitViewerBaseEditor(bool enable);
 bool IsTraitViewerBaseEditorApplied();
