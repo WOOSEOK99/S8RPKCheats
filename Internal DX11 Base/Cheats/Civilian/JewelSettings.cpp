@@ -44,6 +44,7 @@ constexpr uint16_t kMaxSecondaryJewelId = 500;
 
 using SecondaryJewelJudgeFn = bool(__fastcall *)(uint16_t jewelId);
 
+std::atomic_bool g_allJewelsOpenPreferred{false};
 std::atomic_bool g_allSecondaryJewelsEnabled{false};
 SecondaryJewelJudgeFn g_originalSecondaryJewelJudge = nullptr;
 bool g_secondaryJewelHookInstalled = false;
@@ -52,6 +53,51 @@ bool g_secondaryJewelHookInstalled = false;
 // 원 version.dll도 ID별 캐시를 사용해 hot path에서 반복 포인터 검증을 피합니다.
 std::array<uint8_t, kMaxSecondaryJewelId + 1> g_secondaryRuntimeCache{};
 uintptr_t g_secondaryRuntimeCacheBase = 0;
+
+bool AreAllJewelsOpenAtBase(uintptr_t gameBase) {
+  if (!gameBase)
+    return false;
+
+  const uintptr_t bitmapAddress = gameBase + kJewelOpenBitmapOffset;
+  if (!IsValidPtr(bitmapAddress, kDefinedJewelOpenMask.size()))
+    return false;
+
+  const auto *bitmap = reinterpret_cast<const uint8_t *>(bitmapAddress);
+  for (size_t i = 0; i < kDefinedJewelOpenMask.size(); ++i) {
+    const uint8_t mask = kDefinedJewelOpenMask[i];
+    if (mask != 0 && (bitmap[i] & mask) != mask)
+      return false;
+  }
+  return true;
+}
+
+bool ApplyAllJewelsOpenAtBase(uintptr_t gameBase, bool enable) {
+  if (!gameBase)
+    return false;
+
+  const uintptr_t bitmapAddress = gameBase + kJewelOpenBitmapOffset;
+  if (!IsValidPtr(bitmapAddress, kDefinedJewelOpenMask.size()))
+    return false;
+
+  auto *bitmap = reinterpret_cast<uint8_t *>(bitmapAddress);
+  __try {
+    for (size_t i = 0; i < kDefinedJewelOpenMask.size(); ++i) {
+      if (enable)
+        bitmap[i] = static_cast<uint8_t>(bitmap[i] | kDefinedJewelOpenMask[i]);
+      else
+        bitmap[i] = static_cast<uint8_t>(bitmap[i] & ~kDefinedJewelOpenMask[i]);
+    }
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+  return true;
+}
+
+void ResetSecondaryJewelRuntimeCache() {
+  g_secondaryRuntimeCache.fill(0);
+  g_secondaryRuntimeCacheBase = 0;
+}
 
 bool IsDefinedSecondaryJewelId(uint16_t jewelId) {
   if (jewelId < 1 || jewelId > kMaxSecondaryJewelId)
@@ -186,26 +232,24 @@ bool EnsureSecondaryJewelHook() {
 } // namespace
 
 bool SetAllJewelsOpen(bool enable) {
+  // 실제 비트맵과 별개로 사용자가 원하는 ON/OFF 상태를 보존합니다.
+  // ON 상태는 저장게임 로드 후 비트맵이 다시 덮여도 TickJewelSettings()가 재적용합니다.
+  g_allJewelsOpenPreferred.store(enable, std::memory_order_relaxed);
+
   const uintptr_t gameBase = GetGameBase();
   if (!gameBase) {
-    AddLog(u8"[보주] 게임 기준 주소를 찾지 못해 전체 개방을 변경하지 못했습니다.");
+    AddLog(u8"[보주] 게임 기준 주소를 찾지 못해 전체 개방을 즉시 변경하지 못했습니다.");
     return false;
   }
 
-  const uintptr_t bitmapAddress = gameBase + kJewelOpenBitmapOffset;
-  if (!IsValidPtr(bitmapAddress, kDefinedJewelOpenMask.size())) {
+  if (!ApplyAllJewelsOpenAtBase(gameBase, enable)) {
     AddLog(u8"[보주] 개방 비트맵 주소가 유효하지 않습니다: %p",
-           reinterpret_cast<void *>(bitmapAddress));
+           reinterpret_cast<void *>(gameBase + kJewelOpenBitmapOffset));
     return false;
   }
 
-  auto *bitmap = reinterpret_cast<uint8_t *>(bitmapAddress);
-  for (size_t i = 0; i < kDefinedJewelOpenMask.size(); ++i) {
-    if (enable)
-      bitmap[i] = static_cast<uint8_t>(bitmap[i] | kDefinedJewelOpenMask[i]);
-    else
-      bitmap[i] = static_cast<uint8_t>(bitmap[i] & ~kDefinedJewelOpenMask[i]);
-  }
+  if (enable)
+    ResetSecondaryJewelRuntimeCache();
 
   AddLog(enable ? u8"[보주] 정의된 보주 185개 전체 개방 ON"
                 : u8"[보주] 정의된 보주 185개 전체 개방 OFF");
@@ -213,31 +257,54 @@ bool SetAllJewelsOpen(bool enable) {
 }
 
 bool AreAllJewelsOpen() {
+  return AreAllJewelsOpenAtBase(GetGameBase());
+}
+
+bool IsAllJewelsOpenPreferred() {
+  return g_allJewelsOpenPreferred.load(std::memory_order_relaxed);
+}
+
+void SetAllJewelsOpenPreference(bool enable) {
+  g_allJewelsOpenPreferred.store(enable, std::memory_order_relaxed);
+
+  // 설정 로드시 OFF는 세이브에 원래 존재하는 개방 상태를 지우면 안 됩니다.
+  // ON만 즉시 시도하고, 실패해도 TickJewelSettings()가 이후 재시도합니다.
+  if (!enable)
+    return;
+
   const uintptr_t gameBase = GetGameBase();
-  if (!gameBase)
-    return false;
+  if (gameBase && ApplyAllJewelsOpenAtBase(gameBase, true))
+    ResetSecondaryJewelRuntimeCache();
+}
 
-  const uintptr_t bitmapAddress = gameBase + kJewelOpenBitmapOffset;
-  if (!IsValidPtr(bitmapAddress, kDefinedJewelOpenMask.size()))
-    return false;
+void TickJewelSettings() {
+  if (!g_allJewelsOpenPreferred.load(std::memory_order_relaxed))
+    return;
 
-  const auto *bitmap = reinterpret_cast<const uint8_t *>(bitmapAddress);
-  for (size_t i = 0; i < kDefinedJewelOpenMask.size(); ++i) {
-    const uint8_t mask = kDefinedJewelOpenMask[i];
-    if (mask != 0 && (bitmap[i] & mask) != mask)
-      return false;
+  static ULONGLONG s_lastCheckMs = 0;
+  const ULONGLONG now = GetTickCount64();
+  if (now - s_lastCheckMs < 250ull)
+    return;
+  s_lastCheckMs = now;
+
+  const uintptr_t gameBase = GetGameBaseFast();
+  if (!gameBase || AreAllJewelsOpenAtBase(gameBase))
+    return;
+
+  // 저장게임/시나리오 로드가 +0x71E0 비트맵을 세이브 값으로 덮어쓴 경우 자동 복구.
+  if (ApplyAllJewelsOpenAtBase(gameBase, true)) {
+    // 같은 gameBase 안에서 세이브만 교체될 수도 있으므로 보조 보주 런타임 캐시도 무효화합니다.
+    ResetSecondaryJewelRuntimeCache();
+    AddLog(u8"[보주] 저장게임 로드 후 보주 전체 개방 자동 재적용");
   }
-  return true;
 }
 
 bool SetAllSecondaryJewelsEnabled(bool enable) {
   if (enable && !EnsureSecondaryJewelHook())
     return false;
 
-  if (enable) {
-    g_secondaryRuntimeCache.fill(0);
-    g_secondaryRuntimeCacheBase = 0;
-  }
+  if (enable)
+    ResetSecondaryJewelRuntimeCache();
 
   g_allSecondaryJewelsEnabled.store(enable, std::memory_order_relaxed);
   AddLog(enable ? u8"[보주] 보조 보주 전체 사용 ON"
