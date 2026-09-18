@@ -22,7 +22,6 @@
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/Officer/OfficerDetail.h"
 #include "Cheats/Officer/TraitViewerFeature.h"
-#include "Cheats/Officer/TraitViewerNativeEditors.h"
 #include "Cheats/Officer/TraitTextEditorWindow.h"
 #include "Cheats/System/FactionTechEditor.h"
 #include "Cheats/System/StartSetting.h"
@@ -988,24 +987,6 @@ namespace DX11Base {
         DX11Base::OpenTraitTextEditorWindow();
       }
 
-      bool dirtyDiag = DX11Base::IsInProgressTraitDirtyDiagnosticsEnabled();
-      if (ImGui::Checkbox(u8"기재 dirty 진단", &dirtyDiag)) {
-        DX11Base::SetInProgressTraitDirtyDiagnostics(dirtyDiag);
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(u8"상위 무장 편집 객체의 변경 상태를 기준/현재 비교 로그로 기록합니다.");
-      }
-      if (dirtyDiag) {
-        ImGui::SameLine();
-        if (ImGui::Button(u8"기준 캡처")) {
-          DX11Base::CaptureInProgressTraitDirtyBaseline();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(u8"현재 비교")) {
-          DX11Base::CompareInProgressTraitDirtyState();
-        }
-      }
-
       if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여", ImVec2(220.0f * scale, 28.0f * scale))) {
         DX11Base::OpenBatchRandomTraitAssignmentWindow();
       }
@@ -1017,7 +998,6 @@ namespace DX11Base {
       }
 
       EndSection(); // 무장 정보
-      DX11Base::TickInProgressTraitDirtyDiagnostics();
       DX11Base::TickTraitTextEditorAutoApply();
       DX11Base::DrawTraitTextEditorWindow(scale);
       DX11Base::DrawBatchRandomTraitAssignmentWindow(scale);
