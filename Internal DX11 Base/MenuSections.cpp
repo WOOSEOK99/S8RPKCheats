@@ -993,7 +993,17 @@ namespace DX11Base {
         DX11Base::SetInProgressTraitDirtyDiagnostics(dirtyDiag);
       }
       if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(u8"진행 중 무장 편집의 상위 결정 버튼 활성화 상태를 진단 로그로 기록합니다.");
+        ImGui::SetTooltip(u8"상위 무장 편집 객체의 변경 상태를 기준/현재 비교 로그로 기록합니다.");
+      }
+      if (dirtyDiag) {
+        ImGui::SameLine();
+        if (ImGui::Button(u8"기준 캡처")) {
+          DX11Base::CaptureInProgressTraitDirtyBaseline();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"현재 비교")) {
+          DX11Base::CompareInProgressTraitDirtyState();
+        }
       }
 
       if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여", ImVec2(220.0f * scale, 28.0f * scale))) {
