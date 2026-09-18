@@ -7,8 +7,10 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace DX11Base {
 namespace {
