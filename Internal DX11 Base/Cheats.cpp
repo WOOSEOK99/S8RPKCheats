@@ -122,7 +122,12 @@ namespace DX11Base {
     uintptr_t GetGameBaseFast() {
         if (!s_gameBasePtrAddr)
             return 0;
-        return *reinterpret_cast<uintptr_t *>(s_gameBasePtrAddr);
+        __try {
+            return *reinterpret_cast<uintptr_t *>(s_gameBasePtrAddr);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return 0;
+        }
     }
 
     uintptr_t GetGameBase() {
