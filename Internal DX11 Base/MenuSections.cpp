@@ -596,8 +596,11 @@ namespace DX11Base {
       ImGui::SameLine(160.0f * scale);
       DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
 
-      if (::DX11Base::g_resonanceThreadRunning)
+      const bool resonanceBusy =
+          ::DX11Base::g_resonanceThreadRunning.load();
+      if (resonanceBusy)
         ImGui::BeginDisabled();
+
       if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
         DX11Base::SetInstantResonance(bResonance);
         NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
@@ -606,16 +609,16 @@ namespace DX11Base {
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"담화시 공명 갯수가 1개라도 있으면 무조건 공명 발생");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 1개도 없으면 공명발생하지 않음.");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           u8"무조건 공명갯수 4개로 되고,");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"다음번 담화때 상생 발생함.");
         ImGui::EndTooltip();
       }
 
-      if (::DX11Base::g_resonanceThreadRunning) {
+      if (resonanceBusy)
         ImGui::EndDisabled();
-      }
 
-      ImGui::SameLine(160.0f * scale);
       if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
         DX11Base::SetInfiniteGift(bInfiniteGift);
         NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
