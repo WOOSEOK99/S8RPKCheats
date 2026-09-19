@@ -10,7 +10,6 @@
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
 #include "Cheats/Social/ChildEarlyAppearance.h"
-#include "Cheats/Social/Resonancecave.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/System/SystemMonth.h"
@@ -468,7 +467,6 @@ namespace DX11Base {
     }
 
     ApplyStoredConfigs(p1, gameBase);
-    RunResonanceDebugPoll();
 
     // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
     RoninMonitor_Tick(p1);
