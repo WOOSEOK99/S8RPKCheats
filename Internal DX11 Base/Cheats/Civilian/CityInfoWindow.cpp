@@ -1809,6 +1809,79 @@ namespace DX11Base {
       return nullptr;
     }
 
+    static const CityOfficerRow *FindCityOfficerByStatus(uint8_t status) {
+      for (const auto &row : s_cityOfficerRows) {
+        if (row.status == status)
+          return &row;
+      }
+      return nullptr;
+    }
+
+    static bool ReplaceCityGovernor(uintptr_t p1,
+                                    uintptr_t shiftedCityBase) {
+      const CityOfficerRow *selected = FindSelectedCityOfficer();
+      if (!selected || selected->status != 0x28) {
+        AddNotification(u8"태수 교체: 일반 신분 무장을 선택해주세요.");
+        return false;
+      }
+
+      // 군주/도독이 직접 있는 도시는 태수 교체 대상에서 제외.
+      if (FindCityOfficerByStatus(0xC8) || FindCityOfficerByStatus(0xD8)) {
+        AddNotification(u8"태수 교체: 군주/도독이 있는 도시는 대상이 아닙니다.");
+        return false;
+      }
+
+      const CityOfficerRow *currentGovernor = FindCityOfficerByStatus(0xE8);
+      if (!currentGovernor) {
+        AddNotification(u8"태수 교체: 현재 도시의 태수를 찾지 못했습니다.");
+        return false;
+      }
+
+      if (currentGovernor->id == selected->id)
+        return false;
+
+      const uintptr_t oldGovernorBase = currentGovernor->officerBase;
+      const uintptr_t newGovernorBase = selected->officerBase;
+      if (oldGovernorBase <= 0x10000 || newGovernorBase <= 0x10000)
+        return false;
+
+      // 1) 기존 태수 -> 일반
+      if (!SafeWrite8(oldGovernorBase + 0x10, 0x28)) {
+        AddNotification(u8"태수 교체: 기존 태수 신분 변경에 실패했습니다.");
+        return false;
+      }
+
+      // 2) 선택 일반 -> 태수. 실패 시 기존 태수 복구.
+      if (!SafeWrite8(newGovernorBase + 0x10, 0xE8)) {
+        SafeWrite8(oldGovernorBase + 0x10, 0xE8);
+        AddNotification(u8"태수 교체: 새 태수 지정 실패로 기존 태수를 복구했습니다.");
+        return false;
+      }
+
+      const std::string oldName =
+          g_officerNames.count(currentGovernor->id)
+              ? g_officerNames[currentGovernor->id]
+              : (u8"무장 ID " + std::to_string((int)currentGovernor->id));
+      const std::string newName =
+          g_officerNames.count(selected->id)
+              ? g_officerNames[selected->id]
+              : (u8"무장 ID " + std::to_string((int)selected->id));
+
+      char notice[256]{};
+      sprintf_s(notice, u8"%s 태수 교체: %s → %s",
+                g_CityList[s_officerCityIndex].cityname,
+                oldName.c_str(), newName.c_str());
+      AddNotification(notice);
+      AddLog(u8"[도시 무장] %s 태수 교체 | %s(0xE8→0x28) / %s(0x28→0xE8)",
+             g_CityList[s_officerCityIndex].cityname,
+             oldName.c_str(), newName.c_str());
+
+      s_selectedOfficerId = -1;
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, shiftedCityBase);
+      return true;
+    }
+
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
                                           uintptr_t shiftedCityBase) {
       const CityOfficerRow *selected = FindSelectedCityOfficer();
@@ -2025,6 +2098,30 @@ namespace DX11Base {
                     GetOfficerStatusName(selected->status));
       } else {
         ImGui::TextDisabled(u8"이동할 무장을 목록에서 선택하세요.");
+      }
+
+      const bool hasCityLord = FindCityOfficerByStatus(0xC8) != nullptr;
+      const bool hasCityViceroy = FindCityOfficerByStatus(0xD8) != nullptr;
+      const bool hasGovernor = FindCityOfficerByStatus(0xE8) != nullptr;
+      const bool canReplaceGovernor =
+          selected != nullptr && selected->status == 0x28 &&
+          !hasCityLord && !hasCityViceroy && hasGovernor;
+
+      ImGui::SameLine(0.f, 20.f * sc);
+      if (!canReplaceGovernor)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"태수로 교체##ReplaceGovernor",
+                        ImVec2(115.f * sc, 0.f)))
+        ReplaceCityGovernor(p1, shiftedCityBase);
+      if (!canReplaceGovernor)
+        ImGui::EndDisabled();
+
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"테스트 단계: 일반 무장 1명을 현재 도시의 태수와 교체합니다.");
+        ImGui::TextUnformatted(u8"기존 태수는 일반(0x28), 선택 무장은 태수(0xE8)로 신분만 맞바꿉니다.");
+        ImGui::TextUnformatted(u8"군주/도독이 있는 도시는 이 버튼을 사용할 수 없습니다.");
+        ImGui::EndTooltip();
       }
 
       ImGui::SameLine(0.f, 24.f * sc);
