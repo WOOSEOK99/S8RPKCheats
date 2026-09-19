@@ -673,6 +673,7 @@ namespace DX11Base {
     }
     SetMonthCapture(false);
     s_appMonthCapture = false;
+    ResetCorpsAutoDeploymentSession();
     AddLog(u8"[Config] P1 의존 적용 상태 초기화");
   }
 
@@ -689,6 +690,7 @@ namespace DX11Base {
     s_firstP1Time = 0;
     SetMonthCapture(false);
     s_appMonthCapture = false;
+    ResetCorpsAutoDeploymentSession();
     AddLog(u8"[Config] 모든 적용 상태 초기화");
     s_isReset = true;
   }
