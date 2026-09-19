@@ -183,7 +183,7 @@ namespace DX11Base {
     }
 
     // CT369: 게임이 읽으려는 장수 ID가 LockedTargetId와 일치하면
-    // 해당 공명값을 최소 3으로 맞춘 뒤 원본 getter를 계속 실행한다.
+    // 해당 공명값을 최소 4로 맞춘 뒤 원본 getter를 계속 실행한다.
     static bool InstallResonanceThreeGetter(uintptr_t hookAddr) {
         g_resonanceThreeGetCaveAddr = AllocNear(hookAddr, 256);
         if (!g_resonanceThreeGetCaveAddr)
@@ -214,14 +214,14 @@ namespace DX11Base {
         cave[cur++] = 0x41; cave[cur++] = 0x0F; cave[cur++] = 0xB6; cave[cur++] = 0x84; cave[cur++] = 0x08;
         *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
 
-        // 이미 3 이상이면 유지, 3 미만이면 3으로 설정.
-        cave[cur++] = 0x3C; cave[cur++] = 0x03; // cmp al,3
+        // 이미 4 이상이면 유지, 4 미만이면 4로 설정.
+        cave[cur++] = 0x3C; cave[cur++] = 0x04; // cmp al,4
         cave[cur++] = 0x73;                     // jae rel8
         const int jaeNoWriteDispPos = cur++;
 
         cave[cur++] = 0x41; cave[cur++] = 0xC6; cave[cur++] = 0x84; cave[cur++] = 0x08;
         *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
-        cave[cur++] = 0x03;
+        cave[cur++] = 0x04;
 
         const int noWritePos = cur;
         cave[jaeNoWriteDispPos] =
@@ -338,10 +338,10 @@ namespace DX11Base {
 
                             if (selectOk && getterOk) {
                                 g_resonanceThreeCaveApplied = true;
-                                AddLog(u8"[Resonance3] 대화 상대 공명 3개 패치 적용");
+                                AddLog(u8"[Resonance3] 대화 상대 공명 4개 패치 적용");
                             } else {
                                 RemoveResonanceThreeHooks();
-                                AddLog(u8"[Resonance3] 대화 상대 공명 3개 패치 적용 실패");
+                                AddLog(u8"[Resonance3] 대화 상대 공명 4개 패치 적용 실패");
                             }
                         } else {
                             AddLog(u8"[Resonance3] 필요한 패턴을 찾지 못했습니다. select=%p getter=%p",
@@ -358,7 +358,7 @@ namespace DX11Base {
                 g_resonanceThreeSelectCaveAddr ||
                 g_resonanceThreeGetCaveAddr) {
                 RemoveResonanceThreeHooks();
-                AddLog(u8"[Resonance3] 대화 상대 공명 3개 패치 해제");
+                AddLog(u8"[Resonance3] 대화 상대 공명 4개 패치 해제");
             }
         }
     }
