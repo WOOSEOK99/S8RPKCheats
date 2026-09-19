@@ -158,17 +158,17 @@ namespace DX11Base {
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 158.f * sc), true);
+      ImGui::BeginChild("##CityTop", ImVec2(0.f, 222.f * sc), true);
 
-      ImGui::TextColored(ImVec4(1.f, 0.82f, 0.28f, 1.f), u8"[ 자동 환전 설정 ]");
-      // ImGui::SameLine(0.f, 20.f * sc);
-      // ImGui::TextDisabled(u8"(내정 중 양식→금 자동 교환 설정)");
+      const float fw = 95.f * sc;
+
+      // 1) 자동 환전: 모든 도시의 군량 초과분을 금으로 환전
+      ImGui::TextColored(ImVec4(1.f, 0.82f, 0.28f, 1.f),
+                         u8"[ 자동 환전 - 모든 도시 군량 → 금 ]");
       ImGui::Separator();
 
-      float fw = 95.f * sc;
-
       ImGui::TextUnformatted(u8"군량 한도");
-      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
+      ImGui::SameLine();
       ImGui::SetNextItemWidth(fw);
       if (ImGui::InputInt(u8"##gl", &g_cityMaxGrainLimit, 0, 0)) {
         if (g_cityMaxGrainLimit < 0) g_cityMaxGrainLimit = 0;
@@ -179,10 +179,10 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"군량이 이 값을 초과하면 자동으로 금으로 환전합니다.");
         ImGui::EndTooltip();
       }
-      ImGui::SameLine();
 
+      ImGui::SameLine(0.f, 18.f * sc);
       ImGui::TextUnformatted(u8"남길 군량");
-      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
+      ImGui::SameLine();
       ImGui::SetNextItemWidth(fw);
       if (ImGui::InputInt(u8"##kg", &g_cityKeepGrain, 0, 0)) {
         if (g_cityKeepGrain < 0) g_cityKeepGrain = 0;
@@ -193,10 +193,10 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"환전 시 이 수치만큼은 남기고 초과분만 환전합니다.");
         ImGui::EndTooltip();
       }
-      ImGui::SameLine();
 
+      ImGui::SameLine(0.f, 18.f * sc);
       ImGui::TextUnformatted(u8"환전 비율");
-      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
+      ImGui::SameLine();
       ImGui::SetNextItemWidth(fw);
       if (ImGui::InputInt(u8"##er", &g_cityExchangeRate, 0, 0)) {
         if (g_cityExchangeRate < 1) g_cityExchangeRate = 1;
@@ -207,8 +207,8 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"군량 N개당 1금으로 환전합니다. (예: 10 입력 시 10군량 -> 1금)");
         ImGui::EndTooltip();
       }
-      ImGui::SameLine(0.f, 18.f * sc);
 
+      ImGui::SameLine(0.f, 20.f * sc);
       if (ImGui::Checkbox(u8"자동 환전##autoex", &g_cityAutoExchangeEnabled)) {
         SaveConfig();
       }
@@ -219,7 +219,11 @@ namespace DX11Base {
       }
 
       ImGui::Spacing();
-      if (ImGui::Checkbox(u8"반란카운트 항상 0##revoltzero", &g_cityRevoltAlwaysZero)) {
+
+      // 2) 반란 카운트
+      ImGui::TextColored(ImVec4(0.75f, 0.86f, 1.f, 1.f), u8"[ 반란 카운트 ]");
+      ImGui::SameLine(0.f, 18.f * sc);
+      if (ImGui::Checkbox(u8"항상 0 유지##revoltzero", &g_cityRevoltAlwaysZero)) {
         if (g_cityRevoltAlwaysZero)
           ResetAllCityRevoltCounters();
         SaveConfig();
@@ -231,8 +235,8 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(0.f, 18.f * sc);
-      if (ImGui::Button(u8"즉시 반란카운터 0으로 설정##revoltreset",
-                        ImVec2(210.f * sc, 0.f))) {
+      if (ImGui::Button(u8"즉시 모든 도시 0으로 설정##revoltreset",
+                        ImVec2(205.f * sc, 0.f))) {
         ResetAllCityRevoltCounters();
       }
       if (ImGui::IsItemHovered()) {
@@ -241,39 +245,44 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::Spacing();
       ImGui::Separator();
 
-      // 일괄 제어 버튼
+      // 3) 모든 도시 일괄 최대화
+      ImGui::TextColored(ImVec4(1.f, 0.58f, 0.58f, 1.f), u8"[ 모든 도시 일괄 최대화 ]");
+
+      const float gap = 10.f * sc;
+      const float avail = ImGui::GetContentRegionAvail().x;
+      const float btnW = (avail - gap * 2.f) / 3.f;
+
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.2f, 0.2f, 1.f));
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.3f, 0.3f, 1.f));
-      if (ImGui::Button(u8"모든 도시 군량/금 최대화##maxall", ImVec2(200.f * sc, 0.f))) {
+
+      if (ImGui::Button(u8"군량 / 금 최대화##maxall", ImVec2(btnW, 0.f))) {
         MaximizeAllCityResources();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 도시 병사 최대화##maxsol", ImVec2(180.f * sc, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"병사 최대화##maxsol", ImVec2(btnW, 0.f))) {
         MaximizeAllCitySoldierMax();
       }
-      
-      ImGui::Spacing();
-      
-      float limitBtnW = 135.f * sc;
-      if (ImGui::Button(u8"모든 개발 최대화##maxdev", ImVec2(limitBtnW, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"개발 최대화##maxdev", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDevMax();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 상업 최대화##maxcom", ImVec2(limitBtnW, 0.f))) {
+
+      if (ImGui::Button(u8"상업 최대화##maxcom", ImVec2(btnW, 0.f))) {
         MaximizeAllCityComMax();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 방어 최대화##maxdef", ImVec2(limitBtnW, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"방어 최대화##maxdef", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDefMax();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 기술 최대화##maxtec", ImVec2(limitBtnW, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"기술 최대화##maxtec", ImVec2(btnW, 0.f))) {
         MaximizeAllCityTecMax();
       }
-      ImGui::PopStyleColor(2);
 
+      ImGui::PopStyleColor(2);
       ImGui::EndChild();
       ImGui::PopStyleColor();
     }
@@ -933,7 +942,13 @@ namespace DX11Base {
       NormalizeSupportSelections();
 
       ImGui::Spacing();
+      ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.12f, 0.16f, 0.82f));
+      ImGui::BeginChild("##ManualSupportPanel", ImVec2(0.f, 142.f * sc), true);
+
       ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.0f, 1.f), u8"[ 수동 즉시 지원 ]");
+      ImGui::SameLine(0.f, 16.f * sc);
+      ImGui::TextDisabled(u8"같은 세력 도시 간 즉시 이동 · 전선 → 전선 가능");
+      ImGui::Separator();
 
       const char *srcName =
           (s_supportSourceCity >= 0 && s_supportSourceCity < g_CityCount)
@@ -944,9 +959,10 @@ namespace DX11Base {
               ? g_CityList[s_supportTargetCity].cityname
               : u8"도시 없음";
 
+      // 1행: 출발 / 도착 / 방식
       ImGui::TextUnformatted(u8"보내는 도시");
       ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::SetNextItemWidth(130.f * sc);
+      ImGui::SetNextItemWidth(125.f * sc);
       if (ImGui::BeginCombo("##SupportSourceCity", srcName)) {
         for (const auto &row : s_frontierRows) {
           const bool selected = (row.cityIndex == s_supportSourceCity);
@@ -958,10 +974,12 @@ namespace DX11Base {
         ImGui::EndCombo();
       }
 
-      ImGui::SameLine(0.f, 20.f * sc);
+      ImGui::SameLine(0.f, 18.f * sc);
+      ImGui::TextUnformatted(u8"→");
+      ImGui::SameLine(0.f, 18.f * sc);
       ImGui::TextUnformatted(u8"받는 도시");
       ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::SetNextItemWidth(130.f * sc);
+      ImGui::SetNextItemWidth(125.f * sc);
       if (ImGui::BeginCombo("##SupportTargetCity", dstName)) {
         for (const auto &row : s_frontierRows) {
           if (row.cityIndex == s_supportSourceCity)
@@ -976,6 +994,8 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(0.f, 24.f * sc);
+      ImGui::TextUnformatted(u8"방식");
+      ImGui::SameLine(0.f, 8.f * sc);
       if (ImGui::RadioButton(u8"정량##SupportFixed", s_supportMode == 0))
         s_supportMode = 0;
       ImGui::SameLine();
@@ -988,6 +1008,7 @@ namespace DX11Base {
       const int inputMax = (s_supportMode == 0) ? 2000000000 : 100;
       const char *unitText = (s_supportMode == 0) ? u8"" : u8"%";
 
+      // 2행: 자원량 + 실행 버튼
       ImGui::TextUnformatted(u8"금");
       ImGui::SameLine(0.f, 8.f * sc);
       ImGui::SetNextItemWidth(100.f * sc);
@@ -1020,6 +1041,24 @@ namespace DX11Base {
         ImGui::TextUnformatted(unitText);
       }
 
+      const bool canExecute = (s_supportSourceCity >= 0 && s_supportTargetCity >= 0);
+      ImGui::SameLine(0.f, 20.f * sc);
+      if (!canExecute)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"지금 지원##RearSupport", ImVec2(110.f * sc, 0.f)))
+        ExecuteRearSupport(p1, shiftedCityBase);
+      if (!canExecute)
+        ImGui::EndDisabled();
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"선택 세력의 어느 도시끼리든 즉시 자원을 이동합니다.");
+        ImGui::TextUnformatted(u8"전선->전선 이동도 가능하며, 실행 직전에 같은 세력인지 다시 확인합니다.");
+        ImGui::TextUnformatted(u8"병력은 도착 도시의 병사한도를 넘지 않습니다.");
+        ImGui::EndTooltip();
+      }
+
+      // 3행: 예상 결과 / 병사 한도 안내
       uint32_t previewGold = 0, previewGrain = 0, previewTroops = 0;
       uint32_t previewRequestedTroops = 0;
       uint32_t previewTroopRoom = 0;
@@ -1042,11 +1081,11 @@ namespace DX11Base {
           previewTroops = previewTroopRoom;
       }
 
-      ImGui::TextDisabled(u8"예상 지원: 금 %u / 군량 %u / 병력 %u",
+      ImGui::TextDisabled(u8"예상 지원  금 %u / 군량 %u / 병력 %u",
                           previewGold, previewGrain, previewTroops);
       if (srcRow && dstRow) {
         ImGui::SameLine(0.f, 18.f * sc);
-        ImGui::TextDisabled(u8"(병력: 출발 %u / 도착 %u/%u / 여유 %u)",
+        ImGui::TextDisabled(u8"병력: 출발 %u · 도착 %u/%u · 여유 %u",
                             srcRow->troops, dstRow->troops, dstRow->troopMax, previewTroopRoom);
       }
 
@@ -1061,24 +1100,8 @@ namespace DX11Base {
         }
       }
 
-      ImGui::SameLine(0.f, 20.f * sc);
-
-      const bool canExecute = (s_supportSourceCity >= 0 && s_supportTargetCity >= 0);
-      if (!canExecute)
-        ImGui::BeginDisabled();
-      if (ImGui::Button(u8"지금 지원##RearSupport", ImVec2(110.f * sc, 0.f)))
-        ExecuteRearSupport(p1, shiftedCityBase);
-      if (!canExecute)
-        ImGui::EndDisabled();
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(u8"선택 세력의 어느 도시끼리든 즉시 자원을 이동합니다.");
-        ImGui::TextUnformatted(u8"전선->전선 이동도 가능하며, 실행 직전에 같은 세력인지 다시 확인합니다.");
-        ImGui::TextUnformatted(u8"병력은 도착 도시의 병사한도를 넘지 않습니다.");
-        ImGui::EndTooltip();
-      }
-
+      ImGui::EndChild();
+      ImGui::PopStyleColor();
       ImGui::Separator();
     }
 
