@@ -144,78 +144,35 @@ namespace DX11Base {
     }
 
     static bool InstallResonanceThreeSelectCapture(uintptr_t hookAddr) {
-        g_resonanceThreeSelectCaveAddr = AllocNear(hookAddr, 192);
+        g_resonanceThreeSelectCaveAddr = AllocNear(hookAddr, 128);
         if (!g_resonanceThreeSelectCaveAddr)
             return false;
 
         uint8_t* cave = (uint8_t*)g_resonanceThreeSelectCaveAddr;
         int cur = 0;
 
-        // CT296은 화면 전환 중 실제 선택 장수 외의 레코드도 다시 지나간다.
-        // g_resonanceThreeArmed 상태:
-        //   0 = 다음 ID를 실제 선택 후보로 캡처
-        //   1 = 후보 ID 고정, 아직 덮어쓰기 없음
-        //   2 = 후보 ID 고정 후 다른 CT296 호출이 한 번 이상 들어옴
-        //   3 = getter가 먼저 매칭됨. 다음 CT296 호출(전환 잡음)을 1회 버리고 0으로 복귀
-        // 원본 mov eax,[rsi+320]은 flags를 바꾸지 않으므로 flags/register를 보존한다.
-        cave[cur++] = 0x9C; // pushfq
+        // CT ID 296: interacting selection에서 RSI가 현재 상대 무장(0x3D0 레코드).
+        // 원본 플래그를 건드리지 않고 상대 ID(+0x08)를 저장하고 armed=1.
         cave[cur++] = 0x50; // push rax
         cave[cur++] = 0x51; // push rcx
+
+        // movzx ecx, word ptr [rsi+08]
+        cave[cur++] = 0x0F; cave[cur++] = 0xB7; cave[cur++] = 0x4E; cave[cur++] = 0x08;
+
+        // mov rax, &g_resonanceThreeTargetId
+        cave[cur++] = 0x48; cave[cur++] = 0xB8;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTargetId; cur += 8;
+        // mov word ptr [rax], cx
+        cave[cur++] = 0x66; cave[cur++] = 0x89; cave[cur++] = 0x08;
 
         // mov rax, &g_resonanceThreeArmed
         cave[cur++] = 0x48; cave[cur++] = 0xB8;
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
-
-        // cmp byte ptr [rax], 0 / je captureNew
-        cave[cur++] = 0x80; cave[cur++] = 0x38; cave[cur++] = 0x00;
-        cave[cur++] = 0x74;
-        const int jeCaptureDispPos = cur++;
-
-        // cmp byte ptr [rax], 3 / je consumeAfterMatch
-        cave[cur++] = 0x80; cave[cur++] = 0x38; cave[cur++] = 0x03;
-        cave[cur++] = 0x74;
-        const int jeConsumeDispPos = cur++;
-
-        // state 1이면 "덮어쓰기 발생" 표시로 2로 올린다. state 2면 그대로 유지.
-        // cmp byte ptr [rax], 1 / jne skipCapture
-        cave[cur++] = 0x80; cave[cur++] = 0x38; cave[cur++] = 0x01;
-        cave[cur++] = 0x75;
-        const int jneSkipDispPos = cur++;
-        // mov byte ptr [rax], 2
-        cave[cur++] = 0xC6; cave[cur++] = 0x00; cave[cur++] = 0x02;
-        // jmp skipCapture
-        cave[cur++] = 0xEB;
-        const int jmpSkipFromState1Pos = cur++;
-
-        // consumeAfterMatch: getter가 먼저 맞은 뒤 들어오는 전환 잡음 1회를 버림.
-        const int consumeAfterMatchPos = cur;
-        cave[cur++] = 0xC6; cave[cur++] = 0x00; cave[cur++] = 0x00; // armed=0
-        cave[cur++] = 0xEB;
-        const int jmpSkipFromConsumePos = cur++;
-
-        // captureNew:
-        const int captureNewPos = cur;
-        cave[cur++] = 0x0F; cave[cur++] = 0xB7; cave[cur++] = 0x4E; cave[cur++] = 0x08; // movzx ecx,[rsi+08]
-
-        cave[cur++] = 0x48; cave[cur++] = 0xB8;
-        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTargetId; cur += 8;
-        cave[cur++] = 0x66; cave[cur++] = 0x89; cave[cur++] = 0x08; // mov [rax],cx
-
-        cave[cur++] = 0x48; cave[cur++] = 0xB8;
-        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
-        cave[cur++] = 0xC6; cave[cur++] = 0x00; cave[cur++] = 0x01; // armed=1
-
-        const int skipCapturePos = cur;
-
-        cave[jeCaptureDispPos] = (uint8_t)(captureNewPos - (jeCaptureDispPos + 1));
-        cave[jeConsumeDispPos] = (uint8_t)(consumeAfterMatchPos - (jeConsumeDispPos + 1));
-        cave[jneSkipDispPos] = (uint8_t)(skipCapturePos - (jneSkipDispPos + 1));
-        cave[jmpSkipFromState1Pos] = (uint8_t)(skipCapturePos - (jmpSkipFromState1Pos + 1));
-        cave[jmpSkipFromConsumePos] = (uint8_t)(skipCapturePos - (jmpSkipFromConsumePos + 1));
+        // mov byte ptr [rax], 1
+        cave[cur++] = 0xC6; cave[cur++] = 0x00; cave[cur++] = 0x01;
 
         cave[cur++] = 0x59; // pop rcx
         cave[cur++] = 0x58; // pop rax
-        cave[cur++] = 0x9D; // popfq
 
         // 원본: mov eax,[rsi+00000320]
         memcpy(&cave[cur], g_resonanceThreeSelectOriginal, sizeof(g_resonanceThreeSelectOriginal));
@@ -265,22 +222,15 @@ namespace DX11Base {
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeRawGetterSeq; cur += 8;
         cave[cur++] = 0x41; cave[cur++] = 0xFF; cave[cur++] = 0x03;
 
-        // armed state 1 또는 2일 때만 선택 후보와 getter ID를 비교한다.
+        // mov r11, &g_resonanceThreeArmed
         cave[cur++] = 0x49; cave[cur++] = 0xBB;
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
-
-        // cmp byte ptr [r11],1 / je armedOk
+        // cmp byte ptr [r11], 1
         cave[cur++] = 0x41; cave[cur++] = 0x80; cave[cur++] = 0x3B; cave[cur++] = 0x01;
-        cave[cur++] = 0x74;
-        const int jeArmedOneDispPos = cur++;
 
-        // cmp byte ptr [r11],2 / jne skipApply
-        cave[cur++] = 0x41; cave[cur++] = 0x80; cave[cur++] = 0x3B; cave[cur++] = 0x02;
+        // jne skipApply (rel8 patched later)
         cave[cur++] = 0x75;
         const int jneArmedDispPos = cur++;
-
-        const int armedOkPos = cur;
-        cave[jeArmedOneDispPos] = (uint8_t)(armedOkPos - (jeArmedOneDispPos + 1));
 
         // mov r11, &g_resonanceThreeTargetId
         cave[cur++] = 0x49; cave[cur++] = 0xBB;
@@ -341,24 +291,8 @@ namespace DX11Base {
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeGetterSeq; cur += 8;
         cave[cur++] = 0x41; cave[cur++] = 0xFF; cave[cur++] = 0x03;
 
-        // 매칭 성공 후 latch 상태 전환.
-        // state1: getter가 덮어쓰기보다 먼저 왔으므로 state3으로 두고 다음 CT296 잡음을 1회 버린다.
-        // state2: 이미 덮어쓰기가 먼저 왔으므로 바로 idle(0)로 복귀한다.
-        cave[cur++] = 0x49; cave[cur++] = 0xBB;
-        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
-        cave[cur++] = 0x41; cave[cur++] = 0x80; cave[cur++] = 0x3B; cave[cur++] = 0x01; // cmp [r11],1
-        cave[cur++] = 0x75;
-        const int jneWasState1DispPos = cur++;
-        cave[cur++] = 0x41; cave[cur++] = 0xC6; cave[cur++] = 0x03; cave[cur++] = 0x03; // state3
-        cave[cur++] = 0xEB;
-        const int jmpStateDoneDispPos = cur++;
-
-        const int wasState2Pos = cur;
-        cave[cur++] = 0x41; cave[cur++] = 0xC6; cave[cur++] = 0x03; cave[cur++] = 0x00; // state0
-
-        const int stateDonePos = cur;
-        cave[jneWasState1DispPos] = (uint8_t)(wasState2Pos - (jneWasState1DispPos + 1));
-        cave[jmpStateDoneDispPos] = (uint8_t)(stateDonePos - (jmpStateDoneDispPos + 1));
+        // 여기서는 armed를 해제하지 않습니다.
+        // 교류 화면에서 상대가 바뀌면 CT296 캡처 훅이 TargetID를 새 값으로 갱신합니다.
 
         const int skipApplyPos = cur;
         cave[jneArmedDispPos] = (uint8_t)(skipApplyPos - (jneArmedDispPos + 1));
@@ -555,7 +489,7 @@ namespace DX11Base {
         const uint16_t targetId = g_resonanceThreeTargetId;
         if (targetId != 0 && targetId != s_lastLoggedTargetId) {
             s_lastLoggedTargetId = targetId;
-            AddLog(u8"[Resonance3Debug] 선택 TargetID=%u LatchState=%u",
+            AddLog(u8"[Resonance3Debug] 선택 TargetID=%u Armed=%u",
                    targetId, (unsigned)g_resonanceThreeArmed);
         }
 
