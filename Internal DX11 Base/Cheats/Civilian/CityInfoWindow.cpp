@@ -1620,6 +1620,45 @@ namespace DX11Base {
     static constexpr uintptr_t OFFICER_CORPS_FILTER_ALL = ~(uintptr_t)0;
     static uintptr_t s_officerCorpsFilter = OFFICER_CORPS_FILTER_ALL;
 
+    struct CorpsDeploymentCityRecommendation {
+      int cityIndex = -1;
+      bool frontline = false;
+      int currentCount = 0;
+      int targetCount = 0;
+      uint16_t currentGovernorId = 0;
+      uint16_t recommendedGovernorId = 0;
+      int governorScore = 0;
+      std::vector<uint16_t> recommendedOfficerIds;
+    };
+
+    struct CorpsDeploymentOfficerRecommendation {
+      uint16_t id = 0;
+      uint8_t status = 0;
+      uint8_t loyalty = 0;
+      int currentCityIndex = -1;
+      int recommendedCityIndex = -1;
+      bool recommendedGovernor = false;
+      std::string reason;
+    };
+
+    static std::vector<CorpsDeploymentCityRecommendation>
+        s_corpsDeploymentCities;
+    static std::vector<CorpsDeploymentOfficerRecommendation>
+        s_corpsDeploymentOfficers;
+    static uintptr_t s_corpsDeploymentCorpsPtr = 0;
+    static bool s_corpsDeploymentValid = false;
+
+    struct CorpsDeploymentTargetBaseline {
+      int cityIndex = -1;
+      int targetCount = 0;
+    };
+    static uintptr_t s_corpsDeploymentTargetCorpsPtr = 0;
+    static std::vector<CorpsDeploymentTargetBaseline>
+        s_corpsDeploymentTargetBaseline;
+    static uint8_t s_corpsDeploymentLastRelevantGameState = 0;
+    static constexpr uint8_t CORPS_DEPLOY_STATE_COUNCIL = 0x05;
+    static constexpr uint8_t CORPS_DEPLOY_STATE_DOMESTIC = 0x07;
+
     struct OfficerCityCorpsInfo {
       bool readable = false;
       uintptr_t corpsPtr = 0;
@@ -2015,6 +2054,2267 @@ namespace DX11Base {
             break;
           }
         }
+      }
+    }
+
+
+    static int GetOfficerCurrentCityIndex(
+        uintptr_t shiftedCityBase, const CityOfficerRow &row) {
+      uintptr_t cityPtr = 0;
+      if (!SafeReadPtr(row.officerBase + 0x20, &cityPtr))
+        return -1;
+      for (int i = 0; i < g_CityCount; ++i) {
+        if (GetRawCityBase(shiftedCityBase, i) == cityPtr)
+          return i;
+      }
+      return -1;
+    }
+
+    static CorpsDeploymentCityRecommendation *FindDeploymentCity(int cityIndex) {
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.cityIndex == cityIndex)
+          return &city;
+      }
+      return nullptr;
+    }
+
+    static const CityOfficerRow *FindCorpsOfficerByRecId(uint16_t officerId) {
+      for (const auto &row : s_corpsOfficerRows) {
+        if (row.id == officerId)
+          return &row;
+      }
+      return nullptr;
+    }
+
+    static int GetFrontDeploymentScore(const CityOfficerRow &row) {
+      // 전선은 통솔+무력형과 고지력형 모두 우대한다.
+      const int combat = (int)row.lead + (int)row.war;
+      const int intellect = (int)row.intel * 2;
+      return (std::max)(combat, intellect);
+    }
+
+    static int GetRearDeploymentScore(const CityOfficerRow &row) {
+      return (int)row.pol + (int)row.cha;
+    }
+
+    static int GetGovernorScore(const CityOfficerRow &row, bool frontline) {
+      return frontline
+                 ? ((int)row.lead + (int)row.war)
+                 : ((int)row.pol + (int)row.cha);
+    }
+
+    static bool IsSafeFirstGovernorNormal(
+        const CityOfficerRow &row) {
+      if (row.status != 0x28 || row.loyalty != 100)
+        return false;
+
+      uint16_t pair = 0;
+      return SafeRead16(row.officerBase + 0x10, &pair) &&
+             pair == 0xD328u;
+    }
+
+    static int PickDeploymentCity(bool frontline) {
+      CorpsDeploymentCityRecommendation *best = nullptr;
+      int bestRemain = -1000000;
+      int bestAssigned = 1000000;
+
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.frontline != frontline)
+          continue;
+        const int assigned = (int)city.recommendedOfficerIds.size();
+        const int remain = city.targetCount - assigned;
+        if (remain <= 0)
+          continue;
+        if (!best || remain > bestRemain ||
+            (remain == bestRemain && assigned < bestAssigned) ||
+            (remain == bestRemain && assigned == bestAssigned &&
+             city.cityIndex < best->cityIndex)) {
+          best = &city;
+          bestRemain = remain;
+          bestAssigned = assigned;
+        }
+      }
+
+      return best ? best->cityIndex : -1;
+    }
+
+    static void AddOfficerDeploymentRecommendation(
+        const CityOfficerRow &row, int currentCityIndex,
+        int recommendedCityIndex, bool governor, const std::string &reason) {
+      CorpsDeploymentOfficerRecommendation rec;
+      rec.id = row.id;
+      rec.status = row.status;
+      rec.loyalty = row.loyalty;
+      rec.currentCityIndex = currentCityIndex;
+      rec.recommendedCityIndex = recommendedCityIndex;
+      rec.recommendedGovernor = governor;
+      rec.reason = reason;
+      s_corpsDeploymentOfficers.push_back(rec);
+
+      CorpsDeploymentCityRecommendation *city =
+          FindDeploymentCity(recommendedCityIndex);
+      if (city)
+        city->recommendedOfficerIds.push_back(row.id);
+    }
+
+    static void ResetCorpsDeploymentTargetBaseline() {
+      s_corpsDeploymentTargetCorpsPtr = 0;
+      s_corpsDeploymentTargetBaseline.clear();
+      s_corpsDeploymentValid = false;
+      s_corpsDeploymentCities.clear();
+      s_corpsDeploymentOfficers.clear();
+      s_corpsDeploymentCorpsPtr = 0;
+    }
+
+    static bool HasValidCorpsDeploymentTargetBaseline(
+        uintptr_t corpsPtr, const std::vector<int> &corpsCities) {
+      if (corpsPtr <= 0x10000 ||
+          s_corpsDeploymentTargetCorpsPtr != corpsPtr ||
+          s_corpsDeploymentTargetBaseline.size() != corpsCities.size())
+        return false;
+
+      for (int cityIndex : corpsCities) {
+        bool found = false;
+        for (const auto &base : s_corpsDeploymentTargetBaseline) {
+          if (base.cityIndex == cityIndex) {
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+          return false;
+      }
+      return true;
+    }
+
+    static bool BuildCorpsDeploymentRecommendation(
+        uintptr_t shiftedCityBase);
+
+    static int GetCorpsDeploymentBaselineTargetCount(int cityIndex) {
+      for (const auto &base : s_corpsDeploymentTargetBaseline) {
+        if (base.cityIndex == cityIndex)
+          return base.targetCount;
+      }
+      return -1;
+    }
+
+    static void CaptureCorpsDeploymentTargetBaseline(
+        uintptr_t corpsPtr,
+        const std::vector<CorpsDeploymentCityRecommendation> &cities) {
+      s_corpsDeploymentTargetBaseline.clear();
+      for (const auto &city : cities) {
+        CorpsDeploymentTargetBaseline base;
+        base.cityIndex = city.cityIndex;
+        base.targetCount = city.targetCount;
+        s_corpsDeploymentTargetBaseline.push_back(base);
+      }
+      s_corpsDeploymentTargetCorpsPtr = corpsPtr;
+    }
+
+    static void RefreshCorpsDeploymentPlanCurrentState(
+        uintptr_t shiftedCityBase) {
+      if (!s_corpsDeploymentValid ||
+          s_corpsDeploymentCorpsPtr <= 0x10000)
+        return;
+
+      for (auto &city : s_corpsDeploymentCities) {
+        city.currentCount = 0;
+        city.currentGovernorId = 0;
+
+        const uintptr_t rawCity =
+            GetRawCityBase(shiftedCityBase, city.cityIndex);
+        uintptr_t governorPtr = 0;
+        if (rawCity)
+          SafeReadPtrAllowZero(rawCity + OFF_CITY_FORCE_LINK_RAW,
+                               &governorPtr);
+
+        for (const auto &row : s_corpsOfficerRows) {
+          const int currentCity =
+              GetOfficerCurrentCityIndex(shiftedCityBase, row);
+          if (currentCity == city.cityIndex)
+            ++city.currentCount;
+          if (row.officerBase == governorPtr)
+            city.currentGovernorId = row.id;
+        }
+      }
+
+      for (auto &rec : s_corpsDeploymentOfficers) {
+        const CityOfficerRow *row = FindCorpsOfficerByRecId(rec.id);
+        if (!row)
+          continue;
+        rec.status = row->status;
+        rec.loyalty = row->loyalty;
+        rec.currentCityIndex =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+      }
+    }
+
+    static uint8_t ReadCorpsDeploymentRelevantGameState() {
+      const uintptr_t gameBase = GetGameBase();
+      if (gameBase <= 0x10000)
+        return 0;
+
+      uint8_t state = 0;
+      if (!SafeRead8(gameBase + 0xD0, &state))
+        return 0;
+
+      return (state == CORPS_DEPLOY_STATE_COUNCIL ||
+              state == CORPS_DEPLOY_STATE_DOMESTIC)
+                 ? state
+                 : 0;
+    }
+
+    static void RunCorpsDeploymentPhaseMonitor(uintptr_t p1) {
+      const uint8_t state = ReadCorpsDeploymentRelevantGameState();
+      if (state == 0)
+        return;
+
+      if (s_corpsDeploymentLastRelevantGameState == 0) {
+        s_corpsDeploymentLastRelevantGameState = state;
+        return;
+      }
+
+      if (state == s_corpsDeploymentLastRelevantGameState)
+        return;
+
+      const uint8_t previous = s_corpsDeploymentLastRelevantGameState;
+      s_corpsDeploymentLastRelevantGameState = state;
+
+      if (previous != CORPS_DEPLOY_STATE_DOMESTIC ||
+          state != CORPS_DEPLOY_STATE_COUNCIL)
+        return;
+
+      ResetCorpsDeploymentTargetBaseline();
+      s_officerRosterDirty = true;
+
+      const uintptr_t cityBase = GetCityArrBase();
+      if (p1 > 0x10000 && cityBase > 0x10000 &&
+          s_officerCityIndex >= 0) {
+        RefreshCityOfficerRoster(p1, cityBase);
+        if (s_officerSelectedCorpsPtr > 0x10000) {
+          BuildCorpsDeploymentRecommendation(cityBase);
+          AddLog(u8"[군단 자동배치] 평정 진입(07->05): 현재 선택 군단 새 배치 계획 생성");
+          return;
+        }
+      }
+
+      AddLog(u8"[군단 자동배치] 평정 진입(07->05): 이전 배치 계획 초기화");
+    }
+
+
+    static bool BuildCorpsDeploymentRecommendation(
+        uintptr_t shiftedCityBase) {
+      s_corpsDeploymentValid = false;
+      s_corpsDeploymentCities.clear();
+      s_corpsDeploymentOfficers.clear();
+      s_corpsDeploymentCorpsPtr = 0;
+
+      if (s_officerSelectedCorpsPtr <= 0x10000 ||
+          s_officerPlayerForce <= 0x10000) {
+        AddNotification(u8"군단 자동배치: 군단 소속 도시를 선택해주세요.");
+        return false;
+      }
+
+      std::vector<int> corpsCities;
+      for (int cityIndex : s_officerPlayerCities) {
+        const OfficerCityCorpsInfo info =
+            GetOfficerCityCorpsInfo(shiftedCityBase, cityIndex);
+        if (info.readable && info.corpsPtr == s_officerSelectedCorpsPtr)
+          corpsCities.push_back(cityIndex);
+      }
+
+      if (corpsCities.empty() || s_corpsOfficerRows.empty()) {
+        AddNotification(u8"군단 자동배치: 추천할 도시 또는 무장이 없습니다.");
+        return false;
+      }
+
+      // 도시별 현재 인원/태수와 전선 여부를 먼저 수집한다.
+      for (int cityIndex : corpsCities) {
+        CorpsDeploymentCityRecommendation city;
+        city.cityIndex = cityIndex;
+        city.frontline =
+            IsCityFrontlineForForce(shiftedCityBase, cityIndex,
+                                    s_officerPlayerForce);
+
+        const uintptr_t rawCity =
+            GetRawCityBase(shiftedCityBase, cityIndex);
+        uintptr_t governorPtr = 0;
+        SafeReadPtrAllowZero(rawCity + OFF_CITY_FORCE_LINK_RAW, &governorPtr);
+
+        for (const auto &row : s_corpsOfficerRows) {
+          const int currentCity =
+              GetOfficerCurrentCityIndex(shiftedCityBase, row);
+          if (currentCity == cityIndex)
+            ++city.currentCount;
+          if (row.officerBase == governorPtr)
+            city.currentGovernorId = row.id;
+        }
+        city.targetCount = city.currentCount;
+        s_corpsDeploymentCities.push_back(city);
+      }
+
+      const bool reuseTargetBaseline =
+          HasValidCorpsDeploymentTargetBaseline(
+              s_officerSelectedCorpsPtr, corpsCities);
+
+      if (reuseTargetBaseline) {
+        // 같은 군단에서는 첫 추천 때 잡은 목표 인원수를 계속 사용한다.
+        // 1단계 이동 직후의 임시 인원수를 새 기준으로 잡으면 반복 배치가
+        // 발생할 수 있으므로, 명시적으로 초기화하기 전까지 목표를 고정한다.
+        for (auto &city : s_corpsDeploymentCities) {
+          const int savedTarget =
+              GetCorpsDeploymentBaselineTargetCount(city.cityIndex);
+          if (savedTarget >= 0)
+            city.targetCount = savedTarget;
+        }
+      } else {
+        // 첫 추천 계산에서만 현재 인원을 기준으로 목표 인원을 만든다.
+        // 가능하면 군단 도시를 비우지 않는다.
+        if ((int)s_corpsOfficerRows.size() >=
+            (int)s_corpsDeploymentCities.size()) {
+          for (auto &city : s_corpsDeploymentCities) {
+            if (city.targetCount > 0)
+              continue;
+
+            CorpsDeploymentCityRecommendation *donor = nullptr;
+            for (auto &candidate : s_corpsDeploymentCities) {
+              if (candidate.targetCount <= 1)
+                continue;
+              if (!donor || candidate.targetCount > donor->targetCount)
+                donor = &candidate;
+            }
+            if (donor) {
+              --donor->targetCount;
+              city.targetCount = 1;
+            }
+          }
+        }
+
+        CaptureCorpsDeploymentTargetBaseline(
+            s_officerSelectedCorpsPtr, s_corpsDeploymentCities);
+      }
+
+      auto isUsed = [&](uint16_t id) {
+        for (const auto &rec : s_corpsDeploymentOfficers) {
+          if (rec.id == id)
+            return true;
+        }
+        return false;
+      };
+
+      // 군주/도독 및 기타 특수 신분은 현재 도시에 고정한다.
+      // 군주(C8)와 도독(D8)이 있는 도시는 책임자 자리도 잠가
+      // 별도의 태수를 중복 추천하지 않는다.
+      for (const auto &row : s_corpsOfficerRows) {
+        if (row.status == 0x18 || row.status == 0x28 ||
+            row.status == 0xE8)
+          continue;
+
+        const int currentCity =
+            GetOfficerCurrentCityIndex(shiftedCityBase, row);
+        if (currentCity < 0)
+          continue;
+
+        const bool fixedLeader =
+            row.status == 0xC8 || row.status == 0xD8;
+        const char *reason =
+            row.status == 0xC8
+                ? u8"군주 고정"
+                : (row.status == 0xD8 ? u8"도독 고정"
+                                      : u8"특수 신분 유지");
+
+        AddOfficerDeploymentRecommendation(
+            row, currentCity, currentCity, fixedLeader, reason);
+
+        if (fixedLeader) {
+          CorpsDeploymentCityRecommendation *city =
+              FindDeploymentCity(currentCity);
+          if (city) {
+            city->recommendedGovernorId = row.id;
+            city->governorScore = 0;
+          }
+        }
+      }
+
+      // 완전히 빈 도시는 기존 태수(E8)를 끌어오지 않는다.
+      // 정상 게임에서 두 번 확인한 28/D3 + 충성100 일반장수만 먼저 배정하고,
+      // 그런 안전한 후보가 없으면 이번 계획에서는 도시를 비운 채 그대로 둔다.
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.currentCount != 0 ||
+            city.currentGovernorId != 0 ||
+            city.targetCount <= 0 ||
+            city.recommendedGovernorId != 0)
+          continue;
+
+        const CityOfficerRow *chosen = nullptr;
+        int chosenScore = -1;
+
+        for (const auto &row : s_corpsOfficerRows) {
+          if (isUsed(row.id) ||
+              !IsSafeFirstGovernorNormal(row))
+            continue;
+
+          const int score =
+              city.frontline
+                  ? GetFrontDeploymentScore(row)
+                  : GetRearDeploymentScore(row);
+          if (!chosen || score > chosenScore ||
+              (score == chosenScore && row.id < chosen->id)) {
+            chosen = &row;
+            chosenScore = score;
+          }
+        }
+
+        if (!chosen) {
+          city.targetCount = 0;
+          AddLog(u8"[군단 자동배치] 빈 도시 %s: 충성100 28/D3 일반 장수가 없어 이번 계획에서는 비움 유지",
+                 g_CityList[city.cityIndex].cityname);
+          continue;
+        }
+
+        const int currentCity =
+            GetOfficerCurrentCityIndex(
+                shiftedCityBase, *chosen);
+        city.recommendedGovernorId = chosen->id;
+        city.governorScore =
+            GetGovernorScore(*chosen, city.frontline);
+
+        AddOfficerDeploymentRecommendation(
+            *chosen, currentCity, city.cityIndex, true,
+            city.frontline
+                ? u8"빈 도시 · 충성100 28/D3 · 전선 최초 태수"
+                : u8"빈 도시 · 충성100 28/D3 · 후방 최초 태수");
+
+        AddLog(u8"[군단 자동배치] 빈 도시 %s: %s 일반장수를 최초 태수 후보로 선배치",
+               g_CityList[city.cityIndex].cityname,
+               BuildOfficerName(chosen->id).c_str());
+      }
+
+      // 먼저 전선/후방 배치를 끝낸 뒤, 각 도시 안에서 충성 100 태수를 고른다.
+      // 태수를 먼저 뽑아 후방으로 보내면서 전투형 장수가 전선에서 밀리는 문제를 막는다.
+      std::vector<const CityOfficerRow *> forcedRear;
+      std::vector<const CityOfficerRow *> advisersFront;
+      std::vector<const CityOfficerRow *> flexible;
+
+      for (const auto &row : s_corpsOfficerRows) {
+        if (isUsed(row.id))
+          continue;
+        if (row.status != 0x18 && row.status != 0x28 &&
+            row.status != 0xE8)
+          continue;
+
+        if (row.loyalty < 90)
+          forcedRear.push_back(&row);
+        else if (row.status == 0x18)
+          advisersFront.push_back(&row);
+        else
+          flexible.push_back(&row);
+      }
+
+      auto countRemainingSlots = [&](bool frontline) {
+        int slots = 0;
+        for (const auto &city : s_corpsDeploymentCities) {
+          if (city.frontline != frontline)
+            continue;
+          slots += (std::max)(
+              0, city.targetCount -
+                     (int)city.recommendedOfficerIds.size());
+        }
+        return slots;
+      };
+
+      // 충성 90 미만은 후방 고정이 절대 규칙이다.
+      // 현재 목표 인원으로 후방 자리가 부족하면 전선 목표 인원 일부를 후방으로 옮긴다.
+      int rearNeed = (int)forcedRear.size();
+      while (countRemainingSlots(false) < rearNeed) {
+        CorpsDeploymentCityRecommendation *donor = nullptr;
+        CorpsDeploymentCityRecommendation *receiver = nullptr;
+
+        // 가능하면 전선 도시를 비우지 않는 선에서 한 자리만 넘긴다.
+        for (auto &city : s_corpsDeploymentCities) {
+          if (!city.frontline)
+            continue;
+          const int assigned =
+              (int)city.recommendedOfficerIds.size();
+          if (city.targetCount <= assigned ||
+              city.targetCount <= 1)
+            continue;
+          if (!donor || city.targetCount > donor->targetCount)
+            donor = &city;
+        }
+
+        // 그래도 부족하면 고정 배치 인원보다 많은 전선 자리에서 가져온다.
+        if (!donor) {
+          for (auto &city : s_corpsDeploymentCities) {
+            if (!city.frontline)
+              continue;
+            const int assigned =
+                (int)city.recommendedOfficerIds.size();
+            if (city.targetCount <= assigned)
+              continue;
+            if (!donor || city.targetCount > donor->targetCount)
+              donor = &city;
+          }
+        }
+
+        for (auto &city : s_corpsDeploymentCities) {
+          if (city.frontline)
+            continue;
+          if (!receiver ||
+              city.targetCount < receiver->targetCount ||
+              (city.targetCount == receiver->targetCount &&
+               city.cityIndex < receiver->cityIndex))
+            receiver = &city;
+        }
+
+        if (!donor || !receiver)
+          break;
+
+        --donor->targetCount;
+        ++receiver->targetCount;
+      }
+
+      // 위에서 목표 인원을 조정했을 수 있으므로 이번 평정 기준도 최종값으로 갱신한다.
+      CaptureCorpsDeploymentTargetBaseline(
+          s_officerSelectedCorpsPtr, s_corpsDeploymentCities);
+
+      std::sort(forcedRear.begin(), forcedRear.end(),
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
+                  if (a->loyalty != b->loyalty)
+                    return a->loyalty < b->loyalty;
+                  const int as = GetRearDeploymentScore(*a);
+                  const int bs = GetRearDeploymentScore(*b);
+                  if (as != bs)
+                    return as > bs;
+                  return a->id < b->id;
+                });
+
+      for (const CityOfficerRow *row : forcedRear) {
+        const int currentCity =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+        int targetCity = PickDeploymentCity(false);
+        if (targetCity < 0)
+          targetCity = currentCity;
+        AddOfficerDeploymentRecommendation(
+            *row, currentCity, targetCity, false,
+            u8"충성 90 미만 · 후방 보호");
+      }
+
+      // 군사는 신분을 유지하면서 지력 높은 순으로 전선 자리를 우선 사용한다.
+      std::sort(advisersFront.begin(), advisersFront.end(),
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
+                  if (a->intel != b->intel)
+                    return a->intel > b->intel;
+                  return a->id < b->id;
+                });
+
+      for (const CityOfficerRow *row : advisersFront) {
+        const int currentCity =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+
+        bool toFront = true;
+        int targetCity = PickDeploymentCity(true);
+        if (targetCity < 0) {
+          toFront = false;
+          targetCity = PickDeploymentCity(false);
+        }
+        if (targetCity < 0)
+          targetCity = currentCity;
+
+        AddOfficerDeploymentRecommendation(
+            *row, currentCity, targetCity, false,
+            toFront ? u8"군사 유지 · 지력 우선 전선"
+                    : u8"군사 유지 · 전선 자리 부족");
+      }
+
+      // 남은 일반/태수 신분 장수는 먼저 전선 인원수를 확정한다.
+      // 전선 자리는 전선 점수 자체가 높은 장수부터 채우므로,
+      // 후방 태수 선발 때문에 하후돈 같은 전투형 장수가 밀리지 않는다.
+      std::sort(flexible.begin(), flexible.end(),
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
+                  const int af = GetFrontDeploymentScore(*a);
+                  const int bf = GetFrontDeploymentScore(*b);
+                  if (af != bf)
+                    return af > bf;
+
+                  const int ac =
+                      (int)a->lead + (int)a->war;
+                  const int bc =
+                      (int)b->lead + (int)b->war;
+                  if (ac != bc)
+                    return ac > bc;
+                  return a->id < b->id;
+                });
+
+      int frontRemaining = countRemainingSlots(true);
+      const size_t frontTake =
+          (std::min)((size_t)(std::max)(0, frontRemaining),
+                     flexible.size());
+
+      std::vector<const CityOfficerRow *> rearFlexible;
+      rearFlexible.reserve(flexible.size() - frontTake);
+
+      for (size_t i = 0; i < flexible.size(); ++i) {
+        const CityOfficerRow *row = flexible[i];
+        if (i >= frontTake) {
+          rearFlexible.push_back(row);
+          continue;
+        }
+
+        const int currentCity =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+        bool toFront = true;
+        int targetCity = PickDeploymentCity(true);
+        if (targetCity < 0) {
+          toFront = false;
+          targetCity = PickDeploymentCity(false);
+        }
+        if (targetCity < 0)
+          targetCity = currentCity;
+
+        AddOfficerDeploymentRecommendation(
+            *row, currentCity, targetCity, false,
+            toFront
+                ? (row->intel * 2 >=
+                           (int)row->lead + (int)row->war
+                       ? u8"전선 · 지력 적성"
+                       : u8"전선 · 통솔/무력 적성")
+                : u8"후방 · 전선 자리 부족");
+      }
+
+      // 전선에 들어가지 않은 장수는 정치+매력 순으로 후방 도시에 배치한다.
+      std::sort(rearFlexible.begin(), rearFlexible.end(),
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
+                  const int ar = GetRearDeploymentScore(*a);
+                  const int br = GetRearDeploymentScore(*b);
+                  if (ar != br)
+                    return ar > br;
+                  return a->id < b->id;
+                });
+
+      for (const CityOfficerRow *row : rearFlexible) {
+        const int currentCity =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+        bool toFront = false;
+        int targetCity = PickDeploymentCity(false);
+        if (targetCity < 0) {
+          toFront = true;
+          targetCity = PickDeploymentCity(true);
+        }
+        if (targetCity < 0)
+          targetCity = currentCity;
+
+        AddOfficerDeploymentRecommendation(
+            *row, currentCity, targetCity, false,
+            toFront
+                ? u8"전선 · 후방 자리 부족"
+                : u8"후방 · 정치/매력 적성");
+      }
+
+      auto findDeploymentRec =
+          [&](uint16_t id)
+              -> CorpsDeploymentOfficerRecommendation * {
+        for (auto &rec : s_corpsDeploymentOfficers) {
+          if (rec.id == id)
+            return &rec;
+        }
+        return nullptr;
+      };
+
+      auto isGovernorEligible = [&](uint16_t id) {
+        const CityOfficerRow *row =
+            FindCorpsOfficerByRecId(id);
+        return row &&
+               (row->status == 0x28 ||
+                row->status == 0xE8) &&
+               row->loyalty == 100;
+      };
+
+      auto countCityGovernorEligible =
+          [&](const CorpsDeploymentCityRecommendation &city) {
+        int count = 0;
+        for (uint16_t id : city.recommendedOfficerIds) {
+          if (isGovernorEligible(id))
+            ++count;
+        }
+        return count;
+      };
+
+      // 같은 전선/후방 안에서는 가능하면 모든 도시에 충성100 태수 후보를 한 명씩 확보한다.
+      // 이미 군주/도독이 책임자인 도시는 별도 태수 후보가 필요 없다.
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.targetCount <= 0 ||
+            city.recommendedGovernorId != 0 ||
+            countCityGovernorEligible(city) > 0)
+          continue;
+
+        uint16_t swapOutId = 0;
+        for (uint16_t id : city.recommendedOfficerIds) {
+          const CityOfficerRow *row =
+              FindCorpsOfficerByRecId(id);
+          if (!row)
+            continue;
+          if (row->status == 0x18 ||
+              row->status == 0x28 ||
+              row->status == 0xE8) {
+            swapOutId = id;
+            break;
+          }
+        }
+        if (!swapOutId)
+          continue;
+
+        CorpsDeploymentCityRecommendation *donorCity = nullptr;
+        uint16_t donorId = 0;
+        int donorScore = -1;
+
+        for (auto &candidateCity :
+             s_corpsDeploymentCities) {
+          if (candidateCity.cityIndex == city.cityIndex ||
+              candidateCity.frontline != city.frontline)
+            continue;
+
+          const bool donorNeedsOwnGovernor =
+              candidateCity.targetCount > 0 &&
+              candidateCity.recommendedGovernorId == 0;
+          const int eligibleCount =
+              countCityGovernorEligible(candidateCity);
+          if (donorNeedsOwnGovernor &&
+              eligibleCount <= 1)
+            continue;
+
+          for (uint16_t id :
+               candidateCity.recommendedOfficerIds) {
+            if (!isGovernorEligible(id))
+              continue;
+
+            const CityOfficerRow *row =
+                FindCorpsOfficerByRecId(id);
+            if (!row)
+              continue;
+
+            const int score =
+                GetGovernorScore(*row, city.frontline);
+            if (!donorCity || score > donorScore ||
+                (score == donorScore && id < donorId)) {
+              donorCity = &candidateCity;
+              donorId = id;
+              donorScore = score;
+            }
+          }
+        }
+
+        if (!donorCity || !donorId)
+          continue;
+
+        auto cityIt = std::find(
+            city.recommendedOfficerIds.begin(),
+            city.recommendedOfficerIds.end(),
+            swapOutId);
+        auto donorIt = std::find(
+            donorCity->recommendedOfficerIds.begin(),
+            donorCity->recommendedOfficerIds.end(),
+            donorId);
+        if (cityIt == city.recommendedOfficerIds.end() ||
+            donorIt == donorCity->recommendedOfficerIds.end())
+          continue;
+
+        *cityIt = donorId;
+        *donorIt = swapOutId;
+
+        CorpsDeploymentOfficerRecommendation *donorRec =
+            findDeploymentRec(donorId);
+        CorpsDeploymentOfficerRecommendation *swapRec =
+            findDeploymentRec(swapOutId);
+        if (donorRec)
+          donorRec->recommendedCityIndex = city.cityIndex;
+        if (swapRec)
+          swapRec->recommendedCityIndex =
+              donorCity->cityIndex;
+      }
+
+      // 모든 배치가 끝난 뒤 각 도시 안에서 태수를 고른다.
+      // 전선은 통솔+무력, 후방은 정치+매력, 충성도는 반드시 100.
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.targetCount <= 0 ||
+            city.recommendedGovernorId != 0)
+          continue;
+
+        const CityOfficerRow *chosen = nullptr;
+        int chosenScore = -1;
+
+        for (uint16_t id : city.recommendedOfficerIds) {
+          const CityOfficerRow *row =
+              FindCorpsOfficerByRecId(id);
+          if (!row ||
+              (row->status != 0x28 &&
+               row->status != 0xE8) ||
+              row->loyalty != 100)
+            continue;
+
+          const int score =
+              GetGovernorScore(*row, city.frontline);
+          if (!chosen || score > chosenScore ||
+              (score == chosenScore && row->id < chosen->id)) {
+            chosen = row;
+            chosenScore = score;
+          }
+        }
+
+        if (!chosen)
+          continue;
+
+        city.recommendedGovernorId = chosen->id;
+        city.governorScore = chosenScore;
+
+        CorpsDeploymentOfficerRecommendation *rec =
+            findDeploymentRec(chosen->id);
+        if (rec) {
+          rec->recommendedGovernor = true;
+          rec->reason =
+              city.frontline
+                  ? u8"충성100 · 전선 배치 후 태수(통솔+무력)"
+                  : u8"충성100 · 후방 배치 후 태수(정치+매력)";
+        }
+      }
+
+      // 같은 도시 안에서는 태수 -> 군사 -> 나머지 순으로 보여준다.
+      for (auto &city : s_corpsDeploymentCities) {
+        std::stable_sort(
+            city.recommendedOfficerIds.begin(),
+            city.recommendedOfficerIds.end(),
+            [&](uint16_t a, uint16_t b) {
+              if (a == city.recommendedGovernorId)
+                return true;
+              if (b == city.recommendedGovernorId)
+                return false;
+              const CityOfficerRow *ar = FindCorpsOfficerByRecId(a);
+              const CityOfficerRow *br = FindCorpsOfficerByRecId(b);
+              const bool aa = ar && ar->status == 0x18;
+              const bool ba = br && br->status == 0x18;
+              if (aa != ba)
+                return aa;
+              return a < b;
+            });
+      }
+
+      s_corpsDeploymentCorpsPtr = s_officerSelectedCorpsPtr;
+      s_corpsDeploymentValid = true;
+      AddNotification(u8"군단 자동배치: 추천 계산 완료. 아직 실제 배치는 변경하지 않았습니다.");
+      return true;
+    }
+
+    struct CorpsDeploymentMoveWrite {
+      uint16_t id = 0;
+      uint8_t status = 0;
+      uintptr_t officerBase = 0;
+      uintptr_t oldCity = 0;
+      uintptr_t newCity = 0;
+      int oldCityIndex = -1;
+      int newCityIndex = -1;
+    };
+
+    static bool ApplyCorpsDeploymentMovements(
+        uintptr_t p1, uintptr_t shiftedCityBase) {
+      if (!s_corpsDeploymentValid ||
+          s_corpsDeploymentCorpsPtr <= 0x10000 ||
+          s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
+        AddNotification(u8"군단 자동배치: 먼저 현재 군단의 추천을 계산해주세요.");
+        return false;
+      }
+
+      std::vector<CorpsDeploymentMoveWrite> writes;
+      writes.reserve(s_corpsDeploymentOfficers.size());
+
+      // 먼저 모든 이동을 검증한다. 이번 단계에서는 일반/군사만 이동한다.
+      for (const auto &rec : s_corpsDeploymentOfficers) {
+        if (rec.currentCityIndex == rec.recommendedCityIndex)
+          continue;
+        if (rec.status != 0x28 && rec.status != 0x18)
+          continue;
+        if (rec.recommendedCityIndex < 0 ||
+            rec.recommendedCityIndex >= g_CityCount)
+          continue;
+
+        const CityOfficerRow *row = FindCorpsOfficerByRecId(rec.id);
+        if (!row || row->officerBase <= 0x10000) {
+          AddNotification(u8"군단 자동배치: 추천 무장 정보를 다시 읽어야 합니다.");
+          return false;
+        }
+
+        uint8_t currentStatus = 0;
+        uintptr_t forcePtr = 0;
+        uintptr_t currentCity = 0;
+        if (!SafeRead8(row->officerBase + 0x10, &currentStatus) ||
+            !SafeReadPtr(row->officerBase + 0x18, &forcePtr) ||
+            !SafeReadPtr(row->officerBase + 0x20, &currentCity)) {
+          AddNotification(u8"군단 자동배치: 무장 현재 상태를 읽지 못했습니다.");
+          return false;
+        }
+
+        if (currentStatus != rec.status ||
+            (currentStatus != 0x28 && currentStatus != 0x18)) {
+          AddNotification(u8"군단 자동배치: 추천 후 무장 신분이 변경되어 적용을 중단했습니다.");
+          AddLog(u8"[군단 자동배치] 신분 변경 감지: ID %u 추천=0x%02X 현재=0x%02X",
+                 (unsigned int)rec.id,
+                 (unsigned int)rec.status,
+                 (unsigned int)currentStatus);
+          return false;
+        }
+
+        const uintptr_t targetCity =
+            GetRawCityBase(shiftedCityBase, rec.recommendedCityIndex);
+        if (!targetCity || forcePtr != s_officerPlayerForce ||
+            GetCityForcePtr(targetCity) != s_officerPlayerForce) {
+          AddNotification(u8"군단 자동배치: 무장/목적 도시의 소속 세력을 다시 확인해주세요.");
+          return false;
+        }
+
+        uintptr_t sourceCorps = 0;
+        uintptr_t targetCorps = 0;
+        if (!SafeReadPtrAllowZero(currentCity + OFF_CITY_CORPS_RAW,
+                                  &sourceCorps) ||
+            !SafeReadPtrAllowZero(targetCity + OFF_CITY_CORPS_RAW,
+                                  &targetCorps) ||
+            sourceCorps != s_corpsDeploymentCorpsPtr ||
+            targetCorps != s_corpsDeploymentCorpsPtr) {
+          AddNotification(u8"군단 자동배치: 군단 소속이 달라져 적용을 중단했습니다.");
+          AddLog(u8"[군단 자동배치] 군단 검증 실패: ID %u 출발=0x%llX 목적=0x%llX 기준=0x%llX",
+                 (unsigned int)rec.id,
+                 (unsigned long long)sourceCorps,
+                 (unsigned long long)targetCorps,
+                 (unsigned long long)s_corpsDeploymentCorpsPtr);
+          return false;
+        }
+
+        CorpsDeploymentMoveWrite write;
+        write.id = rec.id;
+        write.status = currentStatus;
+        write.officerBase = row->officerBase;
+        write.oldCity = currentCity;
+        write.newCity = targetCity;
+        write.oldCityIndex = rec.currentCityIndex;
+        write.newCityIndex = rec.recommendedCityIndex;
+        writes.push_back(write);
+      }
+
+      if (writes.empty()) {
+        AddNotification(u8"군단 자동배치: 이번 단계에서 이동할 일반/군사가 없습니다.");
+        return true;
+      }
+
+      size_t writtenCount = 0;
+      for (size_t i = 0; i < writes.size(); ++i) {
+        const auto &write = writes[i];
+        if (!SafeWritePtr(write.officerBase + 0x20, write.newCity)) {
+          for (size_t j = 0; j < writtenCount; ++j)
+            SafeWritePtr(writes[j].officerBase + 0x20, writes[j].oldCity);
+
+          AddNotification(u8"군단 자동배치: 이동 중 실패하여 이전 이동을 원복했습니다.");
+          AddLog(u8"[군단 자동배치] 쓰기 실패/롤백: ID %u (%u/%u)",
+                 (unsigned int)write.id,
+                 (unsigned int)i,
+                 (unsigned int)writes.size());
+          return false;
+        }
+        ++writtenCount;
+      }
+
+      bool verifyOk = true;
+      for (const auto &write : writes) {
+        uintptr_t cityNow = 0;
+        if (!SafeReadPtr(write.officerBase + 0x20, &cityNow) ||
+            cityNow != write.newCity) {
+          verifyOk = false;
+          break;
+        }
+      }
+
+      if (!verifyOk) {
+        for (const auto &write : writes)
+          SafeWritePtr(write.officerBase + 0x20, write.oldCity);
+        AddNotification(u8"군단 자동배치: 이동 후 검증 실패로 전체 원복했습니다.");
+        return false;
+      }
+
+      int normalCount = 0;
+      int adviserCount = 0;
+      for (const auto &write : writes) {
+        if (write.status == 0x18)
+          ++adviserCount;
+        else
+          ++normalCount;
+
+        AddLog(u8"[군단 자동배치] %s: %s -> %s (%s)",
+               BuildOfficerName(write.id).c_str(),
+               write.oldCityIndex >= 0
+                   ? g_CityList[write.oldCityIndex].cityname
+                   : u8"?",
+               write.newCityIndex >= 0
+                   ? g_CityList[write.newCityIndex].cityname
+                   : u8"?",
+               write.status == 0x18 ? u8"군사 유지" : u8"일반");
+      }
+
+      char notice[256]{};
+      sprintf_s(notice,
+                u8"군단 자동배치 1단계 완료: 일반 %d명 / 군사 %d명 이동",
+                normalCount, adviserCount);
+      AddNotification(notice);
+
+      s_selectedOfficerId = -1;
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, shiftedCityBase);
+
+      // 같은 평정에서는 최초 추천안을 유지하고 현재 위치만 갱신한다.
+      RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
+      return true;
+    }
+
+
+    struct CorpsDeploymentStage2OfficerSnapshot {
+      uintptr_t officerBase = 0;
+      uint16_t statusPair = 0;
+      uintptr_t cityPtr = 0;
+    };
+
+    struct CorpsDeploymentStage2CitySnapshot {
+      uintptr_t rawCity = 0;
+      uintptr_t governorPtr = 0;
+    };
+
+    struct CorpsDeploymentStage2Snapshot {
+      std::vector<CorpsDeploymentStage2OfficerSnapshot> officers;
+      std::vector<CorpsDeploymentStage2CitySnapshot> cities;
+    };
+
+    static CorpsDeploymentOfficerRecommendation *
+    FindDeploymentOfficerRecommendation(uint16_t id) {
+      for (auto &rec : s_corpsDeploymentOfficers) {
+        if (rec.id == id)
+          return &rec;
+      }
+      return nullptr;
+    }
+
+    static int GetOfficerCityIndexByBase(uintptr_t shiftedCityBase,
+                                         uintptr_t officerBase) {
+      uintptr_t cityPtr = 0;
+      if (officerBase <= 0x10000 ||
+          !SafeReadPtr(officerBase + 0x20, &cityPtr))
+        return -1;
+
+      for (int i = 0; i < g_CityCount; ++i) {
+        if (GetRawCityBase(shiftedCityBase, i) == cityPtr)
+          return i;
+      }
+      return -1;
+    }
+
+    static bool CaptureCorpsDeploymentStage2Snapshot(
+        uintptr_t shiftedCityBase,
+        CorpsDeploymentStage2Snapshot *out) {
+      if (!out)
+        return false;
+
+      out->officers.clear();
+      out->cities.clear();
+
+      for (const auto &row : s_corpsOfficerRows) {
+        CorpsDeploymentStage2OfficerSnapshot snap;
+        snap.officerBase = row.officerBase;
+        if (snap.officerBase <= 0x10000 ||
+            !SafeRead16(snap.officerBase + 0x10, &snap.statusPair) ||
+            !SafeReadPtr(snap.officerBase + 0x20, &snap.cityPtr))
+          return false;
+        out->officers.push_back(snap);
+      }
+
+      for (const auto &city : s_corpsDeploymentCities) {
+        CorpsDeploymentStage2CitySnapshot snap;
+        snap.rawCity = GetRawCityBase(shiftedCityBase, city.cityIndex);
+        if (!snap.rawCity ||
+            !SafeReadPtrAllowZero(
+                snap.rawCity + OFF_CITY_FORCE_LINK_RAW,
+                &snap.governorPtr))
+          return false;
+        out->cities.push_back(snap);
+      }
+
+      return true;
+    }
+
+    static void RestoreCorpsDeploymentStage2Snapshot(
+        const CorpsDeploymentStage2Snapshot &snapshot) {
+      for (const auto &snap : snapshot.officers) {
+        if (snap.officerBase <= 0x10000)
+          continue;
+        SafeWrite16(snap.officerBase + 0x10, snap.statusPair);
+        SafeWritePtr(snap.officerBase + 0x20, snap.cityPtr);
+      }
+
+      for (const auto &snap : snapshot.cities) {
+        if (snap.rawCity <= 0x10000)
+          continue;
+        SafeWritePtr(snap.rawCity + OFF_CITY_FORCE_LINK_RAW,
+                     snap.governorPtr);
+      }
+    }
+
+    static bool MoveNormalOfficerWithinDeploymentCorps(
+        uintptr_t shiftedCityBase, uintptr_t officerBase,
+        int targetCityIndex) {
+      if (officerBase <= 0x10000 ||
+          targetCityIndex < 0 || targetCityIndex >= g_CityCount)
+        return false;
+
+      uint8_t status = 0;
+      uintptr_t forcePtr = 0;
+      uintptr_t currentCity = 0;
+      if (!SafeRead8(officerBase + 0x10, &status) ||
+          !SafeReadPtr(officerBase + 0x18, &forcePtr) ||
+          !SafeReadPtr(officerBase + 0x20, &currentCity) ||
+          status != 0x28 ||
+          forcePtr != s_officerPlayerForce)
+        return false;
+
+      const uintptr_t targetCity =
+          GetRawCityBase(shiftedCityBase, targetCityIndex);
+      if (!targetCity)
+        return false;
+      if (currentCity == targetCity)
+        return true;
+
+      if (GetCityForcePtr(targetCity) != s_officerPlayerForce)
+        return false;
+
+      uintptr_t sourceCorps = 0;
+      uintptr_t targetCorps = 0;
+      if (!SafeReadPtrAllowZero(currentCity + OFF_CITY_CORPS_RAW,
+                                &sourceCorps) ||
+          !SafeReadPtrAllowZero(targetCity + OFF_CITY_CORPS_RAW,
+                                &targetCorps) ||
+          sourceCorps != s_corpsDeploymentCorpsPtr ||
+          targetCorps != s_corpsDeploymentCorpsPtr)
+        return false;
+
+      if (!SafeWritePtr(officerBase + 0x20, targetCity))
+        return false;
+
+      uintptr_t verifyCity = 0;
+      if (!SafeReadPtr(officerBase + 0x20, &verifyCity) ||
+          verifyCity != targetCity) {
+        SafeWritePtr(officerBase + 0x20, currentCity);
+        return false;
+      }
+      return true;
+    }
+
+    static bool SwapDeploymentGovernorAtCity(
+        uintptr_t shiftedCityBase, int cityIndex,
+        uintptr_t oldGovernorBase, uintptr_t candidateBase) {
+      if (cityIndex < 0 || cityIndex >= g_CityCount ||
+          oldGovernorBase <= 0x10000 || candidateBase <= 0x10000)
+        return false;
+
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, cityIndex);
+      if (!rawCity)
+        return false;
+
+      uintptr_t cityCorps = 0;
+      if (!SafeReadPtrAllowZero(rawCity + OFF_CITY_CORPS_RAW,
+                                &cityCorps) ||
+          cityCorps != s_corpsDeploymentCorpsPtr)
+        return false;
+
+      uint16_t oldPair = 0;
+      uint16_t newPair = 0;
+      uintptr_t cityGovernor = 0;
+      uintptr_t oldCity = 0;
+      uintptr_t newCity = 0;
+      uintptr_t oldForce = 0;
+      uintptr_t newForce = 0;
+      uint8_t candidateLoyalty = 0;
+
+      if (!SafeRead16(oldGovernorBase + 0x10, &oldPair) ||
+          !SafeRead16(candidateBase + 0x10, &newPair) ||
+          !SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW,
+                       &cityGovernor) ||
+          !SafeReadPtr(oldGovernorBase + 0x20, &oldCity) ||
+          !SafeReadPtr(candidateBase + 0x20, &newCity) ||
+          !SafeReadPtr(oldGovernorBase + 0x18, &oldForce) ||
+          !SafeReadPtr(candidateBase + 0x18, &newForce) ||
+          !SafeRead8(candidateBase + 0xEC, &candidateLoyalty))
+        return false;
+
+      const uint8_t oldStatus = (uint8_t)(oldPair & 0xFF);
+      const uint8_t oldAux = (uint8_t)((oldPair >> 8) & 0xFF);
+      const uint8_t newStatus = (uint8_t)(newPair & 0xFF);
+      const uint8_t newAux = (uint8_t)((newPair >> 8) & 0xFF);
+
+      if (oldStatus != 0xE8 || newStatus != 0x28 ||
+          candidateLoyalty != 100 ||
+          cityGovernor != oldGovernorBase ||
+          oldCity != rawCity || newCity != rawCity ||
+          oldForce != newForce ||
+          oldForce != s_officerPlayerForce)
+        return false;
+
+      const uint16_t oldAfter =
+          (uint16_t)(((uint16_t)newAux << 8) | 0x28u);
+      const uint16_t newAfter =
+          (uint16_t)(((uint16_t)oldAux << 8) | 0xE8u);
+
+      bool oldWritten =
+          SafeWrite16(oldGovernorBase + 0x10, oldAfter);
+      bool newWritten = false;
+      bool cityWritten = false;
+      if (oldWritten)
+        newWritten = SafeWrite16(candidateBase + 0x10, newAfter);
+      if (oldWritten && newWritten)
+        cityWritten = SafeWritePtr(
+            rawCity + OFF_CITY_FORCE_LINK_RAW, candidateBase);
+
+      if (!oldWritten || !newWritten || !cityWritten) {
+        if (cityWritten)
+          SafeWritePtr(rawCity + OFF_CITY_FORCE_LINK_RAW,
+                       cityGovernor);
+        if (newWritten)
+          SafeWrite16(candidateBase + 0x10, newPair);
+        if (oldWritten)
+          SafeWrite16(oldGovernorBase + 0x10, oldPair);
+        return false;
+      }
+
+      uint16_t verifyOld = 0;
+      uint16_t verifyNew = 0;
+      uintptr_t verifyGovernor = 0;
+      const bool verifyOk =
+          SafeRead16(oldGovernorBase + 0x10, &verifyOld) &&
+          SafeRead16(candidateBase + 0x10, &verifyNew) &&
+          SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW,
+                      &verifyGovernor) &&
+          verifyOld == oldAfter &&
+          verifyNew == newAfter &&
+          verifyGovernor == candidateBase;
+
+      if (!verifyOk) {
+        SafeWritePtr(rawCity + OFF_CITY_FORCE_LINK_RAW,
+                     cityGovernor);
+        SafeWrite16(candidateBase + 0x10, newPair);
+        SafeWrite16(oldGovernorBase + 0x10, oldPair);
+        return false;
+      }
+
+      uint16_t oldId = 0;
+      uint16_t newId = 0;
+      SafeRead16(oldGovernorBase + 0x08, &oldId);
+      SafeRead16(candidateBase + 0x08, &newId);
+      AddLog(u8"[군단 자동배치 2단계] %s 태수: %s -> %s",
+             g_CityList[cityIndex].cityname,
+             BuildOfficerName(oldId).c_str(),
+             BuildOfficerName(newId).c_str());
+      return true;
+    }
+
+    static bool AppointFirstDeploymentGovernorAtCity(
+        uintptr_t shiftedCityBase, int cityIndex,
+        uintptr_t candidateBase) {
+      if (cityIndex < 0 || cityIndex >= g_CityCount ||
+          candidateBase <= 0x10000)
+        return false;
+
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, cityIndex);
+      if (!rawCity)
+        return false;
+
+      uintptr_t cityCorps = 0;
+      uintptr_t cityGovernor = 0;
+      uintptr_t candidateCity = 0;
+      uintptr_t candidateForce = 0;
+      uint16_t candidatePair = 0;
+      uint8_t candidateLoyalty = 0;
+
+      if (!SafeReadPtrAllowZero(
+              rawCity + OFF_CITY_CORPS_RAW, &cityCorps) ||
+          !SafeReadPtrAllowZero(
+              rawCity + OFF_CITY_FORCE_LINK_RAW, &cityGovernor) ||
+          !SafeReadPtr(
+              candidateBase + 0x20, &candidateCity) ||
+          !SafeReadPtr(
+              candidateBase + 0x18, &candidateForce) ||
+          !SafeRead16(
+              candidateBase + 0x10, &candidatePair) ||
+          !SafeRead8(
+              candidateBase + 0xEC, &candidateLoyalty))
+        return false;
+
+      // 정상 게임에서 두 번 관찰된 빈 도시 최초 임명 패턴:
+      // 일반 28/D3 (0xD328) -> 태수 E8/D2 (0xD2E8),
+      // City+0x98 0 -> 해당 OfficerData*.
+      if (cityCorps != s_corpsDeploymentCorpsPtr ||
+          cityGovernor != 0 ||
+          candidateCity != rawCity ||
+          candidateForce != s_officerPlayerForce ||
+          candidateLoyalty != 100 ||
+          candidatePair != 0xD328u ||
+          GetCityForcePtr(rawCity) != s_officerPlayerForce)
+        return false;
+
+      // 군주/도독/기존 태수가 이미 거주하는 특수 상황에서는 최초 임명을 하지 않는다.
+      for (const auto &row : s_corpsOfficerRows) {
+        if (row.officerBase == candidateBase)
+          continue;
+        if (GetOfficerCurrentCityIndex(
+                shiftedCityBase, row) != cityIndex)
+          continue;
+        if (row.status == 0xC8 ||
+            row.status == 0xD8 ||
+            row.status == 0xE8)
+          return false;
+      }
+
+      const uint16_t candidateAfter = 0xD2E8u;
+      bool pairWritten =
+          SafeWrite16(candidateBase + 0x10, candidateAfter);
+      bool cityWritten = false;
+      if (pairWritten) {
+        cityWritten = SafeWritePtr(
+            rawCity + OFF_CITY_FORCE_LINK_RAW, candidateBase);
+      }
+
+      if (!pairWritten || !cityWritten) {
+        if (cityWritten) {
+          SafeWritePtr(
+              rawCity + OFF_CITY_FORCE_LINK_RAW, 0);
+        }
+        if (pairWritten) {
+          SafeWrite16(candidateBase + 0x10, candidatePair);
+        }
+        return false;
+      }
+
+      uint16_t verifyPair = 0;
+      uintptr_t verifyGovernor = 0;
+      uintptr_t verifyCity = 0;
+      uint8_t verifyLoyalty = 0;
+      const bool verifyOk =
+          SafeRead16(
+              candidateBase + 0x10, &verifyPair) &&
+          SafeReadPtr(
+              candidateBase + 0x20, &verifyCity) &&
+          SafeRead8(
+              candidateBase + 0xEC, &verifyLoyalty) &&
+          SafeReadPtr(
+              rawCity + OFF_CITY_FORCE_LINK_RAW,
+              &verifyGovernor) &&
+          verifyPair == candidateAfter &&
+          verifyCity == rawCity &&
+          verifyLoyalty == 100 &&
+          verifyGovernor == candidateBase;
+
+      if (!verifyOk) {
+        SafeWritePtr(
+            rawCity + OFF_CITY_FORCE_LINK_RAW, 0);
+        SafeWrite16(candidateBase + 0x10, candidatePair);
+        return false;
+      }
+
+      uint16_t candidateId = 0;
+      SafeRead16(candidateBase + 0x08, &candidateId);
+      AddLog(u8"[군단 자동배치 2단계] %s 최초 태수 임명: %s (28/D3 -> E8/D2, City+0x98 설정)",
+             g_CityList[cityIndex].cityname,
+             BuildOfficerName(candidateId).c_str());
+      return true;
+    }
+
+    static bool IsDeploymentFixedLeader(uint16_t id) {
+      const CityOfficerRow *row = FindCorpsOfficerByRecId(id);
+      if (!row)
+        return false;
+      return row->status == 0xC8 || row->status == 0xD8;
+    }
+
+    static bool HasDeploymentCityIndex(
+        const std::vector<int> &cities, int cityIndex) {
+      return std::find(cities.begin(), cities.end(), cityIndex) !=
+             cities.end();
+    }
+
+    static uintptr_t ReadDeploymentCityGovernor(
+        uintptr_t shiftedCityBase, int cityIndex) {
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, cityIndex);
+      uintptr_t governor = 0;
+      if (!rawCity ||
+          !SafeReadPtrAllowZero(
+              rawCity + OFF_CITY_FORCE_LINK_RAW, &governor))
+        return 0;
+      return governor;
+    }
+
+    static std::string BuildDeploymentCityResponsibilityDiagnostic(
+        uintptr_t shiftedCityBase, int cityIndex) {
+      if (cityIndex < 0 || cityIndex >= g_CityCount)
+        return u8"도시 인덱스 오류";
+
+      int residentCount = 0;
+      std::string rulerName;
+      std::string governorGeneralName;
+      std::string governorName;
+
+      for (const auto &row : s_corpsOfficerRows) {
+        if (GetOfficerCurrentCityIndex(
+                shiftedCityBase, row) != cityIndex)
+          continue;
+
+        ++residentCount;
+        if (row.status == 0xC8 && rulerName.empty())
+          rulerName = BuildOfficerName(row.id);
+        else if (row.status == 0xD8 &&
+                 governorGeneralName.empty())
+          governorGeneralName = BuildOfficerName(row.id);
+        else if (row.status == 0xE8 &&
+                 governorName.empty())
+          governorName = BuildOfficerName(row.id);
+      }
+
+      const uintptr_t cityGovernor =
+          ReadDeploymentCityGovernor(
+              shiftedCityBase, cityIndex);
+
+      std::string ptrInfo;
+      if (cityGovernor <= 0x10000) {
+        ptrInfo = u8"City+0x98=0";
+      } else {
+        uint16_t ptrId = 0;
+        uint8_t ptrStatus = 0;
+        const bool idOk =
+            SafeRead16(cityGovernor + 0x08, &ptrId);
+        const bool statusOk =
+            SafeRead8(cityGovernor + 0x10, &ptrStatus);
+
+        ptrInfo = u8"City+0x98=";
+        if (idOk)
+          ptrInfo += BuildOfficerName(ptrId);
+        else
+          ptrInfo += u8"ID?";
+        if (statusOk) {
+          char statusBuf[24]{};
+          sprintf_s(statusBuf, "(0x%02X)",
+                    (unsigned int)ptrStatus);
+          ptrInfo += statusBuf;
+        }
+      }
+
+      if (!rulerName.empty())
+        return u8"군주 " + rulerName + u8" 있음 | " + ptrInfo;
+
+      if (!governorGeneralName.empty())
+        return u8"도독 " + governorGeneralName + u8" 있음 | " +
+               ptrInfo;
+
+      if (!governorName.empty())
+        return u8"거주 E8 태수 " + governorName +
+               u8" 있음 / 포인터 상태 확인 필요 | " +
+               ptrInfo + u8" | 직접 체크";
+
+      return u8"C8/D8/E8 없음, 거주 " +
+             std::to_string(residentCount) +
+             u8"명 | " + ptrInfo + u8" | 직접 체크";
+    }
+
+    static void BuildDeferredDeploymentGovernorCities(
+        uintptr_t shiftedCityBase, std::vector<int> *outDeferred) {
+      if (!outDeferred)
+        return;
+      outDeferred->clear();
+
+      auto markDeferred = [&](int cityIndex) {
+        if (!HasDeploymentCityIndex(*outDeferred, cityIndex))
+          outDeferred->push_back(cityIndex);
+      };
+
+      // City+0x98==0은 검증된 28/D3 -> E8/D2 최초 태수 패턴으로 처리한다.
+      // 0이 아닌 포인터가 E8 태수를 가리키지 않는 특수 상태만 보류한다.
+      for (const auto &city : s_corpsDeploymentCities) {
+        if (!city.recommendedGovernorId ||
+            IsDeploymentFixedLeader(city.recommendedGovernorId))
+          continue;
+
+        const CityOfficerRow *desired =
+            FindCorpsOfficerByRecId(city.recommendedGovernorId);
+        if (!desired)
+          continue;
+
+        const uintptr_t currentGovernor =
+            ReadDeploymentCityGovernor(
+                shiftedCityBase, city.cityIndex);
+        if (currentGovernor == desired->officerBase)
+          continue;
+
+        if (currentGovernor == 0) {
+          const int desiredCity =
+              GetOfficerCityIndexByBase(
+                  shiftedCityBase, desired->officerBase);
+          if (IsSafeFirstGovernorNormal(*desired) &&
+              desiredCity == city.cityIndex)
+            continue;
+
+          // 빈 도시인데 최종 후보가 기존 태수이거나 안전한 28/D3 일반이 아니면
+          // 이번 2단계에서는 건드리지 않는다. 연결된 기존 태수 도시도 함께 보류된다.
+          markDeferred(city.cityIndex);
+          continue;
+        }
+
+        uint8_t currentStatus = 0;
+        if (currentGovernor <= 0x10000 ||
+            !SafeRead8(currentGovernor + 0x10, &currentStatus) ||
+            currentStatus != 0xE8) {
+          markDeferred(city.cityIndex);
+        }
+      }
+
+      // 보류 도시와 E8 이동 관계로 연결된 도시도 함께 보류한다.
+      bool changed = true;
+      while (changed) {
+        changed = false;
+        for (const auto &blockedCity : s_corpsDeploymentCities) {
+          if (!HasDeploymentCityIndex(
+                  *outDeferred, blockedCity.cityIndex))
+            continue;
+
+          const uintptr_t blockedCurrent =
+              ReadDeploymentCityGovernor(
+                  shiftedCityBase, blockedCity.cityIndex);
+          const CityOfficerRow *blockedDesired =
+              blockedCity.recommendedGovernorId
+                  ? FindCorpsOfficerByRecId(
+                        blockedCity.recommendedGovernorId)
+                  : nullptr;
+          const uintptr_t blockedDesiredBase =
+              blockedDesired ? blockedDesired->officerBase : 0;
+
+          for (const auto &other : s_corpsDeploymentCities) {
+            if (HasDeploymentCityIndex(
+                    *outDeferred, other.cityIndex) ||
+                !other.recommendedGovernorId ||
+                IsDeploymentFixedLeader(
+                    other.recommendedGovernorId))
+              continue;
+
+            const CityOfficerRow *otherDesired =
+                FindCorpsOfficerByRecId(other.recommendedGovernorId);
+            if (!otherDesired)
+              continue;
+
+            const uintptr_t otherCurrent =
+                ReadDeploymentCityGovernor(
+                    shiftedCityBase, other.cityIndex);
+
+            const bool dependsOnBlockedCurrent =
+                blockedCurrent > 0x10000 &&
+                otherDesired->officerBase == blockedCurrent;
+            const bool ownsBlockedDesired =
+                blockedDesiredBase > 0x10000 &&
+                otherCurrent == blockedDesiredBase;
+
+            if (dependsOnBlockedCurrent || ownsBlockedDesired) {
+              outDeferred->push_back(other.cityIndex);
+              changed = true;
+            }
+          }
+        }
+      }
+
+      std::sort(outDeferred->begin(), outDeferred->end());
+    }
+
+    static int CountPendingDeploymentGovernorChanges(
+        uintptr_t shiftedCityBase, int *outDeferredCount = nullptr) {
+      std::vector<int> deferred;
+      BuildDeferredDeploymentGovernorCities(
+          shiftedCityBase, &deferred);
+
+      int applicable = 0;
+      int deferredPending = 0;
+      for (const auto &city : s_corpsDeploymentCities) {
+        if (!city.recommendedGovernorId ||
+            IsDeploymentFixedLeader(city.recommendedGovernorId))
+          continue;
+
+        const CityOfficerRow *desired =
+            FindCorpsOfficerByRecId(city.recommendedGovernorId);
+        if (!desired)
+          continue;
+
+        const uintptr_t currentGovernor =
+            ReadDeploymentCityGovernor(
+                shiftedCityBase, city.cityIndex);
+        if (currentGovernor == desired->officerBase)
+          continue;
+
+        if (HasDeploymentCityIndex(
+                deferred, city.cityIndex))
+          ++deferredPending;
+        else
+          ++applicable;
+      }
+
+      if (outDeferredCount)
+        *outDeferredCount = deferredPending;
+      return applicable;
+    }
+
+    static bool ApplyCorpsDeploymentGovernorStage(
+        uintptr_t p1, uintptr_t shiftedCityBase) {
+      if (!s_corpsDeploymentValid ||
+          s_corpsDeploymentCorpsPtr <= 0x10000 ||
+          s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
+        AddNotification(u8"군단 자동배치 2단계: 현재 군단의 고정된 추천 계획이 없습니다.");
+        return false;
+      }
+
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, shiftedCityBase);
+      RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
+
+      std::vector<int> deferredCities;
+      BuildDeferredDeploymentGovernorCities(
+          shiftedCityBase, &deferredCities);
+      for (int cityIndex : deferredCities) {
+        const std::string diagnostic =
+            BuildDeploymentCityResponsibilityDiagnostic(
+                shiftedCityBase, cityIndex);
+        AddLog(u8"[군단 자동배치 2단계] 보류: %s | %s",
+               cityIndex >= 0 && cityIndex < g_CityCount
+                   ? g_CityList[cityIndex].cityname
+                   : u8"?",
+               diagnostic.c_str());
+      }
+
+      // 1단계 이동이 남아 있으면 태수 교체를 시작하지 않는다.
+      for (const auto &rec : s_corpsDeploymentOfficers) {
+        if ((rec.status == 0x28 || rec.status == 0x18) &&
+            rec.currentCityIndex != rec.recommendedCityIndex) {
+          AddNotification(u8"군단 자동배치 2단계: 먼저 1단계 일반/군사 배치를 완료해주세요.");
+          return false;
+        }
+      }
+
+      // 태수가 필요한 도시에는 충성 100 추천 책임자가 반드시 있어야 한다.
+      for (const auto &city : s_corpsDeploymentCities) {
+        if (HasDeploymentCityIndex(
+                deferredCities, city.cityIndex))
+          continue;
+        if (city.targetCount <= 0)
+          continue;
+        if (!city.recommendedGovernorId) {
+          AddNotification(u8"군단 자동배치 2단계: 충성 100 태수 후보가 부족한 도시가 있어 중단했습니다.");
+          return false;
+        }
+
+        const CityOfficerRow *desired =
+            FindCorpsOfficerByRecId(city.recommendedGovernorId);
+        if (!desired)
+          return false;
+        if (desired->status == 0xC8 || desired->status == 0xD8)
+          continue;
+        if (desired->loyalty != 100) {
+          AddNotification(u8"군단 자동배치 2단계: 추천 태수의 충성도가 100이 아니어서 중단했습니다.");
+          return false;
+        }
+      }
+
+      CorpsDeploymentStage2Snapshot snapshot;
+      if (!CaptureCorpsDeploymentStage2Snapshot(
+              shiftedCityBase, &snapshot)) {
+        AddNotification(u8"군단 자동배치 2단계: 롤백용 현재 상태를 저장하지 못했습니다.");
+        return false;
+      }
+
+      int moveCount = 0;
+      int swapCount = 0;
+      int firstGovernorCount = 0;
+      int cycleBreakCount = 0;
+      const int deferredCount =
+          (int)deferredCities.size();
+      bool failed = false;
+      std::string failReason;
+
+      for (int guard = 0; guard < 512; ++guard) {
+        s_officerRosterDirty = true;
+        RefreshCityOfficerRoster(p1, shiftedCityBase);
+        RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
+
+        bool progress = false;
+
+        // 교체로 일반 신분이 된 기존 태수는 이제 안전하게 추천 도시로 이동할 수 있다.
+        for (auto &rec : s_corpsDeploymentOfficers) {
+          const CityOfficerRow *row =
+              FindCorpsOfficerByRecId(rec.id);
+          if (!row || row->status != 0x28 ||
+              rec.currentCityIndex == rec.recommendedCityIndex)
+            continue;
+          if (HasDeploymentCityIndex(
+                  deferredCities, rec.recommendedCityIndex))
+            continue;
+          if (rec.recommendedCityIndex < 0 ||
+              rec.recommendedCityIndex >= g_CityCount)
+            continue;
+
+          const int oldCity = rec.currentCityIndex;
+          if (!MoveNormalOfficerWithinDeploymentCorps(
+                  shiftedCityBase, row->officerBase,
+                  rec.recommendedCityIndex)) {
+            failed = true;
+            failReason = u8"해제된 태수의 도시 이동에 실패했습니다.";
+            break;
+          }
+
+          ++moveCount;
+          progress = true;
+          AddLog(u8"[군단 자동배치 2단계] %s 이동: %s -> %s",
+                 BuildOfficerName(rec.id).c_str(),
+                 oldCity >= 0 ? g_CityList[oldCity].cityname : u8"?",
+                 g_CityList[rec.recommendedCityIndex].cityname);
+        }
+
+        if (failed)
+          break;
+        if (progress)
+          continue;
+
+        // 추천 태수가 일반(28) 상태로 목표 도시에 도착한 곳부터 교체한다.
+        for (const auto &city : s_corpsDeploymentCities) {
+          if (HasDeploymentCityIndex(
+                  deferredCities, city.cityIndex))
+            continue;
+          if (!city.recommendedGovernorId ||
+              IsDeploymentFixedLeader(city.recommendedGovernorId))
+            continue;
+
+          const CityOfficerRow *desired =
+              FindCorpsOfficerByRecId(city.recommendedGovernorId);
+          if (!desired)
+            continue;
+
+          const uintptr_t rawCity =
+              GetRawCityBase(shiftedCityBase, city.cityIndex);
+          uintptr_t currentGovernor = 0;
+          if (!rawCity ||
+              !SafeReadPtrAllowZero(
+                  rawCity + OFF_CITY_FORCE_LINK_RAW,
+                  &currentGovernor)) {
+            failed = true;
+            failReason = u8"도시 태수 포인터를 읽지 못했습니다.";
+            break;
+          }
+
+          if (currentGovernor == desired->officerBase)
+            continue;
+
+          const int desiredCity =
+              GetOfficerCityIndexByBase(
+                  shiftedCityBase, desired->officerBase);
+          if (desired->status != 0x28 ||
+              desiredCity != city.cityIndex)
+            continue;
+
+          if (currentGovernor == 0) {
+            if (!IsSafeFirstGovernorNormal(*desired)) {
+              failed = true;
+              failReason =
+                  u8"선검사를 통과한 빈 도시의 추천 태수가 안전한 28/D3 일반장수가 아닙니다.";
+              break;
+            }
+
+            if (!AppointFirstDeploymentGovernorAtCity(
+                    shiftedCityBase, city.cityIndex,
+                    desired->officerBase)) {
+              failed = true;
+              failReason =
+                  u8"빈 도시 최초 태수 직접 임명 쓰기/검증에 실패했습니다.";
+              break;
+            }
+
+            ++firstGovernorCount;
+            progress = true;
+            break;
+          }
+
+          if (currentGovernor <= 0x10000) {
+            failed = true;
+            failReason =
+                u8"도시 책임자 포인터가 0이 아닌 비정상 값입니다.";
+            break;
+          }
+
+          uint8_t currentStatus = 0;
+          if (!SafeRead8(currentGovernor + 0x10,
+                         &currentStatus) ||
+              currentStatus != 0xE8) {
+            failed = true;
+            failReason = u8"현재 책임자가 태수(E8)가 아니어서 교체를 중단했습니다.";
+            break;
+          }
+
+          if (!SwapDeploymentGovernorAtCity(
+                  shiftedCityBase, city.cityIndex,
+                  currentGovernor, desired->officerBase)) {
+            failed = true;
+            failReason = u8"태수 교체 쓰기/검증에 실패했습니다.";
+            break;
+          }
+
+          ++swapCount;
+          progress = true;
+          break;
+        }
+
+        if (failed)
+          break;
+        if (progress)
+          continue;
+
+        // 여기까지 왔는데 미완료라면 태수끼리 서로 물고 있는 순환 배치일 수 있다.
+        int unresolvedCityIndex = -1;
+        uintptr_t unresolvedDesiredBase = 0;
+        int desiredCurrentCity = -1;
+
+        for (const auto &city : s_corpsDeploymentCities) {
+          if (HasDeploymentCityIndex(
+                  deferredCities, city.cityIndex))
+            continue;
+          if (!city.recommendedGovernorId ||
+              IsDeploymentFixedLeader(city.recommendedGovernorId))
+            continue;
+
+          const CityOfficerRow *desired =
+              FindCorpsOfficerByRecId(city.recommendedGovernorId);
+          if (!desired)
+            continue;
+
+          const uintptr_t rawCity =
+              GetRawCityBase(shiftedCityBase, city.cityIndex);
+          uintptr_t currentGovernor = 0;
+          if (!rawCity ||
+              !SafeReadPtrAllowZero(
+                  rawCity + OFF_CITY_FORCE_LINK_RAW,
+                  &currentGovernor))
+            continue;
+          if (currentGovernor == desired->officerBase)
+            continue;
+
+          if (desired->status == 0xE8) {
+            unresolvedCityIndex = city.cityIndex;
+            unresolvedDesiredBase = desired->officerBase;
+            desiredCurrentCity =
+                GetOfficerCityIndexByBase(
+                    shiftedCityBase, desired->officerBase);
+            break;
+          }
+        }
+
+        if (unresolvedCityIndex < 0)
+          break;
+
+        if (desiredCurrentCity < 0 ||
+            desiredCurrentCity >= g_CityCount) {
+          failed = true;
+          failReason = u8"순환 태수의 현재 도시를 확인하지 못했습니다.";
+          break;
+        }
+
+        // 충성 100 일반 장수를 임시 태수로 써서 E8 순환 고리를 한 번 끊는다.
+        const CityOfficerRow *buffer = nullptr;
+        int bufferCity = -1;
+        for (const auto &rec : s_corpsDeploymentOfficers) {
+          if (rec.recommendedGovernor || rec.loyalty != 100)
+            continue;
+
+          const CityOfficerRow *row =
+              FindCorpsOfficerByRecId(rec.id);
+          if (!row || row->status != 0x28)
+            continue;
+
+          const int currentCity =
+              GetOfficerCityIndexByBase(
+                  shiftedCityBase, row->officerBase);
+          if (currentCity < 0 ||
+              currentCity != rec.recommendedCityIndex)
+            continue;
+
+          buffer = row;
+          bufferCity = currentCity;
+          break;
+        }
+
+        if (!buffer) {
+          failed = true;
+          failReason = u8"태수 순환을 풀 충성 100 일반 장수 버퍼가 없습니다.";
+          break;
+        }
+
+        if (!MoveNormalOfficerWithinDeploymentCorps(
+                shiftedCityBase, buffer->officerBase,
+                desiredCurrentCity)) {
+          failed = true;
+          failReason = u8"순환 해제용 임시 장수 이동에 실패했습니다.";
+          break;
+        }
+        if (bufferCity != desiredCurrentCity)
+          ++moveCount;
+
+        if (!SwapDeploymentGovernorAtCity(
+                shiftedCityBase, desiredCurrentCity,
+                unresolvedDesiredBase, buffer->officerBase)) {
+          failed = true;
+          failReason = u8"순환 해제용 임시 태수 교체에 실패했습니다.";
+          break;
+        }
+
+        ++swapCount;
+        ++cycleBreakCount;
+        AddLog(u8"[군단 자동배치 2단계] 태수 순환 해제: %s를 임시 태수로 사용",
+               BuildOfficerName(buffer->id).c_str());
+      }
+
+      if (!failed) {
+        s_officerRosterDirty = true;
+        RefreshCityOfficerRoster(p1, shiftedCityBase);
+        RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
+
+        // 최종 태수/충성도 검증. 보류 도시는 원상 유지 대상으로 제외한다.
+        for (const auto &city : s_corpsDeploymentCities) {
+          if (HasDeploymentCityIndex(
+                  deferredCities, city.cityIndex))
+            continue;
+          if (!city.recommendedGovernorId ||
+              IsDeploymentFixedLeader(city.recommendedGovernorId))
+            continue;
+
+          const CityOfficerRow *desired =
+              FindCorpsOfficerByRecId(city.recommendedGovernorId);
+          const uintptr_t rawCity =
+              GetRawCityBase(shiftedCityBase, city.cityIndex);
+          uintptr_t currentGovernor = 0;
+          if (!desired || !rawCity ||
+              !SafeReadPtrAllowZero(
+                  rawCity + OFF_CITY_FORCE_LINK_RAW,
+                  &currentGovernor) ||
+              currentGovernor != desired->officerBase ||
+              desired->status != 0xE8 ||
+              desired->loyalty != 100 ||
+              GetOfficerCityIndexByBase(
+                  shiftedCityBase, desired->officerBase) !=
+                  city.cityIndex) {
+            failed = true;
+            failReason = u8"최종 태수 배치 검증에 실패했습니다.";
+            break;
+          }
+        }
+      }
+
+      if (failed) {
+        RestoreCorpsDeploymentStage2Snapshot(snapshot);
+        s_officerRosterDirty = true;
+        RefreshCityOfficerRoster(p1, shiftedCityBase);
+        RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
+
+        AddNotification(
+            (std::string(u8"군단 자동배치 2단계: ") +
+             failReason + u8" 전체 원복했습니다.").c_str());
+        AddLog(u8"[군단 자동배치 2단계] 실패/전체 롤백: %s",
+               failReason.c_str());
+        return false;
+      }
+
+      char notice[256]{};
+      sprintf_s(notice,
+                u8"군단 자동배치 2단계 완료: 태수 교체 %d회 / 최초 임명 %d회 / 이동 %d회 / 보류 %d도시",
+                swapCount, firstGovernorCount,
+                moveCount, deferredCount);
+      AddNotification(notice);
+      AddLog(u8"[군단 자동배치 2단계] 완료: 교체 %d / 최초임명 %d / 이동 %d / 순환해제 %d / 보류 %d",
+             swapCount, firstGovernorCount,
+             moveCount, cycleBreakCount, deferredCount);
+      return true;
+    }
+
+
+    static void DrawCorpsDeploymentRecommendation(
+        uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.0f, 1.f),
+                         u8"[ 군단 자동배치 추천 ]");
+      ImGui::SameLine(0.f, 12.f * sc);
+      ImGui::TextDisabled(u8"계획 / 단계 적용");
+
+      const bool canBuild = s_officerSelectedCorpsPtr > 0x10000;
+      if (!canBuild)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"추천 계산##CorpsDeploymentBuild",
+                        ImVec2(120.f * sc, 0.f))) {
+        ResetCorpsDeploymentTargetBaseline();
+        BuildCorpsDeploymentRecommendation(shiftedCityBase);
+      }
+      if (!canBuild)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 6.f * sc);
+      const bool hasTargetBaseline =
+          s_corpsDeploymentTargetCorpsPtr == s_officerSelectedCorpsPtr &&
+          !s_corpsDeploymentTargetBaseline.empty();
+      if (!hasTargetBaseline)
+        ImGui::BeginDisabled();
+      if (ImGui::SmallButton(u8"현재 계획 취소##CorpsDeploymentReset")) {
+        ResetCorpsDeploymentTargetBaseline();
+      }
+      if (!hasTargetBaseline)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 12.f * sc);
+      ImGui::TextDisabled(
+          u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 신분 유지/전선 우선");
+      if (hasTargetBaseline) {
+        ImGui::SameLine(0.f, 8.f * sc);
+        ImGui::TextDisabled(u8"| 이번 평정 계획 고정");
+      }
+
+      if (!s_corpsDeploymentValid ||
+          s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
+        ImGui::TextDisabled(
+            u8"군단 도시를 선택한 뒤 '추천 계산'을 눌러주세요.");
+        return;
+      }
+
+      int movableNormal = 0;
+      int movableAdviser = 0;
+      for (const auto &rec : s_corpsDeploymentOfficers) {
+        if (rec.currentCityIndex == rec.recommendedCityIndex)
+          continue;
+        if (rec.status == 0x28)
+          ++movableNormal;
+        else if (rec.status == 0x18)
+          ++movableAdviser;
+      }
+
+      ImGui::SameLine(0.f, 12.f * sc);
+      const bool hasMovable = movableNormal > 0 || movableAdviser > 0;
+      if (!hasMovable)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"1단계 배치 적용##CorpsDeploymentMoveApply",
+                        ImVec2(145.f * sc, 0.f))) {
+        ApplyCorpsDeploymentMovements(p1, shiftedCityBase);
+      }
+      if (!hasMovable)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::TextDisabled(u8"일반 %d / 군사 %d 이동 예정",
+                          movableNormal, movableAdviser);
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"1단계는 같은 군단 안에서 일반/군사의 도시만 이동합니다.");
+        ImGui::TextUnformatted(
+            u8"군주·도독·태수의 신분과 태수 포인터는 아직 변경하지 않습니다.");
+        ImGui::EndTooltip();
+      }
+
+      int deferredGovernorChanges = 0;
+      const int pendingGovernorChanges =
+          CountPendingDeploymentGovernorChanges(
+              shiftedCityBase, &deferredGovernorChanges);
+      ImGui::SameLine(0.f, 12.f * sc);
+      const bool canApplyGovernorStage =
+          !hasMovable && pendingGovernorChanges > 0;
+      if (!canApplyGovernorStage)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"2단계 태수 적용##CorpsDeploymentGovernorApply",
+                        ImVec2(145.f * sc, 0.f))) {
+        ApplyCorpsDeploymentGovernorStage(p1, shiftedCityBase);
+      }
+      if (!canApplyGovernorStage)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::TextDisabled(u8"태수 변경 %d / 보류 %d 도시",
+                          pendingGovernorChanges,
+                          deferredGovernorChanges);
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"기존 태수를 현지에서 일반 신분으로 해제한 뒤 필요한 경우 이동합니다.");
+        ImGui::TextUnformatted(
+            u8"태수끼리 순환하는 경우 충성 100 일반 장수를 임시 태수로 사용합니다.");
+        ImGui::TextUnformatted(
+            u8"빈 도시는 충성100 28/D3 일반장수를 먼저 배치한 경우에만 최초 태수(E8/D2)로 임명합니다.");
+        ImGui::TextUnformatted(
+            u8"안전한 일반장수가 없으면 빈 도시는 이번 계획에서 그대로 두고 AI 처리를 기다립니다.");
+        ImGui::TextUnformatted(
+            u8"0이 아닌 City+0x98이 E8이 아닌 특수 상태만 진단 후 보류합니다.");
+        ImGui::TextUnformatted(
+            u8"중간 실패 시 적용 대상 도시는 2단계 시작 직전 상태로 전체 원복합니다.");
+        ImGui::EndTooltip();
+      }
+
+      static ImGuiTableFlags deployFlags =
+          ImGuiTableFlags_BordersInner |
+          ImGuiTableFlags_RowBg |
+          ImGuiTableFlags_SizingFixedFit |
+          ImGuiTableFlags_NoSavedSettings;
+
+      if (ImGui::BeginTable("##CorpsDeploymentCityTbl", 7, deployFlags,
+                            ImVec2(0.f, 0.f))) {
+        ImGui::TableSetupColumn(u8"구분", ImGuiTableColumnFlags_WidthFixed,
+                                50.f * sc);
+        ImGui::TableSetupColumn(u8"도시", ImGuiTableColumnFlags_WidthFixed,
+                                80.f * sc);
+        ImGui::TableSetupColumn(u8"인원", ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableSetupColumn(u8"현재 책임자",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                105.f * sc);
+        ImGui::TableSetupColumn(u8"추천 책임자",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                105.f * sc);
+        ImGui::TableSetupColumn(u8"점수", ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableSetupColumn(u8"추천 배치",
+                                ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto &city : s_corpsDeploymentCities) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextUnformatted(city.frontline ? u8"전선" : u8"후방");
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::TextUnformatted(g_CityList[city.cityIndex].cityname);
+
+          ImGui::TableSetColumnIndex(2);
+          ImGui::Text("%d→%d", city.currentCount, city.targetCount);
+
+          ImGui::TableSetColumnIndex(3);
+          if (city.currentGovernorId)
+            ImGui::TextUnformatted(
+                BuildOfficerName(city.currentGovernorId).c_str());
+          else
+            ImGui::TextDisabled(u8"없음");
+
+          ImGui::TableSetColumnIndex(4);
+          if (city.recommendedGovernorId)
+            ImGui::TextUnformatted(
+                BuildOfficerName(city.recommendedGovernorId).c_str());
+          else
+            ImGui::TextColored(ImVec4(1.f, 0.45f, 0.25f, 1.f),
+                               u8"후보 부족");
+
+          ImGui::TableSetColumnIndex(5);
+          if (city.governorScore > 0)
+            ImGui::Text("%d", city.governorScore);
+          else
+            ImGui::TextDisabled("-");
+
+          ImGui::TableSetColumnIndex(6);
+          std::string names;
+          for (uint16_t id : city.recommendedOfficerIds) {
+            if (!names.empty())
+              names += ", ";
+            names += BuildOfficerName(id);
+          }
+          if (names.empty())
+            ImGui::TextDisabled(u8"없음");
+          else
+            ImGui::TextWrapped("%s", names.c_str());
+        }
+        ImGui::EndTable();
+      }
+
+      ImGui::Spacing();
+      ImGui::TextUnformatted(u8"이동/역할 변경 예정");
+
+      if (ImGui::BeginTable("##CorpsDeploymentOfficerTbl", 7, deployFlags,
+                            ImVec2(0.f, 220.f * sc))) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn(u8"이름", ImGuiTableColumnFlags_WidthFixed,
+                                105.f * sc);
+        ImGui::TableSetupColumn(u8"현재 신분",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                65.f * sc);
+        ImGui::TableSetupColumn(u8"충성", ImGuiTableColumnFlags_WidthFixed,
+                                45.f * sc);
+        ImGui::TableSetupColumn(u8"현재", ImGuiTableColumnFlags_WidthFixed,
+                                75.f * sc);
+        ImGui::TableSetupColumn(u8"추천", ImGuiTableColumnFlags_WidthFixed,
+                                75.f * sc);
+        ImGui::TableSetupColumn(u8"역할", ImGuiTableColumnFlags_WidthFixed,
+                                60.f * sc);
+        ImGui::TableSetupColumn(u8"이유",
+                                ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto &rec : s_corpsDeploymentOfficers) {
+          if (rec.currentCityIndex == rec.recommendedCityIndex &&
+              !rec.recommendedGovernor)
+            continue;
+
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextUnformatted(BuildOfficerName(rec.id).c_str());
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::TextUnformatted(GetOfficerStatusName(rec.status));
+
+          ImGui::TableSetColumnIndex(2);
+          if (rec.loyalty < 90)
+            ImGui::TextColored(ImVec4(1.f, 0.4f, 0.25f, 1.f),
+                               "%u", (unsigned int)rec.loyalty);
+          else
+            ImGui::Text("%u", (unsigned int)rec.loyalty);
+
+          ImGui::TableSetColumnIndex(3);
+          if (rec.currentCityIndex >= 0)
+            ImGui::TextUnformatted(
+                g_CityList[rec.currentCityIndex].cityname);
+          else
+            ImGui::TextDisabled("?");
+
+          ImGui::TableSetColumnIndex(4);
+          if (rec.recommendedCityIndex >= 0)
+            ImGui::TextUnformatted(
+                g_CityList[rec.recommendedCityIndex].cityname);
+          else
+            ImGui::TextDisabled("?");
+
+          ImGui::TableSetColumnIndex(5);
+          ImGui::TextUnformatted(
+              rec.recommendedGovernor
+                  ? (rec.status == 0xC8
+                         ? u8"군주 고정"
+                         : (rec.status == 0xD8 ? u8"도독 고정"
+                                               : u8"태수"))
+                  : (rec.status == 0x18
+                         ? u8"군사 유지"
+                         : (rec.status == 0xE8
+                                ? u8"태수 해제→배치"
+                                : u8"배치")));
+
+          ImGui::TableSetColumnIndex(6);
+          ImGui::TextWrapped("%s", rec.reason.c_str());
+        }
+        ImGui::EndTable();
       }
     }
 
@@ -2615,6 +4915,7 @@ namespace DX11Base {
                govOk ? "" : u8"(읽기 실패) ",
                (unsigned long long)governorGeneralPtr);
       }
+
     }
 
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
@@ -3064,6 +5365,7 @@ namespace DX11Base {
 
       DrawGovernorPanel(p1, shiftedCityBase, sc);
       DrawGovernorGeneralPanel(p1, shiftedCityBase, sc);
+      DrawCorpsDeploymentRecommendation(p1, shiftedCityBase, sc);
       if (bShowDebug)
         DrawCityCorpsPointerDebug(shiftedCityBase, sc);
     }
@@ -3125,6 +5427,8 @@ namespace DX11Base {
     if (now - s_lastPollMs < 500)
       return;
     s_lastPollMs = now;
+
+    RunCorpsDeploymentPhaseMonitor(p1);
 
     LoadAutoSupportRoutes();
 
