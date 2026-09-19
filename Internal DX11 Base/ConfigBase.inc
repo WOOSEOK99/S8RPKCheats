@@ -74,7 +74,6 @@ namespace DX11Base {
   static bool s_appLoveHate = false;
   static bool s_appLoyalty = false;
   static bool s_appResonance = false;
-  static bool s_appResonanceThree = false;
   static bool s_appGift = false;
   static bool s_appTalk = false;
   static bool s_appRelation = false;
@@ -114,9 +113,7 @@ namespace DX11Base {
       {"bAttitudeHack", u8"견문시 민심최대", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false, true},
       {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false, true},
       {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false, true},
-      {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false, true},
-      {"bResonanceThree", u8"대화 상대 공명 4개 고정", &bResonanceThree, &s_appResonanceThree,
-       SetDialogueResonanceThree, false, true},
+      {"bResonance", u8"무조건 공명 발생", &bResonance, &s_appResonance, SetInstantResonance, false, true},
       {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false, true},
       {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false, true},
       {"bFastRelationship", u8"즉시 경애 맺기", &bFastRelationship, &s_appRelation, SetFastRelationship, false, true},
