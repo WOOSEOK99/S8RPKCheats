@@ -16,9 +16,17 @@ namespace DX11Base {
     static bool g_resonanceCaveApplied = false;
     static uint8_t g_resonanceOriginal[8] = { 0 };
 
-    static uintptr_t g_resonanceThreeCaveAddr = 0;
+    static uintptr_t g_resonanceThreeSelectHookAddr = 0;
+    static uintptr_t g_resonanceThreeSelectCaveAddr = 0;
+    static uint8_t g_resonanceThreeSelectOriginal[6] = { 0 };
+
+    static uintptr_t g_resonanceThreeGetHookAddr = 0;
+    static uintptr_t g_resonanceThreeGetCaveAddr = 0;
+    static uint8_t g_resonanceThreeGetOriginal[9] = { 0 };
+
     static bool g_resonanceThreeCaveApplied = false;
-    static uint8_t g_resonanceThreeOriginal[8] = { 0 };
+    static volatile uint16_t g_resonanceThreeTargetId = 0;
+    static volatile uint8_t g_resonanceThreeArmed = 0;
 
     static bool InstallResonanceCave(uintptr_t hookAddr) {
         // 코드 케이브 할당 (8.0 버전에 맞춰 AllocNear 사용)
@@ -109,33 +117,138 @@ namespace DX11Base {
         }
     }
 
-    static bool InstallResonanceThreeCave(uintptr_t hookAddr) {
-        g_resonanceThreeCaveAddr = AllocNear(hookAddr, 96);
-        if (!g_resonanceThreeCaveAddr)
-            return false;
-
-        const uint32_t dynOffset = *(uint32_t*)(hookAddr + 4);
-        uint8_t* cave = (uint8_t*)g_resonanceThreeCaveAddr;
-        int cur = 0;
-
-        // 현재 이 루틴에서 읽는 상대 장수의 공명값을 무조건 3으로 설정.
-        // mov byte ptr [rdx+rsi+dynOffset], 3
-        cave[cur++] = 0xC6; cave[cur++] = 0x84; cave[cur++] = 0x32;
-        *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
-        cave[cur++] = 0x03;
-
-        // 원본: movzx ecx, byte ptr [rdx+rsi+dynOffset]
-        memcpy(&cave[cur], g_resonanceThreeOriginal, 8);
-        cur += 8;
-
-        // 원래 코드로 복귀
-        const uintptr_t returnAddr = hookAddr + 8;
+    static void EmitAbsoluteReturn(uint8_t* cave, int& cur, uintptr_t returnAddr) {
         cave[cur++] = 0xFF; cave[cur++] = 0x25;
         *(uint32_t*)&cave[cur] = 0; cur += 4;
         *(uintptr_t*)&cave[cur] = returnAddr; cur += 8;
+    }
 
-        FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_resonanceThreeCaveAddr, cur);
-        return ApplyJmp(hookAddr, g_resonanceThreeCaveAddr, 8);
+    static bool InstallResonanceThreeSelectCapture(uintptr_t hookAddr) {
+        g_resonanceThreeSelectCaveAddr = AllocNear(hookAddr, 128);
+        if (!g_resonanceThreeSelectCaveAddr)
+            return false;
+
+        uint8_t* cave = (uint8_t*)g_resonanceThreeSelectCaveAddr;
+        int cur = 0;
+
+        // CT ID 296: interacting selection에서 RSI가 현재 상대 무장(0x3D0 레코드).
+        // 원본 플래그를 건드리지 않고 상대 ID(+0x08)를 저장하고 armed=1.
+        cave[cur++] = 0x50; // push rax
+        cave[cur++] = 0x51; // push rcx
+
+        // movzx ecx, word ptr [rsi+08]
+        cave[cur++] = 0x0F; cave[cur++] = 0xB7; cave[cur++] = 0x4E; cave[cur++] = 0x08;
+
+        // mov rax, &g_resonanceThreeTargetId
+        cave[cur++] = 0x48; cave[cur++] = 0xB8;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTargetId; cur += 8;
+        // mov word ptr [rax], cx
+        cave[cur++] = 0x66; cave[cur++] = 0x89; cave[cur++] = 0x08;
+
+        // mov rax, &g_resonanceThreeArmed
+        cave[cur++] = 0x48; cave[cur++] = 0xB8;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
+        // mov byte ptr [rax], 1
+        cave[cur++] = 0xC6; cave[cur++] = 0x00; cave[cur++] = 0x01;
+
+        cave[cur++] = 0x59; // pop rcx
+        cave[cur++] = 0x58; // pop rax
+
+        // 원본: mov eax,[rsi+00000320]
+        memcpy(&cave[cur], g_resonanceThreeSelectOriginal, sizeof(g_resonanceThreeSelectOriginal));
+        cur += (int)sizeof(g_resonanceThreeSelectOriginal);
+
+        EmitAbsoluteReturn(cave, cur, hookAddr + sizeof(g_resonanceThreeSelectOriginal));
+        FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_resonanceThreeSelectCaveAddr, cur);
+
+        return ApplyJmp(hookAddr, g_resonanceThreeSelectCaveAddr,
+                        sizeof(g_resonanceThreeSelectOriginal));
+    }
+
+    static bool InstallResonanceThreeGetter(uintptr_t hookAddr) {
+        g_resonanceThreeGetCaveAddr = AllocNear(hookAddr, 160);
+        if (!g_resonanceThreeGetCaveAddr)
+            return false;
+
+        const uint32_t dynOffset = *(uint32_t*)(hookAddr + 5);
+        uint8_t* cave = (uint8_t*)g_resonanceThreeGetCaveAddr;
+        int cur = 0;
+
+        // 원본 movzx는 flags를 건드리지 않으므로 비교에 사용한 flags/register를 보존.
+        cave[cur++] = 0x9C;             // pushfq
+        cave[cur++] = 0x41; cave[cur++] = 0x53; // push r11
+        cave[cur++] = 0x50;             // push rax
+
+        // mov r11, &g_resonanceThreeArmed
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
+        // cmp byte ptr [r11], 1
+        cave[cur++] = 0x41; cave[cur++] = 0x80; cave[cur++] = 0x3B; cave[cur++] = 0x01;
+
+        // jne skipApply (rel8 patched later)
+        cave[cur++] = 0x75;
+        const int jneArmedDispPos = cur++;
+
+        // mov r11, &g_resonanceThreeTargetId
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTargetId; cur += 8;
+        // cmp dx, word ptr [r11]
+        cave[cur++] = 0x66; cave[cur++] = 0x41; cave[cur++] = 0x3B; cave[cur++] = 0x13;
+
+        // jne skipApply
+        cave[cur++] = 0x75;
+        const int jneIdDispPos = cur++;
+
+        // CT ID 369 실제 공명 저장 위치:
+        // mov byte ptr [r8+rcx+dynOffset], 3
+        cave[cur++] = 0x41; cave[cur++] = 0xC6; cave[cur++] = 0x84; cave[cur++] = 0x08;
+        *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
+        cave[cur++] = 0x03;
+
+        // 한 번 실제 대상에 적용했으면 stale target이 나중 조회를 오염시키지 않도록 armed=0.
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
+        cave[cur++] = 0x41; cave[cur++] = 0xC6; cave[cur++] = 0x03; cave[cur++] = 0x00;
+
+        const int skipApplyPos = cur;
+        cave[jneArmedDispPos] = (uint8_t)(skipApplyPos - (jneArmedDispPos + 1));
+        cave[jneIdDispPos] = (uint8_t)(skipApplyPos - (jneIdDispPos + 1));
+
+        cave[cur++] = 0x58;                         // pop rax
+        cave[cur++] = 0x41; cave[cur++] = 0x5B;   // pop r11
+        cave[cur++] = 0x9D;                         // popfq
+
+        // 원본 CT ID 369: movzx eax,byte ptr [r8+rcx+00005BDA]
+        memcpy(&cave[cur], g_resonanceThreeGetOriginal, sizeof(g_resonanceThreeGetOriginal));
+        cur += (int)sizeof(g_resonanceThreeGetOriginal);
+
+        EmitAbsoluteReturn(cave, cur, hookAddr + sizeof(g_resonanceThreeGetOriginal));
+        FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_resonanceThreeGetCaveAddr, cur);
+
+        return ApplyJmp(hookAddr, g_resonanceThreeGetCaveAddr,
+                        sizeof(g_resonanceThreeGetOriginal));
+    }
+
+    static void RemoveResonanceThreeHooks() {
+        if (g_resonanceThreeSelectHookAddr && g_resonanceThreeSelectOriginal[0] != 0)
+            RestoreBytes(g_resonanceThreeSelectHookAddr, g_resonanceThreeSelectOriginal,
+                         sizeof(g_resonanceThreeSelectOriginal));
+        if (g_resonanceThreeGetHookAddr && g_resonanceThreeGetOriginal[0] != 0)
+            RestoreBytes(g_resonanceThreeGetHookAddr, g_resonanceThreeGetOriginal,
+                         sizeof(g_resonanceThreeGetOriginal));
+
+        if (g_resonanceThreeSelectCaveAddr) {
+            VirtualFree((LPVOID)g_resonanceThreeSelectCaveAddr, 0, MEM_RELEASE);
+            g_resonanceThreeSelectCaveAddr = 0;
+        }
+        if (g_resonanceThreeGetCaveAddr) {
+            VirtualFree((LPVOID)g_resonanceThreeGetCaveAddr, 0, MEM_RELEASE);
+            g_resonanceThreeGetCaveAddr = 0;
+        }
+
+        g_resonanceThreeCaveApplied = false;
+        g_resonanceThreeTargetId = 0;
+        g_resonanceThreeArmed = 0;
     }
 
     void SetDialogueResonanceThree(bool enable) {
@@ -145,7 +258,6 @@ namespace DX11Base {
             if (g_resonanceThreeThreadRunning || g_resonanceThreadRunning)
                 return;
 
-            // 기존 1개 이상 -> 3 기능과 같은 훅을 공유하므로 먼저 해제.
             if (g_resonanceCaveApplied) {
                 SetInstantResonance(false);
                 bResonance = false;
@@ -159,27 +271,43 @@ namespace DX11Base {
                     if (GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi))) {
                         const uintptr_t searchEnd = exeBase + mi.SizeOfImage;
 
-                        if (!g_resonanceHookAddr) {
-                            // CT ID 368 계열: 상대 무장 ID를 해석한 뒤 공명값을 읽는 지점.
-                            const char* pat =
-                                "0F B7 C9 48 63 94 88 ?? ?? ?? ?? 83 FA FF 74 ?? "
-                                "0F B6 ?? 32 ?? ?? ?? ?? EB";
-                            uintptr_t found = FindPattern(exeBase, searchEnd, pat);
-                            if (found)
-                                g_resonanceHookAddr = found + 16;
-                        }
+                        // CT ID 296: 교류 화면에서 현재 선택한 상대 무장 레코드(RSI) 캡처.
+                        const char* selectPat =
+                            "8B 86 20 03 00 00 C1 E8 12 A8 01 74 0A";
+                        g_resonanceThreeSelectHookAddr =
+                            FindPattern(exeBase, searchEnd, selectPat);
 
-                        if (g_resonanceHookAddr && !g_resonanceThreeCaveApplied) {
-                            memcpy(g_resonanceThreeOriginal, (void*)g_resonanceHookAddr, 8);
+                        // CT ID 369: 공명 getter. EDX=대상 무장 ID,
+                        // [r8+rcx+disp32]가 실제 공명 저장 바이트.
+                        const char* getterPat =
+                            "41 0F B6 84 08 DA 5B 00 00";
+                        g_resonanceThreeGetHookAddr =
+                            FindPattern(exeBase, searchEnd, getterPat);
 
-                            if (InstallResonanceThreeCave(g_resonanceHookAddr)) {
+                        if (g_resonanceThreeSelectHookAddr && g_resonanceThreeGetHookAddr) {
+                            memcpy(g_resonanceThreeSelectOriginal,
+                                   (void*)g_resonanceThreeSelectHookAddr,
+                                   sizeof(g_resonanceThreeSelectOriginal));
+                            memcpy(g_resonanceThreeGetOriginal,
+                                   (void*)g_resonanceThreeGetHookAddr,
+                                   sizeof(g_resonanceThreeGetOriginal));
+
+                            const bool selectOk =
+                                InstallResonanceThreeSelectCapture(g_resonanceThreeSelectHookAddr);
+                            const bool getterOk =
+                                selectOk && InstallResonanceThreeGetter(g_resonanceThreeGetHookAddr);
+
+                            if (selectOk && getterOk) {
                                 g_resonanceThreeCaveApplied = true;
-                                AddLog(u8"[Resonance3] 상대 공명 3개 강제 패치 성공");
+                                AddLog(u8"[Resonance3] 교류 상대 캡처 + 공명 getter 필터 패치 성공");
                             } else {
-                                AddLog(u8"[Resonance3] Cave 할당/적용 실패");
+                                RemoveResonanceThreeHooks();
+                                AddLog(u8"[Resonance3] 교류 상대/공명 getter 패치 적용 실패");
                             }
-                        } else if (!g_resonanceHookAddr) {
-                            AddLog(u8"[Resonance3] 공명 훅 패턴을 찾지 못했습니다.");
+                        } else {
+                            AddLog(u8"[Resonance3] 필요한 CT296/CT369 패턴을 찾지 못했습니다. select=%p getter=%p",
+                                   (void*)g_resonanceThreeSelectHookAddr,
+                                   (void*)g_resonanceThreeGetHookAddr);
                         }
                     }
                 }
@@ -187,13 +315,13 @@ namespace DX11Base {
                 g_resonanceThreeThreadRunning = false;
             }).detach();
         } else {
-            if (g_resonanceThreeCaveApplied) {
-                RestoreBytes(g_resonanceHookAddr, g_resonanceThreeOriginal, 8);
-                VirtualFree((LPVOID)g_resonanceThreeCaveAddr, 0, MEM_RELEASE);
-                g_resonanceThreeCaveAddr = 0;
-                g_resonanceThreeCaveApplied = false;
-                AddLog(u8"[Resonance3] 상대 공명 3개 강제 패치 해제");
+            if (g_resonanceThreeCaveApplied ||
+                g_resonanceThreeSelectCaveAddr ||
+                g_resonanceThreeGetCaveAddr) {
+                RemoveResonanceThreeHooks();
+                AddLog(u8"[Resonance3] 교류 상대 공명 3개 패치 해제");
             }
         }
     }
+
 }
