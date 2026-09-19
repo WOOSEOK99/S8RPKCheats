@@ -2499,6 +2499,14 @@ namespace DX11Base {
           s_officerMoveTargetCity >= g_CityCount)
         return false;
 
+      if (selected->status == 0xD8 || selected->status == 0xE8) {
+        AddNotification(u8"무장 이동: 도독/태수는 도시 이동할 수 없습니다. 해당 도시에서 교체 기능을 사용해주세요.");
+        AddLog(u8"[도시 무장] 이동 차단: ID %u / 신분 0x%02X (도독/태수는 도시 참조 포인터 보호를 위해 이동 금지)",
+               (unsigned int)selected->id,
+               (unsigned int)selected->status);
+        return false;
+      }
+
       const uint16_t officerId = selected->id;
       const uintptr_t targetRaw =
           GetRawCityBase(shiftedCityBase, s_officerMoveTargetCity);
@@ -2833,6 +2841,12 @@ namespace DX11Base {
                     name.c_str(),
                     GetOfficerStatusName(selected->status));
 
+        if (selected->status == 0xD8 || selected->status == 0xE8) {
+          ImGui::SameLine(0.f, 10.f * sc);
+          ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.25f, 1.0f),
+                             u8"[이동 불가]");
+        }
+
         if (s_officerCityIndex >= 0) {
           const std::string currentCorps =
               GetOfficerCorpsName(shiftedCityBase, s_officerCityIndex);
@@ -2896,8 +2910,12 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(0.f, 12.f * sc);
+      const bool isFixedOffice =
+          selected != nullptr &&
+          (selected->status == 0xD8 || selected->status == 0xE8);
       const bool canMove =
-          selected != nullptr && s_officerMoveTargetCity >= 0;
+          selected != nullptr && s_officerMoveTargetCity >= 0 &&
+          !isFixedOffice;
       if (!canMove)
         ImGui::BeginDisabled();
       if (ImGui::Button(u8"선택도시로 이동##MoveCityOfficer",
@@ -2912,6 +2930,8 @@ namespace DX11Base {
             u8"무장의 신분/충성/능력치는 건드리지 않고 +0x20 도시 포인터만 변경합니다.");
         ImGui::TextUnformatted(
             u8"현재 주인공 세력이 소유한 도시끼리 이동하며, 목적 도시의 +0x90 군단 소속을 자동으로 따릅니다.");
+        ImGui::TextUnformatted(
+            u8"도독(D8)·태수(E8)는 도시/군단에서 별도 참조하므로 이동을 금지합니다.");
         ImGui::TextUnformatted(
             u8"다른 군단으로의 전속은 현재 일반 신분(0x28) 무장만 허용합니다.");
         ImGui::EndTooltip();
