@@ -578,7 +578,20 @@ namespace DX11Base {
           ImGui::EndDisabled();
       };
 
-      DrawLoveCheckbox(u8"즉시 경애 맺기", &bLoveCave, LoveMode::Normal);
+      if (ImGui::Checkbox(u8"즉시 경애 맺기", &bFastRelationship)) {
+        DX11Base::SetFastRelationship(bFastRelationship);
+        NotifyFeatureToggle(u8"즉시 경애 맺기", bFastRelationship);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           u8"교류로 관계가 갱신되는 대상의 친밀도를 100으로 처리해 즉시 경애 상태로 진입시킵니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 기존 즉시 경애 패치 대신 CT ID 321 방식을 사용합니다.");
+        ImGui::EndTooltip();
+      }
+
       ImGui::SameLine(160.0f * scale);
       DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
 
