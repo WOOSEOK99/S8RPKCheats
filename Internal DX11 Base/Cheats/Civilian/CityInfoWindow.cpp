@@ -5,6 +5,7 @@
 #include "../../Cheats.h"
 #include "../../Framework/imgui.h"
 #include "../../MenuState.h"
+#include "../../NotificationManager.h"
 #include "../../pch.h"
 #include "../../showlog.h"
 #include "../../Config.h"
@@ -839,6 +840,7 @@ namespace DX11Base {
       uint32_t moveGold = CalcSupportAmount(srcGold, s_supportFixedGold, s_supportPercentGold);
       uint32_t moveGrain = CalcSupportAmount(srcGrain, s_supportFixedGrain, s_supportPercentGrain);
       uint32_t moveTroops = CalcSupportAmount(srcTroops, s_supportFixedTroops, s_supportPercentTroops);
+      const uint32_t requestedTroops = moveTroops;
 
       // 목적지 uint32 오버플로 방지
       const uint64_t goldRoom = 0xFFFFFFFFull - (uint64_t)dstGold;
@@ -850,8 +852,24 @@ namespace DX11Base {
       uint32_t troopRoom = 0;
       if (dstTroopMax > dstTroops)
         troopRoom = dstTroopMax - dstTroops;
+
+      const bool troopCapLimited = requestedTroops > troopRoom;
       if (moveTroops > troopRoom)
         moveTroops = troopRoom;
+
+      if (troopCapLimited) {
+        char notice[256]{};
+        if (troopRoom == 0) {
+          sprintf_s(notice, u8"후방지원: %s 병사 한도(%u)에 도달하여 병력은 이동하지 못했습니다.",
+                    g_CityList[s_supportTargetCity].cityname, dstTroopMax);
+        } else {
+          sprintf_s(notice, u8"후방지원: %s 병사 한도로 요청 %u명 중 %u명만 이동합니다.",
+                    g_CityList[s_supportTargetCity].cityname, requestedTroops, moveTroops);
+        }
+        AddNotification(notice);
+        AddLog(u8"[후방지원] 병력 한도 제한: 요청=%u, 실제=%u, 도착=%u/%u",
+               requestedTroops, moveTroops, dstTroops, dstTroopMax);
+      }
 
       if (moveGold == 0 && moveGrain == 0 && moveTroops == 0) {
         AddLog(u8"[후방지원] 이동 가능한 자원이 없습니다. 출발 병력=%u, 도착 병력=%u/%u",
@@ -998,34 +1016,46 @@ namespace DX11Base {
       }
 
       uint32_t previewGold = 0, previewGrain = 0, previewTroops = 0;
+      uint32_t previewRequestedTroops = 0;
+      uint32_t previewTroopRoom = 0;
       const FrontierCityRow *srcRow = FindFrontierRow(s_supportSourceCity);
       const FrontierCityRow *dstRow = FindFrontierRow(s_supportTargetCity);
       if (srcRow && dstRow) {
         previewGold = CalcSupportAmount(srcRow->gold, s_supportFixedGold, s_supportPercentGold);
         previewGrain = CalcSupportAmount(srcRow->grain, s_supportFixedGrain, s_supportPercentGrain);
         previewTroops = CalcSupportAmount(srcRow->troops, s_supportFixedTroops, s_supportPercentTroops);
+        previewRequestedTroops = previewTroops;
 
         const uint64_t goldRoom = 0xFFFFFFFFull - (uint64_t)dstRow->gold;
         const uint64_t grainRoom = 0xFFFFFFFFull - (uint64_t)dstRow->grain;
         if ((uint64_t)previewGold > goldRoom) previewGold = (uint32_t)goldRoom;
         if ((uint64_t)previewGrain > grainRoom) previewGrain = (uint32_t)grainRoom;
 
-        uint32_t troopRoom = 0;
-        if (dstRow->troopMax > dstRow->troops)
-          troopRoom = dstRow->troopMax - dstRow->troops;
-        if (previewTroops > troopRoom)
-          previewTroops = troopRoom;
+        previewTroopRoom =
+            (dstRow->troopMax > dstRow->troops) ? (dstRow->troopMax - dstRow->troops) : 0;
+        if (previewTroops > previewTroopRoom)
+          previewTroops = previewTroopRoom;
       }
 
       ImGui::TextDisabled(u8"예상 지원: 금 %u / 군량 %u / 병력 %u",
                           previewGold, previewGrain, previewTroops);
       if (srcRow && dstRow) {
-        const uint32_t troopRoom =
-            (dstRow->troopMax > dstRow->troops) ? (dstRow->troopMax - dstRow->troops) : 0;
         ImGui::SameLine(0.f, 18.f * sc);
         ImGui::TextDisabled(u8"(병력: 출발 %u / 도착 %u/%u / 여유 %u)",
-                            srcRow->troops, dstRow->troops, dstRow->troopMax, troopRoom);
+                            srcRow->troops, dstRow->troops, dstRow->troopMax, previewTroopRoom);
       }
+
+      if (srcRow && dstRow && previewRequestedTroops > previewTroopRoom) {
+        ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.2f, 1.f),
+                           u8"※ 병사 한도 제한: 요청 %u명 중 %u명만 이동 가능",
+                           previewRequestedTroops, previewTroops);
+        if (previewTroopRoom == 0) {
+          ImGui::SameLine(0.f, 8.f * sc);
+          ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.25f, 1.f),
+                             u8"(도착 도시 병사 한도 도달)");
+        }
+      }
+
       ImGui::SameLine(0.f, 20.f * sc);
 
       const bool canExecute = (s_supportSourceCity >= 0 && s_supportTargetCity >= 0);
