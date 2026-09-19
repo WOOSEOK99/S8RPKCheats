@@ -1236,6 +1236,19 @@ namespace DX11Base {
       LoadAutoSupportRoutes();
 
       ImGui::Spacing();
+
+      // 노선 수에 따라 패널이 자연스럽게 커지되, 너무 많아지면 내부 스크롤로 전환.
+      const int routeCount = (int)s_autoSupportRoutes.size();
+      const int visibleRouteCount = (routeCount < 4) ? routeCount : 4;
+      const float routeCardH = 68.f * sc;
+      const float listH = (routeCount == 0) ? 34.f * sc
+                                             : (routeCardH * visibleRouteCount + 4.f * sc);
+      const float panelH = 58.f * sc + listH;
+
+      ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.09f, 0.15f, 0.82f));
+      ImGui::BeginChild("##AutoSupportRoutesPanel", ImVec2(0.f, panelH), true);
+
+      // 헤더
       ImGui::TextColored(ImVec4(0.85f, 0.65f, 1.0f, 1.f), u8"[ 자동 후방지원 노선 ]");
       ImGui::SameLine(0.f, 16.f * sc);
 
@@ -1248,7 +1261,7 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      ImGui::SameLine(0.f, 16.f * sc);
+      ImGui::SameLine(0.f, 14.f * sc);
       if (ImGui::SmallButton(u8"+ 노선 추가")) {
         int rear = -1, front = -1;
         for (const auto &row : s_frontierRows) {
@@ -1275,27 +1288,41 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(0.f, 12.f * sc);
-      ImGui::TextDisabled(u8"자동 노선은 후방 -> 전선만 허용 | 각 행은 독립적인 양/비율 설정");
+      ImGui::TextDisabled(u8"후방 → 전선 전용");
+      ImGui::Separator();
 
       bool saveNeeded = false;
       int deleteIndex = -1;
+
+      const ImGuiWindowFlags listFlags =
+          (routeCount > 4) ? ImGuiWindowFlags_AlwaysVerticalScrollbar : 0;
+      ImGui::BeginChild("##AutoSupportRouteList", ImVec2(0.f, listH), false, listFlags);
+
+      if (s_autoSupportRoutes.empty()) {
+        ImGui::TextDisabled(u8"등록된 노선이 없습니다.  '+ 노선 추가'로 후방지원 노선을 등록하세요.");
+      }
 
       for (size_t i = 0; i < s_autoSupportRoutes.size(); ++i) {
         AutoSupportRoute &r = s_autoSupportRoutes[i];
         ImGui::PushID((int)i + 10000);
 
-        ImGui::Separator();
-        if (ImGui::Checkbox(u8"사용", &r.enabled))
-          saveNeeded = true;
-        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.12f, 0.17f, 0.95f));
+        ImGui::BeginChild("##AutoRouteCard", ImVec2(0.f, 62.f * sc), true);
 
+        // 1행: 노선 / 도시 / 방식 / 실행
+        ImGui::TextColored(ImVec4(0.72f, 0.78f, 1.0f, 1.f), u8"노선 %d", (int)i + 1);
+        ImGui::SameLine(0.f, 10.f * sc);
+        if (ImGui::Checkbox(u8"사용##AutoEnabled", &r.enabled))
+          saveNeeded = true;
+
+        ImGui::SameLine(0.f, 14.f * sc);
         const char *srcName = (r.sourceCity >= 0 && r.sourceCity < g_CityCount)
                                   ? g_CityList[r.sourceCity].cityname : u8"후방 도시";
         ImGui::SetNextItemWidth(105.f * sc);
         if (ImGui::BeginCombo("##AutoRouteSource", srcName)) {
           for (const auto &row : s_frontierRows) {
             if (row.frontline) continue;
-            bool selected = row.cityIndex == r.sourceCity;
+            const bool selected = row.cityIndex == r.sourceCity;
             if (ImGui::Selectable(g_CityList[row.cityIndex].cityname, selected)) {
               r.sourceCity = row.cityIndex;
               saveNeeded = true;
@@ -1305,9 +1332,9 @@ namespace DX11Base {
           ImGui::EndCombo();
         }
 
-        ImGui::SameLine();
-        ImGui::TextUnformatted(u8"->");
-        ImGui::SameLine();
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::TextUnformatted(u8"→");
+        ImGui::SameLine(0.f, 6.f * sc);
 
         const char *dstName = (r.targetCity >= 0 && r.targetCity < g_CityCount)
                                   ? g_CityList[r.targetCity].cityname : u8"전선 도시";
@@ -1315,7 +1342,7 @@ namespace DX11Base {
         if (ImGui::BeginCombo("##AutoRouteTarget", dstName)) {
           for (const auto &row : s_frontierRows) {
             if (!row.frontline) continue;
-            bool selected = row.cityIndex == r.targetCity;
+            const bool selected = row.cityIndex == r.targetCity;
             if (ImGui::Selectable(g_CityList[row.cityIndex].cityname, selected)) {
               r.targetCity = row.cityIndex;
               saveNeeded = true;
@@ -1325,55 +1352,71 @@ namespace DX11Base {
           ImGui::EndCombo();
         }
 
-        ImGui::SameLine(0.f, 10.f * sc);
+        ImGui::SameLine(0.f, 14.f * sc);
         if (ImGui::RadioButton(u8"정량##AutoFixed", r.mode == 0)) {
-          r.mode = 0; saveNeeded = true;
+          r.mode = 0;
+          saveNeeded = true;
         }
         ImGui::SameLine();
         if (ImGui::RadioButton(u8"비율##AutoPercent", r.mode == 1)) {
-          r.mode = 1; saveNeeded = true;
+          r.mode = 1;
+          saveNeeded = true;
         }
 
-        const int maxValue = (r.mode == 0) ? 2000000000 : 100;
-        ImGui::SameLine(0.f, 12.f * sc);
-        ImGui::TextUnformatted(u8"금");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(75.f * sc);
-        if (ImGui::InputInt("##AutoGold", &r.gold, 0, 0)) {
-          ClampSupportInput(r.gold, maxValue); saveNeeded = true;
-        }
-
-        ImGui::SameLine(0.f, 8.f * sc);
-        ImGui::TextUnformatted(u8"군량");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(75.f * sc);
-        if (ImGui::InputInt("##AutoGrain", &r.grain, 0, 0)) {
-          ClampSupportInput(r.grain, maxValue); saveNeeded = true;
-        }
-
-        ImGui::SameLine(0.f, 8.f * sc);
-        ImGui::TextUnformatted(u8"병력");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(75.f * sc);
-        if (ImGui::InputInt("##AutoTroops", &r.troops, 0, 0)) {
-          ClampSupportInput(r.troops, maxValue); saveNeeded = true;
-        }
-
-        if (r.mode == 1) {
-          ImGui::SameLine();
-          ImGui::TextDisabled("%%");
-        }
-
-        ImGui::SameLine(0.f, 10.f * sc);
+        ImGui::SameLine(0.f, 14.f * sc);
         if (ImGui::SmallButton(u8"지금"))
           ExecuteAutoSupportRoute(i, p1, shiftedCityBase);
-
-        ImGui::SameLine();
+        ImGui::SameLine(0.f, 5.f * sc);
         if (ImGui::SmallButton(u8"삭제"))
           deleteIndex = (int)i;
 
+        // 2행: 노선별 자원량
+        const int maxValue = (r.mode == 0) ? 2000000000 : 100;
+
+        ImGui::TextUnformatted(u8"금");
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::SetNextItemWidth(90.f * sc);
+        if (ImGui::InputInt("##AutoGold", &r.gold, 0, 0)) {
+          ClampSupportInput(r.gold, maxValue);
+          saveNeeded = true;
+        }
+        if (r.mode == 1) {
+          ImGui::SameLine(0.f, 2.f * sc);
+          ImGui::TextDisabled("%%");
+        }
+
+        ImGui::SameLine(0.f, 18.f * sc);
+        ImGui::TextUnformatted(u8"군량");
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::SetNextItemWidth(100.f * sc);
+        if (ImGui::InputInt("##AutoGrain", &r.grain, 0, 0)) {
+          ClampSupportInput(r.grain, maxValue);
+          saveNeeded = true;
+        }
+        if (r.mode == 1) {
+          ImGui::SameLine(0.f, 2.f * sc);
+          ImGui::TextDisabled("%%");
+        }
+
+        ImGui::SameLine(0.f, 18.f * sc);
+        ImGui::TextUnformatted(u8"병력");
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::SetNextItemWidth(100.f * sc);
+        if (ImGui::InputInt("##AutoTroops", &r.troops, 0, 0)) {
+          ClampSupportInput(r.troops, maxValue);
+          saveNeeded = true;
+        }
+        if (r.mode == 1) {
+          ImGui::SameLine(0.f, 2.f * sc);
+          ImGui::TextDisabled("%%");
+        }
+
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
         ImGui::PopID();
       }
+
+      ImGui::EndChild();
 
       if (deleteIndex >= 0 && deleteIndex < (int)s_autoSupportRoutes.size()) {
         s_autoSupportRoutes.erase(s_autoSupportRoutes.begin() + deleteIndex);
@@ -1382,6 +1425,8 @@ namespace DX11Base {
       if (saveNeeded)
         SaveAutoSupportRoutes();
 
+      ImGui::EndChild();
+      ImGui::PopStyleColor();
       ImGui::Separator();
     }
 
