@@ -915,6 +915,9 @@ namespace DX11Base {
       ImGui::PopStyleVar(2);
     }
 
+    // 도시 반란 카운트 자동 유지 (도시 정보 창을 닫아도 동작)
+    RunCityRevoltAlwaysZero();
+
     // 부속 창들 렌더링 (메인 메뉴의 접힘/펼침 상태와 독립적으로 항상 그려지도록 분리)
     DrawOfficerDetailWindow(p1, mPos, mSize, scale);
     DrawSelectedOfficerWindow(mPos, mSize, scale);
