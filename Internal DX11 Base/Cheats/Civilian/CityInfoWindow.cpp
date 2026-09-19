@@ -2198,7 +2198,7 @@ namespace DX11Base {
       return true;
     }
 
-    static void DrawGovernorDebugPanel(uintptr_t shiftedCityBase, float sc) {
+    static void DrawGovernorDebugPanel(uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
       NormalizeGovernorDebugSelections();
 
       ImGui::Spacing();
@@ -2690,7 +2690,7 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      DrawGovernorDebugPanel(shiftedCityBase, sc);
+      DrawGovernorDebugPanel(p1, shiftedCityBase, sc);
       DrawCityCorpsPointerDebug(shiftedCityBase, sc);
     }
 
