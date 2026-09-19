@@ -23,6 +23,11 @@ struct ChildEntry {
   uint16_t birthYear = 0;
   uint16_t deathYear = 0;
   uint16_t appliedTargetYear = 0;
+
+  // 체크 해제 시 원래 일정으로 되돌리기 위한 백업
+  bool hasOriginalSchedule = false;
+  uint16_t originalAppearanceYear = 0;
+  uint16_t originalBirthYear = 0;
 };
 
 static std::unordered_map<uint16_t, ChildEntry> g_children;
@@ -104,6 +109,35 @@ static bool ApplyChildSchedule(ChildEntry& e) {
 
     AddLog(u8"[ChildManager] ID %u 임관 예약: %u년 (출생 %u년, %d년 후)",
            e.id, targetAppearance, targetBirth, e.yearsLater);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static bool RestoreChildSchedule(ChildEntry& e) {
+  if (!e.hasOriginalSchedule || !e.addr || !IsValidPtr(e.addr, 0x38))
+    return false;
+
+  __try {
+    if (*(uint16_t*)(e.addr + 0x08) != e.id)
+      return false;
+
+    DWORD oldProt = 0, tmp = 0;
+    if (!VirtualProtect((LPVOID)(e.addr + 0x32), 4, PAGE_READWRITE, &oldProt))
+      return false;
+
+    *(uint16_t*)(e.addr + 0x32) = e.originalAppearanceYear;
+    *(uint16_t*)(e.addr + 0x34) = e.originalBirthYear;
+    VirtualProtect((LPVOID)(e.addr + 0x32), 4, oldProt, &tmp);
+
+    e.appearanceYear = e.originalAppearanceYear;
+    e.birthYear = e.originalBirthYear;
+    e.appliedTargetYear = 0;
+    e.hasOriginalSchedule = false;
+
+    AddLog(u8"[ChildManager] ID %u 임관 예약 취소: 등장 %u년 / 출생 %u년 복원",
+           e.id, e.appearanceYear, e.birthYear);
     return true;
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
@@ -277,7 +311,7 @@ void DrawChildManagerWindow(float scale) {
     ImGui::TableSetupColumn(u8"등장", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
     ImGui::TableSetupColumn(u8"사망", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
     ImGui::TableSetupColumn(u8"몇 년 후", ImGuiTableColumnFlags_WidthFixed, 85.0f * scale);
-    ImGui::TableSetupColumn(u8"예약", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn(u8"임관예정일", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableHeadersRow();
 
     std::vector<uint16_t> ids;
@@ -294,9 +328,29 @@ void DrawChildManagerWindow(float scale) {
       ImGui::TableNextColumn();
       bool selected = e.selected;
       if (ImGui::Checkbox("##select", &selected)) {
-        e.selected = selected;
-        if (e.selected)
-          ApplyChildSchedule(e);
+        if (selected) {
+          if (!e.hasOriginalSchedule) {
+            e.originalAppearanceYear = e.appearanceYear;
+            e.originalBirthYear = e.birthYear;
+            e.hasOriginalSchedule = true;
+          }
+
+          if (ApplyChildSchedule(e)) {
+            e.selected = true;
+          } else {
+            e.selected = false;
+            e.hasOriginalSchedule = false;
+            AddLog(u8"[ChildManager] ID %u 임관 예약 적용 실패", e.id);
+          }
+        } else {
+          if (RestoreChildSchedule(e)) {
+            e.selected = false;
+          } else {
+            // 복원에 실패했다면 실제 메모리 예약은 남아 있을 수 있으므로 체크 상태를 유지합니다.
+            e.selected = true;
+            AddLog(u8"[ChildManager] ID %u 임관 예약 취소 실패", e.id);
+          }
+        }
       }
 
       ImGui::TableNextColumn();
