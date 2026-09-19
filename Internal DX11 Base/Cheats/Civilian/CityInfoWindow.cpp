@@ -527,7 +527,8 @@ namespace DX11Base {
     //   CityData + 0x98 -> [ptr + 0x18] = 소유 ForceData
     // 게시글 기준:
     //   CityData + 0x20부터 8바이트 x 6 = 인접 도시 CityData 포인터
-    static constexpr uintptr_t OFF_CITY_FORCE_LINK_RAW = 0x98;
+    static constexpr uintptr_t OFF_CITY_CORPS_RAW = 0x90;      // 군단 포인터 후보 (구버전 구조 -0x08 패턴 검증용)
+    static constexpr uintptr_t OFF_CITY_FORCE_LINK_RAW = 0x98; // 현재 확인상 태수 OfficerData*
     static constexpr uintptr_t OFF_CITY_CONNECTION_RAW = 0x20;
     static constexpr uintptr_t OFF_CITY_TROOPS_RAW = 0xC4;
     static constexpr int CITY_CONNECTION_SLOTS = 6;
@@ -2147,6 +2148,92 @@ namespace DX11Base {
       }
     }
 
+
+    // ── 도시 군단 포인터 확인 (읽기 전용) ────────────────────────────────
+    static void DrawCityCorpsPointerDebug(uintptr_t shiftedCityBase, float sc) {
+      if (s_officerCityIndex < 0 || s_officerCityIndex >= g_CityCount)
+        return;
+
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, s_officerCityIndex);
+      if (!rawCity)
+        return;
+
+      uintptr_t corpsPtr = 0;
+      const bool corpsRead =
+          SafeReadPtr(rawCity + OFF_CITY_CORPS_RAW, &corpsPtr);
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::TextColored(ImVec4(0.55f, 0.90f, 1.0f, 1.f),
+                         u8"[ 군단 포인터 확인 - 읽기 전용 ]");
+      ImGui::SameLine(0.f, 12.f * sc);
+      ImGui::TextDisabled(u8"CityData +0x90 후보 검증");
+
+      ImGui::Text(u8"도시: %s  Raw CityData: 0x%llX",
+                  g_CityList[s_officerCityIndex].cityname,
+                  (unsigned long long)rawCity);
+
+      if (!corpsRead) {
+        ImGui::TextColored(ImVec4(1.f, 0.35f, 0.35f, 1.f),
+                           u8"City +0x90 읽기 실패");
+        return;
+      }
+
+      ImGui::Text(u8"City +0x90 군단 후보: 0x%llX",
+                  (unsigned long long)corpsPtr);
+
+      if (corpsPtr <= 0x10000) {
+        ImGui::TextDisabled(
+            u8"군단 포인터가 비어 있습니다. 직할/군단 미지정 상태일 가능성을 확인하세요.");
+      } else {
+        uintptr_t forcePtr = 0;
+        uintptr_t corpsNoRaw = 0;
+        uintptr_t governorGeneralPtr = 0;
+        const bool forceOk = SafeReadPtr(corpsPtr + 0x10, &forcePtr);
+        const bool noOk = SafeReadPtr(corpsPtr + 0x18, &corpsNoRaw);
+        const bool govOk = SafeReadPtr(corpsPtr + 0x20, &governorGeneralPtr);
+
+        ImGui::Text(u8"군단 +0x10 세력 후보: %s0x%llX",
+                    forceOk ? "" : u8"(읽기 실패) ",
+                    (unsigned long long)forcePtr);
+        ImGui::Text(u8"군단 +0x18 원시값: %s0x%llX",
+                    noOk ? "" : u8"(읽기 실패) ",
+                    (unsigned long long)corpsNoRaw);
+        ImGui::Text(u8"군단 +0x20 도독 후보: %s0x%llX",
+                    govOk ? "" : u8"(읽기 실패) ",
+                    (unsigned long long)governorGeneralPtr);
+      }
+
+      if (ImGui::Button(u8"군단 포인터 로그##CityCorpsPtrLog",
+                        ImVec2(145.f * sc, 0.f))) {
+        uintptr_t forcePtr = 0;
+        uintptr_t corpsNoRaw = 0;
+        uintptr_t governorGeneralPtr = 0;
+        const bool forceOk =
+            corpsPtr > 0x10000 && SafeReadPtr(corpsPtr + 0x10, &forcePtr);
+        const bool noOk =
+            corpsPtr > 0x10000 && SafeReadPtr(corpsPtr + 0x18, &corpsNoRaw);
+        const bool govOk =
+            corpsPtr > 0x10000 && SafeReadPtr(corpsPtr + 0x20, &governorGeneralPtr);
+
+        AddLog(u8"[군단DBG] 도시 %s Raw=0x%llX",
+               g_CityList[s_officerCityIndex].cityname,
+               (unsigned long long)rawCity);
+        AddLog(u8"[군단DBG] City+0x90 = 0x%llX",
+               (unsigned long long)corpsPtr);
+        AddLog(u8"[군단DBG] Corps+0x10 세력 후보 = %s0x%llX",
+               forceOk ? "" : u8"(읽기 실패) ",
+               (unsigned long long)forcePtr);
+        AddLog(u8"[군단DBG] Corps+0x18 원시값 = %s0x%llX",
+               noOk ? "" : u8"(읽기 실패) ",
+               (unsigned long long)corpsNoRaw);
+        AddLog(u8"[군단DBG] Corps+0x20 도독 후보 = %s0x%llX",
+               govOk ? "" : u8"(읽기 실패) ",
+               (unsigned long long)governorGeneralPtr);
+      }
+    }
+
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
                                           uintptr_t shiftedCityBase) {
       const CityOfficerRow *selected = FindSelectedCityOfficer();
@@ -2411,6 +2498,7 @@ namespace DX11Base {
       }
 
       DrawGovernorDebugPanel(shiftedCityBase, sc);
+      DrawCityCorpsPointerDebug(shiftedCityBase, sc);
     }
 
   } // anonymous namespace
