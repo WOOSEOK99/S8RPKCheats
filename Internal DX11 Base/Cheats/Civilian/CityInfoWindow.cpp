@@ -854,7 +854,8 @@ namespace DX11Base {
         moveTroops = troopRoom;
 
       if (moveGold == 0 && moveGrain == 0 && moveTroops == 0) {
-        AddLog(u8"[후방지원] 이동 가능한 자원이 없습니다.");
+        AddLog(u8"[후방지원] 이동 가능한 자원이 없습니다. 출발 병력=%u, 도착 병력=%u/%u",
+               srcTroops, dstTroops, dstTroopMax);
         return false;
       }
 
@@ -1018,6 +1019,13 @@ namespace DX11Base {
 
       ImGui::TextDisabled(u8"예상 지원: 금 %u / 군량 %u / 병력 %u",
                           previewGold, previewGrain, previewTroops);
+      if (srcRow && dstRow) {
+        const uint32_t troopRoom =
+            (dstRow->troopMax > dstRow->troops) ? (dstRow->troopMax - dstRow->troops) : 0;
+        ImGui::SameLine(0.f, 18.f * sc);
+        ImGui::TextDisabled(u8"(병력: 출발 %u / 도착 %u/%u / 여유 %u)",
+                            srcRow->troops, dstRow->troops, dstRow->troopMax, troopRoom);
+      }
       ImGui::SameLine(0.f, 20.f * sc);
 
       const bool canExecute = (s_supportSourceCity >= 0 && s_supportTargetCity >= 0);
@@ -1125,7 +1133,7 @@ namespace DX11Base {
       ImGui::TableSetupColumn(u8"타세력/공백지 접경", ImGuiTableColumnFlags_WidthStretch, 1.4f);
       ImGui::TableSetupColumn(u8"금", ImGuiTableColumnFlags_WidthFixed, 82.f * sc);
       ImGui::TableSetupColumn(u8"군량", ImGuiTableColumnFlags_WidthFixed, 92.f * sc);
-      ImGui::TableSetupColumn(u8"병사", ImGuiTableColumnFlags_WidthFixed, 82.f * sc);
+      ImGui::TableSetupColumn(u8"병사/한도", ImGuiTableColumnFlags_WidthFixed, 115.f * sc);
       ImGui::TableHeadersRow();
 
       for (const auto &row : s_frontierRows) {
@@ -1165,7 +1173,7 @@ namespace DX11Base {
         ImGui::Text("%u", row.grain);
 
         ImGui::TableSetColumnIndex(6);
-        ImGui::Text("%u", row.troops);
+        ImGui::Text("%u / %u", row.troops, row.troopMax);
       }
 
       ImGui::EndTable();
