@@ -596,9 +596,17 @@ namespace DX11Base {
       ImGui::SameLine(160.0f * scale);
       DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
 
-      if (::DX11Base::g_resonanceThreadRunning)
+      const bool resonanceBusy =
+          ::DX11Base::g_resonanceThreadRunning.load() ||
+          ::DX11Base::g_resonanceFourThreadRunning.load();
+      if (resonanceBusy)
         ImGui::BeginDisabled();
+
       if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
+        if (bResonance && bResonanceFour) {
+          DX11Base::SetDialogueResonanceFour(false);
+          bResonanceFour = false;
+        }
         DX11Base::SetInstantResonance(bResonance);
         NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
         SaveConfig();
@@ -611,11 +619,28 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (::DX11Base::g_resonanceThreadRunning) {
-        ImGui::EndDisabled();
+      ImGui::SameLine(160.0f * scale);
+      if (ImGui::Checkbox(u8"대화 상대 공명 4개 고정", &bResonanceFour)) {
+        if (bResonanceFour && bResonance) {
+          DX11Base::SetInstantResonance(false);
+          bResonance = false;
+        }
+        DX11Base::SetDialogueResonanceFour(bResonanceFour);
+        NotifyFeatureToggle(u8"대화 상대 공명 4개 고정", bResonanceFour);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           u8"교류/담화에서 현재 처리되는 상대 장수의 공명값을 기존 갯수와 관계없이 4로 고정합니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 상생/특수 이벤트 발생 여부를 테스트하기 위한 별도 기능입니다.");
+        ImGui::EndTooltip();
       }
 
-      ImGui::SameLine(160.0f * scale);
+      if (resonanceBusy)
+        ImGui::EndDisabled();
+
       if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
         DX11Base::SetInfiniteGift(bInfiniteGift);
         NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
