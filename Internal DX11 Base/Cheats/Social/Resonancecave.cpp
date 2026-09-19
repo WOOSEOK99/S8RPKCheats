@@ -35,6 +35,12 @@ namespace DX11Base {
     static volatile uint8_t g_resonanceThreeGetterBefore = 0;
     static volatile uint8_t g_resonanceThreeGetterAfter = 0;
 
+    // CT369 getter의 모든 호출을 TargetID 필터 없이 기록.
+    static volatile uint32_t g_resonanceThreeRawGetterSeq = 0;
+    static volatile uint16_t g_resonanceThreeRawGetterId = 0;
+    static volatile int32_t g_resonanceThreeRawGetterSlot = -1;
+    static volatile uint8_t g_resonanceThreeRawGetterValue = 0;
+
     // CT298 실제 담화 실행 경로에서 rdi+0x08을 확인하는 진단용.
     static uintptr_t g_resonanceThreeTalkHookAddr = 0;
     static uintptr_t g_resonanceThreeTalkCaveAddr = 0;
@@ -180,7 +186,7 @@ namespace DX11Base {
     }
 
     static bool InstallResonanceThreeGetter(uintptr_t hookAddr) {
-        g_resonanceThreeGetCaveAddr = AllocNear(hookAddr, 320);
+        g_resonanceThreeGetCaveAddr = AllocNear(hookAddr, 512);
         if (!g_resonanceThreeGetCaveAddr)
             return false;
 
@@ -192,6 +198,29 @@ namespace DX11Base {
         cave[cur++] = 0x9C;             // pushfq
         cave[cur++] = 0x41; cave[cur++] = 0x53; // push r11
         cave[cur++] = 0x50;             // push rax
+
+        // ---- RAW CT369 진단: TargetID와 상관없이 모든 getter 호출 기록 ----
+        // ID = dx
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeRawGetterId; cur += 8;
+        cave[cur++] = 0x66; cave[cur++] = 0x41; cave[cur++] = 0x89; cave[cur++] = 0x13;
+
+        // Slot = r8d
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeRawGetterSlot; cur += 8;
+        cave[cur++] = 0x45; cave[cur++] = 0x89; cave[cur++] = 0x03;
+
+        // Value = [r8+rcx+dynOffset]
+        cave[cur++] = 0x41; cave[cur++] = 0x0F; cave[cur++] = 0xB6; cave[cur++] = 0x84; cave[cur++] = 0x08;
+        *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeRawGetterValue; cur += 8;
+        cave[cur++] = 0x41; cave[cur++] = 0x88; cave[cur++] = 0x03;
+
+        // seq++
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeRawGetterSeq; cur += 8;
+        cave[cur++] = 0x41; cave[cur++] = 0xFF; cave[cur++] = 0x03;
 
         // mov r11, &g_resonanceThreeArmed
         cave[cur++] = 0x49; cave[cur++] = 0xBB;
@@ -451,6 +480,7 @@ namespace DX11Base {
     void RunResonanceDebugPoll() {
         static uint16_t s_lastLoggedTargetId = 0;
         static uint32_t s_lastGetterSeq = 0;
+        static uint32_t s_lastRawGetterSeq = 0;
         static uint32_t s_lastTalkSeq = 0;
 
         if (!bResonanceThree)
@@ -469,6 +499,17 @@ namespace DX11Base {
             AddLog(u8"[Resonance3Talk] Hit#%u ActualTalkID=%u (SelectTarget=%u)",
                    talkSeq,
                    (unsigned)g_resonanceThreeTalkId,
+                   (unsigned)g_resonanceThreeTargetId);
+        }
+
+        const uint32_t rawSeq = g_resonanceThreeRawGetterSeq;
+        if (rawSeq != s_lastRawGetterSeq) {
+            s_lastRawGetterSeq = rawSeq;
+            AddLog(u8"[Resonance3Raw] Hit#%u ID=%u Slot=%d Value=%u (SelectTarget=%u)",
+                   rawSeq,
+                   (unsigned)g_resonanceThreeRawGetterId,
+                   (int)g_resonanceThreeRawGetterSlot,
+                   (unsigned)g_resonanceThreeRawGetterValue,
                    (unsigned)g_resonanceThreeTargetId);
         }
 
