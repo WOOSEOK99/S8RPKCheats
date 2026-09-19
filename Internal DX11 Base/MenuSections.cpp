@@ -679,9 +679,11 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"미등장 자녀의 등장년도를 현재 연도 + 설정값으로 앞당깁니다.");
+                           u8"미등장 자녀의 등장년도만 현재 연도 + 설정값으로 앞당깁니다.");
         ImGui::TextColored(ImVec4(1, 1, 0, 1),
                            u8"기본값 3년 / 입력 범위 1~10년");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 출생년도/사망년도는 변경하지 않습니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                            u8"※ 이미 설정값 이내에 등장 예정인 자녀는 변경하지 않습니다.");
         ImGui::EndTooltip();
