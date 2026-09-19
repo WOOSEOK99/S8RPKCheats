@@ -597,16 +597,11 @@ namespace DX11Base {
       DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
 
       const bool resonanceBusy =
-          ::DX11Base::g_resonanceThreadRunning.load() ||
-          ::DX11Base::g_resonanceThreeThreadRunning.load();
+          ::DX11Base::g_resonanceThreadRunning.load();
       if (resonanceBusy)
         ImGui::BeginDisabled();
 
       if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
-        if (bResonance && bResonanceThree) {
-          DX11Base::SetDialogueResonanceThree(false);
-          bResonanceThree = false;
-        }
         DX11Base::SetInstantResonance(bResonance);
         NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
         SaveConfig();
@@ -614,27 +609,10 @@ namespace DX11Base {
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"담화시 공명 갯수가 1개라도 있으면 무조건 공명 발생");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 1개도 없으면 공명발생하지 않음.");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-      if (ImGui::Checkbox(u8"대화 상대 공명 4개 고정", &bResonanceThree)) {
-        if (bResonanceThree && bResonance) {
-          DX11Base::SetInstantResonance(false);
-          bResonance = false;
-        }
-        DX11Base::SetDialogueResonanceThree(bResonanceThree);
-        NotifyFeatureToggle(u8"대화 상대 공명 4개 고정", bResonanceThree);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"교류 화면에서 선택한 상대 장수의 공명값이 4 미만이면 4로 맞춥니다.");
+                           u8"무조건 공명갯수 4개로 되고,");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 테스트용: 선택 상대의 공명값 자체를 4로 맞춥니다.");
+                           u8"다음번 담화때 상생 발생함.");
         ImGui::EndTooltip();
       }
 
