@@ -29,15 +29,6 @@ namespace DX11Base {
   bool g_cityAutoExchangeEnabled = false;
   bool g_cityRevoltAlwaysZero = false; // 모든 도시 반란 카운트(+0x105)를 항상 0으로 유지
 
-  // 군단 자동배치 저장 설정. 포인터 자체는 저장하지 않고 안정적인 식별값만 저장한다.
-  bool g_corpsAutoDeploymentEachCouncil = false;
-  int g_corpsAutoScenarioId = 0;
-  int g_corpsAutoScenarioStartYear = 0;
-  int g_corpsAutoScenarioStartMonth = 0;
-  int g_corpsAutoForceLordId = 0;
-  int g_corpsAutoCorpsNo = 0;
-  int g_corpsAutoGovernorGeneralId = 0;
-
   // ── 내부 상태 ──────────────────────────────────────────────────────────────
   namespace {
 
@@ -1699,11 +1690,21 @@ namespace DX11Base {
     static constexpr uint8_t CORPS_DEPLOY_STATE_COUNCIL = 0x05;
     static constexpr uint8_t CORPS_DEPLOY_STATE_DOMESTIC = 0x07;
 
-    // 설정 파일에서 자동배치 선호/대상은 복원하지만 실제 자동 실행은
-    // 현재 실행 세션에서 사용자가 다시 대상을 지정한 뒤에만 허용한다.
-    static bool s_corpsAutoSessionArmed = false;
-    static uintptr_t s_corpsAutoArmedForcePtr = 0;
-    static uintptr_t s_corpsAutoArmedCorpsPtr = 0;
+    // 군단 자동배치는 설정 파일에 저장하지 않는 세션 전용 기능이다.
+    // 다른 게임/세이브에서 군단 구성이 달라질 수 있으므로 사용자가 매 실행마다 직접 선택한다.
+    struct CorpsAutoDeploymentTarget {
+      uintptr_t corpsPtr = 0;
+      uintptr_t forcePtr = 0;
+      uintptr_t corpsNo = 0;
+      uint16_t governorGeneralId = 0;
+    };
+
+    static bool s_corpsAutoDeploymentEachCouncil = false;
+    static std::vector<CorpsAutoDeploymentTarget>
+        s_corpsAutoDeploymentTargets;
+    static uintptr_t s_corpsAutoContextP1 = 0;
+    static uintptr_t s_corpsAutoContextForce = 0;
+    static uintptr_t s_corpsAutoContextCityBase = 0;
     static uint16_t s_corpsAutoLastObservedYear = 0;
     static uint8_t s_corpsAutoLastObservedMonth = 0;
 
@@ -1749,15 +1750,6 @@ namespace DX11Base {
       return true;
     }
 
-    static bool ReadForceLordId(
-        uintptr_t forcePtr, uint16_t *outId) {
-      if (!outId || forcePtr <= 0x10000)
-        return false;
-      uintptr_t lordPtr = 0;
-      return SafeReadPtr(forcePtr + 0xC0, &lordPtr) &&
-             ReadOfficerIdFromPtr(lordPtr, outId);
-    }
-
     static bool ReadCorpsGovernorGeneralId(
         uintptr_t corpsPtr, uint16_t *outId) {
       if (!outId || corpsPtr <= 0x10000)
@@ -1770,94 +1762,153 @@ namespace DX11Base {
       return ReadOfficerIdFromPtr(governorPtr, outId);
     }
 
-    static void DisarmCorpsAutoDeploymentSession(
-        const char *reason, bool notifyUser = false) {
-      if (!s_corpsAutoSessionArmed)
-        return;
+    static bool HasCorpsAutoDeploymentTarget(
+        uintptr_t corpsPtr) {
+      for (const auto &target : s_corpsAutoDeploymentTargets) {
+        if (target.corpsPtr == corpsPtr)
+          return true;
+      }
+      return false;
+    }
 
-      s_corpsAutoSessionArmed = false;
-      s_corpsAutoArmedForcePtr = 0;
-      s_corpsAutoArmedCorpsPtr = 0;
+    static void ClearCorpsAutoDeploymentSession(
+        const char *reason, bool notifyUser = false) {
+      const bool hadState =
+          s_corpsAutoDeploymentEachCouncil ||
+          !s_corpsAutoDeploymentTargets.empty();
+
+      s_corpsAutoDeploymentEachCouncil = false;
+      s_corpsAutoDeploymentTargets.clear();
+      s_corpsAutoContextP1 = 0;
+      s_corpsAutoContextForce = 0;
+      s_corpsAutoContextCityBase = 0;
       s_corpsAutoLastObservedYear = 0;
       s_corpsAutoLastObservedMonth = 0;
 
-      AddLog(u8"[군단 자동배치] 현재 세이브 자동 실행 해제: %s",
-             reason ? reason : u8"상태 변경");
-      if (notifyUser)
-        AddNotification(
-            u8"군단 자동배치: 현재 게임/세이브 상태가 달라 자동 실행을 해제했습니다. 대상 군단을 다시 지정해주세요.");
+      if (hadState) {
+        AddLog(u8"[군단 자동배치] 세션 설정 초기화: %s",
+               reason ? reason : u8"게임 상태 변경");
+        if (notifyUser) {
+          AddNotification(
+              u8"군단 자동배치: 다른 게임/세이브 가능성이 감지되어 자동 대상 선택을 초기화했습니다.");
+        }
+      }
     }
 
-    static bool BindCorpsAutoDeploymentTarget(
-        const OfficerCityCorpsInfo &info) {
+    static bool AddCorpsAutoDeploymentTarget(
+        const OfficerCityCorpsInfo &info, uintptr_t p1,
+        uintptr_t shiftedCityBase) {
       if (!info.readable || info.corpsPtr <= 0x10000 ||
           info.forcePtr <= 0x10000 || info.corpsNo == 0)
         return false;
 
-      uint8_t scenarioId = 0;
-      unsigned short startYear = 0;
-      uint8_t startMonth = 0;
-      uint16_t lordId = 0;
+      if (HasCorpsAutoDeploymentTarget(info.corpsPtr))
+        return true;
+
       uint16_t governorGeneralId = 0;
+      ReadCorpsGovernorGeneralId(
+          info.corpsPtr, &governorGeneralId);
 
-      if (!ReadScenarioIdentity(
-              &scenarioId, &startYear, &startMonth) ||
-          !ReadForceLordId(info.forcePtr, &lordId) ||
-          !ReadCorpsGovernorGeneralId(
-              info.corpsPtr, &governorGeneralId))
+      // 첫 대상 지정 시 현재 게임 컨텍스트를 함께 묶는다.
+      if (s_corpsAutoDeploymentTargets.empty()) {
+        s_corpsAutoContextP1 = p1;
+        s_corpsAutoContextForce = info.forcePtr;
+        s_corpsAutoContextCityBase = shiftedCityBase;
+        ReadScenarioDate(
+            &s_corpsAutoLastObservedYear,
+            &s_corpsAutoLastObservedMonth);
+      } else if (s_corpsAutoContextP1 != p1 ||
+                 s_corpsAutoContextForce != info.forcePtr ||
+                 s_corpsAutoContextCityBase != shiftedCityBase) {
         return false;
+      }
 
-      g_corpsAutoScenarioId = (int)scenarioId;
-      g_corpsAutoScenarioStartYear = (int)startYear;
-      g_corpsAutoScenarioStartMonth = (int)startMonth;
-      g_corpsAutoForceLordId = (int)lordId;
-      g_corpsAutoCorpsNo = (int)info.corpsNo;
-      g_corpsAutoGovernorGeneralId =
-          (int)governorGeneralId;
+      CorpsAutoDeploymentTarget target;
+      target.corpsPtr = info.corpsPtr;
+      target.forcePtr = info.forcePtr;
+      target.corpsNo = info.corpsNo;
+      target.governorGeneralId = governorGeneralId;
+      s_corpsAutoDeploymentTargets.push_back(target);
 
-      s_corpsAutoSessionArmed = true;
-      s_corpsAutoArmedForcePtr = info.forcePtr;
-      s_corpsAutoArmedCorpsPtr = info.corpsPtr;
-      ReadScenarioDate(
-          &s_corpsAutoLastObservedYear,
-          &s_corpsAutoLastObservedMonth);
-
-      SaveConfig();
-      AddLog(u8"[군단 자동배치] 자동 대상 지정: 시나리오 %d / 군주 %u / %llu군단 / 도독 %u / corps 0x%llX",
-             g_corpsAutoScenarioId,
-             (unsigned int)lordId,
+      AddLog(u8"[군단 자동배치] 자동 대상 추가: %llu군단 / 도독 %s / corps 0x%llX",
              (unsigned long long)info.corpsNo,
-             (unsigned int)governorGeneralId,
+             governorGeneralId
+                 ? BuildOfficerName(governorGeneralId).c_str()
+                 : u8"?",
              (unsigned long long)info.corpsPtr);
       return true;
     }
 
-    static bool MatchesStoredCorpsAutoIdentity(
-        const OfficerCityCorpsInfo &info) {
-      if (!info.readable || info.corpsPtr <= 0x10000 ||
-          info.forcePtr <= 0x10000 || info.corpsNo == 0)
-        return false;
+    static void RemoveCorpsAutoDeploymentTarget(
+        uintptr_t corpsPtr, const char *reason = nullptr) {
+      for (size_t i = 0; i < s_corpsAutoDeploymentTargets.size(); ++i) {
+        if (s_corpsAutoDeploymentTargets[i].corpsPtr != corpsPtr)
+          continue;
 
-      uint8_t scenarioId = 0;
-      unsigned short startYear = 0;
-      uint8_t startMonth = 0;
-      uint16_t lordId = 0;
-      uint16_t governorGeneralId = 0;
+        AddLog(u8"[군단 자동배치] 자동 대상 제거: %llu군단%s%s",
+               (unsigned long long)
+                   s_corpsAutoDeploymentTargets[i].corpsNo,
+               reason ? u8" / " : "",
+               reason ? reason : "");
+        s_corpsAutoDeploymentTargets.erase(
+            s_corpsAutoDeploymentTargets.begin() + i);
+        break;
+      }
 
-      if (!ReadScenarioIdentity(
-              &scenarioId, &startYear, &startMonth) ||
-          !ReadForceLordId(info.forcePtr, &lordId) ||
-          !ReadCorpsGovernorGeneralId(
-              info.corpsPtr, &governorGeneralId))
-        return false;
+      if (s_corpsAutoDeploymentTargets.empty()) {
+        s_corpsAutoContextP1 = 0;
+        s_corpsAutoContextForce = 0;
+        s_corpsAutoContextCityBase = 0;
+        s_corpsAutoLastObservedYear = 0;
+        s_corpsAutoLastObservedMonth = 0;
+      }
+    }
 
-      return (int)scenarioId == g_corpsAutoScenarioId &&
-             (int)startYear == g_corpsAutoScenarioStartYear &&
-             (int)startMonth == g_corpsAutoScenarioStartMonth &&
-             (int)lordId == g_corpsAutoForceLordId &&
-             (int)info.corpsNo == g_corpsAutoCorpsNo &&
-             (int)governorGeneralId ==
-                 g_corpsAutoGovernorGeneralId;
+    static void PruneMissingCorpsAutoDeploymentTargets(
+        uintptr_t shiftedCityBase) {
+      if (s_corpsAutoDeploymentTargets.empty())
+        return;
+
+      std::vector<uintptr_t> liveCorps;
+      for (int cityIndex : s_officerPlayerCities) {
+        const OfficerCityCorpsInfo info =
+            GetOfficerCityCorpsInfo(
+                shiftedCityBase, cityIndex);
+        if (!info.readable || info.corpsPtr <= 0x10000 ||
+            info.forcePtr != s_officerPlayerForce)
+          continue;
+
+        bool exists = false;
+        for (uintptr_t ptr : liveCorps) {
+          if (ptr == info.corpsPtr) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists)
+          liveCorps.push_back(info.corpsPtr);
+      }
+
+      for (size_t i = 0;
+           i < s_corpsAutoDeploymentTargets.size();) {
+        bool found = false;
+        for (uintptr_t ptr : liveCorps) {
+          if (ptr == s_corpsAutoDeploymentTargets[i].corpsPtr) {
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          ++i;
+          continue;
+        }
+
+        AddLog(u8"[군단 자동배치] %llu군단이 현재 세력에서 사라져 자동 대상에서 제거",
+               (unsigned long long)
+                   s_corpsAutoDeploymentTargets[i].corpsNo);
+        s_corpsAutoDeploymentTargets.erase(
+            s_corpsAutoDeploymentTargets.begin() + i);
+      }
     }
 
     static std::string GetOfficerForceShortName(uintptr_t forcePtr) {
@@ -2442,44 +2493,41 @@ namespace DX11Base {
     static void RunCorpsDeploymentPhaseMonitor(uintptr_t p1) {
       const uint8_t state = ReadCorpsDeploymentRelevantGameState();
 
-      // 현재 세션에 묶인 자동설정은 세력 포인터/시나리오/날짜 역행을 계속 감시한다.
-      if (s_corpsAutoSessionArmed) {
+      // 같은 실행 중 다른 세이브를 불러오는 경우를 최대한 보수적으로 감지한다.
+      if (!s_corpsAutoDeploymentTargets.empty()) {
+        const uintptr_t cityBase = GetCityArrBase();
         uintptr_t playerCity = 0;
         uintptr_t currentForce = 0;
         uint16_t year = 0;
         uint8_t month = 0;
-        uint8_t scenarioId = 0;
-        unsigned short startYear = 0;
-        uint8_t startMonth = 0;
 
         const bool contextOk =
             p1 > 0x10000 &&
+            p1 == s_corpsAutoContextP1 &&
+            cityBase > 0x10000 &&
+            cityBase == s_corpsAutoContextCityBase &&
             SafeReadPtr(p1 + 0x20, &playerCity) &&
             (currentForce = GetCityForcePtr(playerCity)) > 0x10000 &&
-            currentForce == s_corpsAutoArmedForcePtr &&
-            ReadScenarioIdentity(
-                &scenarioId, &startYear, &startMonth) &&
-            (int)scenarioId == g_corpsAutoScenarioId &&
-            (int)startYear == g_corpsAutoScenarioStartYear &&
-            (int)startMonth == g_corpsAutoScenarioStartMonth &&
+            currentForce == s_corpsAutoContextForce &&
             ReadScenarioDate(&year, &month);
 
         if (!contextOk) {
-          DisarmCorpsAutoDeploymentSession(
-              u8"세력/시나리오 식별값 변경", true);
+          ClearCorpsAutoDeploymentSession(
+              u8"게임/P1/세력/도시 배열 변경", true);
         } else if (s_corpsAutoLastObservedYear != 0) {
-          const int previous =
+          const int previousMonthIndex =
               (int)s_corpsAutoLastObservedYear * 12 +
               (int)s_corpsAutoLastObservedMonth;
-          const int current =
+          const int currentMonthIndex =
               (int)year * 12 + (int)month;
-          if (current < previous) {
-            DisarmCorpsAutoDeploymentSession(
+          if (currentMonthIndex < previousMonthIndex) {
+            ClearCorpsAutoDeploymentSession(
                 u8"게임 날짜 역행(다른 세이브 로드 가능성)", true);
+          } else {
+            s_corpsAutoLastObservedYear = year;
+            s_corpsAutoLastObservedMonth = month;
           }
-        }
-
-        if (s_corpsAutoSessionArmed) {
+        } else {
           s_corpsAutoLastObservedYear = year;
           s_corpsAutoLastObservedMonth = month;
         }
@@ -2505,77 +2553,95 @@ namespace DX11Base {
 
       ResetCorpsDeploymentTargetBaseline();
 
-      // 자동 사용 안 함이면 기존처럼 아무 계획도 자동 생성하지 않는다.
-      // 수동 '추천 계산'은 UI에서 언제든 사용할 수 있다.
-      if (!g_corpsAutoDeploymentEachCouncil) {
+      if (!s_corpsAutoDeploymentEachCouncil) {
         AddLog(u8"[군단 자동배치] 평정 진입(07->05): 자동 실행 OFF");
         return;
       }
 
-      if (!s_corpsAutoSessionArmed) {
-        AddLog(u8"[군단 자동배치] 평정 진입(07->05): 설정은 ON이나 현재 세이브 대상 미지정 - 자동 실행 안 함");
+      if (s_corpsAutoDeploymentTargets.empty()) {
+        AddLog(u8"[군단 자동배치] 평정 진입(07->05): 자동 대상 군단 없음");
         return;
       }
 
       const uintptr_t cityBase = GetCityArrBase();
       if (p1 <= 0x10000 || cityBase <= 0x10000) {
-        AddLog(u8"[군단 자동배치] 평정 진입: 도시/주인공 데이터 없음 - 자동 실행 안 함");
-        return;
-      }
-
-      // 먼저 현재 플레이어 세력/도시 목록을 다시 만든다.
-      s_officerRosterDirty = true;
-      RefreshCityOfficerRoster(p1, cityBase);
-      if (s_officerPlayerForce != s_corpsAutoArmedForcePtr) {
-        DisarmCorpsAutoDeploymentSession(
-            u8"현재 플레이어 세력이 설정 당시와 다름", true);
-        return;
-      }
-
-      int targetCityIndex = -1;
-      OfficerCityCorpsInfo targetInfo;
-      for (int cityIndex : s_officerPlayerCities) {
-        const OfficerCityCorpsInfo info =
-            GetOfficerCityCorpsInfo(cityBase, cityIndex);
-        if (!MatchesStoredCorpsAutoIdentity(info))
-          continue;
-        targetCityIndex = cityIndex;
-        targetInfo = info;
-        break;
-      }
-
-      if (targetCityIndex < 0 ||
-          targetInfo.corpsPtr != s_corpsAutoArmedCorpsPtr) {
-        DisarmCorpsAutoDeploymentSession(
-            u8"저장된 군단 식별값/포인터가 현재 세이브와 불일치", true);
+        ClearCorpsAutoDeploymentSession(
+            u8"도시/주인공 데이터 없음", true);
         return;
       }
 
       const int previousCityIndex = s_officerCityIndex;
-      s_officerCityIndex = targetCityIndex;
+
       s_officerRosterDirty = true;
       RefreshCityOfficerRoster(p1, cityBase);
+      PruneMissingCorpsAutoDeploymentTargets(cityBase);
 
-      bool ok =
-          s_officerSelectedCorpsPtr ==
-              s_corpsAutoArmedCorpsPtr &&
-          BuildCorpsDeploymentRecommendation(cityBase);
+      // 실행 중 벡터가 변하지 않도록 현재 대상 포인터만 복사한다.
+      std::vector<uintptr_t> targets;
+      for (const auto &target : s_corpsAutoDeploymentTargets)
+        targets.push_back(target.corpsPtr);
 
-      if (ok)
-        ok = ApplyCorpsDeploymentMovements(p1, cityBase);
-      if (ok)
-        ok = ApplyCorpsDeploymentGovernorStage(p1, cityBase);
+      int successCount = 0;
+      int failCount = 0;
+      for (uintptr_t targetCorpsPtr : targets) {
+        int targetCityIndex = -1;
+        uintptr_t targetCorpsNo = 0;
 
-      AddLog(u8"[군단 자동배치] 평정 자동 실행: %d군단 / 결과 %s",
-             g_corpsAutoCorpsNo,
-             ok ? u8"완료" : u8"실패");
+        for (int cityIndex : s_officerPlayerCities) {
+          const OfficerCityCorpsInfo info =
+              GetOfficerCityCorpsInfo(cityBase, cityIndex);
+          if (!info.readable ||
+              info.corpsPtr != targetCorpsPtr ||
+              info.forcePtr != s_officerPlayerForce)
+            continue;
+          targetCityIndex = cityIndex;
+          targetCorpsNo = info.corpsNo;
+          break;
+        }
 
-      // UI에서 사용자가 보고 있던 도시는 가능한 한 복구한다.
+        if (targetCityIndex < 0) {
+          RemoveCorpsAutoDeploymentTarget(
+              targetCorpsPtr, u8"군단 소멸/소속 변경");
+          continue;
+        }
+
+        ResetCorpsDeploymentTargetBaseline();
+        s_officerCityIndex = targetCityIndex;
+        s_officerRosterDirty = true;
+        RefreshCityOfficerRoster(p1, cityBase);
+
+        bool ok =
+            s_officerSelectedCorpsPtr == targetCorpsPtr &&
+            BuildCorpsDeploymentRecommendation(cityBase);
+
+        if (ok)
+          ok = ApplyCorpsDeploymentMovements(p1, cityBase);
+        if (ok)
+          ok = ApplyCorpsDeploymentGovernorStage(p1, cityBase);
+
+        if (ok)
+          ++successCount;
+        else
+          ++failCount;
+
+        AddLog(u8"[군단 자동배치] 평정 자동 실행: %llu군단 / 결과 %s",
+               (unsigned long long)targetCorpsNo,
+               ok ? u8"완료" : u8"실패");
+      }
+
       if (previousCityIndex >= 0 &&
           previousCityIndex < g_CityCount)
         s_officerCityIndex = previousCityIndex;
       s_officerRosterDirty = true;
       RefreshCityOfficerRoster(p1, cityBase);
+
+      char notice[192]{};
+      sprintf_s(
+          notice,
+          u8"군단 자동배치 완료: 성공 %d군단 / 실패 %d군단 / 현재 대상 %d군단",
+          successCount, failCount,
+          (int)s_corpsAutoDeploymentTargets.size());
+      AddNotification(notice);
     }
 
 
@@ -4337,57 +4403,98 @@ namespace DX11Base {
 
       if (ImGui::Checkbox(
               u8"매 평정 자동 배치 사용##CorpsAutoEachCouncil",
-              &g_corpsAutoDeploymentEachCouncil)) {
-        SaveConfig();
+              &s_corpsAutoDeploymentEachCouncil)) {
+        AddLog(u8"[군단 자동배치] 매 평정 자동 실행: %s",
+               s_corpsAutoDeploymentEachCouncil ? "ON" : "OFF");
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(
-            u8"ON이면 현재 세션에서 지정한 군단만 평정 진입(07->05) 때 자동으로 추천 계산→1단계→2단계를 실행합니다.");
+            u8"ON이면 아래에서 체크한 군단들을 평정 진입(07->05) 때 각각 독립적으로 자동 배치합니다.");
         ImGui::TextUnformatted(
-            u8"설정 파일에는 대상 식별값을 저장하지만, 게임 재실행 후에는 안전을 위해 대상 군단을 다시 지정해야 자동 실행됩니다.");
+            u8"이 설정과 군단 선택은 설정파일에 저장하지 않으며 현재 게임 실행 중에만 유지됩니다.");
         ImGui::EndTooltip();
       }
 
       ImGui::SameLine(0.f, 12.f * sc);
-      const bool canBindAutoTarget =
-          s_officerSelectedCorpsPtr > 0x10000;
-      if (!canBindAutoTarget)
-        ImGui::BeginDisabled();
-      if (ImGui::Button(
-              u8"현재 군단을 자동 대상으로 지정##CorpsAutoBind",
-              ImVec2(210.f * sc, 0.f))) {
+      ImGui::TextDisabled(
+          u8"※ 세이브마다 군단 생성/해체 상태가 달라질 수 있어 게임 시작 후 직접 선택해야 합니다.");
+
+      struct CorpsAutoUiOption {
+        OfficerCityCorpsInfo info;
+        int cityIndex = -1;
+      };
+      std::vector<CorpsAutoUiOption> autoCorpsOptions;
+      for (int cityIndex : s_officerPlayerCities) {
         const OfficerCityCorpsInfo info =
             GetOfficerCityCorpsInfo(
-                shiftedCityBase, s_officerCityIndex);
-        if (BindCorpsAutoDeploymentTarget(info)) {
-          AddNotification(
-              u8"군단 자동배치: 현재 군단을 이 세션의 자동 적용 대상으로 지정했습니다.");
-        } else {
-          AddNotification(
-              u8"군단 자동배치: 시나리오/군주/군단/도독 식별값을 읽지 못해 자동 대상을 지정하지 못했습니다.");
+                shiftedCityBase, cityIndex);
+        if (!info.readable || info.corpsPtr <= 0x10000 ||
+            info.forcePtr != s_officerPlayerForce)
+          continue;
+
+        bool exists = false;
+        for (const auto &option : autoCorpsOptions) {
+          if (option.info.corpsPtr == info.corpsPtr) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists)
+          autoCorpsOptions.push_back({info, cityIndex});
+      }
+
+      PruneMissingCorpsAutoDeploymentTargets(
+          shiftedCityBase);
+
+      ImGui::TextUnformatted(u8"자동 적용 군단");
+      if (autoCorpsOptions.empty()) {
+        ImGui::SameLine(0.f, 8.f * sc);
+        ImGui::TextDisabled(u8"현재 생성된 군단 없음");
+      } else {
+        for (size_t i = 0; i < autoCorpsOptions.size(); ++i) {
+          auto &option = autoCorpsOptions[i];
+          bool selected =
+              HasCorpsAutoDeploymentTarget(
+                  option.info.corpsPtr);
+
+          if (i > 0)
+            ImGui::SameLine(0.f, 12.f * sc);
+
+          ImGui::PushID(
+              (int)(option.info.corpsPtr & 0x7FFFFFFF));
+          const std::string label =
+              GetOfficerCorpsName(
+                  shiftedCityBase, option.cityIndex);
+          if (ImGui::Checkbox(label.c_str(), &selected)) {
+            if (selected) {
+              if (!AddCorpsAutoDeploymentTarget(
+                      option.info, p1,
+                      shiftedCityBase)) {
+                AddNotification(
+                    u8"군단 자동배치: 현재 게임 컨텍스트가 달라 대상 군단을 추가하지 못했습니다.");
+              }
+            } else {
+              RemoveCorpsAutoDeploymentTarget(
+                  option.info.corpsPtr,
+                  u8"사용자 선택 해제");
+            }
+          }
+          ImGui::PopID();
         }
       }
-      if (!canBindAutoTarget)
-        ImGui::EndDisabled();
 
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (s_corpsAutoSessionArmed) {
-        ImGui::TextColored(
-            ImVec4(0.45f, 0.95f, 0.55f, 1.f),
-            u8"자동 대상: %d군단 / 도독 %s / 현재 세이브 활성",
-            g_corpsAutoCorpsNo,
-            BuildOfficerName(
-                (uint16_t)g_corpsAutoGovernorGeneralId).c_str());
-      } else if (g_corpsAutoDeploymentEachCouncil &&
-                 g_corpsAutoCorpsNo > 0) {
-        ImGui::TextColored(
-            ImVec4(1.f, 0.70f, 0.25f, 1.f),
-            u8"저장 대상: %d군단 / 현재 세이브 재지정 필요",
-            g_corpsAutoCorpsNo);
-      } else {
-        ImGui::TextDisabled(u8"자동 대상 미지정");
+      if (!s_corpsAutoDeploymentTargets.empty()) {
+        ImGui::SameLine(0.f, 14.f * sc);
+        ImGui::TextDisabled(
+            u8"선택 %d군단",
+            (int)s_corpsAutoDeploymentTargets.size());
       }
+
+      ImGui::TextDisabled(
+          u8"군단이 해체되면 자동 대상에서 제거됩니다. 새 군단은 목록에 나타나며 필요하면 직접 체크하세요.");
+      ImGui::TextDisabled(
+          u8"다른 세이브를 불러오거나 게임 컨텍스트가 바뀌면 오적용 방지를 위해 자동 설정/대상을 모두 초기화합니다.");
 
       const bool canBuild = s_officerSelectedCorpsPtr > 0x10000;
       if (!canBuild)
@@ -6201,7 +6308,7 @@ namespace DX11Base {
   }
 
   void ResetCorpsAutoDeploymentSession() {
-    DisarmCorpsAutoDeploymentSession(
+    ClearCorpsAutoDeploymentSession(
         u8"게임/P1 리셋 감지", false);
     s_corpsDeploymentLastRelevantGameState = 0;
     ResetCorpsDeploymentTargetBaseline();
