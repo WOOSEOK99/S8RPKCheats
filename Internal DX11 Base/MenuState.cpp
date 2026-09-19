@@ -32,7 +32,6 @@ namespace DX11Base {
   bool bHateCave = false;
   bool bLoyalty = false;
   bool bResonance = false;
-  bool bResonanceThree = false;
   bool bInfiniteGift = false;
   bool bInfiniteTalk = false;
   bool bFastRelationship = false;
