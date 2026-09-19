@@ -1623,6 +1623,8 @@ namespace DX11Base {
 
     static std::vector<int> s_officerPlayerCities;
     static std::vector<CityOfficerRow> s_cityOfficerRows;
+    static std::vector<CityOfficerRow> s_corpsOfficerRows;
+    static uintptr_t s_officerSelectedCorpsPtr = 0;
     static int s_officerCityIndex = -1;
     static int s_officerMoveTargetCity = -1;
     static int s_selectedOfficerId = -1;
@@ -1838,6 +1840,8 @@ namespace DX11Base {
                                          uintptr_t shiftedCityBase) {
       s_officerPlayerCities.clear();
       s_cityOfficerRows.clear();
+      s_corpsOfficerRows.clear();
+      s_officerSelectedCorpsPtr = 0;
       s_officerPlayerForce = 0;
 
       if (p1 <= 0x10000 || shiftedCityBase <= 0x10000) {
@@ -1880,6 +1884,8 @@ namespace DX11Base {
       LoadOfficerNames();
       const uintptr_t selectedCityRaw =
           GetRawCityBase(shiftedCityBase, s_officerCityIndex);
+      SafeReadPtrAllowZero(selectedCityRaw + OFF_CITY_CORPS_RAW,
+                           &s_officerSelectedCorpsPtr);
 
       for (int i = 0; i < 5102; ++i) {
         const uintptr_t officerBase =
@@ -1892,24 +1898,38 @@ namespace DX11Base {
           continue;
         if (!IsEmployedOfficerStatus(row.status))
           continue;
-        if (forcePtr != s_officerPlayerForce || cityPtr != selectedCityRaw)
+        if (forcePtr != s_officerPlayerForce)
           continue;
 
-        s_cityOfficerRows.push_back(row);
+        if (cityPtr == selectedCityRaw)
+          s_cityOfficerRows.push_back(row);
+
+        if (s_officerSelectedCorpsPtr > 0x10000 && cityPtr > 0x10000) {
+          uintptr_t officerCorps = 0;
+          if (SafeReadPtrAllowZero(cityPtr + OFF_CITY_CORPS_RAW,
+                                   &officerCorps) &&
+              officerCorps == s_officerSelectedCorpsPtr) {
+            s_corpsOfficerRows.push_back(row);
+          }
+        }
       }
 
-      std::sort(s_cityOfficerRows.begin(), s_cityOfficerRows.end(),
-                [](const CityOfficerRow &a, const CityOfficerRow &b) {
-                  const int ar = GetOfficerStatusSortRank(a.status);
-                  const int br = GetOfficerStatusSortRank(b.status);
-                  if (ar != br)
-                    return ar < br;
-                  if (a.lead != b.lead)
-                    return a.lead > b.lead;
-                  if (a.war != b.war)
-                    return a.war > b.war;
-                  return a.id < b.id;
-                });
+      auto sortOfficerRows = [](std::vector<CityOfficerRow> &rows) {
+        std::sort(rows.begin(), rows.end(),
+                  [](const CityOfficerRow &a, const CityOfficerRow &b) {
+                    const int ar = GetOfficerStatusSortRank(a.status);
+                    const int br = GetOfficerStatusSortRank(b.status);
+                    if (ar != br)
+                      return ar < br;
+                    if (a.lead != b.lead)
+                      return a.lead > b.lead;
+                    if (a.war != b.war)
+                      return a.war > b.war;
+                    return a.id < b.id;
+                  });
+      };
+      sortOfficerRows(s_cityOfficerRows);
+      sortOfficerRows(s_corpsOfficerRows);
 
       bool selectedStillExists = false;
       for (const auto &row : s_cityOfficerRows) {
@@ -1950,6 +1970,23 @@ namespace DX11Base {
     static int s_governorDbgOldId = -1;
     static int s_governorDbgNewId = -1;
 
+    struct GovernorGeneralDebugSnapshot {
+      bool valid = false;
+      uintptr_t corpsPtr = 0;
+      uintptr_t corpsNo = 0;
+      uint16_t oldGovernorGeneralId = 0;
+      uint16_t newGovernorGeneralId = 0;
+      uintptr_t oldGovernorGeneralBase = 0;
+      uintptr_t newGovernorGeneralBase = 0;
+      std::array<uint8_t, 0x3D0> oldGovernorGeneral{};
+      std::array<uint8_t, 0x3D0> newGovernorGeneral{};
+      std::array<uint8_t, 0x60> corps{};
+    };
+
+    static GovernorGeneralDebugSnapshot s_governorGeneralDbgSnapshot;
+    static int s_governorGeneralDbgOldId = -1;
+    static int s_governorGeneralDbgNewId = -1;
+
     static const CityOfficerRow *FindCityOfficerById(int officerId) {
       for (const auto &row : s_cityOfficerRows) {
         if ((int)row.id == officerId)
@@ -1963,6 +2000,40 @@ namespace DX11Base {
       if (it != g_officerNames.end() && !it->second.empty())
         return it->second;
       return u8"무장 ID " + std::to_string((int)officerId);
+    }
+
+    static const CityOfficerRow *FindCorpsOfficerById(int officerId) {
+      for (const auto &row : s_corpsOfficerRows) {
+        if ((int)row.id == officerId)
+          return &row;
+      }
+      return nullptr;
+    }
+
+    static void NormalizeGovernorGeneralDebugSelections() {
+      const CityOfficerRow *oldGov =
+          FindCorpsOfficerById(s_governorGeneralDbgOldId);
+      if (!oldGov || oldGov->status != 0xD8) {
+        s_governorGeneralDbgOldId = -1;
+        for (const auto &row : s_corpsOfficerRows) {
+          if (row.status == 0xD8) {
+            s_governorGeneralDbgOldId = row.id;
+            break;
+          }
+        }
+      }
+
+      const CityOfficerRow *candidate =
+          FindCorpsOfficerById(s_governorGeneralDbgNewId);
+      if (!candidate || candidate->status != 0x28) {
+        s_governorGeneralDbgNewId = -1;
+        for (const auto &row : s_corpsOfficerRows) {
+          if (row.status == 0x28) {
+            s_governorGeneralDbgNewId = row.id;
+            break;
+          }
+        }
+      }
     }
 
     static void NormalizeGovernorDebugSelections() {
@@ -2151,6 +2222,199 @@ namespace DX11Base {
              aChanges, bChanges, cityChanges);
       AddLog(u8"[태수DBG] =====================================================");
       AddNotification(u8"태수DBG: 변경값 비교 완료. 로그 창을 확인하세요.");
+      return true;
+    }
+
+
+    static int LogGovernorGeneralDebugDiff(const char *label,
+                                           const uint8_t *before,
+                                           const uint8_t *after,
+                                           size_t size) {
+      int byteChanges = 0;
+      int pointerCandidates = 0;
+
+      AddLog(u8"[도독DBG] %s", label);
+      for (size_t i = 0; i < size; ++i) {
+        if (before[i] == after[i])
+          continue;
+        ++byteChanges;
+        AddLog(u8"  +0x%03X : %02X -> %02X",
+               (unsigned int)i,
+               (unsigned int)before[i],
+               (unsigned int)after[i]);
+      }
+
+      for (size_t off = 0; off + 8 <= size; off += 8) {
+        const uint64_t beforeQ = ReadLe64(before + off);
+        const uint64_t afterQ = ReadLe64(after + off);
+        if (beforeQ == afterQ)
+          continue;
+        if (!LooksLikeUserPointer(beforeQ) && !LooksLikeUserPointer(afterQ))
+          continue;
+
+        ++pointerCandidates;
+        AddLog(u8"  [PTR? +0x%03X] 0x%016llX -> 0x%016llX",
+               (unsigned int)off,
+               (unsigned long long)beforeQ,
+               (unsigned long long)afterQ);
+      }
+
+      AddLog(u8"[도독DBG] %s 요약: 변경 바이트 %d개 / 8바이트 포인터 후보 %d개",
+             label, byteChanges, pointerCandidates);
+      return byteChanges;
+    }
+
+    static bool CaptureGovernorGeneralDebugBaseline() {
+      NormalizeGovernorGeneralDebugSelections();
+
+      if (s_officerSelectedCorpsPtr <= 0x10000) {
+        AddNotification(u8"도독DBG: 현재 도시는 군단 소속이 아닙니다.");
+        return false;
+      }
+
+      const CityOfficerRow *oldGov =
+          FindCorpsOfficerById(s_governorGeneralDbgOldId);
+      const CityOfficerRow *candidate =
+          FindCorpsOfficerById(s_governorGeneralDbgNewId);
+      if (!oldGov || oldGov->status != 0xD8 ||
+          !candidate || candidate->status != 0x28) {
+        AddNotification(u8"도독DBG: 현재 군단의 도독 A와 일반 후보 B를 선택해주세요.");
+        return false;
+      }
+
+      uintptr_t corpsGovernor = 0;
+      uintptr_t corpsNo = 0;
+      uintptr_t corpsForce = 0;
+      uintptr_t oldForce = 0;
+      uintptr_t newForce = 0;
+      if (!SafeReadPtr(s_officerSelectedCorpsPtr + 0x20, &corpsGovernor) ||
+          !SafeReadPtrAllowZero(s_officerSelectedCorpsPtr + 0x18, &corpsNo) ||
+          !SafeReadPtr(s_officerSelectedCorpsPtr + 0x10, &corpsForce) ||
+          !SafeReadPtr(oldGov->officerBase + 0x18, &oldForce) ||
+          !SafeReadPtr(candidate->officerBase + 0x18, &newForce)) {
+        AddNotification(u8"도독DBG: 군단/무장 메모리 읽기에 실패했습니다.");
+        return false;
+      }
+
+      if (corpsGovernor != oldGov->officerBase) {
+        AddNotification(u8"도독DBG: Division+0x20이 선택한 도독 A를 가리키지 않습니다.");
+        AddLog(u8"[도독DBG] Division+0x20 불일치: 현재=0x%llX / 선택=0x%llX",
+               (unsigned long long)corpsGovernor,
+               (unsigned long long)oldGov->officerBase);
+        return false;
+      }
+
+      if (!corpsForce || oldForce != corpsForce || newForce != corpsForce) {
+        AddNotification(u8"도독DBG: 도독/후보의 소속 세력이 군단 세력과 일치하지 않습니다.");
+        return false;
+      }
+
+      GovernorGeneralDebugSnapshot next;
+      next.corpsPtr = s_officerSelectedCorpsPtr;
+      next.corpsNo = corpsNo;
+      next.oldGovernorGeneralId = oldGov->id;
+      next.newGovernorGeneralId = candidate->id;
+      next.oldGovernorGeneralBase = oldGov->officerBase;
+      next.newGovernorGeneralBase = candidate->officerBase;
+
+      if (!SafeReadBlock(next.oldGovernorGeneralBase,
+                         next.oldGovernorGeneral.data(),
+                         next.oldGovernorGeneral.size()) ||
+          !SafeReadBlock(next.newGovernorGeneralBase,
+                         next.newGovernorGeneral.data(),
+                         next.newGovernorGeneral.size()) ||
+          !SafeReadBlock(next.corpsPtr, next.corps.data(),
+                         next.corps.size())) {
+        AddNotification(u8"도독DBG: 기준 메모리 읽기에 실패했습니다.");
+        return false;
+      }
+
+      next.valid = true;
+      s_governorGeneralDbgSnapshot = next;
+
+      const std::string oldName =
+          BuildOfficerDebugName(next.oldGovernorGeneralId);
+      const std::string newName =
+          BuildOfficerDebugName(next.newGovernorGeneralId);
+      uint16_t oldPair = 0;
+      uint16_t newPair = 0;
+      SafeRead16(next.oldGovernorGeneralBase + 0x10, &oldPair);
+      SafeRead16(next.newGovernorGeneralBase + 0x10, &newPair);
+
+      AddLog(u8"[도독DBG] 기준 저장 완료");
+      AddLog(u8"[도독DBG] %llu군단 DivisionData=0x%llX size=0x60",
+             (unsigned long long)next.corpsNo,
+             (unsigned long long)next.corpsPtr);
+      AddLog(u8"[도독DBG] 기존 도독 A: %s (ID %u) base=0x%llX 상태쌍=0x%04X",
+             oldName.c_str(), (unsigned int)next.oldGovernorGeneralId,
+             (unsigned long long)next.oldGovernorGeneralBase,
+             (unsigned int)oldPair);
+      AddLog(u8"[도독DBG] 후보 일반 B: %s (ID %u) base=0x%llX 상태쌍=0x%04X",
+             newName.c_str(), (unsigned int)next.newGovernorGeneralId,
+             (unsigned long long)next.newGovernorGeneralBase,
+             (unsigned int)newPair);
+      AddLog(u8"[도독DBG] 게임 정상 기능으로 A -> 일반 / B -> 도독 교체 후 '변경값 비교'를 누르세요.");
+      AddNotification(u8"도독DBG: 기준 저장 완료. 정상 게임 기능으로 도독을 교체하세요.");
+      return true;
+    }
+
+    static bool CompareGovernorGeneralDebugBaseline() {
+      if (!s_governorGeneralDbgSnapshot.valid) {
+        AddNotification(u8"도독DBG: 먼저 '도독교체 기준 저장'을 눌러주세요.");
+        return false;
+      }
+
+      std::array<uint8_t, 0x3D0> oldNow{};
+      std::array<uint8_t, 0x3D0> newNow{};
+      std::array<uint8_t, 0x60> corpsNow{};
+
+      if (!SafeReadBlock(
+              s_governorGeneralDbgSnapshot.oldGovernorGeneralBase,
+              oldNow.data(), oldNow.size()) ||
+          !SafeReadBlock(
+              s_governorGeneralDbgSnapshot.newGovernorGeneralBase,
+              newNow.data(), newNow.size()) ||
+          !SafeReadBlock(s_governorGeneralDbgSnapshot.corpsPtr,
+                         corpsNow.data(), corpsNow.size())) {
+        AddNotification(u8"도독DBG: 현재 메모리 읽기에 실패했습니다.");
+        return false;
+      }
+
+      const std::string oldName = BuildOfficerDebugName(
+          s_governorGeneralDbgSnapshot.oldGovernorGeneralId);
+      const std::string newName = BuildOfficerDebugName(
+          s_governorGeneralDbgSnapshot.newGovernorGeneralId);
+
+      char oldLabel[160]{};
+      char newLabel[160]{};
+      char corpsLabel[160]{};
+      sprintf_s(oldLabel, u8"기존 도독 A %s (ID %u)",
+                oldName.c_str(),
+                (unsigned int)s_governorGeneralDbgSnapshot.oldGovernorGeneralId);
+      sprintf_s(newLabel, u8"신규 도독 후보 B %s (ID %u)",
+                newName.c_str(),
+                (unsigned int)s_governorGeneralDbgSnapshot.newGovernorGeneralId);
+      sprintf_s(corpsLabel, u8"DivisionData %llu군단",
+                (unsigned long long)s_governorGeneralDbgSnapshot.corpsNo);
+
+      AddLog(u8"[도독DBG] ================= 변경값 비교 시작 =================");
+      const int aChanges = LogGovernorGeneralDebugDiff(
+          oldLabel,
+          s_governorGeneralDbgSnapshot.oldGovernorGeneral.data(),
+          oldNow.data(), oldNow.size());
+      const int bChanges = LogGovernorGeneralDebugDiff(
+          newLabel,
+          s_governorGeneralDbgSnapshot.newGovernorGeneral.data(),
+          newNow.data(), newNow.size());
+      const int corpsChanges = LogGovernorGeneralDebugDiff(
+          corpsLabel,
+          s_governorGeneralDbgSnapshot.corps.data(),
+          corpsNow.data(), corpsNow.size());
+
+      AddLog(u8"[도독DBG] 전체 요약: A %d바이트 / B %d바이트 / 군단 %d바이트 변경",
+             aChanges, bChanges, corpsChanges);
+      AddLog(u8"[도독DBG] =====================================================");
+      AddNotification(u8"도독DBG: 변경값 비교 완료. 로그 창을 확인하세요.");
       return true;
     }
 
@@ -2432,6 +2696,114 @@ namespace DX11Base {
         ImGui::TextUnformatted(
             u8"기준 저장/변경값 비교 기능은 계속 읽기 전용입니다.");
         ImGui::EndTooltip();
+      }
+    }
+
+
+    static void DrawGovernorGeneralDebugPanel(
+        uintptr_t shiftedCityBase, float sc) {
+      NormalizeGovernorGeneralDebugSelections();
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::TextColored(ImVec4(0.85f, 0.60f, 1.0f, 1.f),
+                         u8"[ 도독 교체 메모리 비교 - 읽기 전용 ]");
+      ImGui::SameLine(0.f, 12.f * sc);
+      ImGui::TextDisabled(u8"A/B 0x3D0 + DivisionData 0x60");
+
+      if (s_officerSelectedCorpsPtr <= 0x10000) {
+        ImGui::TextDisabled(
+            u8"현재 도시는 직할/군단 없음 상태라 도독 비교 대상이 없습니다.");
+        return;
+      }
+
+      const std::string corpsName =
+          GetOfficerCorpsName(shiftedCityBase, s_officerCityIndex);
+      ImGui::Text(u8"현재 군단: %s", corpsName.c_str());
+      ImGui::SameLine(0.f, 10.f * sc);
+      ImGui::TextDisabled(u8"Division 0x%llX",
+                          (unsigned long long)s_officerSelectedCorpsPtr);
+
+      const CityOfficerRow *oldGov =
+          FindCorpsOfficerById(s_governorGeneralDbgOldId);
+      const std::string oldName =
+          oldGov ? BuildOfficerDebugName(oldGov->id) : u8"도독 없음";
+
+      ImGui::TextUnformatted(u8"기존 도독 A");
+      ImGui::SameLine(0.f, 6.f * sc);
+      ImGui::SetNextItemWidth(135.f * sc);
+      if (ImGui::BeginCombo("##GovernorGeneralDbgOld", oldName.c_str())) {
+        for (const auto &row : s_corpsOfficerRows) {
+          if (row.status != 0xD8)
+            continue;
+          const std::string name = BuildOfficerDebugName(row.id);
+          const bool selected =
+              ((int)row.id == s_governorGeneralDbgOldId);
+          if (ImGui::Selectable(name.c_str(), selected))
+            s_governorGeneralDbgOldId = row.id;
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::SameLine(0.f, 18.f * sc);
+      const CityOfficerRow *candidate =
+          FindCorpsOfficerById(s_governorGeneralDbgNewId);
+      const std::string candidateName =
+          candidate ? BuildOfficerDebugName(candidate->id) : u8"일반 없음";
+
+      ImGui::TextUnformatted(u8"후보 일반 B");
+      ImGui::SameLine(0.f, 6.f * sc);
+      ImGui::SetNextItemWidth(135.f * sc);
+      if (ImGui::BeginCombo("##GovernorGeneralDbgNew",
+                            candidateName.c_str())) {
+        for (const auto &row : s_corpsOfficerRows) {
+          if (row.status != 0x28)
+            continue;
+          const std::string name = BuildOfficerDebugName(row.id);
+          const bool selected =
+              ((int)row.id == s_governorGeneralDbgNewId);
+          if (ImGui::Selectable(name.c_str(), selected))
+            s_governorGeneralDbgNewId = row.id;
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      const bool canCapture =
+          oldGov != nullptr && candidate != nullptr;
+
+      if (!canCapture)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"도독교체 기준 저장##GovernorGeneralDbgCapture",
+                        ImVec2(165.f * sc, 0.f)))
+        CaptureGovernorGeneralDebugBaseline();
+      if (!canCapture)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (!s_governorGeneralDbgSnapshot.valid)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"변경값 비교##GovernorGeneralDbgCompare",
+                        ImVec2(130.f * sc, 0.f)))
+        CompareGovernorGeneralDebugBaseline();
+      if (!s_governorGeneralDbgSnapshot.valid)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 14.f * sc);
+      ImGui::TextDisabled(u8"후보 B: 현재 군단 전체 도시의 일반 무장");
+
+      if (s_governorGeneralDbgSnapshot.valid) {
+        const std::string savedA = BuildOfficerDebugName(
+            s_governorGeneralDbgSnapshot.oldGovernorGeneralId);
+        const std::string savedB = BuildOfficerDebugName(
+            s_governorGeneralDbgSnapshot.newGovernorGeneralId);
+        ImGui::TextDisabled(u8"저장 기준: %llu군단 %s(A) -> %s(B)",
+                            (unsigned long long)
+                                s_governorGeneralDbgSnapshot.corpsNo,
+                            savedA.c_str(), savedB.c_str());
       }
     }
 
@@ -2969,6 +3341,7 @@ namespace DX11Base {
       }
 
       DrawGovernorDebugPanel(p1, shiftedCityBase, sc);
+      DrawGovernorGeneralDebugPanel(shiftedCityBase, sc);
       DrawCityCorpsPointerDebug(shiftedCityBase, sc);
     }
 
