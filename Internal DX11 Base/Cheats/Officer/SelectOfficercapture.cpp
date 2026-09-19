@@ -213,22 +213,6 @@ namespace DX11Base {
         RenderStatRow(forceAddr, u8"세력 색상", 0x09, 1, &v_ForceColor, scale);
       }
 
-      if (bShowDebug) {
-        uintptr_t corpsAddr = *(uintptr_t *)(pR + 0x20);
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(u8"거주 도시 주소");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)corpsAddr);
-        ImGui::SameLine();
-        if (ImGui::SmallButton(u8"복사##CorpsCopy")) {
-          char buf[32];
-          sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)corpsAddr);
-          ImGui::SetClipboardText(buf);
-        }
-      }
       unsigned short currentID = *(unsigned short *)(pR + 0x08);
       char idBuf[16];
       sprintf_s(idBuf, "#%u", currentID);
@@ -358,17 +342,24 @@ namespace DX11Base {
         perStr = u8"나약";
       ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.6f, 1.0f), u8"전략: %s   성격: %s", stratStr, perStr);
 
-      // [최적화] 거주 도시는 선택 변경 시에만 계산하고 캐시를 재사용
+      // [최적화] 거주 도시 / 소속 군단은 선택 변경 시에만 계산하고 캐시를 재사용
       {
         static uintptr_t s_cachedBaseForCity = 0;
         static std::string s_cachedCityName = u8"정보 없음";
+        static uintptr_t s_cachedCityPtr = 0;
+        static uintptr_t s_cachedCorpsPtr = 0;
+        static uintptr_t s_cachedCorpsNo = 0;
+        static uintptr_t s_cachedCorpsGovernorPtr = 0;
+        static std::string s_cachedCorpsGovernorName = u8"없음";
 
         if (s_cachedBaseForCity != pGame) {
           s_cachedBaseForCity = pGame;
-
-          // if (s_cachedBaseForCity != pR) {
-          //   s_cachedBaseForCity = pR;
           s_cachedCityName = u8"정보 없음";
+          s_cachedCityPtr = 0;
+          s_cachedCorpsPtr = 0;
+          s_cachedCorpsNo = 0;
+          s_cachedCorpsGovernorPtr = 0;
+          s_cachedCorpsGovernorName = u8"없음";
 
           uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
           uintptr_t cityArrayBase = 0;
@@ -382,11 +373,33 @@ namespace DX11Base {
           }
 
           if (cityArrayBase > 0x10000) {
-            uintptr_t cityPtr = *(uintptr_t *)(pR + 0x20);
-            if (cityPtr >= cityArrayBase) {
+            uintptr_t cityPtr = 0;
+            if (UnsafeReadPtr(pR + 0x20, &cityPtr) && cityPtr >= cityArrayBase) {
               int idx = (int)((cityPtr - cityArrayBase) / 0x2A0);
               if (idx >= 0 && idx < g_CityCount) {
+                s_cachedCityPtr = cityPtr;
                 s_cachedCityName = g_CityList[idx].cityname;
+
+                uintptr_t corpsPtr = 0;
+                if (UnsafeReadPtr(cityPtr + 0x90, &corpsPtr)) {
+                  s_cachedCorpsPtr = corpsPtr;
+                  if (corpsPtr > 0x10000) {
+                    UnsafeReadPtr(corpsPtr + 0x18, &s_cachedCorpsNo);
+                    UnsafeReadPtr(corpsPtr + 0x20, &s_cachedCorpsGovernorPtr);
+
+                    if (s_cachedCorpsGovernorPtr > 0x10000) {
+                      unsigned short governorId = 0;
+                      if (UnsafeRead16(s_cachedCorpsGovernorPtr + 0x08, &governorId) &&
+                          governorId >= 1 && governorId <= 5102) {
+                        auto govIt = g_officerNames.find((int)governorId);
+                        if (govIt != g_officerNames.end())
+                          s_cachedCorpsGovernorName = govIt->second;
+                        else
+                          s_cachedCorpsGovernorName = u8"무장 ID " + std::to_string((int)governorId);
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -398,16 +411,44 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"거주 도시");
         ImGui::TableSetColumnIndex(1);
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.6f, 1.0f), "%s", s_cachedCityName.c_str()); // 노란색 계열
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.6f, 1.0f), "%s", s_cachedCityName.c_str());
         if (bShowDebug) {
-          uintptr_t cityPtr = *(uintptr_t *)(pR + 0x20);
           ImGui::SameLine();
-          ImGui::TextDisabled(u8"(%p)", (void *)cityPtr);
+          ImGui::TextDisabled(u8"(%p)", (void *)s_cachedCityPtr);
           ImGui::SameLine();
           if (ImGui::SmallButton(u8"복사##CityAddrCopy")) {
             char buf[32];
-            sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)cityPtr);
+            sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)s_cachedCityPtr);
             ImGui::SetClipboardText(buf);
+          }
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(u8"소속 군단");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::AlignTextToFramePadding();
+        if (s_cachedCorpsPtr > 0x10000) {
+          ImGui::TextColored(ImVec4(0.55f, 0.9f, 1.0f, 1.0f),
+                             u8"%llu군단 · 도독 %s",
+                             (unsigned long long)s_cachedCorpsNo,
+                             s_cachedCorpsGovernorName.c_str());
+          if (bShowDebug) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(u8"군단포인터 %p", (void *)s_cachedCorpsPtr);
+            ImGui::SameLine();
+            if (ImGui::SmallButton(u8"복사##DivisionAddrCopy")) {
+              char buf[32];
+              sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)s_cachedCorpsPtr);
+              ImGui::SetClipboardText(buf);
+            }
+          }
+        } else {
+          ImGui::TextDisabled(u8"직할 / 군단 없음");
+          if (bShowDebug) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(u8"군단포인터 0");
           }
         }
       }
