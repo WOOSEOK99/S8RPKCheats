@@ -1830,11 +1830,9 @@ namespace DX11Base {
       target.governorGeneralId = governorGeneralId;
       s_corpsAutoDeploymentTargets.push_back(target);
 
-      AddLog(u8"[군단 자동배치] 자동 대상 추가: %llu군단 / 도독 %s / corps 0x%llX",
+      AddLog(u8"[군단 자동배치] 자동 대상 추가: %llu군단 / 도독 ID %u / corps 0x%llX",
              (unsigned long long)info.corpsNo,
-             governorGeneralId
-                 ? BuildOfficerName(governorGeneralId).c_str()
-                 : u8"?",
+             (unsigned int)governorGeneralId,
              (unsigned long long)info.corpsPtr);
       return true;
     }
@@ -4461,8 +4459,7 @@ namespace DX11Base {
           if (i > 0)
             ImGui::SameLine(0.f, 12.f * sc);
 
-          ImGui::PushID(
-              (int)(option.info.corpsPtr & 0x7FFFFFFF));
+          ImGui::PushID((void *)option.info.corpsPtr);
           const std::string label =
               GetOfficerCorpsName(
                   shiftedCityBase, option.cityIndex);
