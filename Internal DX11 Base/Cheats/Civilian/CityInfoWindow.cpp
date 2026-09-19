@@ -82,6 +82,37 @@ namespace DX11Base {
       }
     }
 
+    static bool SafeReadS32(uintptr_t addr, int32_t *out) {
+      if (!out)
+        return false;
+      __try {
+        *out = *(int32_t *)addr;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *out = 0;
+        return false;
+      }
+    }
+
+    static bool SafeGetModuleImageEnd(
+        uintptr_t exeBase, uintptr_t *outImageEnd) {
+      if (!exeBase || !outImageEnd)
+        return false;
+      __try {
+        const IMAGE_DOS_HEADER *dos =
+            (const IMAGE_DOS_HEADER *)exeBase;
+        const IMAGE_NT_HEADERS *nt =
+            (const IMAGE_NT_HEADERS *)(
+                exeBase + (uintptr_t)dos->e_lfanew);
+        *outImageEnd =
+            exeBase + (uintptr_t)nt->OptionalHeader.SizeOfImage;
+        return *outImageEnd > exeBase;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *outImageEnd = 0;
+        return false;
+      }
+    }
+
     static bool SafeWrite8(uintptr_t addr, uint8_t val) {
       DWORD old = 0, dummy = 0;
       if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &old))
@@ -5001,16 +5032,7 @@ namespace DX11Base {
       // 구 CT가 사용하던 시그니처:
       // 48 8D [modrm + disp32] 48 3B ? 44 0F ? ? 77 ? 48 8B
       uintptr_t imageEnd = 0;
-      __try {
-        const IMAGE_DOS_HEADER *dos =
-            reinterpret_cast<const IMAGE_DOS_HEADER *>(exeBase);
-        const IMAGE_NT_HEADERS *nt =
-            reinterpret_cast<const IMAGE_NT_HEADERS *>(
-                exeBase + (uintptr_t)dos->e_lfanew);
-        imageEnd = exeBase + nt->OptionalHeader.SizeOfImage;
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        imageEnd = 0;
-      }
+      SafeGetModuleImageEnd(exeBase, &imageEnd);
 
       const std::string pattern =
           "48 8D ? ? ? ? ? 48 3B ? 44 0F ? ? 77 ? 48 8B";
@@ -5026,11 +5048,7 @@ namespace DX11Base {
             break;
 
           int32_t disp = 0;
-          __try {
-            disp = *reinterpret_cast<int32_t *>(found + 3);
-          } __except (EXCEPTION_EXECUTE_HANDLER) {
-            disp = 0;
-          }
+          SafeReadS32(found + 3, &disp);
 
           if (disp > 0) {
             uintptr_t tablePtr = 0;
