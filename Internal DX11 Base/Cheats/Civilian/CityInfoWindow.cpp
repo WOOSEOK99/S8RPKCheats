@@ -18,6 +18,7 @@ namespace DX11Base {
   int g_cityKeepGrain = 100000;     // 초과 시 남겨둘 군량 수치 (KEEP_GRAIN)
   int g_cityExchangeRate = 10;      // 1회 교환 비율 (EXCHANGE_RATE)
   bool g_cityAutoExchangeEnabled = false;
+  bool g_cityRevoltAlwaysZero = false; // 모든 도시 반란 카운트(+0x105)를 항상 0으로 유지
 
   // ── 내부 상태 ──────────────────────────────────────────────────────────────
   namespace {
@@ -29,6 +30,14 @@ namespace DX11Base {
       __try {
         *out = *(uintptr_t *)addr;
         return (*out > 0x10000);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+    static bool SafeRead8(uintptr_t addr, uint8_t *out) {
+      __try {
+        *out = *(uint8_t *)addr;
+        return true;
       } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
       }
@@ -48,6 +57,19 @@ namespace DX11Base {
       } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
       }
+    }
+    static bool SafeWrite8(uintptr_t addr, uint8_t val) {
+      DWORD old = 0, dummy = 0;
+      if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &old))
+        return false;
+      __try {
+        *(uint8_t *)addr = val;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        VirtualProtect((LPVOID)addr, 1, old, &dummy);
+        return false;
+      }
+      VirtualProtect((LPVOID)addr, 1, old, &dummy);
+      return true;
     }
     static bool SafeWrite16(uintptr_t addr, uint16_t val) {
       DWORD old = 0, dummy = 0;
@@ -109,11 +131,14 @@ namespace DX11Base {
     static constexpr uintptr_t OFF_DEF_MAX = 0xB0;  // 방어한도 uint16 (이전 0xD8 - 0x28)
     static constexpr uintptr_t OFF_TEC_MAX = 0xB4;  // 기술한도 uint16 (이전 0xDC - 0x28)
     static constexpr uintptr_t OFF_SOL_MAX = 0x100; // 병사한도 uint32 (ca - 0x28 + 0x100)
+    // CT 기준 CityData + 0x105. 현재 ca는 원본 CityData보다 +0x28 이동된 기준이므로
+    // 실제 접근 주소는 ca - 0x28 + OFF_REVOLT_RAW.
+    static constexpr uintptr_t OFF_REVOLT_RAW = 0x105; // 반란 카운트 uint8
 
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 125.f * sc), true);
+      ImGui::BeginChild("##CityTop", ImVec2(0.f, 158.f * sc), true);
 
       ImGui::TextColored(ImVec4(1.f, 0.82f, 0.28f, 1.f), u8"[ 자동 환전 설정 ]");
       // ImGui::SameLine(0.f, 20.f * sc);
@@ -173,6 +198,29 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::Spacing();
+      if (ImGui::Checkbox(u8"반란카운트 항상 0##revoltzero", &g_cityRevoltAlwaysZero)) {
+        if (g_cityRevoltAlwaysZero)
+          ResetAllCityRevoltCounters();
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"모든 도시의 CityData + 0x105 반란 카운트를 계속 0으로 유지합니다.");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(0.f, 18.f * sc);
+      if (ImGui::Button(u8"즉시 반란카운터 0으로 설정##revoltreset",
+                        ImVec2(210.f * sc, 0.f))) {
+        ResetAllCityRevoltCounters();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"현재 51개 도시의 반란 카운트를 즉시 0으로 설정합니다.");
+        ImGui::EndTooltip();
+      }
+
       ImGui::Separator();
 
       // 일괄 제어 버튼
@@ -214,6 +262,7 @@ namespace DX11Base {
     struct CitySnap {
       int gold = 0, grain = 0, soldier = 0;
       int devMax = 0, comMax = 0, defMax = 0, tecMax = 0;
+      int revolt = 0;
       bool valid = false;
     };
     static std::vector<CitySnap> s_snap;
@@ -225,6 +274,7 @@ namespace DX11Base {
         uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
         uint16_t dv = 0, cm = 0, df = 0, tc = 0;
         uint32_t gd = 0, gr = 0, sl = 0;
+        uint8_t rv = 0;
         SafeRead16(ca + OFF_DEV_MAX, &dv);
         SafeRead16(ca + OFF_COM_MAX, &cm);
         SafeRead16(ca + OFF_DEF_MAX, &df);
@@ -232,7 +282,8 @@ namespace DX11Base {
         SafeRead32(ca - 0x28 + OFF_GOLD, &gd);
         SafeRead32(ca - 0x28 + OFF_GRAIN, &gr);
         SafeRead32(ca - 0x28 + OFF_SOL_MAX, &sl);
-        s_snap[i] = {(int)gd, (int)gr, (int)sl, dv, cm, df, tc, true};
+        SafeRead8(ca - 0x28 + OFF_REVOLT_RAW, &rv);
+        s_snap[i] = {(int)gd, (int)gr, (int)sl, dv, cm, df, tc, (int)rv, true};
       }
       s_snapDirty = false;
     }
@@ -264,7 +315,7 @@ namespace DX11Base {
       static ImGuiTableFlags tf = ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
                                   ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings;
 
-      if (!ImGui::BeginTable("##CityTbl", 9, tf))
+      if (!ImGui::BeginTable("##CityTbl", 10, tf))
         return;
 
       ImGui::TableSetupScrollFreeze(2, 1);
@@ -277,6 +328,7 @@ namespace DX11Base {
       ImGui::TableSetupColumn(u8"방어한도", ImGuiTableColumnFlags_WidthFixed, 75.f * sc);
       ImGui::TableSetupColumn(u8"기술한도", ImGuiTableColumnFlags_WidthFixed, 75.f * sc);
       ImGui::TableSetupColumn(u8"병사한도", ImGuiTableColumnFlags_WidthFixed, 85.f * sc);
+      ImGui::TableSetupColumn(u8"반란카운트", ImGuiTableColumnFlags_WidthFixed, 80.f * sc);
       // ImGui::TableSetupColumn(u8"주소", ImGuiTableColumnFlags_WidthFixed, 100.f * sc);
       ImGui::TableHeadersRow();
 
@@ -398,8 +450,12 @@ namespace DX11Base {
         // }
         ImGui::PopID();
 
+        // 반란 카운트 (CT: CityData + 0x105)
+        ImGui::TableSetColumnIndex(9);
+        ImGui::Text("%d", snap.revolt);
+
         // 주소
-        // ImGui::TableSetColumnIndex(9);
+        // ImGui::TableSetColumnIndex(10);
         // ImGui::TextDisabled("0x%llX", (unsigned long long)(ca - 0x28));
       }
 
@@ -415,8 +471,8 @@ namespace DX11Base {
     if (!bShowCityInfoWin)
       return;
 
-    ImGui::SetNextWindowSize(ImVec2(750.f * scale, 760.f * scale), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(500.f * scale, 300.f * scale), ImVec2(1400.f * scale, 900.f * scale));
+    ImGui::SetNextWindowSize(ImVec2(850.f * scale, 790.f * scale), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(650.f * scale, 360.f * scale), ImVec2(1500.f * scale, 950.f * scale));
 
     if (!ImGui::Begin(u8"도시 정보###CityInfoWin", &bShowCityInfoWin, ImGuiWindowFlags_NoSavedSettings)) {
       ImGui::End();
@@ -437,6 +493,49 @@ namespace DX11Base {
     }
 
     ImGui::End();
+  }
+
+  void ResetAllCityRevoltCounters() {
+    uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000)
+      return;
+
+    int changed = 0;
+    for (int i = 0; i < g_CityCount; i++) {
+      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      uint8_t current = 0;
+      const uintptr_t revoltAddr = ca - 0x28 + OFF_REVOLT_RAW;
+      if (!SafeRead8(revoltAddr, &current))
+        continue;
+      if (current != 0 && SafeWrite8(revoltAddr, 0))
+        changed++;
+    }
+
+    s_snapDirty = true;
+    AddLog(u8"[도시] 모든 도시 반란 카운트 0 설정 완료 (변경 %d개)", changed);
+  }
+
+  void RunCityRevoltAlwaysZero() {
+    if (!g_cityRevoltAlwaysZero)
+      return;
+
+    uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000)
+      return;
+
+    bool changed = false;
+    for (int i = 0; i < g_CityCount; i++) {
+      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      uint8_t current = 0;
+      const uintptr_t revoltAddr = ca - 0x28 + OFF_REVOLT_RAW;
+      if (!SafeRead8(revoltAddr, &current))
+        continue;
+      if (current != 0 && SafeWrite8(revoltAddr, 0))
+        changed = true;
+    }
+
+    if (changed)
+      s_snapDirty = true;
   }
 
   void RunAutoCityExchange() {
