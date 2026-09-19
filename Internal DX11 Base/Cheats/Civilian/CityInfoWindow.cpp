@@ -2121,6 +2121,16 @@ namespace DX11Base {
                  : ((int)row.pol + (int)row.cha);
     }
 
+    static bool IsSafeFirstGovernorNormal(
+        const CityOfficerRow &row) {
+      if (row.status != 0x28 || row.loyalty != 100)
+        return false;
+
+      uint16_t pair = 0;
+      return SafeRead16(row.officerBase + 0x10, &pair) &&
+             pair == 0xD328u;
+    }
+
     static int PickDeploymentCity(bool frontline) {
       CorpsDeploymentCityRecommendation *best = nullptr;
       int bestRemain = -1000000;
@@ -2442,6 +2452,60 @@ namespace DX11Base {
             city->governorScore = 0;
           }
         }
+      }
+
+      // 완전히 빈 도시는 기존 태수(E8)를 끌어오지 않는다.
+      // 정상 게임에서 두 번 확인한 28/D3 + 충성100 일반장수만 먼저 배정하고,
+      // 그런 안전한 후보가 없으면 이번 계획에서는 도시를 비운 채 그대로 둔다.
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.currentCount != 0 ||
+            city.currentGovernorId != 0 ||
+            city.targetCount <= 0 ||
+            city.recommendedGovernorId != 0)
+          continue;
+
+        const CityOfficerRow *chosen = nullptr;
+        int chosenScore = -1;
+
+        for (const auto &row : s_corpsOfficerRows) {
+          if (isUsed(row.id) ||
+              !IsSafeFirstGovernorNormal(row))
+            continue;
+
+          const int score =
+              city.frontline
+                  ? GetFrontDeploymentScore(row)
+                  : GetRearDeploymentScore(row);
+          if (!chosen || score > chosenScore ||
+              (score == chosenScore && row.id < chosen->id)) {
+            chosen = &row;
+            chosenScore = score;
+          }
+        }
+
+        if (!chosen) {
+          city.targetCount = 0;
+          AddLog(u8"[군단 자동배치] 빈 도시 %s: 충성100 28/D3 일반 장수가 없어 이번 계획에서는 비움 유지",
+                 g_CityList[city.cityIndex].cityname);
+          continue;
+        }
+
+        const int currentCity =
+            GetOfficerCurrentCityIndex(
+                shiftedCityBase, *chosen);
+        city.recommendedGovernorId = chosen->id;
+        city.governorScore =
+            GetGovernorScore(*chosen, city.frontline);
+
+        AddOfficerDeploymentRecommendation(
+            *chosen, currentCity, city.cityIndex, true,
+            city.frontline
+                ? u8"빈 도시 · 충성100 28/D3 · 전선 최초 태수"
+                : u8"빈 도시 · 충성100 28/D3 · 후방 최초 태수");
+
+        AddLog(u8"[군단 자동배치] 빈 도시 %s: %s 일반장수를 최초 태수 후보로 선배치",
+               g_CityList[city.cityIndex].cityname,
+               BuildOfficerName(chosen->id).c_str());
       }
 
       // 먼저 전선/후방 배치를 끝낸 뒤, 각 도시 안에서 충성 100 태수를 고른다.
@@ -3388,66 +3452,6 @@ namespace DX11Base {
       return true;
     }
 
-    static const CityOfficerRow *
-    FindFirstGovernorDeploymentBuffer(
-        uintptr_t shiftedCityBase, int targetCityIndex,
-        uint16_t excludeId, int *outCurrentCity = nullptr) {
-      if (outCurrentCity)
-        *outCurrentCity = -1;
-
-      CorpsDeploymentCityRecommendation *target =
-          FindDeploymentCity(targetCityIndex);
-      if (!target)
-        return nullptr;
-
-      const CityOfficerRow *best = nullptr;
-      int bestCity = -1;
-      int bestScore = -1;
-
-      for (const auto &rec : s_corpsDeploymentOfficers) {
-        if (rec.id == excludeId ||
-            rec.recommendedGovernor ||
-            rec.loyalty != 100 ||
-            rec.recommendedCityIndex < 0 ||
-            rec.recommendedCityIndex >= g_CityCount)
-          continue;
-
-        const CityOfficerRow *row =
-            FindCorpsOfficerByRecId(rec.id);
-        if (!row || row->status != 0x28)
-          continue;
-
-        uint16_t pair = 0;
-        if (!SafeRead16(row->officerBase + 0x10, &pair) ||
-            pair != 0xD328u)
-          continue;
-
-        const int currentCity =
-            GetOfficerCityIndexByBase(
-                shiftedCityBase, row->officerBase);
-        if (currentCity < 0 ||
-            currentCity != rec.recommendedCityIndex ||
-            currentCity == targetCityIndex)
-          continue;
-
-        const int score =
-            target->frontline
-                ? GetFrontDeploymentScore(*row)
-                : GetRearDeploymentScore(*row);
-
-        if (!best || score > bestScore ||
-            (score == bestScore && row->id < best->id)) {
-          best = row;
-          bestCity = currentCity;
-          bestScore = score;
-        }
-      }
-
-      if (best && outCurrentCity)
-        *outCurrentCity = bestCity;
-      return best;
-    }
-
     static bool IsDeploymentFixedLeader(uint16_t id) {
       const CityOfficerRow *row = FindCorpsOfficerByRecId(id);
       if (!row)
@@ -3570,9 +3574,22 @@ namespace DX11Base {
         const uintptr_t currentGovernor =
             ReadDeploymentCityGovernor(
                 shiftedCityBase, city.cityIndex);
-        if (currentGovernor == desired->officerBase ||
-            currentGovernor == 0)
+        if (currentGovernor == desired->officerBase)
           continue;
+
+        if (currentGovernor == 0) {
+          const int desiredCity =
+              GetOfficerCityIndexByBase(
+                  shiftedCityBase, desired->officerBase);
+          if (IsSafeFirstGovernorNormal(*desired) &&
+              desiredCity == city.cityIndex)
+            continue;
+
+          // 빈 도시인데 최종 후보가 기존 태수이거나 안전한 28/D3 일반이 아니면
+          // 이번 2단계에서는 건드리지 않는다. 연결된 기존 태수 도시도 함께 보류된다.
+          markDeferred(city.cityIndex);
+          continue;
+        }
 
         uint8_t currentStatus = 0;
         if (currentGovernor <= 0x10000 ||
@@ -3743,7 +3760,6 @@ namespace DX11Base {
       int moveCount = 0;
       int swapCount = 0;
       int firstGovernorCount = 0;
-      int emptyCityBufferCount = 0;
       int cycleBreakCount = 0;
       const int deferredCount =
           (int)deferredCities.size();
@@ -3830,94 +3846,23 @@ namespace DX11Base {
             continue;
 
           if (currentGovernor == 0) {
-            uint16_t desiredPair = 0;
-            if (!SafeRead16(
-                    desired->officerBase + 0x10,
-                    &desiredPair)) {
+            if (!IsSafeFirstGovernorNormal(*desired)) {
               failed = true;
               failReason =
-                  u8"빈 도시 추천 태수의 신분/보조값을 읽지 못했습니다.";
+                  u8"선검사를 통과한 빈 도시의 추천 태수가 안전한 28/D3 일반장수가 아닙니다.";
               break;
             }
-
-            // 최종 후보 자체가 정상 게임에서 확인한 28/D3이면 바로 최초 태수로 임명한다.
-            if (desiredPair == 0xD328u) {
-              if (!AppointFirstDeploymentGovernorAtCity(
-                      shiftedCityBase, city.cityIndex,
-                      desired->officerBase)) {
-                failed = true;
-                failReason =
-                    u8"빈 도시 최초 태수 직접 임명 쓰기/검증에 실패했습니다.";
-                break;
-              }
-
-              ++firstGovernorCount;
-              progress = true;
-              break;
-            }
-
-            // 기존 태수에서 해제된 장수처럼 28이지만 +0x11이 D3가 아니면
-            // 검증된 28/D3 일반 장수를 임시 최초 태수로 세운 뒤 정상 태수 교체를 한다.
-            int bufferOriginalCity = -1;
-            const CityOfficerRow *buffer =
-                FindFirstGovernorDeploymentBuffer(
-                    shiftedCityBase, city.cityIndex,
-                    desired->id, &bufferOriginalCity);
-            if (!buffer) {
-              char reason[256]{};
-              sprintf_s(
-                  reason,
-                  u8"빈 도시 %s의 최종 후보 %s가 28/%02X이며, 임시 최초 태수로 사용할 충성100 28/D3 일반 장수가 없습니다.",
-                  g_CityList[city.cityIndex].cityname,
-                  BuildOfficerName(desired->id).c_str(),
-                  (unsigned int)((desiredPair >> 8) & 0xFF));
-              failed = true;
-              failReason = reason;
-              break;
-            }
-
-            if (!MoveNormalOfficerWithinDeploymentCorps(
-                    shiftedCityBase, buffer->officerBase,
-                    city.cityIndex)) {
-              failed = true;
-              failReason =
-                  u8"빈 도시 임시 최초 태수 후보 이동에 실패했습니다.";
-              break;
-            }
-            if (bufferOriginalCity != city.cityIndex)
-              ++moveCount;
 
             if (!AppointFirstDeploymentGovernorAtCity(
                     shiftedCityBase, city.cityIndex,
-                    buffer->officerBase)) {
-              failed = true;
-              failReason =
-                  u8"빈 도시 임시 최초 태수(28/D3 -> E8/D2) 임명에 실패했습니다.";
-              break;
-            }
-            ++firstGovernorCount;
-
-            if (!SwapDeploymentGovernorAtCity(
-                    shiftedCityBase, city.cityIndex,
-                    buffer->officerBase,
                     desired->officerBase)) {
               failed = true;
               failReason =
-                  u8"빈 도시 임시 태수와 최종 추천 태수 교체에 실패했습니다.";
+                  u8"빈 도시 최초 태수 직접 임명 쓰기/검증에 실패했습니다.";
               break;
             }
 
-            ++swapCount;
-            ++emptyCityBufferCount;
-            AddLog(
-                u8"[군단 자동배치 2단계] 빈 도시 버퍼: %s에 %s 임시 태수 -> %s 최종 태수 / 임시 장수 복귀 예정 %s",
-                g_CityList[city.cityIndex].cityname,
-                BuildOfficerName(buffer->id).c_str(),
-                BuildOfficerName(desired->id).c_str(),
-                bufferOriginalCity >= 0
-                    ? g_CityList[bufferOriginalCity].cityname
-                    : u8"?");
-
+            ++firstGovernorCount;
             progress = true;
             break;
           }
@@ -4111,14 +4056,13 @@ namespace DX11Base {
 
       char notice[256]{};
       sprintf_s(notice,
-                u8"군단 자동배치 2단계 완료: 태수 교체 %d회 / 최초 임명 %d회 / 빈도시 버퍼 %d회 / 이동 %d회 / 보류 %d도시",
+                u8"군단 자동배치 2단계 완료: 태수 교체 %d회 / 최초 임명 %d회 / 이동 %d회 / 보류 %d도시",
                 swapCount, firstGovernorCount,
-                emptyCityBufferCount, moveCount, deferredCount);
+                moveCount, deferredCount);
       AddNotification(notice);
-      AddLog(u8"[군단 자동배치 2단계] 완료: 교체 %d / 최초임명 %d / 빈도시버퍼 %d / 이동 %d / 순환해제 %d / 보류 %d",
+      AddLog(u8"[군단 자동배치 2단계] 완료: 교체 %d / 최초임명 %d / 이동 %d / 순환해제 %d / 보류 %d",
              swapCount, firstGovernorCount,
-             emptyCityBufferCount, moveCount,
-             cycleBreakCount, deferredCount);
+             moveCount, cycleBreakCount, deferredCount);
       return true;
     }
 
@@ -4233,9 +4177,9 @@ namespace DX11Base {
         ImGui::TextUnformatted(
             u8"태수끼리 순환하는 경우 충성 100 일반 장수를 임시 태수로 사용합니다.");
         ImGui::TextUnformatted(
-            u8"City+0x98=0은 28/D3 충성100 장수를 최초 태수(E8/D2)로 임명합니다.");
+            u8"빈 도시는 충성100 28/D3 일반장수를 먼저 배치한 경우에만 최초 태수(E8/D2)로 임명합니다.");
         ImGui::TextUnformatted(
-            u8"최종 후보가 28/D3가 아니면 다음 28/D3 일반 장수를 임시 태수로 세운 뒤 교체/복귀합니다.");
+            u8"안전한 일반장수가 없으면 빈 도시는 이번 계획에서 그대로 두고 AI 처리를 기다립니다.");
         ImGui::TextUnformatted(
             u8"0이 아닌 City+0x98이 E8이 아닌 특수 상태만 진단 후 보류합니다.");
         ImGui::TextUnformatted(
