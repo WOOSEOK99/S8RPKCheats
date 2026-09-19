@@ -203,6 +203,7 @@ namespace DX11Base {
     file << "  \"g_cityKeepGrain\": " << g_cityKeepGrain << ",\n";
     file << "  \"g_cityExchangeRate\": " << g_cityExchangeRate << ",\n";
     file << "  \"g_cityAutoExchangeEnabled\": " << (g_cityAutoExchangeEnabled ? "true" : "false") << ",\n";
+    file << "  \"g_cityRevoltAlwaysZero\": " << (g_cityRevoltAlwaysZero ? "true" : "false") << ",\n";
     file << "  \"nSkipDays\": " << nSkipDays << ",\n";
     file << "  \"v_HealLv1_Amount\": " << v_HealLv1_Amount << ",\n";
     file << "  \"v_HealLv2_Amount\": " << v_HealLv2_Amount << ",\n";
@@ -336,6 +337,10 @@ namespace DX11Base {
       }
       if (line.find("\"g_cityAutoExchangeEnabled\"") != std::string::npos) {
           g_cityAutoExchangeEnabled = (line.find("true") != std::string::npos);
+          continue;
+      }
+      if (line.find("\"g_cityRevoltAlwaysZero\"") != std::string::npos) {
+          g_cityRevoltAlwaysZero = (line.find("true") != std::string::npos);
           continue;
       }
       if (line.find("nSkipDays") != std::string::npos) {
