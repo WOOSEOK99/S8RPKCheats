@@ -10,15 +10,15 @@
 
 namespace DX11Base {
     std::atomic<bool> g_resonanceThreadRunning(false);
-    std::atomic<bool> g_resonanceFourThreadRunning(false);
+    std::atomic<bool> g_resonanceThreeThreadRunning(false);
     static uintptr_t g_resonanceHookAddr = 0;
     static uintptr_t g_resonanceCaveAddr = 0;
     static bool g_resonanceCaveApplied = false;
     static uint8_t g_resonanceOriginal[8] = { 0 };
 
-    static uintptr_t g_resonanceFourCaveAddr = 0;
-    static bool g_resonanceFourCaveApplied = false;
-    static uint8_t g_resonanceFourOriginal[8] = { 0 };
+    static uintptr_t g_resonanceThreeCaveAddr = 0;
+    static bool g_resonanceThreeCaveApplied = false;
+    static uint8_t g_resonanceThreeOriginal[8] = { 0 };
 
     static bool InstallResonanceCave(uintptr_t hookAddr) {
         // 코드 케이브 할당 (8.0 버전에 맞춰 AllocNear 사용)
@@ -60,12 +60,12 @@ namespace DX11Base {
     void SetInstantResonance(bool enable) {
         if (enable) {
             if (g_resonanceCaveApplied) return;
-            if (g_resonanceThreadRunning || g_resonanceFourThreadRunning) return;
+            if (g_resonanceThreadRunning || g_resonanceThreeThreadRunning) return;
 
-            // 같은 훅을 쓰므로 4개 강제 모드와 동시 적용하지 않습니다.
-            if (g_resonanceFourCaveApplied) {
-                SetDialogueResonanceFour(false);
-                bResonanceFour = false;
+            // 같은 훅을 쓰므로 3개 강제 모드와 동시 적용하지 않습니다.
+            if (g_resonanceThreeCaveApplied) {
+                SetDialogueResonanceThree(false);
+                bResonanceThree = false;
             }
 
             g_resonanceThreadRunning = true;
@@ -109,23 +109,23 @@ namespace DX11Base {
         }
     }
 
-    static bool InstallResonanceFourCave(uintptr_t hookAddr) {
-        g_resonanceFourCaveAddr = AllocNear(hookAddr, 96);
-        if (!g_resonanceFourCaveAddr)
+    static bool InstallResonanceThreeCave(uintptr_t hookAddr) {
+        g_resonanceThreeCaveAddr = AllocNear(hookAddr, 96);
+        if (!g_resonanceThreeCaveAddr)
             return false;
 
         const uint32_t dynOffset = *(uint32_t*)(hookAddr + 4);
-        uint8_t* cave = (uint8_t*)g_resonanceFourCaveAddr;
+        uint8_t* cave = (uint8_t*)g_resonanceThreeCaveAddr;
         int cur = 0;
 
-        // 현재 이 루틴에서 읽는 상대 장수의 공명값을 무조건 4로 설정.
-        // mov byte ptr [rdx+rsi+dynOffset], 4
+        // 현재 이 루틴에서 읽는 상대 장수의 공명값을 무조건 3으로 설정.
+        // mov byte ptr [rdx+rsi+dynOffset], 3
         cave[cur++] = 0xC6; cave[cur++] = 0x84; cave[cur++] = 0x32;
         *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
-        cave[cur++] = 0x04;
+        cave[cur++] = 0x03;
 
         // 원본: movzx ecx, byte ptr [rdx+rsi+dynOffset]
-        memcpy(&cave[cur], g_resonanceFourOriginal, 8);
+        memcpy(&cave[cur], g_resonanceThreeOriginal, 8);
         cur += 8;
 
         // 원래 코드로 복귀
@@ -134,15 +134,15 @@ namespace DX11Base {
         *(uint32_t*)&cave[cur] = 0; cur += 4;
         *(uintptr_t*)&cave[cur] = returnAddr; cur += 8;
 
-        FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_resonanceFourCaveAddr, cur);
-        return ApplyJmp(hookAddr, g_resonanceFourCaveAddr, 8);
+        FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_resonanceThreeCaveAddr, cur);
+        return ApplyJmp(hookAddr, g_resonanceThreeCaveAddr, 8);
     }
 
-    void SetDialogueResonanceFour(bool enable) {
+    void SetDialogueResonanceThree(bool enable) {
         if (enable) {
-            if (g_resonanceFourCaveApplied)
+            if (g_resonanceThreeCaveApplied)
                 return;
-            if (g_resonanceFourThreadRunning || g_resonanceThreadRunning)
+            if (g_resonanceThreeThreadRunning || g_resonanceThreadRunning)
                 return;
 
             // 기존 1개 이상 -> 3 기능과 같은 훅을 공유하므로 먼저 해제.
@@ -151,7 +151,7 @@ namespace DX11Base {
                 bResonance = false;
             }
 
-            g_resonanceFourThreadRunning = true;
+            g_resonanceThreeThreadRunning = true;
             std::thread([]() {
                 uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
                 if (exeBase) {
@@ -169,30 +169,30 @@ namespace DX11Base {
                                 g_resonanceHookAddr = found + 16;
                         }
 
-                        if (g_resonanceHookAddr && !g_resonanceFourCaveApplied) {
-                            memcpy(g_resonanceFourOriginal, (void*)g_resonanceHookAddr, 8);
+                        if (g_resonanceHookAddr && !g_resonanceThreeCaveApplied) {
+                            memcpy(g_resonanceThreeOriginal, (void*)g_resonanceHookAddr, 8);
 
-                            if (InstallResonanceFourCave(g_resonanceHookAddr)) {
-                                g_resonanceFourCaveApplied = true;
-                                AddLog(u8"[Resonance4] 상대 공명 4개 강제 패치 성공");
+                            if (InstallResonanceThreeCave(g_resonanceHookAddr)) {
+                                g_resonanceThreeCaveApplied = true;
+                                AddLog(u8"[Resonance3] 상대 공명 3개 강제 패치 성공");
                             } else {
-                                AddLog(u8"[Resonance4] Cave 할당/적용 실패");
+                                AddLog(u8"[Resonance3] Cave 할당/적용 실패");
                             }
                         } else if (!g_resonanceHookAddr) {
-                            AddLog(u8"[Resonance4] 공명 훅 패턴을 찾지 못했습니다.");
+                            AddLog(u8"[Resonance3] 공명 훅 패턴을 찾지 못했습니다.");
                         }
                     }
                 }
 
-                g_resonanceFourThreadRunning = false;
+                g_resonanceThreeThreadRunning = false;
             }).detach();
         } else {
-            if (g_resonanceFourCaveApplied) {
-                RestoreBytes(g_resonanceHookAddr, g_resonanceFourOriginal, 8);
-                VirtualFree((LPVOID)g_resonanceFourCaveAddr, 0, MEM_RELEASE);
-                g_resonanceFourCaveAddr = 0;
-                g_resonanceFourCaveApplied = false;
-                AddLog(u8"[Resonance4] 상대 공명 4개 강제 패치 해제");
+            if (g_resonanceThreeCaveApplied) {
+                RestoreBytes(g_resonanceHookAddr, g_resonanceThreeOriginal, 8);
+                VirtualFree((LPVOID)g_resonanceThreeCaveAddr, 0, MEM_RELEASE);
+                g_resonanceThreeCaveAddr = 0;
+                g_resonanceThreeCaveApplied = false;
+                AddLog(u8"[Resonance3] 상대 공명 3개 강제 패치 해제");
             }
         }
     }
