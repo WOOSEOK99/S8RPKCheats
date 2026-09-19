@@ -579,102 +579,129 @@ namespace DX11Base {
           ImGui::EndDisabled();
       };
 
-      if (ImGui::Checkbox(u8"즉시 경애 맺기", &bFastRelationship)) {
-        DX11Base::SetFastRelationship(bFastRelationship);
-        NotifyFeatureToggle(u8"즉시 경애 맺기", bFastRelationship);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"교류로 관계가 갱신되는 대상의 친밀도를 100으로 처리해 즉시 경애 상태로 진입시킵니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 기존 즉시 경애 패치 대신 CT ID 321 방식을 사용합니다.");
-        ImGui::EndTooltip();
-      }
+      if (ImGui::BeginTable("SocialRelationLayout", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("SocialLeft", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("SocialRight", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 
-      ImGui::SameLine(160.0f * scale);
-      DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
+        // 1행: 경애 관련
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"즉시 경애 맺기", &bFastRelationship)) {
+          DX11Base::SetFastRelationship(bFastRelationship);
+          NotifyFeatureToggle(u8"즉시 경애 맺기", bFastRelationship);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"교류로 관계가 갱신되는 대상의 친밀도를 100으로 처리해 즉시 경애 상태로 진입시킵니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 기존 즉시 경애 패치 대신 CT ID 321 방식을 사용합니다.");
+          ImGui::EndTooltip();
+        }
 
-      const bool resonanceBusy =
-          ::DX11Base::g_resonanceThreadRunning.load();
-      if (resonanceBusy)
-        ImGui::BeginDisabled();
+        ImGui::TableSetColumnIndex(1);
+        DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
 
-      if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
-        DX11Base::SetInstantResonance(bResonance);
-        NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
-        SaveConfig();
-      }
+        // 2행: 공명 / 선물
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        const bool resonanceBusy =
+            ::DX11Base::g_resonanceThreadRunning.load();
+        if (resonanceBusy)
+          ImGui::BeginDisabled();
 
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"무조건 공명갯수 4개로 되고,");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"다음번 담화때 상생 발생함.");
-        ImGui::EndTooltip();
-      }
+        if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
+          DX11Base::SetInstantResonance(bResonance);
+          NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
+          SaveConfig();
+        }
 
-      if (resonanceBusy)
-        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"무조건 공명갯수 4개로 되고,");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"다음번 담화때 상생 발생함.");
+          ImGui::EndTooltip();
+        }
 
-      if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
-        DX11Base::SetInfiniteGift(bInfiniteGift);
-        NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
-        SaveConfig();
-      }
+        if (resonanceBusy)
+          ImGui::EndDisabled();
 
-      if (ImGui::Checkbox(u8"담화 실행 무제한", &bInfiniteTalk)) {
-        DX11Base::SetInfiniteTalk(bInfiniteTalk);
-        NotifyFeatureToggle(u8"담화 실행 무제한", bInfiniteTalk);
-        SaveConfig();
-      }
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
+          DX11Base::SetInfiniteGift(bInfiniteGift);
+          NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
+          SaveConfig();
+        }
 
-      ImGui::SameLine(160.0f * scale);
-      if (::DX11Base::g_loyaltyThreadRunning.load())
-        ImGui::BeginDisabled();
-      if (ImGui::Checkbox(u8"무장 충성도 100", &bLoyalty)) {
-        DX11Base::SetInstantLoyalty(bLoyalty);
-        NotifyFeatureToggle(u8"무장 충성도 100", bLoyalty);
-        SaveConfig();
-      }
+        // 3행: 담화 / 충성도
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"담화 실행 무제한", &bInfiniteTalk)) {
+          DX11Base::SetInfiniteTalk(bInfiniteTalk);
+          NotifyFeatureToggle(u8"담화 실행 무제한", bInfiniteTalk);
+          SaveConfig();
+        }
 
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"교류 클릭시 목록에 있는 모든 무장의 충성이 100이 됨.");
-        ImGui::EndTooltip();
-      }
+        ImGui::TableSetColumnIndex(1);
+        if (::DX11Base::g_loyaltyThreadRunning.load())
+          ImGui::BeginDisabled();
 
-      if (::DX11Base::g_loyaltyThreadRunning.load()) {
-        ImGui::EndDisabled();
-      }
+        if (ImGui::Checkbox(u8"무장 충성도 100", &bLoyalty)) {
+          DX11Base::SetInstantLoyalty(bLoyalty);
+          NotifyFeatureToggle(u8"무장 충성도 100", bLoyalty);
+          SaveConfig();
+        }
 
-      bool tempMarriage = ::DX11Base::marriageApplied;
-      if (ImGui::Checkbox(u8"결혼 무제한", &tempMarriage)) {
-        ::DX11Base::SetMarriageCondition(tempMarriage);
-        NotifyFeatureToggle(u8"결혼 무제한", tempMarriage);
-        SaveConfig();
-      }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"교류 클릭시 목록에 있는 모든 무장의 충성이 100이 됨.");
+          ImGui::EndTooltip();
+        }
 
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"배우자가 있어도 무조건 결혼이 됩니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 공명 4개 + 경애 상태에서만 무제한 결혼이 가능합니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 대신 타 세력의 경우 등용은 안되네요.");
-        ImGui::EndTooltip();
-      }
+        if (::DX11Base::g_loyaltyThreadRunning.load())
+          ImGui::EndDisabled();
 
-      if (ImGui::Button(u8"자녀 관리", ImVec2(120.0f * scale, 0))) {
-        bShowChildManagerWin = true;
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"감지된 자녀 목록을 열어 자녀별로 임관 시점을 설정합니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 새로 태어난 자녀도 이후 자녀 처리 시 자동으로 목록에 추가됩니다.");
-        ImGui::EndTooltip();
+        // 4행: 결혼 / 자녀 관리
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        bool tempMarriage = ::DX11Base::marriageApplied;
+        if (ImGui::Checkbox(u8"결혼 무제한", &tempMarriage)) {
+          ::DX11Base::SetMarriageCondition(tempMarriage);
+          NotifyFeatureToggle(u8"결혼 무제한", tempMarriage);
+          SaveConfig();
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"배우자가 있어도 무조건 결혼이 됩니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 공명 4개 + 경애 상태에서만 무제한 결혼이 가능합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 대신 타 세력의 경우 등용은 안되네요.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Button(u8"자녀 관리", ImVec2(120.0f * scale, 0))) {
+          bShowChildManagerWin = true;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"감지된 자녀 목록을 열어 자녀별로 임관 시점을 설정합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 새로 태어난 자녀도 이후 자녀 처리 시 자동으로 목록에 추가됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
       }
 
       EndSection(); // 결혼/인연
