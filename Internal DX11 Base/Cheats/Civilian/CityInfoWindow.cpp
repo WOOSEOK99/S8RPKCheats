@@ -2113,6 +2113,8 @@ namespace DX11Base {
           continue;
         const int assigned = (int)city.recommendedOfficerIds.size();
         const int remain = city.targetCount - assigned;
+        if (remain <= 0)
+          continue;
         if (!best || remain > bestRemain ||
             (remain == bestRemain && assigned < bestAssigned) ||
             (remain == bestRemain && assigned == bestAssigned &&
@@ -2424,64 +2426,8 @@ namespace DX11Base {
         }
       }
 
-      // 태수 후보는 충성도 100만 허용한다. 군사는 신분 유지 대상이라 제외한다.
-      std::vector<const CityOfficerRow *> governorPool;
-      for (const auto &row : s_corpsOfficerRows) {
-        if ((row.status == 0x28 || row.status == 0xE8) &&
-            row.loyalty == 100) {
-          governorPool.push_back(&row);
-        }
-      }
-
-      auto assignGovernorsForSide = [&](bool frontline) {
-        std::vector<CorpsDeploymentCityRecommendation *> cities;
-        for (auto &city : s_corpsDeploymentCities) {
-          if (city.frontline == frontline &&
-              city.recommendedGovernorId == 0 &&
-              city.targetCount > 0) {
-            cities.push_back(&city);
-          }
-        }
-
-        // 전선은 통솔+무력, 후방은 정치+매력 합이 높은 후보부터 태수로 사용한다.
-        std::sort(governorPool.begin(), governorPool.end(),
-                  [&](const CityOfficerRow *a, const CityOfficerRow *b) {
-                    const int as = GetGovernorScore(*a, frontline);
-                    const int bs = GetGovernorScore(*b, frontline);
-                    if (as != bs)
-                      return as > bs;
-                    if (a->loyalty != b->loyalty)
-                      return a->loyalty > b->loyalty;
-                    return a->id < b->id;
-                  });
-
-        for (auto *city : cities) {
-          const CityOfficerRow *chosen = nullptr;
-          for (const CityOfficerRow *row : governorPool) {
-            if (!row || isUsed(row->id))
-              continue;
-            chosen = row;
-            break;
-          }
-          if (!chosen)
-            continue;
-
-          const int currentCity =
-              GetOfficerCurrentCityIndex(shiftedCityBase, *chosen);
-          city->recommendedGovernorId = chosen->id;
-          city->governorScore = GetGovernorScore(*chosen, frontline);
-          AddOfficerDeploymentRecommendation(
-              *chosen, currentCity, city->cityIndex, true,
-              frontline ? u8"충성100 · 전선 태수(통솔+무력)"
-                        : u8"충성100 · 후방 태수(정치+매력)");
-        }
-      };
-
-      // 전선 태수를 먼저 확보한 뒤 후방 태수를 정한다.
-      assignGovernorsForSide(true);
-      assignGovernorsForSide(false);
-
-      // 충성도 90 미만은 무조건 후방. 군사는 그 다음 우선순위로 전선 배치.
+      // 먼저 전선/후방 배치를 끝낸 뒤, 각 도시 안에서 충성 100 태수를 고른다.
+      // 태수를 먼저 뽑아 후방으로 보내면서 전투형 장수가 전선에서 밀리는 문제를 막는다.
       std::vector<const CityOfficerRow *> forcedRear;
       std::vector<const CityOfficerRow *> advisersFront;
       std::vector<const CityOfficerRow *> flexible;
@@ -2501,12 +2447,83 @@ namespace DX11Base {
           flexible.push_back(&row);
       }
 
+      auto countRemainingSlots = [&](bool frontline) {
+        int slots = 0;
+        for (const auto &city : s_corpsDeploymentCities) {
+          if (city.frontline != frontline)
+            continue;
+          slots += (std::max)(
+              0, city.targetCount -
+                     (int)city.recommendedOfficerIds.size());
+        }
+        return slots;
+      };
+
+      // 충성 90 미만은 후방 고정이 절대 규칙이다.
+      // 현재 목표 인원으로 후방 자리가 부족하면 전선 목표 인원 일부를 후방으로 옮긴다.
+      int rearNeed = (int)forcedRear.size();
+      while (countRemainingSlots(false) < rearNeed) {
+        CorpsDeploymentCityRecommendation *donor = nullptr;
+        CorpsDeploymentCityRecommendation *receiver = nullptr;
+
+        // 가능하면 전선 도시를 비우지 않는 선에서 한 자리만 넘긴다.
+        for (auto &city : s_corpsDeploymentCities) {
+          if (!city.frontline)
+            continue;
+          const int assigned =
+              (int)city.recommendedOfficerIds.size();
+          if (city.targetCount <= assigned ||
+              city.targetCount <= 1)
+            continue;
+          if (!donor || city.targetCount > donor->targetCount)
+            donor = &city;
+        }
+
+        // 그래도 부족하면 고정 배치 인원보다 많은 전선 자리에서 가져온다.
+        if (!donor) {
+          for (auto &city : s_corpsDeploymentCities) {
+            if (!city.frontline)
+              continue;
+            const int assigned =
+                (int)city.recommendedOfficerIds.size();
+            if (city.targetCount <= assigned)
+              continue;
+            if (!donor || city.targetCount > donor->targetCount)
+              donor = &city;
+          }
+        }
+
+        for (auto &city : s_corpsDeploymentCities) {
+          if (city.frontline)
+            continue;
+          if (!receiver ||
+              city.targetCount < receiver->targetCount ||
+              (city.targetCount == receiver->targetCount &&
+               city.cityIndex < receiver->cityIndex))
+            receiver = &city;
+        }
+
+        if (!donor || !receiver)
+          break;
+
+        --donor->targetCount;
+        ++receiver->targetCount;
+      }
+
+      // 위에서 목표 인원을 조정했을 수 있으므로 이번 평정 기준도 최종값으로 갱신한다.
+      CaptureCorpsDeploymentTargetBaseline(
+          s_officerSelectedCorpsPtr, s_corpsDeploymentCities);
+
       std::sort(forcedRear.begin(), forcedRear.end(),
-                [](const CityOfficerRow *a, const CityOfficerRow *b) {
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
                   if (a->loyalty != b->loyalty)
                     return a->loyalty < b->loyalty;
-                  return GetRearDeploymentScore(*a) >
-                         GetRearDeploymentScore(*b);
+                  const int as = GetRearDeploymentScore(*a);
+                  const int bs = GetRearDeploymentScore(*b);
+                  if (as != bs)
+                    return as > bs;
+                  return a->id < b->id;
                 });
 
       for (const CityOfficerRow *row : forcedRear) {
@@ -2520,8 +2537,10 @@ namespace DX11Base {
             u8"충성 90 미만 · 후방 보호");
       }
 
+      // 군사는 신분을 유지하면서 지력 높은 순으로 전선 자리를 우선 사용한다.
       std::sort(advisersFront.begin(), advisersFront.end(),
-                [](const CityOfficerRow *a, const CityOfficerRow *b) {
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
                   if (a->intel != b->intel)
                     return a->intel > b->intel;
                   return a->id < b->id;
@@ -2530,61 +2549,273 @@ namespace DX11Base {
       for (const CityOfficerRow *row : advisersFront) {
         const int currentCity =
             GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+
+        bool toFront = true;
         int targetCity = PickDeploymentCity(true);
-        if (targetCity < 0)
-          targetCity = currentCity;
-        AddOfficerDeploymentRecommendation(
-            *row, currentCity, targetCity, false,
-            u8"군사 유지 · 지력 우선 전선");
-      }
-
-      // 남은 무장은 전선 적성 - 후방 적성 차가 큰 순서로 정렬한다.
-      std::sort(flexible.begin(), flexible.end(),
-                [](const CityOfficerRow *a, const CityOfficerRow *b) {
-                  const int ad = GetFrontDeploymentScore(*a) -
-                                 GetRearDeploymentScore(*a);
-                  const int bd = GetFrontDeploymentScore(*b) -
-                                 GetRearDeploymentScore(*b);
-                  if (ad != bd)
-                    return ad > bd;
-                  return a->id < b->id;
-                });
-
-      int frontRemaining = 0;
-      for (const auto &city : s_corpsDeploymentCities) {
-        if (!city.frontline)
-          continue;
-        frontRemaining +=
-            (std::max)(0, city.targetCount -
-                              (int)city.recommendedOfficerIds.size());
-      }
-
-      for (size_t i = 0; i < flexible.size(); ++i) {
-        const CityOfficerRow *row = flexible[i];
-        const int currentCity =
-            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
-
-        bool toFront = frontRemaining > 0;
-        int targetCity = PickDeploymentCity(toFront);
         if (targetCity < 0) {
-          toFront = !toFront;
-          targetCity = PickDeploymentCity(toFront);
+          toFront = false;
+          targetCity = PickDeploymentCity(false);
         }
         if (targetCity < 0)
           targetCity = currentCity;
 
-        if (toFront && frontRemaining > 0)
-          --frontRemaining;
+        AddOfficerDeploymentRecommendation(
+            *row, currentCity, targetCity, false,
+            toFront ? u8"군사 유지 · 지력 우선 전선"
+                    : u8"군사 유지 · 전선 자리 부족");
+      }
 
-        const int frontScore = GetFrontDeploymentScore(*row);
-        const int rearScore = GetRearDeploymentScore(*row);
+      // 남은 일반/태수 신분 장수는 먼저 전선 인원수를 확정한다.
+      // 전선 자리는 전선 점수 자체가 높은 장수부터 채우므로,
+      // 후방 태수 선발 때문에 하후돈 같은 전투형 장수가 밀리지 않는다.
+      std::sort(flexible.begin(), flexible.end(),
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
+                  const int af = GetFrontDeploymentScore(*a);
+                  const int bf = GetFrontDeploymentScore(*b);
+                  if (af != bf)
+                    return af > bf;
+
+                  const int ac =
+                      (int)a->lead + (int)a->war;
+                  const int bc =
+                      (int)b->lead + (int)b->war;
+                  if (ac != bc)
+                    return ac > bc;
+                  return a->id < b->id;
+                });
+
+      int frontRemaining = countRemainingSlots(true);
+      const size_t frontTake =
+          (std::min)((size_t)(std::max)(0, frontRemaining),
+                     flexible.size());
+
+      std::vector<const CityOfficerRow *> rearFlexible;
+      rearFlexible.reserve(flexible.size() - frontTake);
+
+      for (size_t i = 0; i < flexible.size(); ++i) {
+        const CityOfficerRow *row = flexible[i];
+        if (i >= frontTake) {
+          rearFlexible.push_back(row);
+          continue;
+        }
+
+        const int currentCity =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+        bool toFront = true;
+        int targetCity = PickDeploymentCity(true);
+        if (targetCity < 0) {
+          toFront = false;
+          targetCity = PickDeploymentCity(false);
+        }
+        if (targetCity < 0)
+          targetCity = currentCity;
+
         AddOfficerDeploymentRecommendation(
             *row, currentCity, targetCity, false,
             toFront
-                ? (row->intel * 2 >= (int)row->lead + (int)row->war
+                ? (row->intel * 2 >=
+                           (int)row->lead + (int)row->war
                        ? u8"전선 · 지력 적성"
                        : u8"전선 · 통솔/무력 적성")
+                : u8"후방 · 전선 자리 부족");
+      }
+
+      // 전선에 들어가지 않은 장수는 정치+매력 순으로 후방 도시에 배치한다.
+      std::sort(rearFlexible.begin(), rearFlexible.end(),
+                [](const CityOfficerRow *a,
+                   const CityOfficerRow *b) {
+                  const int ar = GetRearDeploymentScore(*a);
+                  const int br = GetRearDeploymentScore(*b);
+                  if (ar != br)
+                    return ar > br;
+                  return a->id < b->id;
+                });
+
+      for (const CityOfficerRow *row : rearFlexible) {
+        const int currentCity =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+        bool toFront = false;
+        int targetCity = PickDeploymentCity(false);
+        if (targetCity < 0) {
+          toFront = true;
+          targetCity = PickDeploymentCity(true);
+        }
+        if (targetCity < 0)
+          targetCity = currentCity;
+
+        AddOfficerDeploymentRecommendation(
+            *row, currentCity, targetCity, false,
+            toFront
+                ? u8"전선 · 후방 자리 부족"
                 : u8"후방 · 정치/매력 적성");
+      }
+
+      auto findDeploymentRec =
+          [&](uint16_t id)
+              -> CorpsDeploymentOfficerRecommendation * {
+        for (auto &rec : s_corpsDeploymentOfficers) {
+          if (rec.id == id)
+            return &rec;
+        }
+        return nullptr;
+      };
+
+      auto isGovernorEligible = [&](uint16_t id) {
+        const CityOfficerRow *row =
+            FindCorpsOfficerByRecId(id);
+        return row &&
+               (row->status == 0x28 ||
+                row->status == 0xE8) &&
+               row->loyalty == 100;
+      };
+
+      auto countCityGovernorEligible =
+          [&](const CorpsDeploymentCityRecommendation &city) {
+        int count = 0;
+        for (uint16_t id : city.recommendedOfficerIds) {
+          if (isGovernorEligible(id))
+            ++count;
+        }
+        return count;
+      };
+
+      // 같은 전선/후방 안에서는 가능하면 모든 도시에 충성100 태수 후보를 한 명씩 확보한다.
+      // 이미 군주/도독이 책임자인 도시는 별도 태수 후보가 필요 없다.
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.targetCount <= 0 ||
+            city.recommendedGovernorId != 0 ||
+            countCityGovernorEligible(city) > 0)
+          continue;
+
+        uint16_t swapOutId = 0;
+        for (uint16_t id : city.recommendedOfficerIds) {
+          const CityOfficerRow *row =
+              FindCorpsOfficerByRecId(id);
+          if (!row)
+            continue;
+          if (row->status == 0x18 ||
+              row->status == 0x28 ||
+              row->status == 0xE8) {
+            swapOutId = id;
+            break;
+          }
+        }
+        if (!swapOutId)
+          continue;
+
+        CorpsDeploymentCityRecommendation *donorCity = nullptr;
+        uint16_t donorId = 0;
+        int donorScore = -1;
+
+        for (auto &candidateCity :
+             s_corpsDeploymentCities) {
+          if (candidateCity.cityIndex == city.cityIndex ||
+              candidateCity.frontline != city.frontline)
+            continue;
+
+          const bool donorNeedsOwnGovernor =
+              candidateCity.targetCount > 0 &&
+              candidateCity.recommendedGovernorId == 0;
+          const int eligibleCount =
+              countCityGovernorEligible(candidateCity);
+          if (donorNeedsOwnGovernor &&
+              eligibleCount <= 1)
+            continue;
+
+          for (uint16_t id :
+               candidateCity.recommendedOfficerIds) {
+            if (!isGovernorEligible(id))
+              continue;
+
+            const CityOfficerRow *row =
+                FindCorpsOfficerByRecId(id);
+            if (!row)
+              continue;
+
+            const int score =
+                GetGovernorScore(*row, city.frontline);
+            if (!donorCity || score > donorScore ||
+                (score == donorScore && id < donorId)) {
+              donorCity = &candidateCity;
+              donorId = id;
+              donorScore = score;
+            }
+          }
+        }
+
+        if (!donorCity || !donorId)
+          continue;
+
+        auto cityIt = std::find(
+            city.recommendedOfficerIds.begin(),
+            city.recommendedOfficerIds.end(),
+            swapOutId);
+        auto donorIt = std::find(
+            donorCity->recommendedOfficerIds.begin(),
+            donorCity->recommendedOfficerIds.end(),
+            donorId);
+        if (cityIt == city.recommendedOfficerIds.end() ||
+            donorIt == donorCity->recommendedOfficerIds.end())
+          continue;
+
+        *cityIt = donorId;
+        *donorIt = swapOutId;
+
+        CorpsDeploymentOfficerRecommendation *donorRec =
+            findDeploymentRec(donorId);
+        CorpsDeploymentOfficerRecommendation *swapRec =
+            findDeploymentRec(swapOutId);
+        if (donorRec)
+          donorRec->recommendedCityIndex = city.cityIndex;
+        if (swapRec)
+          swapRec->recommendedCityIndex =
+              donorCity->cityIndex;
+      }
+
+      // 모든 배치가 끝난 뒤 각 도시 안에서 태수를 고른다.
+      // 전선은 통솔+무력, 후방은 정치+매력, 충성도는 반드시 100.
+      for (auto &city : s_corpsDeploymentCities) {
+        if (city.targetCount <= 0 ||
+            city.recommendedGovernorId != 0)
+          continue;
+
+        const CityOfficerRow *chosen = nullptr;
+        int chosenScore = -1;
+
+        for (uint16_t id : city.recommendedOfficerIds) {
+          const CityOfficerRow *row =
+              FindCorpsOfficerByRecId(id);
+          if (!row ||
+              (row->status != 0x28 &&
+               row->status != 0xE8) ||
+              row->loyalty != 100)
+            continue;
+
+          const int score =
+              GetGovernorScore(*row, city.frontline);
+          if (!chosen || score > chosenScore ||
+              (score == chosenScore && row->id < chosen->id)) {
+            chosen = row;
+            chosenScore = score;
+          }
+        }
+
+        if (!chosen)
+          continue;
+
+        city.recommendedGovernorId = chosen->id;
+        city.governorScore = chosenScore;
+
+        CorpsDeploymentOfficerRecommendation *rec =
+            findDeploymentRec(chosen->id);
+        if (rec) {
+          rec->recommendedGovernor = true;
+          rec->reason =
+              city.frontline
+                  ? u8"충성100 · 전선 배치 후 태수(통솔+무력)"
+                  : u8"충성100 · 후방 배치 후 태수(정치+매력)";
+        }
       }
 
       // 같은 도시 안에서는 태수 -> 군사 -> 나머지 순으로 보여준다.
