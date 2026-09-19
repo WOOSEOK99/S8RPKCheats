@@ -324,4 +324,54 @@ namespace DX11Base {
         }
     }
 
+    void RunResonanceDebugPoll() {
+        static uint16_t s_lastLoggedTargetId = 0;
+        const uint16_t targetId = g_resonanceThreeTargetId;
+
+        if (!bResonanceThree || targetId == 0 || targetId == s_lastLoggedTargetId)
+            return;
+
+        s_lastLoggedTargetId = targetId;
+
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        if (!exeBase) {
+            AddLog(u8"[Resonance3Debug] TargetID=%u / exeBase 없음", targetId);
+            return;
+        }
+
+        int32_t map368 = -999999;
+        int32_t map369 = -999999;
+        bool ok368 = false;
+        bool ok369 = false;
+
+        __try {
+            uintptr_t root368 = *(uintptr_t*)(exeBase + 0x2E98BC8);
+            if (root368 > 0x10000) {
+                map368 = *(int32_t*)(root368 + (uintptr_t)targetId * 4 + 0x226078);
+                ok368 = true;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+
+        __try {
+            uintptr_t root369 = *(uintptr_t*)(exeBase + 0x2E65AF8);
+            if (root369 > 0x10000) {
+                map369 = *(int32_t*)(root369 + (uintptr_t)targetId * 4 + 0x226060);
+                ok369 = true;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+
+        AddLog(u8"[Resonance3Debug] TargetID=%u Armed=%u | CT368 map=%s%d | CT369 map=%s%d",
+               targetId,
+               (unsigned)g_resonanceThreeArmed,
+               ok368 ? "" : "ERR:", map368,
+               ok369 ? "" : "ERR:", map369);
+
+        if (ok368 && map368 == -1)
+            AddLog(u8"[Resonance3Debug] ID %u: CT368 경로는 공명 슬롯 없음(-1)", targetId);
+        if (ok369 && map369 == -1)
+            AddLog(u8"[Resonance3Debug] ID %u: CT369 경로는 공명 슬롯 없음(-1)", targetId);
+    }
+
 }
