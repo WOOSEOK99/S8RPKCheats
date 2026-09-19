@@ -2,13 +2,15 @@
 #include "ChildEarlyAppearance.h"
 #include "../../Cheats.h"
 #include "../../MemoryUtils.h"
-#include "../../MenuState.h"
+#include "../../Cheats/System/MonthCapture.h"
+#include "../../Cheats/Officer/OfficerData.h"
 #include "../../showlog.h"
 
 #include <psapi.h>
+#include <algorithm>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
-#include <unordered_set>
 
 namespace DX11Base {
 namespace {
@@ -16,28 +18,33 @@ namespace {
 static uintptr_t g_childHookAddr = 0;
 static uintptr_t g_childCaveAddr = 0;
 static uint8_t g_childOriginal[7] = {};
-static bool g_childApplied = false;
+static bool g_childCaptureApplied = false;
 
-// 자녀 처리 훅에서 주소만 빠르게 적재하고, 실제 필드 읽기/로그는 메인 스레드에서 수행합니다.
-static constexpr int kChildDebugRingSize = 32;
-static uintptr_t g_childDebugAddrRing[kChildDebugRingSize] = {};
-static volatile LONG g_childDebugWriteIndex = 0;
-static int g_childDebugReadIndex = 0;
-static std::unordered_set<uintptr_t> g_childDebugSeen;
+static constexpr int kChildRingSize = 64;
+static uintptr_t g_childAddrRing[kChildRingSize] = {};
+static volatile LONG g_childWriteIndex = 0;
+static int g_childReadIndex = 0;
 
-// MonthCapture.cpp와 동일한 시나리오 연도 경로.
-static constexpr uintptr_t kScenarioInstanceStaticOffset = 0x2E98BC8;
-static constexpr uintptr_t kScenarioYearOffset = 0x72D0;
+struct ChildEntry {
+  uint16_t id = 0;
+  uintptr_t addr = 0;
+  bool selected = false;
+  int yearsLater = 3;
+  uint16_t appearanceYear = 0;
+  uint16_t birthYear = 0;
+  uint16_t deathYear = 0;
+  uint16_t appliedTargetYear = 0;
+};
+
+static std::unordered_map<uint16_t, ChildEntry> g_children;
 
 static bool GetModuleRange(uintptr_t& begin, uintptr_t& end) {
   begin = (uintptr_t)GetModuleHandle(nullptr);
   if (!begin)
     return false;
-
   MODULEINFO mi{};
   if (!GetModuleInformation(GetCurrentProcess(), (HMODULE)begin, &mi, sizeof(mi)))
     return false;
-
   end = begin + mi.SizeOfImage;
   return end > begin;
 }
@@ -46,121 +53,48 @@ static void Emit8(std::vector<uint8_t>& code, uint8_t v) {
   code.push_back(v);
 }
 
-static void Emit16(std::vector<uint8_t>& code, uint16_t v) {
-  const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
-  code.insert(code.end(), p, p + sizeof(v));
-}
-
 static void Emit64(std::vector<uint8_t>& code, uintptr_t v) {
   const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
   code.insert(code.end(), p, p + sizeof(v));
 }
 
-static bool PatchRel8(std::vector<uint8_t>& code, size_t dispPos, size_t targetPos) {
-  const ptrdiff_t rel = (ptrdiff_t)targetPos - (ptrdiff_t)(dispPos + 1);
-  if (rel < -128 || rel > 127)
-    return false;
-  code[dispPos] = (uint8_t)(int8_t)rel;
-  return true;
-}
-
-static bool InstallChildCave(uintptr_t hookAddr) {
-  g_childCaveAddr = AllocNear(hookAddr, 256);
+static bool InstallCaptureCave(uintptr_t hookAddr) {
+  g_childCaveAddr = AllocNear(hookAddr, 160);
   if (!g_childCaveAddr)
     return false;
 
   std::vector<uint8_t> code;
-  code.reserve(192);
+  code.reserve(128);
 
-  // Original: mov rax,[rbp+000001C0]
-  code.insert(code.end(), g_childOriginal,
-              g_childOriginal + sizeof(g_childOriginal));
+  // 원본: mov rax,[rbp+000001C0]
+  code.insert(code.end(), g_childOriginal, g_childOriginal + sizeof(g_childOriginal));
 
-  // 원본 mov 명령은 FLAGS를 변경하지 않으므로 사용자 로직도 FLAGS까지 보존합니다.
+  // 원본 mov은 FLAGS를 변경하지 않으므로 캡처 코드도 상태를 모두 보존.
   Emit8(code, 0x9C); // pushfq
-  Emit8(code, 0x53); // push rbx
   Emit8(code, 0x51); // push rcx
   Emit8(code, 0x52); // push rdx
 
-  // [ChildDebug] 현재 처리 중인 레코드 주소(RAX)를 32칸 링버퍼에 저장.
-  // next = (writeIndex + 1) & 31
+  // next = (writeIndex + 1) & 63
   Emit8(code, 0x48); Emit8(code, 0xBA);
-  Emit64(code, (uintptr_t)&g_childDebugWriteIndex); // mov rdx,&writeIndex
+  Emit64(code, (uintptr_t)&g_childWriteIndex);
   Emit8(code, 0x8B); Emit8(code, 0x0A);             // mov ecx,[rdx]
   Emit8(code, 0xFF); Emit8(code, 0xC1);             // inc ecx
-  Emit8(code, 0x83); Emit8(code, 0xE1); Emit8(code, 0x1F); // and ecx,31
+  Emit8(code, 0x83); Emit8(code, 0xE1); Emit8(code, 0x3F); // and ecx,63
 
   Emit8(code, 0x48); Emit8(code, 0xBA);
-  Emit64(code, (uintptr_t)&g_childDebugAddrRing[0]); // mov rdx,&ring[0]
+  Emit64(code, (uintptr_t)&g_childAddrRing[0]);
   Emit8(code, 0x48); Emit8(code, 0x89); Emit8(code, 0x04); Emit8(code, 0xCA);
   // mov [rdx+rcx*8],rax
 
   Emit8(code, 0x48); Emit8(code, 0xBA);
-  Emit64(code, (uintptr_t)&g_childDebugWriteIndex); // mov rdx,&writeIndex
+  Emit64(code, (uintptr_t)&g_childWriteIndex);
   Emit8(code, 0x89); Emit8(code, 0x0A);             // mov [rdx],ecx
 
-  // 현재 연도는 레지스터를 추정하지 않고 MonthCapture.cpp와 동일한
-  // 시나리오 데이터 인스턴스 + 0x72D0에서 직접 읽습니다.
-  // mov rdx, exeBase + kScenarioInstanceStaticOffset
-  Emit8(code, 0x48); Emit8(code, 0xBA);
-  Emit64(code, (uintptr_t)GetModuleHandle(nullptr) + kScenarioInstanceStaticOffset);
-  // mov rdx,[rdx]
-  Emit8(code, 0x48); Emit8(code, 0x8B); Emit8(code, 0x12);
-  // test rdx,rdx / jz end
-  Emit8(code, 0x48); Emit8(code, 0x85); Emit8(code, 0xD2);
-  Emit8(code, 0x74); const size_t jNoScenario = code.size(); Emit8(code, 0x00);
-  // movzx ebx,word ptr [rdx+72D0]
-  Emit8(code, 0x0F); Emit8(code, 0xB7); Emit8(code, 0x9A);
-  code.push_back(0xD0); code.push_back(0x72); code.push_back(0x00); code.push_back(0x00);
-
-  // cmp bx,170 / jbe end
-  Emit8(code, 0x66); Emit8(code, 0x81); Emit8(code, 0xFB); Emit16(code, 170);
-  Emit8(code, 0x76); const size_t jYearLow = code.size(); Emit8(code, 0x00);
-
-  // cmp bx,270 / jae end
-  Emit8(code, 0x66); Emit8(code, 0x81); Emit8(code, 0xFB); Emit16(code, 270);
-  Emit8(code, 0x73); const size_t jYearHigh = code.size(); Emit8(code, 0x00);
-
-  // mov rdx,&vChildEarlyAppearanceYears / mov edx,[rdx]
-  Emit8(code, 0x48); Emit8(code, 0xBA);
-  Emit64(code, (uintptr_t)&vChildEarlyAppearanceYears);
-  Emit8(code, 0x8B); Emit8(code, 0x12);
-
-  // xor rcx,rcx
-  Emit8(code, 0x48); Emit8(code, 0x31); Emit8(code, 0xC9);
-
-  // cx = appearance year; if appearance-N <= current year, already close enough => skip
-  // mov cx,[rax+32]
-  Emit8(code, 0x66); Emit8(code, 0x8B); Emit8(code, 0x48); Emit8(code, 0x32);
-  // sub cx,dx
-  Emit8(code, 0x66); Emit8(code, 0x2B); Emit8(code, 0xCA);
-  // cmp cx,bx / jbe end
-  Emit8(code, 0x66); Emit8(code, 0x3B); Emit8(code, 0xCB);
-  Emit8(code, 0x76); const size_t jAlreadyClose = code.size(); Emit8(code, 0x00);
-
-  // appearance year = current year + N
-  // 중요: 테스트 버전에서는 출생년도(+0x34)와 사망년도(+0x36)를 절대 수정하지 않습니다.
-  // 실제 나이 데이터는 그대로 두고 등장년도(+0x32)만 앞당깁니다.
-  Emit8(code, 0x66); Emit8(code, 0x8B); Emit8(code, 0xCB); // mov cx,bx
-  Emit8(code, 0x66); Emit8(code, 0x03); Emit8(code, 0xCA); // add cx,dx
-  Emit8(code, 0x66); Emit8(code, 0x89); Emit8(code, 0x48); Emit8(code, 0x32);
-
-  const size_t endPos = code.size();
   Emit8(code, 0x5A); // pop rdx
   Emit8(code, 0x59); // pop rcx
-  Emit8(code, 0x5B); // pop rbx
   Emit8(code, 0x9D); // popfq
 
-  if (!PatchRel8(code, jNoScenario, endPos) ||
-      !PatchRel8(code, jYearLow, endPos) ||
-      !PatchRel8(code, jYearHigh, endPos) ||
-      !PatchRel8(code, jAlreadyClose, endPos)) {
-    VirtualFree((LPVOID)g_childCaveAddr, 0, MEM_RELEASE);
-    g_childCaveAddr = 0;
-    return false;
-  }
-
-  // Absolute return jump: jmp qword ptr [rip+0]
+  // absolute return jump
   Emit8(code, 0xFF); Emit8(code, 0x25);
   Emit8(code, 0x00); Emit8(code, 0x00); Emit8(code, 0x00); Emit8(code, 0x00);
   Emit64(code, hookAddr + sizeof(g_childOriginal));
@@ -173,107 +107,245 @@ static bool InstallChildCave(uintptr_t hookAddr) {
     g_childCaveAddr = 0;
     return false;
   }
-
-  FlushInstructionCache(GetCurrentProcess(), (LPCVOID)hookAddr,
-                        sizeof(g_childOriginal));
   return true;
+}
+
+static bool RefreshChild(ChildEntry& e) {
+  if (!e.addr || !IsValidPtr(e.addr, 0x38))
+    return false;
+  __try {
+    const uint16_t id = *(uint16_t*)(e.addr + 0x08);
+    if (id != e.id)
+      return false;
+    e.appearanceYear = *(uint16_t*)(e.addr + 0x32);
+    e.birthYear = *(uint16_t*)(e.addr + 0x34);
+    e.deathYear = *(uint16_t*)(e.addr + 0x36);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static bool ApplyChildSchedule(ChildEntry& e) {
+  if (!e.addr || !IsValidPtr(e.addr, 0x38))
+    return false;
+
+  unsigned short currentYear = 0;
+  if (!ReadScenarioYear(&currentYear) || currentYear < 171 || currentYear >= 270)
+    return false;
+
+  e.yearsLater = (std::max)(1, (std::min)(10, e.yearsLater));
+  const uint16_t targetAppearance = (uint16_t)(currentYear + e.yearsLater);
+  if (targetAppearance >= 270)
+    return false;
+
+  const uint16_t targetBirth = (uint16_t)(targetAppearance - 15);
+
+  __try {
+    if (*(uint16_t*)(e.addr + 0x08) != e.id)
+      return false;
+
+    DWORD oldProt = 0, tmp = 0;
+    if (!VirtualProtect((LPVOID)(e.addr + 0x32), 4, PAGE_READWRITE, &oldProt))
+      return false;
+
+    *(uint16_t*)(e.addr + 0x32) = targetAppearance;
+    *(uint16_t*)(e.addr + 0x34) = targetBirth;
+
+    VirtualProtect((LPVOID)(e.addr + 0x32), 4, oldProt, &tmp);
+    e.appearanceYear = targetAppearance;
+    e.birthYear = targetBirth;
+    e.appliedTargetYear = targetAppearance;
+
+    AddLog(u8"[ChildManager] ID %u 임관 예약: %u년 (출생 %u년, %d년 후)",
+           e.id, targetAppearance, targetBirth, e.yearsLater);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
 }
 
 } // namespace
 
-void RunChildDebugLog() {
-  const int writeIndex = (int)g_childDebugWriteIndex;
+void EnsureChildManagerCapture() {
+  if (g_childCaptureApplied)
+    return;
 
-  int guard = 0;
-  while (g_childDebugReadIndex != writeIndex && guard++ < kChildDebugRingSize) {
-    g_childDebugReadIndex = (g_childDebugReadIndex + 1) & (kChildDebugRingSize - 1);
-    const uintptr_t addr = g_childDebugAddrRing[g_childDebugReadIndex];
+  uintptr_t begin = 0, end = 0;
+  if (!GetModuleRange(begin, end))
+    return;
 
-    if (!addr || g_childDebugSeen.find(addr) != g_childDebugSeen.end())
-      continue;
-    if (!IsValidPtr(addr, 0x38))
-      continue;
-
-    g_childDebugSeen.insert(addr);
-
-    const uint16_t v00 = *(uint16_t *)(addr + 0x00);
-    const uint16_t v02 = *(uint16_t *)(addr + 0x02);
-    const uint16_t v04 = *(uint16_t *)(addr + 0x04);
-    const uint16_t v06 = *(uint16_t *)(addr + 0x06);
-    const uint16_t v08 = *(uint16_t *)(addr + 0x08);
-    const uint16_t v0A = *(uint16_t *)(addr + 0x0A);
-    const uint16_t v0C = *(uint16_t *)(addr + 0x0C);
-    const uint16_t v0E = *(uint16_t *)(addr + 0x0E);
-    const uint16_t v2C = *(uint16_t *)(addr + 0x2C);
-    const uint16_t v2E = *(uint16_t *)(addr + 0x2E);
-    const uint16_t appearance = *(uint16_t *)(addr + 0x32);
-    const uint16_t birth = *(uint16_t *)(addr + 0x34);
-    const uint16_t death = *(uint16_t *)(addr + 0x36);
-
-    AddLog(u8"[ChildDebug] addr=%p | +00=%u +02=%u +04=%u +06=%u +08=%u +0A=%u +0C=%u +0E=%u",
-           (void *)addr, v00, v02, v04, v06, v08, v0A, v0C, v0E);
-    AddLog(u8"[ChildDebug] +2C=%u +2E=%u | 등장(+32)=%u 출생(+34)=%u 사망(+36)=%u",
-           v2C, v2E, appearance, birth, death);
+  if (!g_childHookAddr) {
+    g_childHookAddr = FindPattern(
+        begin, end,
+        "48 8B 85 C0 01 00 00 0F B7 58 34 E8 1D");
   }
+
+  if (!g_childHookAddr) {
+    AddLog(u8"[ChildManager] 자녀 처리 패턴을 찾지 못했습니다.");
+    return;
+  }
+
+  memcpy(g_childOriginal, (const void*)g_childHookAddr, sizeof(g_childOriginal));
+  if (!InstallCaptureCave(g_childHookAddr)) {
+    AddLog(u8"[ChildManager] 자녀 목록 캡처 훅 설치 실패");
+    return;
+  }
+
+  g_childReadIndex = (int)g_childWriteIndex;
+  g_childCaptureApplied = true;
+  AddLog(u8"[ChildManager] 자녀 목록 감시 시작");
 }
 
-void SetChildEarlyAppearance(bool enable) {
-  if (vChildEarlyAppearanceYears < 1)
-    vChildEarlyAppearanceYears = 1;
-  if (vChildEarlyAppearanceYears > 10)
-    vChildEarlyAppearanceYears = 10;
+void RunChildManagerUpdate() {
+  if (!g_childCaptureApplied)
+    return;
 
-  if (enable) {
-    if (g_childApplied)
-      return;
+  const int writeIndex = (int)g_childWriteIndex;
+  int guard = 0;
+  while (g_childReadIndex != writeIndex && guard++ < kChildRingSize) {
+    g_childReadIndex = (g_childReadIndex + 1) & (kChildRingSize - 1);
+    const uintptr_t addr = g_childAddrRing[g_childReadIndex];
 
-    g_childDebugSeen.clear();
-    g_childDebugReadIndex = (int)g_childDebugWriteIndex;
+    if (!addr || !IsValidPtr(addr, 0x38))
+      continue;
 
-    uintptr_t begin = 0, end = 0;
-    if (!GetModuleRange(begin, end)) {
-      AddLog(u8"[Children] 모듈 범위 확인 실패");
-      return;
+    uint16_t id = 0;
+    uint16_t appearance = 0;
+    uint16_t birth = 0;
+    uint16_t death = 0;
+    __try {
+      id = *(uint16_t*)(addr + 0x08);
+      appearance = *(uint16_t*)(addr + 0x32);
+      birth = *(uint16_t*)(addr + 0x34);
+      death = *(uint16_t*)(addr + 0x36);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      continue;
     }
 
-    if (!g_childHookAddr) {
-      g_childHookAddr = FindPattern(
-          begin, end,
-          "48 8B 85 C0 01 00 00 0F B7 58 34 E8 1D");
+    if (id < 1 || id > 5102)
+      continue;
+
+    auto it = g_children.find(id);
+    if (it == g_children.end()) {
+      ChildEntry e;
+      e.id = id;
+      e.addr = addr;
+      e.appearanceYear = appearance;
+      e.birthYear = birth;
+      e.deathYear = death;
+      g_children.emplace(id, e);
+      AddLog(u8"[ChildManager] 자녀 감지: ID %u (등장 %u / 출생 %u / 사망 %u)",
+             id, appearance, birth, death);
+    } else {
+      it->second.addr = addr;
+      RefreshChild(it->second);
     }
+  }
 
-    if (!g_childHookAddr) {
-      AddLog(u8"[Children] 자녀 조기 등장 패턴을 찾지 못했습니다.");
-      return;
-    }
+  for (auto& kv : g_children)
+    RefreshChild(kv.second);
+}
 
-    memcpy(g_childOriginal, (const void*)g_childHookAddr,
-           sizeof(g_childOriginal));
-
-    if (!InstallChildCave(g_childHookAddr)) {
-      AddLog(u8"[Children] 자녀 조기 등장 Cave 설치 실패");
-      return;
-    }
-
-    g_childApplied = true;
-    AddLog(u8"[Children] 자녀 조기 등장 적용: %d년 후 (등장년도만 변경)",
-           vChildEarlyAppearanceYears);
+void DrawChildManagerWindow(float scale) {
+  static bool open = true;
+  if (!open) {
+    open = true;
     return;
   }
 
-  if (!g_childApplied)
+  EnsureChildManagerCapture();
+  RunChildManagerUpdate();
+
+  ImGui::SetNextWindowSize(ImVec2(620.0f * scale, 330.0f * scale), ImGuiCond_FirstUseEver);
+  if (!ImGui::Begin(u8"자녀 관리###ChildManager", &open)) {
+    ImGui::End();
     return;
+  }
 
-  RestoreBytes(g_childHookAddr, g_childOriginal, sizeof(g_childOriginal));
-  FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_childHookAddr,
-                        sizeof(g_childOriginal));
+  ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                     u8"자녀 처리 루틴에서 감지된 자녀를 ID별로 표시합니다.");
+  ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1),
+                     u8"체크하거나 연수를 변경하면 그 시점 기준으로 한 번만 임관년도를 적용합니다.");
+  ImGui::Separator();
 
-  if (g_childCaveAddr)
-    VirtualFree((LPVOID)g_childCaveAddr, 0, MEM_RELEASE);
+  if (g_children.empty()) {
+    ImGui::TextUnformatted(u8"아직 감지된 자녀가 없습니다.");
+    ImGui::TextWrapped(u8"평정 진입/종료 또는 자녀 관련 처리가 발생하면 목록에 자동 추가됩니다.");
+  } else if (ImGui::BeginTable("ChildManagerTable", 7,
+                                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_SizingFixedFit)) {
+    ImGui::TableSetupColumn(u8"적용", ImGuiTableColumnFlags_WidthFixed, 45.0f * scale);
+    ImGui::TableSetupColumn(u8"자녀", ImGuiTableColumnFlags_WidthFixed, 105.0f * scale);
+    ImGui::TableSetupColumn(u8"출생", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
+    ImGui::TableSetupColumn(u8"등장", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
+    ImGui::TableSetupColumn(u8"사망", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
+    ImGui::TableSetupColumn(u8"몇 년 후", ImGuiTableColumnFlags_WidthFixed, 85.0f * scale);
+    ImGui::TableSetupColumn(u8"예약", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableHeadersRow();
 
-  g_childCaveAddr = 0;
-  g_childApplied = false;
-  AddLog(u8"[Children] 자녀 조기 등장 해제");
+    std::vector<uint16_t> ids;
+    ids.reserve(g_children.size());
+    for (const auto& kv : g_children)
+      ids.push_back(kv.first);
+    std::sort(ids.begin(), ids.end());
+
+    for (uint16_t id : ids) {
+      ChildEntry& e = g_children[id];
+      ImGui::PushID((int)id);
+      ImGui::TableNextRow();
+
+      ImGui::TableNextColumn();
+      bool selected = e.selected;
+      if (ImGui::Checkbox("##select", &selected)) {
+        e.selected = selected;
+        if (e.selected)
+          ApplyChildSchedule(e);
+      }
+
+      ImGui::TableNextColumn();
+      auto nameIt = g_officerNames.find(id);
+      if (nameIt != g_officerNames.end() && !nameIt->second.empty())
+        ImGui::Text("%s (%u)", nameIt->second.c_str(), id);
+      else
+        ImGui::Text(u8"자녀 ID %u", id);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", e.birthYear);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", e.appearanceYear);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", e.deathYear);
+
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(55.0f * scale);
+      int years = e.yearsLater;
+      if (ImGui::InputInt("##years", &years, 0, 0)) {
+        e.yearsLater = (std::max)(1, (std::min)(10, years));
+        if (e.selected)
+          ApplyChildSchedule(e);
+      }
+
+      ImGui::TableNextColumn();
+      if (e.appliedTargetYear)
+        ImGui::Text(u8"%u년", e.appliedTargetYear);
+      else
+        ImGui::TextUnformatted(u8"-");
+
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+
+  ImGui::Spacing();
+  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
+                     u8"※ 선택된 자녀만 등장년도와 출생년도를 함께 조정하며 사망년도는 변경하지 않습니다.");
+  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
+                     u8"※ 새로 태어난 자녀는 자동 감지되지만 기본값은 미선택입니다.");
+
+  ImGui::End();
 }
 
 } // namespace DX11Base
