@@ -2218,7 +2218,9 @@ namespace DX11Base {
         return false;
       };
 
-      // 도독 및 특수 신분은 현재 도시에 고정한다.
+      // 군주/도독 및 기타 특수 신분은 현재 도시에 고정한다.
+      // 군주(C8)와 도독(D8)이 있는 도시는 책임자 자리도 잠가
+      // 별도의 태수를 중복 추천하지 않는다.
       for (const auto &row : s_corpsOfficerRows) {
         if (row.status == 0x18 || row.status == 0x28 ||
             row.status == 0xE8)
@@ -2229,12 +2231,18 @@ namespace DX11Base {
         if (currentCity < 0)
           continue;
 
-        AddOfficerDeploymentRecommendation(
-            row, currentCity, currentCity,
-            row.status == 0xD8,
-            row.status == 0xD8 ? u8"도독 유지" : u8"특수 신분 유지");
+        const bool fixedLeader =
+            row.status == 0xC8 || row.status == 0xD8;
+        const char *reason =
+            row.status == 0xC8
+                ? u8"군주 고정"
+                : (row.status == 0xD8 ? u8"도독 고정"
+                                      : u8"특수 신분 유지");
 
-        if (row.status == 0xD8) {
+        AddOfficerDeploymentRecommendation(
+            row, currentCity, currentCity, fixedLeader, reason);
+
+        if (fixedLeader) {
           CorpsDeploymentCityRecommendation *city =
               FindDeploymentCity(currentCity);
           if (city) {
@@ -2595,7 +2603,10 @@ namespace DX11Base {
           ImGui::TableSetColumnIndex(5);
           ImGui::TextUnformatted(
               rec.recommendedGovernor
-                  ? (rec.status == 0xD8 ? u8"도독 유지" : u8"태수")
+                  ? (rec.status == 0xC8
+                         ? u8"군주 고정"
+                         : (rec.status == 0xD8 ? u8"도독 고정"
+                                               : u8"태수"))
                   : (rec.status == 0x18 ? u8"군사 유지" : u8"배치"));
 
           ImGui::TableSetColumnIndex(6);
