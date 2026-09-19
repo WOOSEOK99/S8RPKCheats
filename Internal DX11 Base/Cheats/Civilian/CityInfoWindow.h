@@ -10,6 +10,15 @@ namespace DX11Base {
   extern bool g_cityAutoExchangeEnabled;
   extern bool g_cityRevoltAlwaysZero;
 
+  // 군단 자동배치 설정 (설정 파일 저장 대상)
+  extern bool g_corpsAutoDeploymentEachCouncil;
+  extern int g_corpsAutoScenarioId;
+  extern int g_corpsAutoScenarioStartYear;
+  extern int g_corpsAutoScenarioStartMonth;
+  extern int g_corpsAutoForceLordId;
+  extern int g_corpsAutoCorpsNo;
+  extern int g_corpsAutoGovernorGeneralId;
+
   void DrawCityInfoWindow(uintptr_t p1, float scale);
   void RunAutoCityExchange();
   void RunYearlyRearSupport(uintptr_t p1);
