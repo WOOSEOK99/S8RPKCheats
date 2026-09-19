@@ -170,11 +170,31 @@ static void ScanCurrentHeroChildren(bool forceLog) {
     SafeReadPtr(officerBase + 0x48, &dadPtr);
     SafeReadPtr(officerBase + 0x50, &momPtr);
 
-    const bool isChild =
+    const bool hasParentLink =
         (NormalizeOfficerPtr(dadPtr) == heroNorm) ||
         (NormalizeOfficerPtr(momPtr) == heroNorm);
 
-    if (!isChild)
+    if (!hasParentLink)
+      continue;
+
+    // 일부 미사용/더미 무장 슬롯에도 혈연 포인터 값이 남아 있을 수 있습니다.
+    // 실제 자녀 후보는 정상적인 생년/등장년/몰년 데이터를 가진 레코드만 허용합니다.
+    uint16_t appearance = 0;
+    uint16_t birth = 0;
+    uint16_t death = 0;
+    if (!SafeRead16(officerBase + 0x32, &appearance) ||
+        !SafeRead16(officerBase + 0x34, &birth) ||
+        !SafeRead16(officerBase + 0x36, &death))
+      continue;
+
+    const bool hasValidLifeYears =
+        birth != 0 &&
+        appearance != 0 &&
+        death != 0 &&
+        appearance >= birth &&
+        death >= birth;
+
+    if (!hasValidLifeYears)
       continue;
 
     ChildEntry e;
