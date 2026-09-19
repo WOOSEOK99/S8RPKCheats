@@ -26,6 +26,7 @@ namespace DX11Base {
 
     static bool g_resonanceThreeCaveApplied = false;
     static volatile uint16_t g_resonanceThreeTargetId = 0;
+    static volatile uint16_t g_resonanceThreePrevTargetId = 0;
     static volatile uint8_t g_resonanceThreeArmed = 0;
 
     // CT369 실제 getter가 선택 상대에 대해 호출됐는지 확인하는 진단값.
@@ -144,33 +145,45 @@ namespace DX11Base {
     }
 
     static bool InstallResonanceThreeSelectCapture(uintptr_t hookAddr) {
-        g_resonanceThreeSelectCaveAddr = AllocNear(hookAddr, 128);
+        g_resonanceThreeSelectCaveAddr = AllocNear(hookAddr, 160);
         if (!g_resonanceThreeSelectCaveAddr)
             return false;
 
         uint8_t* cave = (uint8_t*)g_resonanceThreeSelectCaveAddr;
         int cur = 0;
 
-        // CT ID 296: interacting selection에서 RSI가 현재 상대 무장(0x3D0 레코드).
-        // 원본 플래그를 건드리지 않고 상대 ID(+0x08)를 저장하고 armed=1.
+        // CT296은 선택 장수 A 뒤에 화면 전환용 다른 레코드(예: 967)도 지나간다.
+        // 따라서 최근 2개 ID를 보관한다:
+        //   TargetId     = 가장 최근 CT296 ID
+        //   PrevTargetId = 그 직전 CT296 ID
+        // getter가 A보다 먼저 오면 TargetId로, 967 뒤에 오면 PrevTargetId로 매칭할 수 있다.
+        // 아래 명령들은 flags를 변경하지 않는다.
         cave[cur++] = 0x50; // push rax
         cave[cur++] = 0x51; // push rcx
+        cave[cur++] = 0x52; // push rdx
 
-        // movzx ecx, word ptr [rsi+08]
+        // new ID -> ecx
         cave[cur++] = 0x0F; cave[cur++] = 0xB7; cave[cur++] = 0x4E; cave[cur++] = 0x08;
 
-        // mov rax, &g_resonanceThreeTargetId
+        // old TargetId -> edx
         cave[cur++] = 0x48; cave[cur++] = 0xB8;
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTargetId; cur += 8;
-        // mov word ptr [rax], cx
+        cave[cur++] = 0x0F; cave[cur++] = 0xB7; cave[cur++] = 0x10;
+
+        // TargetId = new ID
         cave[cur++] = 0x66; cave[cur++] = 0x89; cave[cur++] = 0x08;
 
-        // mov rax, &g_resonanceThreeArmed
+        // PrevTargetId = old TargetId
+        cave[cur++] = 0x48; cave[cur++] = 0xB8;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreePrevTargetId; cur += 8;
+        cave[cur++] = 0x66; cave[cur++] = 0x89; cave[cur++] = 0x10;
+
+        // armed = 1
         cave[cur++] = 0x48; cave[cur++] = 0xB8;
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
-        // mov byte ptr [rax], 1
         cave[cur++] = 0xC6; cave[cur++] = 0x00; cave[cur++] = 0x01;
 
+        cave[cur++] = 0x5A; // pop rdx
         cave[cur++] = 0x59; // pop rcx
         cave[cur++] = 0x58; // pop rax
 
@@ -222,25 +235,35 @@ namespace DX11Base {
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeRawGetterSeq; cur += 8;
         cave[cur++] = 0x41; cave[cur++] = 0xFF; cave[cur++] = 0x03;
 
-        // mov r11, &g_resonanceThreeArmed
+        // armed != 1 이면 skipApply.
+        // 중요: 적용 코드가 길기 때문에 rel8(75 xx)이 아니라 rel32(0F 85 dword)를 사용한다.
         cave[cur++] = 0x49; cave[cur++] = 0xBB;
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
-        // cmp byte ptr [r11], 1
         cave[cur++] = 0x41; cave[cur++] = 0x80; cave[cur++] = 0x3B; cave[cur++] = 0x01;
+        cave[cur++] = 0x0F; cave[cur++] = 0x85;
+        const int jneArmedDispPos = cur; cur += 4;
 
-        // jne skipApply (rel8 patched later)
-        cave[cur++] = 0x75;
-        const int jneArmedDispPos = cur++;
-
-        // mov r11, &g_resonanceThreeTargetId
+        // getter ID(dx) == 현재 TargetId ?
         cave[cur++] = 0x49; cave[cur++] = 0xBB;
         *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTargetId; cur += 8;
-        // cmp dx, word ptr [r11]
         cave[cur++] = 0x66; cave[cur++] = 0x41; cave[cur++] = 0x3B; cave[cur++] = 0x13;
 
-        // jne skipApply
-        cave[cur++] = 0x75;
-        const int jneIdDispPos = cur++;
+        // 같으면 matchedTarget으로. 이 거리는 짧지만 일관되게 rel32 사용.
+        cave[cur++] = 0x0F; cave[cur++] = 0x84;
+        const int jeCurrentDispPos = cur; cur += 4;
+
+        // 아니면 직전 PrevTargetId와 비교.
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreePrevTargetId; cur += 8;
+        cave[cur++] = 0x66; cave[cur++] = 0x41; cave[cur++] = 0x3B; cave[cur++] = 0x13;
+
+        // 둘 다 아니면 skipApply (rel32).
+        cave[cur++] = 0x0F; cave[cur++] = 0x85;
+        const int jneIdDispPos = cur; cur += 4;
+
+        const int matchedTargetPos = cur;
+        *(int32_t*)&cave[jeCurrentDispPos] =
+            (int32_t)(matchedTargetPos - (jeCurrentDispPos + 4));
 
         // CT369 실제 getter까지 들어온 선택 상대만 진단합니다.
         // r8d = 장수ID -> 공명 슬롯 매핑 결과, [r8+rcx+dynOffset] = 실제 공명 카운트.
@@ -295,8 +318,10 @@ namespace DX11Base {
         // 교류 화면에서 상대가 바뀌면 CT296 캡처 훅이 TargetID를 새 값으로 갱신합니다.
 
         const int skipApplyPos = cur;
-        cave[jneArmedDispPos] = (uint8_t)(skipApplyPos - (jneArmedDispPos + 1));
-        cave[jneIdDispPos] = (uint8_t)(skipApplyPos - (jneIdDispPos + 1));
+        *(int32_t*)&cave[jneArmedDispPos] =
+            (int32_t)(skipApplyPos - (jneArmedDispPos + 4));
+        *(int32_t*)&cave[jneIdDispPos] =
+            (int32_t)(skipApplyPos - (jneIdDispPos + 4));
 
         cave[cur++] = 0x58;                         // pop rax
         cave[cur++] = 0x41; cave[cur++] = 0x5B;   // pop r11
@@ -489,8 +514,10 @@ namespace DX11Base {
         const uint16_t targetId = g_resonanceThreeTargetId;
         if (targetId != 0 && targetId != s_lastLoggedTargetId) {
             s_lastLoggedTargetId = targetId;
-            AddLog(u8"[Resonance3Debug] 선택 TargetID=%u Armed=%u",
-                   targetId, (unsigned)g_resonanceThreeArmed);
+            AddLog(u8"[Resonance3Debug] TargetID=%u PrevID=%u Armed=%u",
+                   targetId,
+                   (unsigned)g_resonanceThreePrevTargetId,
+                   (unsigned)g_resonanceThreeArmed);
         }
 
         const uint32_t talkSeq = g_resonanceThreeTalkSeq;
