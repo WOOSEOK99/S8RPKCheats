@@ -2419,6 +2419,178 @@ namespace DX11Base {
     }
 
 
+    static bool ApplyGovernorGeneralSwap(uintptr_t p1,
+                                           uintptr_t shiftedCityBase) {
+      NormalizeGovernorGeneralDebugSelections();
+
+      if (s_officerSelectedCorpsPtr <= 0x10000) {
+        AddNotification(u8"도독 교체: 현재 도시는 군단 소속이 아닙니다.");
+        return false;
+      }
+
+      const CityOfficerRow *oldGov =
+          FindCorpsOfficerById(s_governorGeneralDbgOldId);
+      const CityOfficerRow *candidate =
+          FindCorpsOfficerById(s_governorGeneralDbgNewId);
+      if (!oldGov || !candidate ||
+          oldGov->status != 0xD8 || candidate->status != 0xE8) {
+        AddNotification(u8"도독 교체: 현재 도독과 태수 후보를 다시 선택해주세요.");
+        return false;
+      }
+
+      uint8_t oldStatus = 0;
+      uint8_t newStatus = 0;
+      uint8_t oldAux = 0;
+      uint8_t newAux = 0;
+      uintptr_t divisionGovernor = 0;
+      uintptr_t divisionForce = 0;
+      uintptr_t oldForce = 0, newForce = 0;
+      uintptr_t oldCity = 0, newCity = 0;
+      uintptr_t oldCorps = 0, newCorps = 0;
+
+      if (!SafeRead8(oldGov->officerBase + 0x10, &oldStatus) ||
+          !SafeRead8(candidate->officerBase + 0x10, &newStatus) ||
+          !SafeRead8(oldGov->officerBase + 0x11, &oldAux) ||
+          !SafeRead8(candidate->officerBase + 0x11, &newAux) ||
+          !SafeReadPtr(s_officerSelectedCorpsPtr + 0x20,
+                       &divisionGovernor) ||
+          !SafeReadPtr(s_officerSelectedCorpsPtr + 0x10,
+                       &divisionForce) ||
+          !SafeReadPtr(oldGov->officerBase + 0x18, &oldForce) ||
+          !SafeReadPtr(candidate->officerBase + 0x18, &newForce) ||
+          !SafeReadPtr(oldGov->officerBase + 0x20, &oldCity) ||
+          !SafeReadPtr(candidate->officerBase + 0x20, &newCity) ||
+          !SafeReadPtrAllowZero(oldCity + OFF_CITY_CORPS_RAW, &oldCorps) ||
+          !SafeReadPtrAllowZero(newCity + OFF_CITY_CORPS_RAW, &newCorps)) {
+        AddNotification(u8"도독 교체: 현재 메모리 상태를 읽지 못했습니다.");
+        return false;
+      }
+
+      if (oldStatus != 0xD8 || newStatus != 0xE8) {
+        AddNotification(u8"도독 교체: 신분 바이트(+0x10)가 예상과 달라 중단했습니다.");
+        AddLog(u8"[도독교체] 신분 불일치: 기존=%02X(+0x11=%02X) / 후보=%02X(+0x11=%02X)",
+               (unsigned int)oldStatus, (unsigned int)oldAux,
+               (unsigned int)newStatus, (unsigned int)newAux);
+        return false;
+      }
+
+      if (divisionGovernor != oldGov->officerBase) {
+        AddNotification(u8"도독 교체: Division+0x20의 현재 도독이 선택한 도독과 다릅니다.");
+        AddLog(u8"[도독교체] Division+0x20 불일치: 현재=0x%llX / 선택=0x%llX",
+               (unsigned long long)divisionGovernor,
+               (unsigned long long)oldGov->officerBase);
+        return false;
+      }
+
+      if (!divisionForce || oldForce != divisionForce ||
+          newForce != divisionForce ||
+          (s_officerPlayerForce && divisionForce != s_officerPlayerForce)) {
+        AddNotification(u8"도독 교체: 군단과 두 무장의 소속 세력이 일치하지 않습니다.");
+        AddLog(u8"[도독교체] 세력 불일치: 군단=0x%llX / 기존=0x%llX / 후보=0x%llX / 플레이어=0x%llX",
+               (unsigned long long)divisionForce,
+               (unsigned long long)oldForce,
+               (unsigned long long)newForce,
+               (unsigned long long)s_officerPlayerForce);
+        return false;
+      }
+
+      if (oldCorps != s_officerSelectedCorpsPtr ||
+          newCorps != s_officerSelectedCorpsPtr) {
+        AddNotification(u8"도독 교체: 두 무장이 현재 같은 군단 소속이 아닙니다.");
+        AddLog(u8"[도독교체] 군단 불일치: 선택=0x%llX / 기존도시군단=0x%llX / 후보도시군단=0x%llX",
+               (unsigned long long)s_officerSelectedCorpsPtr,
+               (unsigned long long)oldCorps,
+               (unsigned long long)newCorps);
+        return false;
+      }
+
+      // 정상 게임 실측:
+      //   기존 도독 +0x10 D8 -> E8
+      //   후보 태수 +0x10 E8 -> D8
+      //   DivisionData +0x20 기존 도독 -> 신규 도독
+      // +0x11은 양쪽 모두 변하지 않았으므로 절대 수정하지 않는다.
+      if (!SafeWrite8(oldGov->officerBase + 0x10, 0xE8)) {
+        AddNotification(u8"도독 교체: 기존 도독 신분 쓰기에 실패했습니다.");
+        return false;
+      }
+
+      if (!SafeWrite8(candidate->officerBase + 0x10, 0xD8)) {
+        SafeWrite8(oldGov->officerBase + 0x10, 0xD8);
+        AddNotification(u8"도독 교체: 후보 태수 신분 쓰기에 실패해 원복했습니다.");
+        return false;
+      }
+
+      if (!SafeWritePtr(s_officerSelectedCorpsPtr + 0x20,
+                        candidate->officerBase)) {
+        SafeWrite8(candidate->officerBase + 0x10, 0xE8);
+        SafeWrite8(oldGov->officerBase + 0x10, 0xD8);
+        AddNotification(u8"도독 교체: 군단 도독 포인터 쓰기에 실패해 원복했습니다.");
+        return false;
+      }
+
+      uint8_t oldStatusAfter = 0;
+      uint8_t newStatusAfter = 0;
+      uint8_t oldAuxAfter = 0;
+      uint8_t newAuxAfter = 0;
+      uintptr_t divisionGovernorAfter = 0;
+      const bool verifyOk =
+          SafeRead8(oldGov->officerBase + 0x10, &oldStatusAfter) &&
+          SafeRead8(candidate->officerBase + 0x10, &newStatusAfter) &&
+          SafeRead8(oldGov->officerBase + 0x11, &oldAuxAfter) &&
+          SafeRead8(candidate->officerBase + 0x11, &newAuxAfter) &&
+          SafeReadPtr(s_officerSelectedCorpsPtr + 0x20,
+                      &divisionGovernorAfter) &&
+          oldStatusAfter == 0xE8 &&
+          newStatusAfter == 0xD8 &&
+          oldAuxAfter == oldAux &&
+          newAuxAfter == newAux &&
+          divisionGovernorAfter == candidate->officerBase;
+
+      if (!verifyOk) {
+        SafeWritePtr(s_officerSelectedCorpsPtr + 0x20,
+                     oldGov->officerBase);
+        SafeWrite8(candidate->officerBase + 0x10, 0xE8);
+        SafeWrite8(oldGov->officerBase + 0x10, 0xD8);
+        AddNotification(u8"도독 교체: 적용 후 검증에 실패해 원복했습니다.");
+        AddLog(u8"[도독교체] 검증 실패: 기존=%02X 후보=%02X Division+0x20=0x%llX / +0x11 기존=%02X->%02X 후보=%02X->%02X",
+               (unsigned int)oldStatusAfter,
+               (unsigned int)newStatusAfter,
+               (unsigned long long)divisionGovernorAfter,
+               (unsigned int)oldAux, (unsigned int)oldAuxAfter,
+               (unsigned int)newAux, (unsigned int)newAuxAfter);
+        return false;
+      }
+
+      const std::string oldName = BuildOfficerDebugName(oldGov->id);
+      const std::string newName = BuildOfficerDebugName(candidate->id);
+      uintptr_t corpsNo = 0;
+      SafeReadPtrAllowZero(s_officerSelectedCorpsPtr + 0x18, &corpsNo);
+
+      AddLog(u8"[도독교체] %llu군단: %s -> %s",
+             (unsigned long long)corpsNo,
+             oldName.c_str(), newName.c_str());
+      AddLog(u8"[도독교체] 기존 %s +0x10 D8->E8 / 후보 %s +0x10 E8->D8 / +0x11 유지 %02X,%02X",
+             oldName.c_str(), newName.c_str(),
+             (unsigned int)oldAux, (unsigned int)newAux);
+      AddLog(u8"[도독교체] Division+0x20: 0x%llX -> 0x%llX",
+             (unsigned long long)oldGov->officerBase,
+             (unsigned long long)candidate->officerBase);
+
+      char notice[256]{};
+      sprintf_s(notice, u8"%llu군단 도독: %s → %s",
+                (unsigned long long)corpsNo,
+                oldName.c_str(), newName.c_str());
+      AddNotification(notice);
+
+      s_governorGeneralDbgSnapshot.valid = false;
+      s_selectedOfficerId = -1;
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, shiftedCityBase);
+      NormalizeGovernorGeneralDebugSelections();
+      return true;
+    }
+
+
     static bool ApplyGovernorSwap(uintptr_t p1, uintptr_t shiftedCityBase) {
       NormalizeGovernorDebugSelections();
 
@@ -2701,15 +2873,15 @@ namespace DX11Base {
 
 
     static void DrawGovernorGeneralDebugPanel(
-        uintptr_t shiftedCityBase, float sc) {
+        uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
       NormalizeGovernorGeneralDebugSelections();
 
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::TextColored(ImVec4(0.85f, 0.60f, 1.0f, 1.f),
-                         u8"[ 도독 교체 메모리 비교 - 읽기 전용 ]");
+                         u8"[ 도독 교체 ]");
       ImGui::SameLine(0.f, 12.f * sc);
-      ImGui::TextDisabled(u8"A/B 0x3D0 + DivisionData 0x60");
+      ImGui::TextDisabled(u8"실제 교체 + 읽기 전용 diff");
 
       if (s_officerSelectedCorpsPtr <= 0x10000) {
         ImGui::TextDisabled(
@@ -2777,6 +2949,15 @@ namespace DX11Base {
 
       if (!canCapture)
         ImGui::BeginDisabled();
+      if (ImGui::Button(u8"도독 교체 적용##GovernorGeneralApply",
+                        ImVec2(145.f * sc, 0.f)))
+        ApplyGovernorGeneralSwap(p1, shiftedCityBase);
+      if (!canCapture)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (!canCapture)
+        ImGui::BeginDisabled();
       if (ImGui::Button(u8"도독교체 기준 저장##GovernorGeneralDbgCapture",
                         ImVec2(165.f * sc, 0.f)))
         CaptureGovernorGeneralDebugBaseline();
@@ -2804,6 +2985,15 @@ namespace DX11Base {
                             (unsigned long long)
                                 s_governorGeneralDbgSnapshot.corpsNo,
                             savedA.c_str(), savedB.c_str());
+      }
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"실측된 도독 교체값만 적용합니다: 기존 D8→E8, 후보 E8→D8, Division+0x20 교체.");
+        ImGui::TextUnformatted(
+            u8"+0x11 및 도시/군단 소속 포인터는 변경하지 않습니다.");
+        ImGui::EndTooltip();
       }
     }
 
@@ -3341,7 +3531,7 @@ namespace DX11Base {
       }
 
       DrawGovernorDebugPanel(p1, shiftedCityBase, sc);
-      DrawGovernorGeneralDebugPanel(shiftedCityBase, sc);
+      DrawGovernorGeneralDebugPanel(p1, shiftedCityBase, sc);
       DrawCityCorpsPointerDebug(shiftedCityBase, sc);
     }
 
