@@ -34,6 +34,16 @@ namespace DX11Base {
         std::unordered_map<int, std::string> paramMap;
     };
 
+    struct OfficerRelationshipInfo {
+        bool valid = false;
+        std::vector<uint16_t> swornBrothers;
+        std::vector<uint16_t> spouses;
+        std::vector<uint16_t> synergetic;
+        std::vector<uint16_t> antipathetic;
+        std::vector<uint16_t> enemies;
+        std::vector<uint16_t> rivals;
+    };
+
     // Shared data structures
     extern std::unordered_map<int, std::string> g_officerNames;
     extern bool g_namesLoaded;
@@ -43,6 +53,9 @@ namespace DX11Base {
     // Data reading functions
     RosterStats SafeReadRosterStats(uintptr_t targetBase);
     bool GetOfficerTalentDetailed(uintptr_t officerBase, int slot, TalentInfo& outInfo);
+    // 현재 PK에서 확인된 관계/숙명 테이블을 읽어 선택 무장의 관계를 정리합니다.
+    // 읽기 전용이며, 숙명의 비활성(+0x19 != 0) 및 직접 관계 중복은 제외합니다.
+    bool GetOfficerRelationshipInfo(uintptr_t officerBase, OfficerRelationshipInfo& outInfo);
 
     // Data loading functions
     void LoadOfficerNames();
