@@ -1648,6 +1648,14 @@ namespace DX11Base {
     static uintptr_t s_corpsDeploymentCorpsPtr = 0;
     static bool s_corpsDeploymentValid = false;
 
+    struct CorpsDeploymentTargetBaseline {
+      int cityIndex = -1;
+      int targetCount = 0;
+    };
+    static uintptr_t s_corpsDeploymentTargetCorpsPtr = 0;
+    static std::vector<CorpsDeploymentTargetBaseline>
+        s_corpsDeploymentTargetBaseline;
+
     struct OfficerCityCorpsInfo {
       bool readable = false;
       uintptr_t corpsPtr = 0;
@@ -2138,6 +2146,58 @@ namespace DX11Base {
         city->recommendedOfficerIds.push_back(row.id);
     }
 
+    static void ResetCorpsDeploymentTargetBaseline() {
+      s_corpsDeploymentTargetCorpsPtr = 0;
+      s_corpsDeploymentTargetBaseline.clear();
+      s_corpsDeploymentValid = false;
+      s_corpsDeploymentCities.clear();
+      s_corpsDeploymentOfficers.clear();
+      s_corpsDeploymentCorpsPtr = 0;
+    }
+
+    static bool HasValidCorpsDeploymentTargetBaseline(
+        uintptr_t corpsPtr, const std::vector<int> &corpsCities) {
+      if (corpsPtr <= 0x10000 ||
+          s_corpsDeploymentTargetCorpsPtr != corpsPtr ||
+          s_corpsDeploymentTargetBaseline.size() != corpsCities.size())
+        return false;
+
+      for (int cityIndex : corpsCities) {
+        bool found = false;
+        for (const auto &base : s_corpsDeploymentTargetBaseline) {
+          if (base.cityIndex == cityIndex) {
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+          return false;
+      }
+      return true;
+    }
+
+    static int GetCorpsDeploymentBaselineTargetCount(int cityIndex) {
+      for (const auto &base : s_corpsDeploymentTargetBaseline) {
+        if (base.cityIndex == cityIndex)
+          return base.targetCount;
+      }
+      return -1;
+    }
+
+    static void CaptureCorpsDeploymentTargetBaseline(
+        uintptr_t corpsPtr,
+        const std::vector<CorpsDeploymentCityRecommendation> &cities) {
+      s_corpsDeploymentTargetBaseline.clear();
+      for (const auto &city : cities) {
+        CorpsDeploymentTargetBaseline base;
+        base.cityIndex = city.cityIndex;
+        base.targetCount = city.targetCount;
+        s_corpsDeploymentTargetBaseline.push_back(base);
+      }
+      s_corpsDeploymentTargetCorpsPtr = corpsPtr;
+    }
+
+
     static bool BuildCorpsDeploymentRecommendation(
         uintptr_t shiftedCityBase) {
       s_corpsDeploymentValid = false;
@@ -2189,25 +2249,45 @@ namespace DX11Base {
         s_corpsDeploymentCities.push_back(city);
       }
 
-      // 가능하면 군단 도시를 비우지 않는다. 빈 도시가 있고 전체 인원이 충분하면
-      // 가장 인원이 많은 도시에서 한 자리를 가져와 최소 1명을 배정한다.
-      if ((int)s_corpsOfficerRows.size() >= (int)s_corpsDeploymentCities.size()) {
-        for (auto &city : s_corpsDeploymentCities) {
-          if (city.targetCount > 0)
-            continue;
+      const bool reuseTargetBaseline =
+          HasValidCorpsDeploymentTargetBaseline(
+              s_officerSelectedCorpsPtr, corpsCities);
 
-          CorpsDeploymentCityRecommendation *donor = nullptr;
-          for (auto &candidate : s_corpsDeploymentCities) {
-            if (candidate.targetCount <= 1)
+      if (reuseTargetBaseline) {
+        // 같은 군단에서는 첫 추천 때 잡은 목표 인원수를 계속 사용한다.
+        // 1단계 이동 직후의 임시 인원수를 새 기준으로 잡으면 반복 배치가
+        // 발생할 수 있으므로, 명시적으로 초기화하기 전까지 목표를 고정한다.
+        for (auto &city : s_corpsDeploymentCities) {
+          const int savedTarget =
+              GetCorpsDeploymentBaselineTargetCount(city.cityIndex);
+          if (savedTarget >= 0)
+            city.targetCount = savedTarget;
+        }
+      } else {
+        // 첫 추천 계산에서만 현재 인원을 기준으로 목표 인원을 만든다.
+        // 가능하면 군단 도시를 비우지 않는다.
+        if ((int)s_corpsOfficerRows.size() >=
+            (int)s_corpsDeploymentCities.size()) {
+          for (auto &city : s_corpsDeploymentCities) {
+            if (city.targetCount > 0)
               continue;
-            if (!donor || candidate.targetCount > donor->targetCount)
-              donor = &candidate;
-          }
-          if (donor) {
-            --donor->targetCount;
-            city.targetCount = 1;
+
+            CorpsDeploymentCityRecommendation *donor = nullptr;
+            for (auto &candidate : s_corpsDeploymentCities) {
+              if (candidate.targetCount <= 1)
+                continue;
+              if (!donor || candidate.targetCount > donor->targetCount)
+                donor = &candidate;
+            }
+            if (donor) {
+              --donor->targetCount;
+              city.targetCount = 1;
+            }
           }
         }
+
+        CaptureCorpsDeploymentTargetBaseline(
+            s_officerSelectedCorpsPtr, s_corpsDeploymentCities);
       }
 
       auto isUsed = [&](uint16_t id) {
@@ -2628,9 +2708,26 @@ namespace DX11Base {
       if (!canBuild)
         ImGui::EndDisabled();
 
+      ImGui::SameLine(0.f, 6.f * sc);
+      const bool hasTargetBaseline =
+          s_corpsDeploymentTargetCorpsPtr == s_officerSelectedCorpsPtr &&
+          !s_corpsDeploymentTargetBaseline.empty();
+      if (!hasTargetBaseline)
+        ImGui::BeginDisabled();
+      if (ImGui::SmallButton(u8"배치 기준 초기화##CorpsDeploymentReset")) {
+        ResetCorpsDeploymentTargetBaseline();
+        BuildCorpsDeploymentRecommendation(shiftedCityBase);
+      }
+      if (!hasTargetBaseline)
+        ImGui::EndDisabled();
+
       ImGui::SameLine(0.f, 12.f * sc);
       ImGui::TextDisabled(
           u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 신분 유지/전선 우선");
+      if (hasTargetBaseline) {
+        ImGui::SameLine(0.f, 8.f * sc);
+        ImGui::TextDisabled(u8"| 목표 인원 고정");
+      }
 
       if (!s_corpsDeploymentValid ||
           s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
