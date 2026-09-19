@@ -179,6 +179,9 @@
     <ClInclude Include="Cheats\Social\Fastrelationship.h">
       <Filter>Cheats\Social</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\Social\ChildEarlyAppearance.h">
+      <Filter>Cheats\Social</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\Selfheal.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -380,6 +383,9 @@
       <Filter>Cheats\Social</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\Social\Fastrelationship.cpp">
+      <Filter>Cheats\Social</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Social\ChildEarlyAppearance.cpp">
       <Filter>Cheats\Social</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\Selfheal.cpp">
