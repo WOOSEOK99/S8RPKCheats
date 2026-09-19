@@ -115,7 +115,7 @@ namespace DX11Base {
       {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false, true},
       {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false, true},
       {"bResonance", u8"공명 변경", &bResonance, &s_appResonance, SetInstantResonance, false, true},
-      {"bResonanceThree", u8"대화 상대 공명 3개 고정", &bResonanceThree, &s_appResonanceThree,
+      {"bResonanceThree", u8"대화 상대 공명 4개 고정", &bResonanceThree, &s_appResonanceThree,
        SetDialogueResonanceThree, false, true},
       {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false, true},
       {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false, true},
