@@ -26,6 +26,7 @@
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/FactionLordBonus.h"
 #include "Cheats/Social/Fastrelationship.h"
+#include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/Social/Infinitegift.h"
 #include "Cheats/Social/Infinitetalk.h"
 #include "Cheats/Social/InstantLoveCave.h"
@@ -77,6 +78,7 @@ namespace DX11Base {
   static bool s_appGift = false;
   static bool s_appTalk = false;
   static bool s_appRelation = false;
+  static bool s_appChildEarlyAppearance = false;
   static bool s_appMarriage = false;
   static bool s_appSelfHeal = false;
   static bool s_appDongto = false;
@@ -117,6 +119,7 @@ namespace DX11Base {
       {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false, true},
       {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false, true},
       {"bFastRelationship", u8"즉시 경애 맺기", &bFastRelationship, &s_appRelation, SetFastRelationship, false, true},
+      {"bChildEarlyAppearance", u8"자녀 조기 등장", &bChildEarlyAppearance, &s_appChildEarlyAppearance, SetChildEarlyAppearance, false, true},
       {"marriageApplied", u8"결혼 무제한", &marriageApplied, &s_appMarriage, SetMarriageCondition, false, true},
       {"bSelfHeal", u8"전쟁: 자가 회복", &bSelfHeal, &s_appSelfHeal, SetSelfHeal, true, true},
       {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true, true},
@@ -204,6 +207,7 @@ namespace DX11Base {
     file << "  \"g_cityExchangeRate\": " << g_cityExchangeRate << ",\n";
     file << "  \"g_cityAutoExchangeEnabled\": " << (g_cityAutoExchangeEnabled ? "true" : "false") << ",\n";
     file << "  \"g_cityRevoltAlwaysZero\": " << (g_cityRevoltAlwaysZero ? "true" : "false") << ",\n";
+    file << "  \"vChildEarlyAppearanceYears\": " << vChildEarlyAppearanceYears << ",\n";
     file << "  \"nSkipDays\": " << nSkipDays << ",\n";
     file << "  \"v_HealLv1_Amount\": " << v_HealLv1_Amount << ",\n";
     file << "  \"v_HealLv2_Amount\": " << v_HealLv2_Amount << ",\n";
@@ -341,6 +345,17 @@ namespace DX11Base {
       }
       if (line.find("\"g_cityRevoltAlwaysZero\"") != std::string::npos) {
           g_cityRevoltAlwaysZero = (line.find("true") != std::string::npos);
+          continue;
+      }
+      if (line.find("vChildEarlyAppearanceYears") != std::string::npos) {
+          size_t colonPos = line.find(":");
+          if (colonPos != std::string::npos) {
+            try {
+              vChildEarlyAppearanceYears = std::stoi(line.substr(colonPos + 1));
+            } catch (...) {}
+          }
+          if (vChildEarlyAppearanceYears < 1) vChildEarlyAppearanceYears = 1;
+          if (vChildEarlyAppearanceYears > 10) vChildEarlyAppearanceYears = 10;
           continue;
       }
       if (line.find("nSkipDays") != std::string::npos) {
