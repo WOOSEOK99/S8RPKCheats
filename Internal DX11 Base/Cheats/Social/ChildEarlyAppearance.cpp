@@ -1,4 +1,5 @@
 #include "../../pch.h"
+#include "../../Cheats.h"
 #include "ChildEarlyAppearance.h"
 #include "../../MenuState.h"
 #include "../../Cheats/System/MonthCapture.h"
