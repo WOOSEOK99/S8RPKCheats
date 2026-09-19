@@ -4918,6 +4918,451 @@ namespace DX11Base {
 
     }
 
+
+    // ── 구 CT 기반 무장 관계 탐색 (읽기 전용) ─────────────────────────────
+    // SAN8R v13.54 CT 기준:
+    // 숙명: stride 0x20, +08/+10 Officer*, +18 relation(1 상극/2 상생), +19 발생
+    // 관계: stride 0x40, +08 relation(1 의형제/2 배우자/3 원수/4 호적수),
+    //       +10/+18/+20/+28/+30 Officer*, +38 flag
+    static constexpr uintptr_t LEGACY_SYNERGETIC_PTR_OFFSET = 0x433210;
+    static constexpr uintptr_t LEGACY_RELATION_PTR_OFFSET = 0x462BA8;
+    static constexpr uintptr_t LEGACY_RELATION_PTR_DELTA =
+        LEGACY_RELATION_PTR_OFFSET - LEGACY_SYNERGETIC_PTR_OFFSET;
+
+    static bool IsRelationshipRosterOfficerPtr(
+        uintptr_t ptr, uintptr_t rosterBase) {
+      if (ptr < rosterBase)
+        return false;
+      const uintptr_t delta = ptr - rosterBase;
+      if (delta >= (uintptr_t)5102 * 0x3D0)
+        return false;
+      return (delta % 0x3D0) == 0;
+    }
+
+    static bool ReadRelationshipOfficerId(
+        uintptr_t ptr, uintptr_t rosterBase, uint16_t *outId) {
+      if (!outId ||
+          !IsRelationshipRosterOfficerPtr(ptr, rosterBase))
+        return false;
+      uint16_t id = 0;
+      if (!SafeRead16(ptr + 0x08, &id) ||
+          id == 0 || id > 5200)
+        return false;
+      *outId = id;
+      return true;
+    }
+
+    static int ScoreSynergeticBase(
+        uintptr_t base, uintptr_t rosterBase,
+        int sampleCount = 384) {
+      if (base <= 0x10000 || rosterBase <= 0x10000)
+        return -1;
+
+      int valid = 0;
+      int invalid = 0;
+      for (int i = 0; i < sampleCount; ++i) {
+        const uintptr_t slot =
+            base + (uintptr_t)i * 0x20;
+        uint8_t relation = 0;
+        if (!SafeRead8(slot + 0x18, &relation))
+          return -1;
+        if (relation == 0)
+          continue;
+        if (relation != 1 && relation != 2) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+
+        uintptr_t p1 = 0, p2 = 0;
+        if (!SafeReadPtrAllowZero(slot + 0x08, &p1) ||
+            !SafeReadPtrAllowZero(slot + 0x10, &p2) ||
+            !IsRelationshipRosterOfficerPtr(p1, rosterBase) ||
+            !IsRelationshipRosterOfficerPtr(p2, rosterBase)) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+        ++valid;
+      }
+      return valid;
+    }
+
+    static bool TryResolveSynergeticBaseFromLegacyCt(
+        uintptr_t exeBase, uintptr_t gameBase,
+        uintptr_t rosterBase, uintptr_t *outBase,
+        uintptr_t *outFieldOffset, uintptr_t *outPatternAddr) {
+      if (!outBase || !outFieldOffset || !outPatternAddr)
+        return false;
+      *outBase = 0;
+      *outFieldOffset = 0;
+      *outPatternAddr = 0;
+
+      // 구 CT가 사용하던 시그니처:
+      // 48 8D [modrm + disp32] 48 3B ? 44 0F ? ? 77 ? 48 8B
+      uintptr_t imageEnd = 0;
+      __try {
+        const IMAGE_DOS_HEADER *dos =
+            reinterpret_cast<const IMAGE_DOS_HEADER *>(exeBase);
+        const IMAGE_NT_HEADERS *nt =
+            reinterpret_cast<const IMAGE_NT_HEADERS *>(
+                exeBase + (uintptr_t)dos->e_lfanew);
+        imageEnd = exeBase + nt->OptionalHeader.SizeOfImage;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        imageEnd = 0;
+      }
+
+      const std::string pattern =
+          "48 8D ? ? ? ? ? 48 3B ? 44 0F ? ? 77 ? 48 8B";
+
+      if (imageEnd > exeBase) {
+        uintptr_t search = exeBase;
+        for (int matchIndex = 0;
+             matchIndex < 32 && search + 32 < imageEnd;
+             ++matchIndex) {
+          const uintptr_t found =
+              FindPattern(search, imageEnd, pattern);
+          if (!found)
+            break;
+
+          int32_t disp = 0;
+          __try {
+            disp = *reinterpret_cast<int32_t *>(found + 3);
+          } __except (EXCEPTION_EXECUTE_HANDLER) {
+            disp = 0;
+          }
+
+          if (disp > 0) {
+            uintptr_t tablePtr = 0;
+            if (SafeReadPtrAllowZero(
+                    gameBase + (uintptr_t)(uint32_t)disp,
+                    &tablePtr) &&
+                tablePtr > 0x10000) {
+              const uintptr_t candidate = tablePtr + 0xA0;
+              const int score =
+                  ScoreSynergeticBase(candidate, rosterBase);
+              if (score >= 3) {
+                *outBase = candidate;
+                *outFieldOffset =
+                    (uintptr_t)(uint32_t)disp;
+                *outPatternAddr = found;
+                return true;
+              }
+            }
+          }
+          search = found + 1;
+        }
+      }
+
+      // 시그니처가 달라졌을 때를 위한 제한적 fallback.
+      // 구 CT 오프셋 근처의 gameBase 포인터 필드만 읽어 구조 점수로 확인한다.
+      const intptr_t window = 0x10000;
+      for (intptr_t delta = -window;
+           delta <= window; delta += 8) {
+        const intptr_t signedOff =
+            (intptr_t)LEGACY_SYNERGETIC_PTR_OFFSET + delta;
+        if (signedOff <= 0)
+          continue;
+
+        uintptr_t tablePtr = 0;
+        if (!SafeReadPtrAllowZero(
+                gameBase + (uintptr_t)signedOff,
+                &tablePtr) ||
+            tablePtr <= 0x10000)
+          continue;
+
+        const uintptr_t candidate = tablePtr + 0xA0;
+        const int score =
+            ScoreSynergeticBase(candidate, rosterBase, 256);
+        if (score >= 3) {
+          *outBase = candidate;
+          *outFieldOffset = (uintptr_t)signedOff;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static int ScoreRelationshipBase(
+        uintptr_t base, uintptr_t rosterBase,
+        int sampleCount = 384) {
+      if (base <= 0x10000 || rosterBase <= 0x10000)
+        return -1;
+
+      int valid = 0;
+      int invalid = 0;
+      for (int i = 0; i < sampleCount; ++i) {
+        const uintptr_t slot =
+            base + (uintptr_t)i * 0x40;
+        uint8_t relation = 0;
+        if (!SafeRead8(slot + 0x08, &relation))
+          return -1;
+        if (relation == 0)
+          continue;
+        if (relation < 1 || relation > 4) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+
+        uintptr_t p1 = 0, p2 = 0;
+        if (!SafeReadPtrAllowZero(slot + 0x10, &p1) ||
+            !SafeReadPtrAllowZero(slot + 0x18, &p2) ||
+            !IsRelationshipRosterOfficerPtr(p1, rosterBase) ||
+            !IsRelationshipRosterOfficerPtr(p2, rosterBase)) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+        ++valid;
+      }
+      return valid;
+    }
+
+    static bool TryResolveRelationshipBaseFromLegacyCt(
+        uintptr_t gameBase, uintptr_t rosterBase,
+        uintptr_t synergeticFieldOffset,
+        uintptr_t *outBase, uintptr_t *outFieldOffset) {
+      if (!outBase || !outFieldOffset)
+        return false;
+      *outBase = 0;
+      *outFieldOffset = 0;
+
+      const uintptr_t center =
+          synergeticFieldOffset > 0
+              ? synergeticFieldOffset +
+                    LEGACY_RELATION_PTR_DELTA
+              : LEGACY_RELATION_PTR_OFFSET;
+
+      // 먼저 구 CT의 상대 거리 그대로 확인.
+      uintptr_t tablePtr = 0;
+      if (SafeReadPtrAllowZero(
+              gameBase + center, &tablePtr) &&
+          tablePtr > 0x10000 &&
+          tablePtr > 0x80) {
+        const uintptr_t candidate = tablePtr - 0x80;
+        if (ScoreRelationshipBase(
+                candidate, rosterBase) >= 3) {
+          *outBase = candidate;
+          *outFieldOffset = center;
+          return true;
+        }
+      }
+
+      // PK에서 필드가 조금 이동했을 가능성만 제한적으로 탐색한다.
+      const intptr_t window = 0x20000;
+      for (intptr_t delta = -window;
+           delta <= window; delta += 8) {
+        if (delta == 0)
+          continue;
+        const intptr_t signedOff =
+            (intptr_t)center + delta;
+        if (signedOff <= 0)
+          continue;
+
+        uintptr_t ptr = 0;
+        if (!SafeReadPtrAllowZero(
+                gameBase + (uintptr_t)signedOff, &ptr) ||
+            ptr <= 0x10080)
+          continue;
+
+        const uintptr_t candidate = ptr - 0x80;
+        const int score =
+            ScoreRelationshipBase(
+                candidate, rosterBase, 256);
+        if (score >= 3) {
+          *outBase = candidate;
+          *outFieldOffset = (uintptr_t)signedOff;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static const char *GetLegacyRelationshipName(
+        uint8_t relation) {
+      switch (relation) {
+      case 1: return u8"의형제";
+      case 2: return u8"배우자";
+      case 3: return u8"원수";
+      case 4: return u8"호적수";
+      default: return u8"?";
+      }
+    }
+
+    static const char *GetLegacySynergeticName(
+        uint8_t relation) {
+      switch (relation) {
+      case 1: return u8"상극";
+      case 2: return u8"상생";
+      default: return u8"?";
+      }
+    }
+
+    static void LogSelectedOfficerRelationshipProbe(
+        const CityOfficerRow &selected) {
+      const uintptr_t exe =
+          (uintptr_t)GetModuleHandle(NULL);
+      const uintptr_t gameBase = GetGameBase();
+
+      uintptr_t rosterBase = 0;
+      if (!exe || gameBase <= 0x10000 ||
+          !TryResolveOfficerRosterArrayBase(
+              exe, &rosterBase) ||
+          rosterBase <= 0x10000) {
+        AddLog(u8"[관계DBG] 기본 주소 확보 실패: exe=0x%llX gameBase=0x%llX roster=0x%llX",
+               (unsigned long long)exe,
+               (unsigned long long)gameBase,
+               (unsigned long long)rosterBase);
+        return;
+      }
+
+      AddLog(u8"[관계DBG] ===== %s(ID %u) 관계 탐색 시작 =====",
+             BuildOfficerName(selected.id).c_str(),
+             (unsigned int)selected.id);
+      AddLog(u8"[관계DBG] Officer=0x%llX / Roster=0x%llX / stride=0x3D0",
+             (unsigned long long)selected.officerBase,
+             (unsigned long long)rosterBase);
+
+      uintptr_t synerBase = 0;
+      uintptr_t synerFieldOffset = 0;
+      uintptr_t synerPattern = 0;
+      if (TryResolveSynergeticBaseFromLegacyCt(
+              exe, gameBase, rosterBase,
+              &synerBase, &synerFieldOffset,
+              &synerPattern)) {
+        AddLog(u8"[관계DBG] 숙명 테이블 후보 확인: gameBase+0x%llX -> base 0x%llX / AOB 0x%llX",
+               (unsigned long long)synerFieldOffset,
+               (unsigned long long)synerBase,
+               (unsigned long long)synerPattern);
+
+        int foundCount = 0;
+        for (int i = 0; i < 5000; ++i) {
+          const uintptr_t slot =
+              synerBase + (uintptr_t)i * 0x20;
+          uintptr_t p1 = 0, p2 = 0;
+          uint8_t relation = 0, occurred = 0;
+          if (!SafeReadPtrAllowZero(slot + 0x08, &p1) ||
+              !SafeReadPtrAllowZero(slot + 0x10, &p2) ||
+              !SafeRead8(slot + 0x18, &relation) ||
+              !SafeRead8(slot + 0x19, &occurred))
+            break;
+          if ((relation != 1 && relation != 2) ||
+              (p1 != selected.officerBase &&
+               p2 != selected.officerBase))
+            continue;
+
+          const uintptr_t other =
+              p1 == selected.officerBase ? p2 : p1;
+          uint16_t otherId = 0;
+          if (!ReadRelationshipOfficerId(
+                  other, rosterBase, &otherId))
+            continue;
+
+          AddLog(u8"[관계DBG][숙명] 슬롯 %d / %s / 상대 %s(ID %u) / 발생값 0x%02X",
+                 i + 1,
+                 GetLegacySynergeticName(relation),
+                 BuildOfficerName(otherId).c_str(),
+                 (unsigned int)otherId,
+                 (unsigned int)occurred);
+          ++foundCount;
+        }
+        AddLog(u8"[관계DBG] 숙명 일치 %d건", foundCount);
+      } else {
+        AddLog(u8"[관계DBG] 숙명 테이블 후보를 찾지 못했습니다. 구 CT AOB/0x433210 근처 재탐색 필요");
+      }
+
+      uintptr_t relationBase = 0;
+      uintptr_t relationFieldOffset = 0;
+      if (TryResolveRelationshipBaseFromLegacyCt(
+              gameBase, rosterBase, synerFieldOffset,
+              &relationBase, &relationFieldOffset)) {
+        AddLog(u8"[관계DBG] 관계 테이블 후보 확인: gameBase+0x%llX -> base 0x%llX",
+               (unsigned long long)relationFieldOffset,
+               (unsigned long long)relationBase);
+
+        int foundCount = 0;
+        for (int i = 0; i < 3000; ++i) {
+          const uintptr_t slot =
+              relationBase + (uintptr_t)i * 0x40;
+          uint8_t relation = 0;
+          if (!SafeRead8(slot + 0x08, &relation))
+            break;
+          if (relation < 1 || relation > 4)
+            continue;
+
+          uintptr_t members[5]{};
+          bool readOk = true;
+          for (int j = 0; j < 5; ++j) {
+            if (!SafeReadPtrAllowZero(
+                    slot + 0x10 + (uintptr_t)j * 8,
+                    &members[j])) {
+              readOk = false;
+              break;
+            }
+          }
+          if (!readOk)
+            break;
+
+          bool containsSelected = false;
+          for (uintptr_t member : members) {
+            if (member == selected.officerBase) {
+              containsSelected = true;
+              break;
+            }
+          }
+          if (!containsSelected)
+            continue;
+
+          uintptr_t flag = 0;
+          SafeReadPtrAllowZero(slot + 0x38, &flag);
+          AddLog(u8"[관계DBG][관계] 슬롯 %d / %s / flag 0x%llX",
+                 i + 1,
+                 GetLegacyRelationshipName(relation),
+                 (unsigned long long)flag);
+
+          uint16_t loggedIds[5]{};
+          int loggedCount = 0;
+          for (int j = 0; j < 5; ++j) {
+            const uintptr_t member = members[j];
+            if (!member ||
+                member == selected.officerBase)
+              continue;
+
+            uint16_t memberId = 0;
+            if (!ReadRelationshipOfficerId(
+                    member, rosterBase, &memberId))
+              continue;
+
+            bool duplicate = false;
+            for (int k = 0; k < loggedCount; ++k) {
+              if (loggedIds[k] == memberId) {
+                duplicate = true;
+                break;
+              }
+            }
+            if (duplicate)
+              continue;
+
+            loggedIds[loggedCount++] = memberId;
+            AddLog(u8"[관계DBG][관계]   +%02X 슬롯%d: %s(ID %u)",
+                   0x10 + j * 8, j + 1,
+                   BuildOfficerName(memberId).c_str(),
+                   (unsigned int)memberId);
+          }
+          ++foundCount;
+        }
+        AddLog(u8"[관계DBG] 의형제/배우자/원수/호적수 일치 %d건",
+               foundCount);
+      } else {
+        AddLog(u8"[관계DBG] 관계 테이블 후보를 찾지 못했습니다. 구 CT 상대거리(+0x%llX) 근처 재탐색 필요",
+               (unsigned long long)LEGACY_RELATION_PTR_DELTA);
+      }
+
+      AddLog(u8"[관계DBG] ===== 관계 탐색 종료 =====");
+    }
+
+
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
                                           uintptr_t shiftedCityBase) {
       const CityOfficerRow *selected = FindSelectedCityOfficer();
@@ -5283,6 +5728,22 @@ namespace DX11Base {
         }
       } else {
         ImGui::TextDisabled(u8"이동할 무장을 목록에서 선택하세요.");
+      }
+
+      if (bShowDebug && selected) {
+        ImGui::SameLine(0.f, 12.f * sc);
+        if (ImGui::SmallButton(
+                u8"관계 탐색 로그##OfficerRelationshipProbe")) {
+          LogSelectedOfficerRelationshipProbe(*selected);
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"구 CT의 숙명(0x20) / 의형제·배우자·원수·호적수(0x40) 구조를 기준으로 PK 주소를 읽기 전용 탐색합니다.");
+          ImGui::TextUnformatted(
+              u8"메모리 쓰기는 하지 않으며 결과는 로그 창에 출력됩니다.");
+          ImGui::EndTooltip();
+        }
       }
 
       ImGui::SameLine(0.f, 24.f * sc);
