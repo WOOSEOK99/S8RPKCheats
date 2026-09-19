@@ -2,6 +2,7 @@
 #include "pch.h"
 
 namespace DX11Base {
+    std::string GetConfigPath();
     void SaveConfig();
     void LoadConfig();
     void LoadEarlyLogConfig();
