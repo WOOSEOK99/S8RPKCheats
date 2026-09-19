@@ -22,6 +22,7 @@ namespace DX11Base {
   void DrawCityInfoWindow(uintptr_t p1, float scale);
   void RunAutoCityExchange();
   void RunYearlyRearSupport(uintptr_t p1);
+  void ResetCorpsAutoDeploymentSession();
   void RunCityRevoltAlwaysZero();
   void ResetAllCityRevoltCounters();
   void MaximizeAllCityResources();
