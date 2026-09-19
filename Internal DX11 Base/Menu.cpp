@@ -9,6 +9,7 @@
 #include "Cheats/Officer/RoninMonitor.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
+#include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/System/SystemMonth.h"
@@ -914,6 +915,9 @@ namespace DX11Base {
       ImGui::PopStyleColor(3);
       ImGui::PopStyleVar(2);
     }
+
+    // 자녀 처리 훅에서 수집된 레코드 주소를 메인 스레드에서 안전하게 로그 출력
+    RunChildDebugLog();
 
     // 도시 반란 카운트 자동 유지 (도시 정보 창을 닫아도 동작)
     RunCityRevoltAlwaysZero();
