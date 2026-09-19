@@ -12,6 +12,7 @@
 #include "Cheats/Officer/OfficerRosterResolve.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Social/Fastrelationship.h"
+#include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/Social/Infinitegift.h"
 #include "Cheats/Social/Infinitetalk.h"
 #include "Cheats/Social/InstantLoveCave.h"
@@ -657,6 +658,32 @@ namespace DX11Base {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"배우자가 있어도 무조건 결혼이 됩니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 대신 타 세력의 경우 등용은 안되네요.");
+        ImGui::EndTooltip();
+      }
+
+      if (ImGui::Checkbox(u8"자녀 조기 등장", &bChildEarlyAppearance)) {
+        DX11Base::SetChildEarlyAppearance(bChildEarlyAppearance);
+        NotifyFeatureToggle(u8"자녀 조기 등장", bChildEarlyAppearance);
+        SaveConfig();
+      }
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(55.0f * scale);
+      if (ImGui::InputInt(u8"##ChildEarlyYears", &vChildEarlyAppearanceYears, 0, 0)) {
+        if (vChildEarlyAppearanceYears < 1) vChildEarlyAppearanceYears = 1;
+        if (vChildEarlyAppearanceYears > 10) vChildEarlyAppearanceYears = 10;
+        SaveConfig();
+      }
+      ImGui::SameLine();
+      ImGui::TextUnformatted(u8"년 후");
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           u8"미등장 자녀의 등장년도를 현재 연도 + 설정값으로 앞당깁니다.");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           u8"기본값 3년 / 입력 범위 1~10년");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 이미 설정값 이내에 등장 예정인 자녀는 변경하지 않습니다.");
         ImGui::EndTooltip();
       }
 
