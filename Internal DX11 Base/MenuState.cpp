@@ -35,6 +35,8 @@ namespace DX11Base {
   bool bInfiniteGift = false;
   bool bInfiniteTalk = false;
   bool bFastRelationship = false;
+  bool bChildEarlyAppearance = false;
+  int vChildEarlyAppearanceYears = 3;
 
   // 3. 전쟁/전투 초기화
   bool bSelfHeal = false;
