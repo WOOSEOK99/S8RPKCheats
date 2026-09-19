@@ -8,6 +8,7 @@
 #include <psapi.h>
 #include <cstring>
 #include <vector>
+#include <unordered_set>
 
 namespace DX11Base {
 namespace {
@@ -16,6 +17,13 @@ static uintptr_t g_childHookAddr = 0;
 static uintptr_t g_childCaveAddr = 0;
 static uint8_t g_childOriginal[7] = {};
 static bool g_childApplied = false;
+
+// 자녀 처리 훅에서 주소만 빠르게 적재하고, 실제 필드 읽기/로그는 메인 스레드에서 수행합니다.
+static constexpr int kChildDebugRingSize = 32;
+static uintptr_t g_childDebugAddrRing[kChildDebugRingSize] = {};
+static volatile LONG g_childDebugWriteIndex = 0;
+static int g_childDebugReadIndex = 0;
+static std::unordered_set<uintptr_t> g_childDebugSeen;
 
 // MonthCapture.cpp와 동일한 시나리오 연도 경로.
 static constexpr uintptr_t kScenarioInstanceStaticOffset = 0x2E98BC8;
@@ -73,6 +81,23 @@ static bool InstallChildCave(uintptr_t hookAddr) {
   Emit8(code, 0x53); // push rbx
   Emit8(code, 0x51); // push rcx
   Emit8(code, 0x52); // push rdx
+
+  // [ChildDebug] 현재 처리 중인 레코드 주소(RAX)를 32칸 링버퍼에 저장.
+  // next = (writeIndex + 1) & 31
+  Emit8(code, 0x48); Emit8(code, 0xBA);
+  Emit64(code, (uintptr_t)&g_childDebugWriteIndex); // mov rdx,&writeIndex
+  Emit8(code, 0x8B); Emit8(code, 0x0A);             // mov ecx,[rdx]
+  Emit8(code, 0xFF); Emit8(code, 0xC1);             // inc ecx
+  Emit8(code, 0x83); Emit8(code, 0xE1); Emit8(code, 0x1F); // and ecx,31
+
+  Emit8(code, 0x48); Emit8(code, 0xBA);
+  Emit64(code, (uintptr_t)&g_childDebugAddrRing[0]); // mov rdx,&ring[0]
+  Emit8(code, 0x48); Emit8(code, 0x89); Emit8(code, 0x04); Emit8(code, 0xCA);
+  // mov [rdx+rcx*8],rax
+
+  Emit8(code, 0x48); Emit8(code, 0xBA);
+  Emit64(code, (uintptr_t)&g_childDebugWriteIndex); // mov rdx,&writeIndex
+  Emit8(code, 0x89); Emit8(code, 0x0A);             // mov [rdx],ecx
 
   // 현재 연도는 레지스터를 추정하지 않고 MonthCapture.cpp와 동일한
   // 시나리오 데이터 인스턴스 + 0x72D0에서 직접 읽습니다.
@@ -156,6 +181,42 @@ static bool InstallChildCave(uintptr_t hookAddr) {
 
 } // namespace
 
+void RunChildDebugLog() {
+  const int writeIndex = (int)g_childDebugWriteIndex;
+
+  int guard = 0;
+  while (g_childDebugReadIndex != writeIndex && guard++ < kChildDebugRingSize) {
+    g_childDebugReadIndex = (g_childDebugReadIndex + 1) & (kChildDebugRingSize - 1);
+    const uintptr_t addr = g_childDebugAddrRing[g_childDebugReadIndex];
+
+    if (!addr || g_childDebugSeen.find(addr) != g_childDebugSeen.end())
+      continue;
+    if (!IsValidPtr(addr, 0x38))
+      continue;
+
+    g_childDebugSeen.insert(addr);
+
+    const uint16_t v00 = *(uint16_t *)(addr + 0x00);
+    const uint16_t v02 = *(uint16_t *)(addr + 0x02);
+    const uint16_t v04 = *(uint16_t *)(addr + 0x04);
+    const uint16_t v06 = *(uint16_t *)(addr + 0x06);
+    const uint16_t v08 = *(uint16_t *)(addr + 0x08);
+    const uint16_t v0A = *(uint16_t *)(addr + 0x0A);
+    const uint16_t v0C = *(uint16_t *)(addr + 0x0C);
+    const uint16_t v0E = *(uint16_t *)(addr + 0x0E);
+    const uint16_t v2C = *(uint16_t *)(addr + 0x2C);
+    const uint16_t v2E = *(uint16_t *)(addr + 0x2E);
+    const uint16_t appearance = *(uint16_t *)(addr + 0x32);
+    const uint16_t birth = *(uint16_t *)(addr + 0x34);
+    const uint16_t death = *(uint16_t *)(addr + 0x36);
+
+    AddLog(u8"[ChildDebug] addr=%p | +00=%u +02=%u +04=%u +06=%u +08=%u +0A=%u +0C=%u +0E=%u",
+           (void *)addr, v00, v02, v04, v06, v08, v0A, v0C, v0E);
+    AddLog(u8"[ChildDebug] +2C=%u +2E=%u | 등장(+32)=%u 출생(+34)=%u 사망(+36)=%u",
+           v2C, v2E, appearance, birth, death);
+  }
+}
+
 void SetChildEarlyAppearance(bool enable) {
   if (vChildEarlyAppearanceYears < 1)
     vChildEarlyAppearanceYears = 1;
@@ -165,6 +226,9 @@ void SetChildEarlyAppearance(bool enable) {
   if (enable) {
     if (g_childApplied)
       return;
+
+    g_childDebugSeen.clear();
+    g_childDebugReadIndex = (int)g_childDebugWriteIndex;
 
     uintptr_t begin = 0, end = 0;
     if (!GetModuleRange(begin, end)) {
