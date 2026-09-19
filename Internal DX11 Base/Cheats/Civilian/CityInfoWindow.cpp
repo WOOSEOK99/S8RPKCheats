@@ -10,6 +10,7 @@
 #include "../../showlog.h"
 #include "../../Config.h"
 #include "../Officer/OfficerData.h"
+#include "../System/MonthCapture.h"
 #include "CityData.h"
 #include <windows.h>
 #include <fstream>
@@ -538,6 +539,9 @@ namespace DX11Base {
     };
     static std::vector<AutoSupportRoute> s_autoSupportRoutes;
     static bool s_autoSupportRoutesLoaded = false;
+    static bool s_autoSupportYearlyEnabled = false;
+    static uint8_t s_autoSupportLastObservedMonth = 0;
+    static uint16_t s_autoSupportLastObservedYear = 0;
 
     static uintptr_t GetRawCityBase(uintptr_t shiftedCityBase, int cityIndex) {
       if (shiftedCityBase <= 0x28 || cityIndex < 0 || cityIndex >= g_CityCount)
@@ -1088,7 +1092,9 @@ namespace DX11Base {
       if (!out.is_open())
         return;
 
-      out << "{\n  \"routes\": [\n";
+      out << "{\n";
+      out << "  \"yearly_auto\": " << (s_autoSupportYearlyEnabled ? 1 : 0) << ",\n";
+      out << "  \"routes\": [\n";
       for (size_t i = 0; i < s_autoSupportRoutes.size(); ++i) {
         const auto &r = s_autoSupportRoutes[i];
         out << "    {\"enabled\": " << (r.enabled ? 1 : 0)
@@ -1117,6 +1123,13 @@ namespace DX11Base {
 
       std::string line;
       while (std::getline(in, line)) {
+        if (line.find("\"yearly_auto\"") != std::string::npos) {
+          int yearly = 0;
+          if (sscanf_s(line.c_str(), "  \"yearly_auto\": %d", &yearly) == 1)
+            s_autoSupportYearlyEnabled = (yearly != 0);
+          continue;
+        }
+
         int enabled = 0, source = -1, target = -1, mode = 0;
         int gold = 0, grain = 0, troops = 0;
         const int n = sscanf_s(
@@ -1203,6 +1216,16 @@ namespace DX11Base {
       ImGui::TextColored(ImVec4(0.85f, 0.65f, 1.0f, 1.f), u8"[ 자동 후방지원 노선 ]");
       ImGui::SameLine(0.f, 16.f * sc);
 
+      if (ImGui::Checkbox(u8"12월→1월 자동 실행##YearlyRearSupport", &s_autoSupportYearlyEnabled))
+        SaveAutoSupportRoutes();
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"게임에서 12월이 끝나고 1월로 넘어가는 순간 활성 노선을 위에서부터 1회 실행합니다.");
+        ImGui::TextUnformatted(u8"프로그램을 1월에 새로 켠 경우에는 소급 실행하지 않고 다음 12월→1월부터 실행합니다.");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(0.f, 16.f * sc);
       if (ImGui::SmallButton(u8"+ 노선 추가")) {
         int rear = -1, front = -1;
         for (const auto &row : s_frontierRows) {
@@ -1515,6 +1538,78 @@ namespace DX11Base {
     }
 
     ImGui::End();
+  }
+
+  void RunYearlyRearSupport(uintptr_t p1) {
+    static ULONGLONG s_lastPollMs = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (now - s_lastPollMs < 500)
+      return;
+    s_lastPollMs = now;
+
+    LoadAutoSupportRoutes();
+
+    uint16_t year = 0;
+    uint8_t month = 0;
+    if (!ReadScenarioDate(&year, &month) || month < 1 || month > 12)
+      return;
+
+    // 처음 관측한 시점은 기준값만 잡고 소급 실행하지 않는다.
+    if (s_autoSupportLastObservedMonth == 0) {
+      s_autoSupportLastObservedMonth = month;
+      s_autoSupportLastObservedYear = year;
+      return;
+    }
+
+    const bool crossedNewYear =
+        (s_autoSupportLastObservedMonth == 12 && month == 1);
+
+    s_autoSupportLastObservedMonth = month;
+    s_autoSupportLastObservedYear = year;
+
+    if (!crossedNewYear || !s_autoSupportYearlyEnabled)
+      return;
+
+    if (p1 <= 0x10000 || s_autoSupportRoutes.empty())
+      return;
+
+    const uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) {
+      AddNotification(u8"자동 후방지원: 도시 데이터를 읽지 못해 이번 연도 지원을 실행하지 못했습니다.");
+      return;
+    }
+
+    // 연간 자동지원은 UI에서 보고 있던 세력과 무관하게 주인공 세력 기준으로 실행한다.
+    const uintptr_t previousSelectedForce = s_frontierSelectedForce;
+    RefreshFrontierAnalysis(p1, cityBase);
+    if (!s_frontierPlayerForce) {
+      AddNotification(u8"자동 후방지원: 주인공 세력을 확인하지 못해 이번 연도 지원을 건너뜁니다.");
+      return;
+    }
+
+    s_frontierSelectedForce = s_frontierPlayerForce;
+    RefreshFrontierAnalysis(p1, cityBase);
+
+    int enabledCount = 0;
+    int successCount = 0;
+    for (size_t i = 0; i < s_autoSupportRoutes.size(); ++i) {
+      if (!s_autoSupportRoutes[i].enabled)
+        continue;
+      enabledCount++;
+      if (ExecuteAutoSupportRoute(i, p1, cityBase))
+        successCount++;
+    }
+
+    char notice[256]{};
+    sprintf_s(notice, u8"%u년 자동 후방지원 완료: 활성 %d개 / 실행 %d개",
+              (unsigned int)year, enabledCount, successCount);
+    AddNotification(notice);
+    AddLog(u8"[자동 후방지원] %u년 1월 자동 실행 완료 (활성 %d / 실행 %d)",
+           (unsigned int)year, enabledCount, successCount);
+
+    // 사용자가 전선 분석에서 보고 있던 세력 선택은 가능한 한 복구한다.
+    s_frontierSelectedForce = previousSelectedForce;
+    RefreshFrontierAnalysis(p1, cityBase);
   }
 
   void ResetAllCityRevoltCounters() {
