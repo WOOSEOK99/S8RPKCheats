@@ -5,6 +5,7 @@
 #include "../../MenuState.h"
 #include "../../Cheats/System/MonthCapture.h"
 #include "../../Cheats/Officer/OfficerData.h"
+#include "../../Cheats/Officer/OfficerRosterResolve.h"
 #include "../../showlog.h"
 
 #include <psapi.h>
@@ -233,6 +234,89 @@ static bool ApplyChildSchedule(ChildEntry& e) {
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
   }
+}
+
+static void ScanOfficerRecordFamilyIdCandidates() {
+  if (g_savedHeroAddr <= 0x10000 || !IsValidPtr(g_savedHeroAddr, 0x3D0)) {
+    AddLog(u8"[ChildRecord] 주인공 레코드 주소가 유효하지 않습니다.");
+    return;
+  }
+
+  uint16_t heroId = 0;
+  if (!SafeRead16(g_savedHeroAddr + 0x08, &heroId) || heroId == 0) {
+    AddLog(u8"[ChildRecord] 주인공 ID 읽기 실패");
+    return;
+  }
+
+  const uintptr_t exeBase = (uintptr_t)GetModuleHandle(nullptr);
+  uintptr_t rosterBase = 0;
+  if (!TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) || rosterBase <= 0x10000) {
+    AddLog(u8"[ChildRecord] 무장 배열 베이스 해석 실패");
+    return;
+  }
+
+  AddLog(u8"[ChildRecord] 검사 시작: HeroID=%u HeroAddr=%p Roster=%p",
+         heroId, (void*)g_savedHeroAddr, (void*)rosterBase);
+
+  for (const auto& kv : g_children) {
+    const uint16_t childId = kv.first;
+    const uintptr_t directChildAddr =
+        rosterBase + (uintptr_t)(childId - 1) * 0x3D0;
+
+    uint16_t verifyId = 0;
+    if (!SafeRead16(directChildAddr + 0x08, &verifyId) || verifyId != childId) {
+      AddLog(u8"[ChildRecord] ID %u 직접 주소 검증 실패: %p (읽힌 ID=%u)",
+             childId, (void*)directChildAddr, verifyId);
+      continue;
+    }
+
+    AddLog(u8"[ChildRecord] ID %u 직접주소=%p / 훅주소=%p / 차이=%lld",
+           childId, (void*)directChildAddr, (void*)kv.second.addr,
+           (long long)((intptr_t)kv.second.addr - (intptr_t)directChildAddr));
+
+    int childToHeroMatches = 0;
+    for (uintptr_t off = 0; off + 2 <= 0x3D0; off += 2) {
+      uint16_t v = 0;
+      if (!SafeRead16(directChildAddr + off, &v) || v != heroId)
+        continue;
+
+      uint16_t m4 = 0, m2 = 0, p2 = 0, p4 = 0;
+      if (off >= 4) SafeRead16(directChildAddr + off - 4, &m4);
+      if (off >= 2) SafeRead16(directChildAddr + off - 2, &m2);
+      if (off + 4 <= 0x3D0) SafeRead16(directChildAddr + off + 2, &p2);
+      if (off + 6 <= 0x3D0) SafeRead16(directChildAddr + off + 4, &p4);
+
+      AddLog(u8"[ChildRecord] 자녀ID %u 내부 HeroID %u 발견: +0x%03llX | 주변 %u %u [%u] %u %u",
+             childId, heroId, (unsigned long long)off,
+             m4, m2, v, p2, p4);
+      childToHeroMatches++;
+    }
+
+    int heroToChildMatches = 0;
+    for (uintptr_t off = 0; off + 2 <= 0x3D0; off += 2) {
+      uint16_t v = 0;
+      if (!SafeRead16(g_savedHeroAddr + off, &v) || v != childId)
+        continue;
+
+      uint16_t m4 = 0, m2 = 0, p2 = 0, p4 = 0;
+      if (off >= 4) SafeRead16(g_savedHeroAddr + off - 4, &m4);
+      if (off >= 2) SafeRead16(g_savedHeroAddr + off - 2, &m2);
+      if (off + 4 <= 0x3D0) SafeRead16(g_savedHeroAddr + off + 2, &p2);
+      if (off + 6 <= 0x3D0) SafeRead16(g_savedHeroAddr + off + 4, &p4);
+
+      AddLog(u8"[ChildRecord] Hero 내부 자녀ID %u 발견: +0x%03llX | 주변 %u %u [%u] %u %u",
+             childId, (unsigned long long)off,
+             m4, m2, v, p2, p4);
+      heroToChildMatches++;
+    }
+
+    if (childToHeroMatches == 0)
+      AddLog(u8"[ChildRecord] 자녀ID %u 레코드 내부에 HeroID %u 직접값 없음", childId, heroId);
+    if (heroToChildMatches == 0)
+      AddLog(u8"[ChildRecord] Hero 레코드 내부에 자녀ID %u 직접값 없음", childId);
+  }
+
+  AddLog(u8"[ChildRecord] 가족 ID 후보 오프셋 검사 완료");
 }
 
 static void StartChildRelationScannerAsync() {
@@ -549,6 +633,7 @@ void DrawChildManagerWindow(float scale) {
     ImGui::ProgressBar(g_childRelationScanProgress.load(), ImVec2(260.0f * scale, 0));
   } else {
     if (ImGui::Button(u8"자녀 관계 검색", ImVec2(130.0f * scale, 0))) {
+      ScanOfficerRecordFamilyIdCandidates();
       StartChildRelationScannerAsync();
     }
     if (ImGui::IsItemHovered()) {
