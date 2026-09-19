@@ -37,6 +37,20 @@ namespace DX11Base {
         return false;
       }
     }
+
+    // 0도 정상값으로 허용하는 포인터/QWORD 읽기.
+    // __try는 C++ 소멸자가 있는 함수 안에서 사용할 수 없으므로 별도 helper로 분리한다.
+    static bool SafeReadPtrAllowZero(uintptr_t addr, uintptr_t *out) {
+      if (!out)
+        return false;
+      __try {
+        *out = *(uintptr_t *)addr;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *out = 0;
+        return false;
+      }
+    }
     static bool SafeRead8(uintptr_t addr, uint8_t *out) {
       __try {
         *out = *(uint8_t *)addr;
@@ -648,11 +662,8 @@ namespace DX11Base {
                 rawCity + OFF_CITY_CONNECTION_RAW + (uintptr_t)slot * sizeof(uintptr_t);
 
             // 빈 슬롯(0)은 정상적인 미사용 슬롯.
-            __try {
-              connectedPtr = *(uintptr_t *)slotAddr;
-            } __except (EXCEPTION_EXECUTE_HANDLER) {
+            if (!SafeReadPtrAllowZero(slotAddr, &connectedPtr))
               connectedPtr = 0;
-            }
 
             if (!connectedPtr)
               continue;
