@@ -93,49 +93,6 @@ namespace DX11Base {
         return true;
     }
 
-    bool ReadScenarioIdentity(uint8_t *outScenarioId,
-                              unsigned short *outStartYear,
-                              uint8_t *outStartMonth) {
-        if (!outScenarioId || !outStartYear || !outStartMonth)
-            return false;
-
-        uintptr_t dataCenter = ResolveScenarioDataCenter();
-        if (!dataCenter)
-            return false;
-
-        const uintptr_t currentYearAddr =
-            dataCenter + kScenarioYearOffset;
-        const uintptr_t scenarioIdAddr =
-            currentYearAddr + 0x14;
-        const uintptr_t startYearAddr =
-            currentYearAddr + 0x16;
-        const uintptr_t startMonthAddr =
-            currentYearAddr + 0x18;
-
-        if (!IsValidPtr(scenarioIdAddr, 1) ||
-            !IsValidPtr(startYearAddr, 2) ||
-            !IsValidPtr(startMonthAddr, 1))
-            return false;
-
-        const uint8_t scenarioId =
-            *(uint8_t *)scenarioIdAddr;
-        const unsigned short startYear =
-            *(unsigned short *)startYearAddr;
-        const uint8_t startMonth =
-            *(uint8_t *)startMonthAddr;
-
-        // 정상 시나리오가 아닌 화면/전환 중에는 자동 기능이 fail-closed 되도록 한다.
-        if (scenarioId == 0 || scenarioId > 100 ||
-            startYear < 100 || startYear > 9999 ||
-            startMonth < 1 || startMonth > 12)
-            return false;
-
-        *outScenarioId = scenarioId;
-        *outStartYear = startYear;
-        *outStartMonth = startMonth;
-        return true;
-    }
-
     // ---------------------------------------------------------------------------
     // 글로벌 상태 및 설정
     // ---------------------------------------------------------------------------
