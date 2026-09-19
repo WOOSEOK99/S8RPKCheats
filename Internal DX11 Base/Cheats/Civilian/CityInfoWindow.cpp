@@ -3034,9 +3034,36 @@ namespace DX11Base {
       return row->status == 0xC8 || row->status == 0xD8;
     }
 
-    static int CountPendingDeploymentGovernorChanges(
-        uintptr_t shiftedCityBase) {
-      int count = 0;
+    static bool HasDeploymentCityIndex(
+        const std::vector<int> &cities, int cityIndex) {
+      return std::find(cities.begin(), cities.end(), cityIndex) !=
+             cities.end();
+    }
+
+    static uintptr_t ReadDeploymentCityGovernor(
+        uintptr_t shiftedCityBase, int cityIndex) {
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, cityIndex);
+      uintptr_t governor = 0;
+      if (!rawCity ||
+          !SafeReadPtrAllowZero(
+              rawCity + OFF_CITY_FORCE_LINK_RAW, &governor))
+        return 0;
+      return governor;
+    }
+
+    static void BuildDeferredDeploymentGovernorCities(
+        uintptr_t shiftedCityBase, std::vector<int> *outDeferred) {
+      if (!outDeferred)
+        return;
+      outDeferred->clear();
+
+      auto markDeferred = [&](int cityIndex) {
+        if (!HasDeploymentCityIndex(*outDeferred, cityIndex))
+          outDeferred->push_back(cityIndex);
+      };
+
+      // 현재 태수가 없거나 E8이 아닌 도시는 신규 임명 방식이 확정되지 않았으므로 보류한다.
       for (const auto &city : s_corpsDeploymentCities) {
         if (!city.recommendedGovernorId ||
             IsDeploymentFixedLeader(city.recommendedGovernorId))
@@ -3047,19 +3074,108 @@ namespace DX11Base {
         if (!desired)
           continue;
 
-        const uintptr_t rawCity =
-            GetRawCityBase(shiftedCityBase, city.cityIndex);
-        uintptr_t currentGovernor = 0;
-        if (!rawCity ||
-            !SafeReadPtrAllowZero(
-                rawCity + OFF_CITY_FORCE_LINK_RAW,
-                &currentGovernor))
+        const uintptr_t currentGovernor =
+            ReadDeploymentCityGovernor(shiftedCityBase, city.cityIndex);
+        if (currentGovernor == desired->officerBase)
           continue;
 
-        if (currentGovernor != desired->officerBase)
-          ++count;
+        uint8_t currentStatus = 0;
+        if (currentGovernor <= 0x10000 ||
+            !SafeRead8(currentGovernor + 0x10, &currentStatus) ||
+            currentStatus != 0xE8) {
+          markDeferred(city.cityIndex);
+        }
       }
-      return count;
+
+      // 보류 도시와 E8 이동 관계로 연결된 도시도 함께 보류한다.
+      bool changed = true;
+      while (changed) {
+        changed = false;
+        for (const auto &blockedCity : s_corpsDeploymentCities) {
+          if (!HasDeploymentCityIndex(
+                  *outDeferred, blockedCity.cityIndex))
+            continue;
+
+          const uintptr_t blockedCurrent =
+              ReadDeploymentCityGovernor(
+                  shiftedCityBase, blockedCity.cityIndex);
+          const CityOfficerRow *blockedDesired =
+              blockedCity.recommendedGovernorId
+                  ? FindCorpsOfficerByRecId(
+                        blockedCity.recommendedGovernorId)
+                  : nullptr;
+          const uintptr_t blockedDesiredBase =
+              blockedDesired ? blockedDesired->officerBase : 0;
+
+          for (const auto &other : s_corpsDeploymentCities) {
+            if (HasDeploymentCityIndex(
+                    *outDeferred, other.cityIndex) ||
+                !other.recommendedGovernorId ||
+                IsDeploymentFixedLeader(
+                    other.recommendedGovernorId))
+              continue;
+
+            const CityOfficerRow *otherDesired =
+                FindCorpsOfficerByRecId(other.recommendedGovernorId);
+            if (!otherDesired)
+              continue;
+
+            const uintptr_t otherCurrent =
+                ReadDeploymentCityGovernor(
+                    shiftedCityBase, other.cityIndex);
+
+            const bool dependsOnBlockedCurrent =
+                blockedCurrent > 0x10000 &&
+                otherDesired->officerBase == blockedCurrent;
+            const bool ownsBlockedDesired =
+                blockedDesiredBase > 0x10000 &&
+                otherCurrent == blockedDesiredBase;
+
+            if (dependsOnBlockedCurrent || ownsBlockedDesired) {
+              outDeferred->push_back(other.cityIndex);
+              changed = true;
+            }
+          }
+        }
+      }
+
+      std::sort(outDeferred->begin(), outDeferred->end());
+    }
+
+    static int CountPendingDeploymentGovernorChanges(
+        uintptr_t shiftedCityBase, int *outDeferredCount = nullptr) {
+      std::vector<int> deferred;
+      BuildDeferredDeploymentGovernorCities(
+          shiftedCityBase, &deferred);
+
+      int applicable = 0;
+      int deferredPending = 0;
+      for (const auto &city : s_corpsDeploymentCities) {
+        if (!city.recommendedGovernorId ||
+            IsDeploymentFixedLeader(city.recommendedGovernorId))
+          continue;
+
+        const CityOfficerRow *desired =
+            FindCorpsOfficerByRecId(city.recommendedGovernorId);
+        if (!desired)
+          continue;
+
+        const uintptr_t currentGovernor =
+            ReadDeploymentCityGovernor(
+                shiftedCityBase, city.cityIndex);
+        if (currentGovernor == desired->officerBase)
+          continue;
+
+        if (HasDeploymentCityIndex(
+                deferred, city.cityIndex))
+          ++deferredPending;
+        else
+          ++applicable;
+      }
+
+      if (outDeferredCount)
+        *outDeferredCount = deferredPending;
+      return applicable;
     }
 
     static bool ApplyCorpsDeploymentGovernorStage(
