@@ -3052,6 +3052,77 @@ namespace DX11Base {
       return governor;
     }
 
+    static std::string BuildDeploymentCityResponsibilityDiagnostic(
+        uintptr_t shiftedCityBase, int cityIndex) {
+      if (cityIndex < 0 || cityIndex >= g_CityCount)
+        return u8"도시 인덱스 오류";
+
+      int residentCount = 0;
+      std::string rulerName;
+      std::string governorGeneralName;
+      std::string governorName;
+
+      for (const auto &row : s_corpsOfficerRows) {
+        if (GetOfficerCurrentCityIndex(
+                shiftedCityBase, row) != cityIndex)
+          continue;
+
+        ++residentCount;
+        if (row.status == 0xC8 && rulerName.empty())
+          rulerName = BuildOfficerName(row.id);
+        else if (row.status == 0xD8 &&
+                 governorGeneralName.empty())
+          governorGeneralName = BuildOfficerName(row.id);
+        else if (row.status == 0xE8 &&
+                 governorName.empty())
+          governorName = BuildOfficerName(row.id);
+      }
+
+      const uintptr_t cityGovernor =
+          ReadDeploymentCityGovernor(
+              shiftedCityBase, cityIndex);
+
+      std::string ptrInfo;
+      if (cityGovernor <= 0x10000) {
+        ptrInfo = u8"City+0x98=0";
+      } else {
+        uint16_t ptrId = 0;
+        uint8_t ptrStatus = 0;
+        const bool idOk =
+            SafeRead16(cityGovernor + 0x08, &ptrId);
+        const bool statusOk =
+            SafeRead8(cityGovernor + 0x10, &ptrStatus);
+
+        ptrInfo = u8"City+0x98=";
+        if (idOk)
+          ptrInfo += BuildOfficerName(ptrId);
+        else
+          ptrInfo += u8"ID?";
+        if (statusOk) {
+          char statusBuf[24]{};
+          sprintf_s(statusBuf, "(0x%02X)",
+                    (unsigned int)ptrStatus);
+          ptrInfo += statusBuf;
+        }
+      }
+
+      if (!rulerName.empty())
+        return u8"군주 " + rulerName + u8" 있음 | " + ptrInfo;
+
+      if (!governorGeneralName.empty())
+        return u8"도독 " + governorGeneralName + u8" 있음 | " +
+               ptrInfo;
+
+      if (!governorName.empty())
+        return u8"거주 E8 태수 " + governorName +
+               u8" 있음 / 포인터 상태 확인 필요 | " +
+               ptrInfo + u8" | 직접 체크";
+
+      return u8"C8/D8/E8 없음, 거주 " +
+             std::to_string(residentCount) +
+             u8"명 | " + ptrInfo + u8" | 직접 체크";
+    }
+
     static void BuildDeferredDeploymentGovernorCities(
         uintptr_t shiftedCityBase, std::vector<int> *outDeferred) {
       if (!outDeferred)
@@ -3063,7 +3134,9 @@ namespace DX11Base {
           outDeferred->push_back(cityIndex);
       };
 
-      // 현재 태수가 없거나 E8이 아닌 도시는 신규 임명 방식이 확정되지 않았으므로 보류한다.
+      // City+0x98이 비어 있거나 E8을 가리키지 않는 도시는 자동으로
+      // "태수 없음"이라 단정하지 않는다. 거주 C8/D8/E8을 별도 진단하고
+      // 신규 임명 방식이 확정될 때까지 보류한다.
       for (const auto &city : s_corpsDeploymentCities) {
         if (!city.recommendedGovernorId ||
             IsDeploymentFixedLeader(city.recommendedGovernorId))
@@ -3195,10 +3268,14 @@ namespace DX11Base {
       BuildDeferredDeploymentGovernorCities(
           shiftedCityBase, &deferredCities);
       for (int cityIndex : deferredCities) {
-        AddLog(u8"[군단 자동배치 2단계] 보류: %s (현재 태수 없음/비E8 또는 연쇄 의존)",
+        const std::string diagnostic =
+            BuildDeploymentCityResponsibilityDiagnostic(
+                shiftedCityBase, cityIndex);
+        AddLog(u8"[군단 자동배치 2단계] 보류: %s | %s",
                cityIndex >= 0 && cityIndex < g_CityCount
                    ? g_CityList[cityIndex].cityname
-                   : u8"?");
+                   : u8"?",
+               diagnostic.c_str());
       }
 
       // 1단계 이동이 남아 있으면 태수 교체를 시작하지 않는다.
@@ -3635,7 +3712,7 @@ namespace DX11Base {
         ImGui::TextUnformatted(
             u8"태수끼리 순환하는 경우 충성 100 일반 장수를 임시 태수로 사용합니다.");
         ImGui::TextUnformatted(
-            u8"현재 태수가 없거나 E8이 아닌 도시와 연결된 연쇄는 이번 단계에서 보류합니다.");
+            u8"City+0x98이 비거나 E8이 아니면 거주 군주/도독/태수를 진단하고 보류합니다.");
         ImGui::TextUnformatted(
             u8"중간 실패 시 적용 대상 도시는 2단계 시작 직전 상태로 전체 원복합니다.");
         ImGui::EndTooltip();
