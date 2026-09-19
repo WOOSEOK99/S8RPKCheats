@@ -1623,6 +1623,7 @@ namespace DX11Base {
       uintptr_t corpsPtr = 0;
       uintptr_t corpsNo = 0;
       uintptr_t forcePtr = 0;
+      uintptr_t governorGeneralPtr = 0;
     };
 
     static OfficerCityCorpsInfo GetOfficerCityCorpsInfo(
@@ -1639,6 +1640,7 @@ namespace DX11Base {
       if (info.corpsPtr > 0x10000) {
         SafeReadPtrAllowZero(info.corpsPtr + 0x18, &info.corpsNo);
         SafeReadPtr(info.corpsPtr + 0x10, &info.forcePtr);
+        SafeReadPtrAllowZero(info.corpsPtr + 0x20, &info.governorGeneralPtr);
       } else {
         // 직할 도시는 DivisionData가 없으므로 도시의 소유 세력으로 표시한다.
         info.forcePtr = GetCityForcePtr(rawCity);
@@ -1667,12 +1669,28 @@ namespace DX11Base {
           info.forcePtr ? GetOfficerForceShortName(info.forcePtr)
                         : std::string(u8"미확인");
 
+      // 직할은 군단 도독이 없으므로 세력 군주 이름으로 표시.
       if (info.corpsPtr <= 0x10000)
         return forceName + u8" 직할";
+
+      // 일반 군단은 세력 군주가 아니라 Division+0x20 도독 이름으로 구분한다.
+      std::string governorName = u8"도독 ?";
+      if (info.governorGeneralPtr > 0x10000) {
+        uint16_t governorId = 0;
+        if (SafeRead16(info.governorGeneralPtr + 0x08, &governorId) &&
+            governorId >= 1 && governorId <= 5102) {
+          auto it = g_officerNames.find((int)governorId);
+          if (it != g_officerNames.end() && !it->second.empty())
+            governorName = it->second;
+          else
+            governorName = u8"무장 ID " + std::to_string((int)governorId);
+        }
+      }
+
       if (info.corpsNo)
-        return forceName + " " +
+        return governorName + " " +
                std::to_string((unsigned long long)info.corpsNo) + u8"군단";
-      return forceName + u8" 군단 ?";
+      return governorName + u8" 군단 ?";
     }
 
     static std::string BuildOfficerCityCorpsLabel(uintptr_t shiftedCityBase,
