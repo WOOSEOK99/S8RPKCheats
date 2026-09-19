@@ -36,7 +36,6 @@ namespace DX11Base {
   extern bool bHateCave;
   extern bool bLoyalty;
   extern bool bResonance;
-  extern bool bResonanceThree;
   extern bool bInfiniteGift;
   extern bool bInfiniteTalk;
   extern bool bFastRelationship;
