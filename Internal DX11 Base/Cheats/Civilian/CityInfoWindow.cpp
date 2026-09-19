@@ -5390,14 +5390,26 @@ namespace DX11Base {
     static int ScoreSynergeticBase(
         uintptr_t base, uintptr_t rosterBase,
         int sampleCount = 384) {
-      if (base <= 0x10000 || rosterBase <= 0x10000)
+      if (base <= 0x10000 || rosterBase <= 0x10000 ||
+          sampleCount <= 0)
         return -1;
+
+      const int totalSlots = 5000;
+      if (sampleCount > totalSlots)
+        sampleCount = totalSlots;
 
       int valid = 0;
       int invalid = 0;
-      for (int i = 0; i < sampleCount; ++i) {
+      for (int sample = 0; sample < sampleCount; ++sample) {
+        const int i =
+            sampleCount == 1
+                ? 0
+                : (int)(((long long)sample *
+                         (totalSlots - 1)) /
+                        (sampleCount - 1));
         const uintptr_t slot =
             base + (uintptr_t)i * 0x20;
+
         uint8_t relation = 0;
         if (!SafeRead8(slot + 0x18, &relation))
           return -1;
@@ -5423,84 +5435,92 @@ namespace DX11Base {
       return valid;
     }
 
+    static bool IsReadableRelationshipScanRegion(
+        const MEMORY_BASIC_INFORMATION &mbi) {
+      if (mbi.State != MEM_COMMIT)
+        return false;
+      if (mbi.Protect & PAGE_GUARD)
+        return false;
+      const DWORD protect = mbi.Protect & 0xFF;
+      return protect != PAGE_NOACCESS;
+    }
+
     static bool TryResolveSynergeticBaseFromLegacyCt(
         uintptr_t exeBase, uintptr_t gameBase,
         uintptr_t rosterBase, uintptr_t *outBase,
         uintptr_t *outFieldOffset, uintptr_t *outPatternAddr) {
+      (void)exeBase;
       if (!outBase || !outFieldOffset || !outPatternAddr)
         return false;
       *outBase = 0;
       *outFieldOffset = 0;
       *outPatternAddr = 0;
 
-      // 구 CT가 사용하던 시그니처:
-      // 48 8D [modrm + disp32] 48 3B ? 44 0F ? ? 77 ? 48 8B
-      uintptr_t imageEnd = 0;
-      SafeGetModuleImageEnd(exeBase, &imageEnd);
-
-      const std::string pattern =
-          "48 8D ? ? ? ? ? 48 3B ? 44 0F ? ? 77 ? 48 8B";
-
-      if (imageEnd > exeBase) {
-        uintptr_t search = exeBase;
-        for (int matchIndex = 0;
-             matchIndex < 32 && search + 32 < imageEnd;
-             ++matchIndex) {
-          const uintptr_t found =
-              FindPattern(search, imageEnd, pattern);
-          if (!found)
-            break;
-
-          int32_t disp = 0;
-          SafeReadS32(found + 3, &disp);
-
-          if (disp > 0) {
-            uintptr_t tablePtr = 0;
-            if (SafeReadPtrAllowZero(
-                    gameBase + (uintptr_t)(uint32_t)disp,
-                    &tablePtr) &&
-                tablePtr > 0x10000) {
-              const uintptr_t candidate = tablePtr + 0xA0;
-              const int score =
-                  ScoreSynergeticBase(candidate, rosterBase);
-              if (score >= 3) {
-                *outBase = candidate;
-                *outFieldOffset =
-                    (uintptr_t)(uint32_t)disp;
-                *outPatternAddr = found;
-                return true;
-              }
-            }
-          }
-          search = found + 1;
+      uintptr_t tablePtr = 0;
+      if (SafeReadPtrAllowZero(
+              gameBase + LEGACY_SYNERGETIC_PTR_OFFSET,
+              &tablePtr) &&
+          tablePtr > 0x10000) {
+        const uintptr_t candidate = tablePtr + 0xA0;
+        if (ScoreSynergeticBase(
+                candidate, rosterBase, 1200) >= 1) {
+          *outBase = candidate;
+          *outFieldOffset = LEGACY_SYNERGETIC_PTR_OFFSET;
+          return true;
         }
       }
 
-      // 시그니처가 달라졌을 때를 위한 제한적 fallback.
-      // 구 CT 오프셋 근처의 gameBase 포인터 필드만 읽어 구조 점수로 확인한다.
-      const intptr_t window = 0x10000;
-      for (intptr_t delta = -window;
-           delta <= window; delta += 8) {
-        const intptr_t signedOff =
-            (intptr_t)LEGACY_SYNERGETIC_PTR_OFFSET + delta;
-        if (signedOff <= 0)
-          continue;
+      const uintptr_t scanSize = 0x800000;
+      const uintptr_t scanEnd = gameBase + scanSize;
+      uintptr_t cursor = gameBase;
 
-        uintptr_t tablePtr = 0;
-        if (!SafeReadPtrAllowZero(
-                gameBase + (uintptr_t)signedOff,
-                &tablePtr) ||
-            tablePtr <= 0x10000)
-          continue;
+      while (cursor < scanEnd) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(
+                (LPCVOID)cursor, &mbi,
+                sizeof(mbi)) != sizeof(mbi))
+          break;
 
-        const uintptr_t candidate = tablePtr + 0xA0;
-        const int score =
-            ScoreSynergeticBase(candidate, rosterBase, 256);
-        if (score >= 3) {
-          *outBase = candidate;
-          *outFieldOffset = (uintptr_t)signedOff;
-          return true;
+        uintptr_t regionStart =
+            (uintptr_t)mbi.BaseAddress;
+        uintptr_t regionEnd =
+            regionStart + mbi.RegionSize;
+        if (regionEnd <= cursor)
+          break;
+        if (regionEnd > scanEnd)
+          regionEnd = scanEnd;
+        if (regionStart < gameBase)
+          regionStart = gameBase;
+
+        if (IsReadableRelationshipScanRegion(mbi)) {
+          uintptr_t addr =
+              (regionStart + 7) & ~(uintptr_t)7;
+          for (; addr + 8 <= regionEnd; addr += 8) {
+            uintptr_t ptr = 0;
+            if (!SafeReadPtrAllowZero(addr, &ptr) ||
+                ptr <= 0x10000)
+              continue;
+
+            const uintptr_t candidate = ptr + 0xA0;
+            const int quick =
+                ScoreSynergeticBase(
+                    candidate, rosterBase, 128);
+            if (quick < 1)
+              continue;
+
+            const int confirm =
+                ScoreSynergeticBase(
+                    candidate, rosterBase, 1600);
+            if (confirm < 1)
+              continue;
+
+            *outBase = candidate;
+            *outFieldOffset = addr - gameBase;
+            return true;
+          }
         }
+
+        cursor = regionEnd;
       }
       return false;
     }
@@ -5508,14 +5528,26 @@ namespace DX11Base {
     static int ScoreRelationshipBase(
         uintptr_t base, uintptr_t rosterBase,
         int sampleCount = 384) {
-      if (base <= 0x10000 || rosterBase <= 0x10000)
+      if (base <= 0x10000 || rosterBase <= 0x10000 ||
+          sampleCount <= 0)
         return -1;
+
+      const int totalSlots = 3000;
+      if (sampleCount > totalSlots)
+        sampleCount = totalSlots;
 
       int valid = 0;
       int invalid = 0;
-      for (int i = 0; i < sampleCount; ++i) {
+      for (int sample = 0; sample < sampleCount; ++sample) {
+        const int i =
+            sampleCount == 1
+                ? 0
+                : (int)(((long long)sample *
+                         (totalSlots - 1)) /
+                        (sampleCount - 1));
         const uintptr_t slot =
             base + (uintptr_t)i * 0x40;
+
         uint8_t relation = 0;
         if (!SafeRead8(slot + 0x08, &relation))
           return -1;
@@ -5545,58 +5577,83 @@ namespace DX11Base {
         uintptr_t gameBase, uintptr_t rosterBase,
         uintptr_t synergeticFieldOffset,
         uintptr_t *outBase, uintptr_t *outFieldOffset) {
+      (void)synergeticFieldOffset;
       if (!outBase || !outFieldOffset)
         return false;
       *outBase = 0;
       *outFieldOffset = 0;
 
-      const uintptr_t center =
-          synergeticFieldOffset > 0
-              ? synergeticFieldOffset +
-                    LEGACY_RELATION_PTR_DELTA
-              : LEGACY_RELATION_PTR_OFFSET;
+      const uintptr_t biases[2] = {0x80, 0xC0};
 
-      // 먼저 구 CT의 상대 거리 그대로 확인.
       uintptr_t tablePtr = 0;
       if (SafeReadPtrAllowZero(
-              gameBase + center, &tablePtr) &&
-          tablePtr > 0x10000 &&
-          tablePtr > 0x80) {
-        const uintptr_t candidate = tablePtr - 0x80;
-        if (ScoreRelationshipBase(
-                candidate, rosterBase) >= 3) {
-          *outBase = candidate;
-          *outFieldOffset = center;
-          return true;
+              gameBase + LEGACY_RELATION_PTR_OFFSET,
+              &tablePtr) &&
+          tablePtr > 0x100C0) {
+        for (uintptr_t bias : biases) {
+          const uintptr_t candidate = tablePtr - bias;
+          if (ScoreRelationshipBase(
+                  candidate, rosterBase, 1200) >= 1) {
+            *outBase = candidate;
+            *outFieldOffset = LEGACY_RELATION_PTR_OFFSET;
+            return true;
+          }
         }
       }
 
-      // PK에서 필드가 조금 이동했을 가능성만 제한적으로 탐색한다.
-      const intptr_t window = 0x20000;
-      for (intptr_t delta = -window;
-           delta <= window; delta += 8) {
-        if (delta == 0)
-          continue;
-        const intptr_t signedOff =
-            (intptr_t)center + delta;
-        if (signedOff <= 0)
-          continue;
+      const uintptr_t scanSize = 0x800000;
+      const uintptr_t scanEnd = gameBase + scanSize;
+      uintptr_t cursor = gameBase;
 
-        uintptr_t ptr = 0;
-        if (!SafeReadPtrAllowZero(
-                gameBase + (uintptr_t)signedOff, &ptr) ||
-            ptr <= 0x10080)
-          continue;
+      while (cursor < scanEnd) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(
+                (LPCVOID)cursor, &mbi,
+                sizeof(mbi)) != sizeof(mbi))
+          break;
 
-        const uintptr_t candidate = ptr - 0x80;
-        const int score =
-            ScoreRelationshipBase(
-                candidate, rosterBase, 256);
-        if (score >= 3) {
-          *outBase = candidate;
-          *outFieldOffset = (uintptr_t)signedOff;
-          return true;
+        uintptr_t regionStart =
+            (uintptr_t)mbi.BaseAddress;
+        uintptr_t regionEnd =
+            regionStart + mbi.RegionSize;
+        if (regionEnd <= cursor)
+          break;
+        if (regionEnd > scanEnd)
+          regionEnd = scanEnd;
+        if (regionStart < gameBase)
+          regionStart = gameBase;
+
+        if (IsReadableRelationshipScanRegion(mbi)) {
+          uintptr_t addr =
+              (regionStart + 7) & ~(uintptr_t)7;
+          for (; addr + 8 <= regionEnd; addr += 8) {
+            uintptr_t ptr = 0;
+            if (!SafeReadPtrAllowZero(addr, &ptr) ||
+                ptr <= 0x100C0)
+              continue;
+
+            for (uintptr_t bias : biases) {
+              const uintptr_t candidate = ptr - bias;
+              const int quick =
+                  ScoreRelationshipBase(
+                      candidate, rosterBase, 128);
+              if (quick < 1)
+                continue;
+
+              const int confirm =
+                  ScoreRelationshipBase(
+                      candidate, rosterBase, 1600);
+              if (confirm < 1)
+                continue;
+
+              *outBase = candidate;
+              *outFieldOffset = addr - gameBase;
+              return true;
+            }
+          }
         }
+
+        cursor = regionEnd;
       }
       return false;
     }
@@ -5653,10 +5710,9 @@ namespace DX11Base {
               exe, gameBase, rosterBase,
               &synerBase, &synerFieldOffset,
               &synerPattern)) {
-        AddLog(u8"[관계DBG] 숙명 테이블 후보 확인: gameBase+0x%llX -> base 0x%llX / AOB 0x%llX",
+        AddLog(u8"[관계DBG] 숙명 테이블 후보 확인: gameBase+0x%llX -> base 0x%llX / CT 구조검증",
                (unsigned long long)synerFieldOffset,
-               (unsigned long long)synerBase,
-               (unsigned long long)synerPattern);
+               (unsigned long long)synerBase);
 
         int foundCount = 0;
         for (int i = 0; i < 5000; ++i) {
@@ -5691,7 +5747,7 @@ namespace DX11Base {
         }
         AddLog(u8"[관계DBG] 숙명 일치 %d건", foundCount);
       } else {
-        AddLog(u8"[관계DBG] 숙명 테이블 후보를 찾지 못했습니다. 구 CT AOB/0x433210 근처 재탐색 필요");
+        AddLog(u8"[관계DBG] 숙명 테이블 후보를 찾지 못했습니다. gameBase 앞 8MB 구조 스캔에서도 미검출");
       }
 
       uintptr_t relationBase = 0;
@@ -5777,8 +5833,7 @@ namespace DX11Base {
         AddLog(u8"[관계DBG] 의형제/배우자/원수/호적수 일치 %d건",
                foundCount);
       } else {
-        AddLog(u8"[관계DBG] 관계 테이블 후보를 찾지 못했습니다. 구 CT 상대거리(+0x%llX) 근처 재탐색 필요",
-               (unsigned long long)LEGACY_RELATION_PTR_DELTA);
+        AddLog(u8"[관계DBG] 관계 테이블 후보를 찾지 못했습니다. gameBase 앞 8MB 구조 스캔에서도 미검출");
       }
 
       AddLog(u8"[관계DBG] ===== 관계 탐색 종료 =====");
