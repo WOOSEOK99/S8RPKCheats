@@ -3191,6 +3191,16 @@ namespace DX11Base {
       RefreshCityOfficerRoster(p1, shiftedCityBase);
       RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
 
+      std::vector<int> deferredCities;
+      BuildDeferredDeploymentGovernorCities(
+          shiftedCityBase, &deferredCities);
+      for (int cityIndex : deferredCities) {
+        AddLog(u8"[군단 자동배치 2단계] 보류: %s (현재 태수 없음/비E8 또는 연쇄 의존)",
+               cityIndex >= 0 && cityIndex < g_CityCount
+                   ? g_CityList[cityIndex].cityname
+                   : u8"?");
+      }
+
       // 1단계 이동이 남아 있으면 태수 교체를 시작하지 않는다.
       for (const auto &rec : s_corpsDeploymentOfficers) {
         if ((rec.status == 0x28 || rec.status == 0x18) &&
@@ -3202,6 +3212,9 @@ namespace DX11Base {
 
       // 태수가 필요한 도시에는 충성 100 추천 책임자가 반드시 있어야 한다.
       for (const auto &city : s_corpsDeploymentCities) {
+        if (HasDeploymentCityIndex(
+                deferredCities, city.cityIndex))
+          continue;
         if (city.targetCount <= 0)
           continue;
         if (!city.recommendedGovernorId) {
@@ -3231,6 +3244,8 @@ namespace DX11Base {
       int moveCount = 0;
       int swapCount = 0;
       int cycleBreakCount = 0;
+      const int deferredCount =
+          (int)deferredCities.size();
       bool failed = false;
       std::string failReason;
 
@@ -3247,6 +3262,9 @@ namespace DX11Base {
               FindCorpsOfficerByRecId(rec.id);
           if (!row || row->status != 0x28 ||
               rec.currentCityIndex == rec.recommendedCityIndex)
+            continue;
+          if (HasDeploymentCityIndex(
+                  deferredCities, rec.recommendedCityIndex))
             continue;
           if (rec.recommendedCityIndex < 0 ||
               rec.recommendedCityIndex >= g_CityCount)
@@ -3276,6 +3294,9 @@ namespace DX11Base {
 
         // 추천 태수가 일반(28) 상태로 목표 도시에 도착한 곳부터 교체한다.
         for (const auto &city : s_corpsDeploymentCities) {
+          if (HasDeploymentCityIndex(
+                  deferredCities, city.cityIndex))
+            continue;
           if (!city.recommendedGovernorId ||
               IsDeploymentFixedLeader(city.recommendedGovernorId))
             continue;
@@ -3309,7 +3330,7 @@ namespace DX11Base {
 
           if (currentGovernor <= 0x10000) {
             failed = true;
-            failReason = u8"현재 태수 포인터가 비어 있어 안전한 교체를 할 수 없습니다.";
+            failReason = u8"선검사를 통과한 도시의 태수 포인터가 비어 있습니다.";
             break;
           }
 
@@ -3346,6 +3367,9 @@ namespace DX11Base {
         int desiredCurrentCity = -1;
 
         for (const auto &city : s_corpsDeploymentCities) {
+          if (HasDeploymentCityIndex(
+                  deferredCities, city.cityIndex))
+            continue;
           if (!city.recommendedGovernorId ||
               IsDeploymentFixedLeader(city.recommendedGovernorId))
             continue;
@@ -3445,8 +3469,11 @@ namespace DX11Base {
         RefreshCityOfficerRoster(p1, shiftedCityBase);
         RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
 
-        // 최종 태수/충성도 검증.
+        // 최종 태수/충성도 검증. 보류 도시는 원상 유지 대상으로 제외한다.
         for (const auto &city : s_corpsDeploymentCities) {
+          if (HasDeploymentCityIndex(
+                  deferredCities, city.cityIndex))
+            continue;
           if (!city.recommendedGovernorId ||
               IsDeploymentFixedLeader(city.recommendedGovernorId))
             continue;
@@ -3489,11 +3516,11 @@ namespace DX11Base {
 
       char notice[256]{};
       sprintf_s(notice,
-                u8"군단 자동배치 2단계 완료: 태수 교체 %d회 / 이동 %d회 / 순환 해제 %d회",
-                swapCount, moveCount, cycleBreakCount);
+                u8"군단 자동배치 2단계 완료: 태수 교체 %d회 / 이동 %d회 / 보류 %d도시",
+                swapCount, moveCount, deferredCount);
       AddNotification(notice);
-      AddLog(u8"[군단 자동배치 2단계] 완료: 교체 %d / 이동 %d / 순환해제 %d",
-             swapCount, moveCount, cycleBreakCount);
+      AddLog(u8"[군단 자동배치 2단계] 완료: 교체 %d / 이동 %d / 순환해제 %d / 보류 %d",
+             swapCount, moveCount, cycleBreakCount, deferredCount);
       return true;
     }
 
@@ -3580,8 +3607,10 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      int deferredGovernorChanges = 0;
       const int pendingGovernorChanges =
-          CountPendingDeploymentGovernorChanges(shiftedCityBase);
+          CountPendingDeploymentGovernorChanges(
+              shiftedCityBase, &deferredGovernorChanges);
       ImGui::SameLine(0.f, 12.f * sc);
       const bool canApplyGovernorStage =
           !hasMovable && pendingGovernorChanges > 0;
@@ -3595,8 +3624,9 @@ namespace DX11Base {
         ImGui::EndDisabled();
 
       ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::TextDisabled(u8"태수 변경 %d개 도시",
-                          pendingGovernorChanges);
+      ImGui::TextDisabled(u8"태수 변경 %d / 보류 %d 도시",
+                          pendingGovernorChanges,
+                          deferredGovernorChanges);
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
@@ -3605,7 +3635,9 @@ namespace DX11Base {
         ImGui::TextUnformatted(
             u8"태수끼리 순환하는 경우 충성 100 일반 장수를 임시 태수로 사용합니다.");
         ImGui::TextUnformatted(
-            u8"중간 실패 시 2단계 시작 직전 상태로 전체 원복합니다.");
+            u8"현재 태수가 없거나 E8이 아닌 도시와 연결된 연쇄는 이번 단계에서 보류합니다.");
+        ImGui::TextUnformatted(
+            u8"중간 실패 시 적용 대상 도시는 2단계 시작 직전 상태로 전체 원복합니다.");
         ImGui::EndTooltip();
       }
 
