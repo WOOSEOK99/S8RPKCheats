@@ -2441,8 +2441,176 @@ namespace DX11Base {
       return true;
     }
 
+    struct CorpsDeploymentMoveWrite {
+      uint16_t id = 0;
+      uint8_t status = 0;
+      uintptr_t officerBase = 0;
+      uintptr_t oldCity = 0;
+      uintptr_t newCity = 0;
+      int oldCityIndex = -1;
+      int newCityIndex = -1;
+    };
+
+    static bool ApplyCorpsDeploymentMovements(
+        uintptr_t p1, uintptr_t shiftedCityBase) {
+      if (!s_corpsDeploymentValid ||
+          s_corpsDeploymentCorpsPtr <= 0x10000 ||
+          s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
+        AddNotification(u8"군단 자동배치: 먼저 현재 군단의 추천을 계산해주세요.");
+        return false;
+      }
+
+      std::vector<CorpsDeploymentMoveWrite> writes;
+      writes.reserve(s_corpsDeploymentOfficers.size());
+
+      // 먼저 모든 이동을 검증한다. 이번 단계에서는 일반/군사만 이동한다.
+      for (const auto &rec : s_corpsDeploymentOfficers) {
+        if (rec.currentCityIndex == rec.recommendedCityIndex)
+          continue;
+        if (rec.status != 0x28 && rec.status != 0x18)
+          continue;
+        if (rec.recommendedCityIndex < 0 ||
+            rec.recommendedCityIndex >= g_CityCount)
+          continue;
+
+        const CityOfficerRow *row = FindCorpsOfficerByRecId(rec.id);
+        if (!row || row->officerBase <= 0x10000) {
+          AddNotification(u8"군단 자동배치: 추천 무장 정보를 다시 읽어야 합니다.");
+          return false;
+        }
+
+        uint8_t currentStatus = 0;
+        uintptr_t forcePtr = 0;
+        uintptr_t currentCity = 0;
+        if (!SafeRead8(row->officerBase + 0x10, &currentStatus) ||
+            !SafeReadPtr(row->officerBase + 0x18, &forcePtr) ||
+            !SafeReadPtr(row->officerBase + 0x20, &currentCity)) {
+          AddNotification(u8"군단 자동배치: 무장 현재 상태를 읽지 못했습니다.");
+          return false;
+        }
+
+        if (currentStatus != rec.status ||
+            (currentStatus != 0x28 && currentStatus != 0x18)) {
+          AddNotification(u8"군단 자동배치: 추천 후 무장 신분이 변경되어 적용을 중단했습니다.");
+          AddLog(u8"[군단 자동배치] 신분 변경 감지: ID %u 추천=0x%02X 현재=0x%02X",
+                 (unsigned int)rec.id,
+                 (unsigned int)rec.status,
+                 (unsigned int)currentStatus);
+          return false;
+        }
+
+        const uintptr_t targetCity =
+            GetRawCityBase(shiftedCityBase, rec.recommendedCityIndex);
+        if (!targetCity || forcePtr != s_officerPlayerForce ||
+            GetCityForcePtr(targetCity) != s_officerPlayerForce) {
+          AddNotification(u8"군단 자동배치: 무장/목적 도시의 소속 세력을 다시 확인해주세요.");
+          return false;
+        }
+
+        uintptr_t sourceCorps = 0;
+        uintptr_t targetCorps = 0;
+        if (!SafeReadPtrAllowZero(currentCity + OFF_CITY_CORPS_RAW,
+                                  &sourceCorps) ||
+            !SafeReadPtrAllowZero(targetCity + OFF_CITY_CORPS_RAW,
+                                  &targetCorps) ||
+            sourceCorps != s_corpsDeploymentCorpsPtr ||
+            targetCorps != s_corpsDeploymentCorpsPtr) {
+          AddNotification(u8"군단 자동배치: 군단 소속이 달라져 적용을 중단했습니다.");
+          AddLog(u8"[군단 자동배치] 군단 검증 실패: ID %u 출발=0x%llX 목적=0x%llX 기준=0x%llX",
+                 (unsigned int)rec.id,
+                 (unsigned long long)sourceCorps,
+                 (unsigned long long)targetCorps,
+                 (unsigned long long)s_corpsDeploymentCorpsPtr);
+          return false;
+        }
+
+        CorpsDeploymentMoveWrite write;
+        write.id = rec.id;
+        write.status = currentStatus;
+        write.officerBase = row->officerBase;
+        write.oldCity = currentCity;
+        write.newCity = targetCity;
+        write.oldCityIndex = rec.currentCityIndex;
+        write.newCityIndex = rec.recommendedCityIndex;
+        writes.push_back(write);
+      }
+
+      if (writes.empty()) {
+        AddNotification(u8"군단 자동배치: 이번 단계에서 이동할 일반/군사가 없습니다.");
+        return true;
+      }
+
+      size_t writtenCount = 0;
+      for (size_t i = 0; i < writes.size(); ++i) {
+        const auto &write = writes[i];
+        if (!SafeWritePtr(write.officerBase + 0x20, write.newCity)) {
+          for (size_t j = 0; j < writtenCount; ++j)
+            SafeWritePtr(writes[j].officerBase + 0x20, writes[j].oldCity);
+
+          AddNotification(u8"군단 자동배치: 이동 중 실패하여 이전 이동을 원복했습니다.");
+          AddLog(u8"[군단 자동배치] 쓰기 실패/롤백: ID %u (%u/%u)",
+                 (unsigned int)write.id,
+                 (unsigned int)i,
+                 (unsigned int)writes.size());
+          return false;
+        }
+        ++writtenCount;
+      }
+
+      bool verifyOk = true;
+      for (const auto &write : writes) {
+        uintptr_t cityNow = 0;
+        if (!SafeReadPtr(write.officerBase + 0x20, &cityNow) ||
+            cityNow != write.newCity) {
+          verifyOk = false;
+          break;
+        }
+      }
+
+      if (!verifyOk) {
+        for (const auto &write : writes)
+          SafeWritePtr(write.officerBase + 0x20, write.oldCity);
+        AddNotification(u8"군단 자동배치: 이동 후 검증 실패로 전체 원복했습니다.");
+        return false;
+      }
+
+      int normalCount = 0;
+      int adviserCount = 0;
+      for (const auto &write : writes) {
+        if (write.status == 0x18)
+          ++adviserCount;
+        else
+          ++normalCount;
+
+        AddLog(u8"[군단 자동배치] %s: %s -> %s (%s)",
+               BuildOfficerName(write.id).c_str(),
+               write.oldCityIndex >= 0
+                   ? g_CityList[write.oldCityIndex].cityname
+                   : u8"?",
+               write.newCityIndex >= 0
+                   ? g_CityList[write.newCityIndex].cityname
+                   : u8"?",
+               write.status == 0x18 ? u8"군사 유지" : u8"일반");
+      }
+
+      char notice[256]{};
+      sprintf_s(notice,
+                u8"군단 자동배치 1단계 완료: 일반 %d명 / 군사 %d명 이동",
+                normalCount, adviserCount);
+      AddNotification(notice);
+
+      s_selectedOfficerId = -1;
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, shiftedCityBase);
+
+      // 이동 후 현재 상태로 추천표를 다시 계산해 남은 태수 교체를 보여준다.
+      BuildCorpsDeploymentRecommendation(shiftedCityBase);
+      return true;
+    }
+
+
     static void DrawCorpsDeploymentRecommendation(
-        uintptr_t shiftedCityBase, float sc) {
+        uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.0f, 1.f),
@@ -2469,6 +2637,41 @@ namespace DX11Base {
         ImGui::TextDisabled(
             u8"군단 도시를 선택한 뒤 '추천 계산'을 눌러주세요.");
         return;
+      }
+
+      int movableNormal = 0;
+      int movableAdviser = 0;
+      for (const auto &rec : s_corpsDeploymentOfficers) {
+        if (rec.currentCityIndex == rec.recommendedCityIndex)
+          continue;
+        if (rec.status == 0x28)
+          ++movableNormal;
+        else if (rec.status == 0x18)
+          ++movableAdviser;
+      }
+
+      ImGui::SameLine(0.f, 12.f * sc);
+      const bool hasMovable = movableNormal > 0 || movableAdviser > 0;
+      if (!hasMovable)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"1단계 배치 적용##CorpsDeploymentMoveApply",
+                        ImVec2(145.f * sc, 0.f))) {
+        ApplyCorpsDeploymentMovements(p1, shiftedCityBase);
+      }
+      if (!hasMovable)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::TextDisabled(u8"일반 %d / 군사 %d 이동 예정",
+                          movableNormal, movableAdviser);
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"1단계는 같은 군단 안에서 일반/군사의 도시만 이동합니다.");
+        ImGui::TextUnformatted(
+            u8"군주·도독·태수의 신분과 태수 포인터는 아직 변경하지 않습니다.");
+        ImGui::EndTooltip();
       }
 
       static ImGuiTableFlags deployFlags =
@@ -3662,7 +3865,7 @@ namespace DX11Base {
 
       DrawGovernorPanel(p1, shiftedCityBase, sc);
       DrawGovernorGeneralPanel(p1, shiftedCityBase, sc);
-      DrawCorpsDeploymentRecommendation(shiftedCityBase, sc);
+      DrawCorpsDeploymentRecommendation(p1, shiftedCityBase, sc);
       if (bShowDebug)
         DrawCityCorpsPointerDebug(shiftedCityBase, sc);
     }
