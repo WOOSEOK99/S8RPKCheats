@@ -660,6 +660,7 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"배우자가 있어도 무조건 결혼이 됩니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 공명 4개 + 경애 상태에서만 무제한 결혼이 가능합니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 대신 타 세력의 경우 등용은 안되네요.");
         ImGui::EndTooltip();
       }
