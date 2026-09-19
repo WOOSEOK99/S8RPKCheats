@@ -1655,6 +1655,9 @@ namespace DX11Base {
     static uintptr_t s_corpsDeploymentTargetCorpsPtr = 0;
     static std::vector<CorpsDeploymentTargetBaseline>
         s_corpsDeploymentTargetBaseline;
+    static uint8_t s_corpsDeploymentLastRelevantGameState = 0;
+    static constexpr uint8_t CORPS_DEPLOY_STATE_COUNCIL = 0x05;
+    static constexpr uint8_t CORPS_DEPLOY_STATE_DOMESTIC = 0x07;
 
     struct OfficerCityCorpsInfo {
       bool readable = false;
@@ -1866,10 +1869,6 @@ namespace DX11Base {
       s_corpsOfficerRows.clear();
       s_officerSelectedCorpsPtr = 0;
       s_officerPlayerForce = 0;
-      s_corpsDeploymentValid = false;
-      s_corpsDeploymentCities.clear();
-      s_corpsDeploymentOfficers.clear();
-      s_corpsDeploymentCorpsPtr = 0;
 
       if (p1 <= 0x10000 || shiftedCityBase <= 0x10000) {
         s_officerRosterDirty = false;
@@ -2176,6 +2175,9 @@ namespace DX11Base {
       return true;
     }
 
+    static bool BuildCorpsDeploymentRecommendation(
+        uintptr_t shiftedCityBase);
+
     static int GetCorpsDeploymentBaselineTargetCount(int cityIndex) {
       for (const auto &base : s_corpsDeploymentTargetBaseline) {
         if (base.cityIndex == cityIndex)
@@ -2195,6 +2197,96 @@ namespace DX11Base {
         s_corpsDeploymentTargetBaseline.push_back(base);
       }
       s_corpsDeploymentTargetCorpsPtr = corpsPtr;
+    }
+
+    static void RefreshCorpsDeploymentPlanCurrentState(
+        uintptr_t shiftedCityBase) {
+      if (!s_corpsDeploymentValid ||
+          s_corpsDeploymentCorpsPtr <= 0x10000)
+        return;
+
+      for (auto &city : s_corpsDeploymentCities) {
+        city.currentCount = 0;
+        city.currentGovernorId = 0;
+
+        const uintptr_t rawCity =
+            GetRawCityBase(shiftedCityBase, city.cityIndex);
+        uintptr_t governorPtr = 0;
+        if (rawCity)
+          SafeReadPtrAllowZero(rawCity + OFF_CITY_FORCE_LINK_RAW,
+                               &governorPtr);
+
+        for (const auto &row : s_corpsOfficerRows) {
+          const int currentCity =
+              GetOfficerCurrentCityIndex(shiftedCityBase, row);
+          if (currentCity == city.cityIndex)
+            ++city.currentCount;
+          if (row.officerBase == governorPtr)
+            city.currentGovernorId = row.id;
+        }
+      }
+
+      for (auto &rec : s_corpsDeploymentOfficers) {
+        const CityOfficerRow *row = FindCorpsOfficerByRecId(rec.id);
+        if (!row)
+          continue;
+        rec.status = row->status;
+        rec.loyalty = row->loyalty;
+        rec.currentCityIndex =
+            GetOfficerCurrentCityIndex(shiftedCityBase, *row);
+      }
+    }
+
+    static uint8_t ReadCorpsDeploymentRelevantGameState() {
+      const uintptr_t gameBase = GetGameBase();
+      if (gameBase <= 0x10000)
+        return 0;
+
+      uint8_t state = 0;
+      if (!SafeRead8(gameBase + 0xD0, &state))
+        return 0;
+
+      return (state == CORPS_DEPLOY_STATE_COUNCIL ||
+              state == CORPS_DEPLOY_STATE_DOMESTIC)
+                 ? state
+                 : 0;
+    }
+
+    static void RunCorpsDeploymentPhaseMonitor(uintptr_t p1) {
+      const uint8_t state = ReadCorpsDeploymentRelevantGameState();
+      if (state == 0)
+        return;
+
+      if (s_corpsDeploymentLastRelevantGameState == 0) {
+        s_corpsDeploymentLastRelevantGameState = state;
+        return;
+      }
+
+      if (state == s_corpsDeploymentLastRelevantGameState)
+        return;
+
+      const uint8_t previous = s_corpsDeploymentLastRelevantGameState;
+      s_corpsDeploymentLastRelevantGameState = state;
+
+      if (previous != CORPS_DEPLOY_STATE_DOMESTIC ||
+          state != CORPS_DEPLOY_STATE_COUNCIL)
+        return;
+
+      ResetCorpsDeploymentTargetBaseline();
+      s_officerRosterDirty = true;
+
+      const uintptr_t cityBase = GetCityArrBase();
+      if (p1 > 0x10000 && cityBase > 0x10000 &&
+          s_officerCityIndex >= 0) {
+        RefreshCityOfficerRoster(p1, cityBase);
+        if (s_officerSelectedCorpsPtr > 0x10000) {
+          BuildCorpsDeploymentRecommendation(cityBase);
+          AddLog(u8"[군단 자동배치] 평정 진입(07->05): 현재 선택 군단 새 배치 계획 생성");
+          return;
+        }
+      }
+
+      AddLog(u8"[군단 자동배치] 평정 진입(07->05): 이전 배치 계획 초기화");
     }
 
 
@@ -2683,8 +2775,8 @@ namespace DX11Base {
       s_officerRosterDirty = true;
       RefreshCityOfficerRoster(p1, shiftedCityBase);
 
-      // 이동 후 현재 상태로 추천표를 다시 계산해 남은 태수 교체를 보여준다.
-      BuildCorpsDeploymentRecommendation(shiftedCityBase);
+      // 같은 평정에서는 최초 추천안을 유지하고 현재 위치만 갱신한다.
+      RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
       return true;
     }
 
@@ -2703,6 +2795,7 @@ namespace DX11Base {
         ImGui::BeginDisabled();
       if (ImGui::Button(u8"추천 계산##CorpsDeploymentBuild",
                         ImVec2(120.f * sc, 0.f))) {
+        ResetCorpsDeploymentTargetBaseline();
         BuildCorpsDeploymentRecommendation(shiftedCityBase);
       }
       if (!canBuild)
@@ -2714,9 +2807,8 @@ namespace DX11Base {
           !s_corpsDeploymentTargetBaseline.empty();
       if (!hasTargetBaseline)
         ImGui::BeginDisabled();
-      if (ImGui::SmallButton(u8"배치 기준 초기화##CorpsDeploymentReset")) {
+      if (ImGui::SmallButton(u8"현재 계획 취소##CorpsDeploymentReset")) {
         ResetCorpsDeploymentTargetBaseline();
-        BuildCorpsDeploymentRecommendation(shiftedCityBase);
       }
       if (!hasTargetBaseline)
         ImGui::EndDisabled();
@@ -2726,7 +2818,7 @@ namespace DX11Base {
           u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 신분 유지/전선 우선");
       if (hasTargetBaseline) {
         ImGui::SameLine(0.f, 8.f * sc);
-        ImGui::TextDisabled(u8"| 목표 인원 고정");
+        ImGui::TextDisabled(u8"| 이번 평정 계획 고정");
       }
 
       if (!s_corpsDeploymentValid ||
@@ -4024,6 +4116,8 @@ namespace DX11Base {
     if (now - s_lastPollMs < 500)
       return;
     s_lastPollMs = now;
+
+    RunCorpsDeploymentPhaseMonitor(p1);
 
     LoadAutoSupportRoutes();
 
