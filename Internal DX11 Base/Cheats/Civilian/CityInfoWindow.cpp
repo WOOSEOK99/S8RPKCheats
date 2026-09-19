@@ -6200,6 +6200,13 @@ namespace DX11Base {
     ImGui::End();
   }
 
+  void ResetCorpsAutoDeploymentSession() {
+    DisarmCorpsAutoDeploymentSession(
+        u8"게임/P1 리셋 감지", false);
+    s_corpsDeploymentLastRelevantGameState = 0;
+    ResetCorpsDeploymentTargetBaseline();
+  }
+
   void RunYearlyRearSupport(uintptr_t p1) {
     static ULONGLONG s_lastPollMs = 0;
     const ULONGLONG now = GetTickCount64();
