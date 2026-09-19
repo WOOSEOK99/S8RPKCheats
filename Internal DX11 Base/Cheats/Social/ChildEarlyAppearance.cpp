@@ -17,6 +17,10 @@ static uintptr_t g_childCaveAddr = 0;
 static uint8_t g_childOriginal[7] = {};
 static bool g_childApplied = false;
 
+// MonthCapture.cpp와 동일한 시나리오 연도 경로.
+static constexpr uintptr_t kScenarioInstanceStaticOffset = 0x2E98BC8;
+static constexpr uintptr_t kScenarioYearOffset = 0x72D0;
+
 static bool GetModuleRange(uintptr_t& begin, uintptr_t& end) {
   begin = (uintptr_t)GetModuleHandle(nullptr);
   if (!begin)
@@ -64,14 +68,25 @@ static bool InstallChildCave(uintptr_t hookAddr) {
   code.insert(code.end(), g_childOriginal,
               g_childOriginal + sizeof(g_childOriginal));
 
-  // CT 원본에서는 별도 훅으로 현재 연도를 잡지만, 이 지점 직전 게임 코드가
-  // movzx edi,word ptr [yearBase+72D0] 를 실행하므로 DI가 현재 연도입니다.
+  // 원본 mov 명령은 FLAGS를 변경하지 않으므로 사용자 로직도 FLAGS까지 보존합니다.
+  Emit8(code, 0x9C); // pushfq
   Emit8(code, 0x53); // push rbx
   Emit8(code, 0x51); // push rcx
   Emit8(code, 0x52); // push rdx
 
-  // mov bx,di
-  Emit8(code, 0x66); Emit8(code, 0x8B); Emit8(code, 0xDF);
+  // 현재 연도는 레지스터를 추정하지 않고 MonthCapture.cpp와 동일한
+  // 시나리오 데이터 인스턴스 + 0x72D0에서 직접 읽습니다.
+  // mov rdx, exeBase + kScenarioInstanceStaticOffset
+  Emit8(code, 0x48); Emit8(code, 0xBA);
+  Emit64(code, (uintptr_t)GetModuleHandle(nullptr) + kScenarioInstanceStaticOffset);
+  // mov rdx,[rdx]
+  Emit8(code, 0x48); Emit8(code, 0x8B); Emit8(code, 0x12);
+  // test rdx,rdx / jz end
+  Emit8(code, 0x48); Emit8(code, 0x85); Emit8(code, 0xD2);
+  Emit8(code, 0x74); const size_t jNoScenario = code.size(); Emit8(code, 0x00);
+  // movzx ebx,word ptr [rdx+72D0]
+  Emit8(code, 0x0F); Emit8(code, 0xB7); Emit8(code, 0x9A);
+  code.push_back(0xD0); code.push_back(0x72); code.push_back(0x00); code.push_back(0x00);
 
   // cmp bx,170 / jbe end
   Emit8(code, 0x66); Emit8(code, 0x81); Emit8(code, 0xFB); Emit16(code, 170);
@@ -123,8 +138,10 @@ static bool InstallChildCave(uintptr_t hookAddr) {
   Emit8(code, 0x5A); // pop rdx
   Emit8(code, 0x59); // pop rcx
   Emit8(code, 0x5B); // pop rbx
+  Emit8(code, 0x9D); // popfq
 
-  if (!PatchRel8(code, jYearLow, endPos) ||
+  if (!PatchRel8(code, jNoScenario, endPos) ||
+      !PatchRel8(code, jYearLow, endPos) ||
       !PatchRel8(code, jYearHigh, endPos) ||
       !PatchRel8(code, jAlreadyClose, endPos) ||
       !PatchRel8(code, jDeathOk, deathOkPos)) {
