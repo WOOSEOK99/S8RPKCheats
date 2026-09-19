@@ -661,31 +661,15 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"자녀 조기 등장", &bChildEarlyAppearance)) {
-        DX11Base::SetChildEarlyAppearance(bChildEarlyAppearance);
-        NotifyFeatureToggle(u8"자녀 조기 등장", bChildEarlyAppearance);
-        SaveConfig();
+      if (ImGui::Button(u8"자녀 관리", ImVec2(120.0f * scale, 0))) {
+        bShowChildManagerWin = true;
       }
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(55.0f * scale);
-      if (ImGui::InputInt(u8"##ChildEarlyYears", &vChildEarlyAppearanceYears, 0, 0)) {
-        if (vChildEarlyAppearanceYears < 1) vChildEarlyAppearanceYears = 1;
-        if (vChildEarlyAppearanceYears > 10) vChildEarlyAppearanceYears = 10;
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      ImGui::TextUnformatted(u8"년 후");
-
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"미등장 자녀의 등장년도만 현재 연도 + 설정값으로 앞당깁니다.");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"기본값 3년 / 입력 범위 1~10년");
+                           u8"감지된 자녀 목록을 열어 자녀별로 임관 시점을 설정합니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 출생년도/사망년도는 변경하지 않습니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 이미 설정값 이내에 등장 예정인 자녀는 변경하지 않습니다.");
+                           u8"※ 새로 태어난 자녀도 이후 자녀 처리 시 자동으로 목록에 추가됩니다.");
         ImGui::EndTooltip();
       }
 
