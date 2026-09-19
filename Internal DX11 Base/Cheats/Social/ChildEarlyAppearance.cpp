@@ -2,6 +2,7 @@
 #include "ChildEarlyAppearance.h"
 #include "../../Cheats.h"
 #include "../../MemoryUtils.h"
+#include "../../MenuState.h"
 #include "../../Cheats/System/MonthCapture.h"
 #include "../../Cheats/Officer/OfficerData.h"
 #include "../../showlog.h"
@@ -248,17 +249,14 @@ void RunChildManagerUpdate() {
 }
 
 void DrawChildManagerWindow(float scale) {
-  static bool open = true;
-  if (!open) {
-    open = true;
+  if (!bShowChildManagerWin)
     return;
-  }
 
   EnsureChildManagerCapture();
   RunChildManagerUpdate();
 
   ImGui::SetNextWindowSize(ImVec2(620.0f * scale, 330.0f * scale), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin(u8"자녀 관리###ChildManager", &open)) {
+  if (!ImGui::Begin(u8"자녀 관리###ChildManager", &bShowChildManagerWin)) {
     ImGui::End();
     return;
   }
