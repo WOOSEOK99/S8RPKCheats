@@ -28,6 +28,13 @@ namespace DX11Base {
     static volatile uint16_t g_resonanceThreeTargetId = 0;
     static volatile uint8_t g_resonanceThreeArmed = 0;
 
+    // CT369 실제 getter가 선택 상대에 대해 호출됐는지 확인하는 진단값.
+    static volatile uint32_t g_resonanceThreeGetterSeq = 0;
+    static volatile uint16_t g_resonanceThreeGetterId = 0;
+    static volatile int32_t g_resonanceThreeGetterSlot = -1;
+    static volatile uint8_t g_resonanceThreeGetterBefore = 0;
+    static volatile uint8_t g_resonanceThreeGetterAfter = 0;
+
     static bool InstallResonanceCave(uintptr_t hookAddr) {
         // 코드 케이브 할당 (8.0 버전에 맞춰 AllocNear 사용)
         g_resonanceCaveAddr = AllocNear(hookAddr, 128);
@@ -199,16 +206,57 @@ namespace DX11Base {
         cave[cur++] = 0x75;
         const int jneIdDispPos = cur++;
 
-        // CT ID 369 실제 공명 저장 위치:
+        // CT369 실제 getter까지 들어온 선택 상대만 진단합니다.
+        // r8d = 장수ID -> 공명 슬롯 매핑 결과, [r8+rcx+dynOffset] = 실제 공명 카운트.
+        // mov r11, &g_resonanceThreeGetterId
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeGetterId; cur += 8;
+        // mov word ptr [r11], dx
+        cave[cur++] = 0x66; cave[cur++] = 0x41; cave[cur++] = 0x89; cave[cur++] = 0x13;
+
+        // mov r11, &g_resonanceThreeGetterSlot
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeGetterSlot; cur += 8;
+        // mov dword ptr [r11], r8d
+        cave[cur++] = 0x45; cave[cur++] = 0x89; cave[cur++] = 0x03;
+
+        // movzx eax, byte ptr [r8+rcx+dynOffset]
+        cave[cur++] = 0x41; cave[cur++] = 0x0F; cave[cur++] = 0xB6; cave[cur++] = 0x84; cave[cur++] = 0x08;
+        *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
+
+        // mov r11, &g_resonanceThreeGetterBefore / mov [r11], al
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeGetterBefore; cur += 8;
+        cave[cur++] = 0x41; cave[cur++] = 0x88; cave[cur++] = 0x03;
+
+        // 공명은 "최소 3"만 보장합니다. 이미 3 이상이면 내리지 않습니다.
+        // cmp al, 3 / jae noWrite
+        cave[cur++] = 0x3C; cave[cur++] = 0x03;
+        cave[cur++] = 0x73;
+        const int jaeNoWriteDispPos = cur++;
+
         // mov byte ptr [r8+rcx+dynOffset], 3
         cave[cur++] = 0x41; cave[cur++] = 0xC6; cave[cur++] = 0x84; cave[cur++] = 0x08;
         *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
         cave[cur++] = 0x03;
 
-        // 한 번 실제 대상에 적용했으면 stale target이 나중 조회를 오염시키지 않도록 armed=0.
+        const int noWritePos = cur;
+        cave[jaeNoWriteDispPos] = (uint8_t)(noWritePos - (jaeNoWriteDispPos + 1));
+
+        // 변경 후 값 기록
+        cave[cur++] = 0x41; cave[cur++] = 0x0F; cave[cur++] = 0xB6; cave[cur++] = 0x84; cave[cur++] = 0x08;
+        *(uint32_t*)&cave[cur] = dynOffset; cur += 4;
         cave[cur++] = 0x49; cave[cur++] = 0xBB;
-        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeArmed; cur += 8;
-        cave[cur++] = 0x41; cave[cur++] = 0xC6; cave[cur++] = 0x03; cave[cur++] = 0x00;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeGetterAfter; cur += 8;
+        cave[cur++] = 0x41; cave[cur++] = 0x88; cave[cur++] = 0x03;
+
+        // seq++ (폴링 로그용)
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeGetterSeq; cur += 8;
+        cave[cur++] = 0x41; cave[cur++] = 0xFF; cave[cur++] = 0x03;
+
+        // 여기서는 armed를 해제하지 않습니다.
+        // 교류 화면에서 상대가 바뀌면 CT296 캡처 훅이 TargetID를 새 값으로 갱신합니다.
 
         const int skipApplyPos = cur;
         cave[jneArmedDispPos] = (uint8_t)(skipApplyPos - (jneArmedDispPos + 1));
@@ -326,52 +374,28 @@ namespace DX11Base {
 
     void RunResonanceDebugPoll() {
         static uint16_t s_lastLoggedTargetId = 0;
+        static uint32_t s_lastGetterSeq = 0;
+
+        if (!bResonanceThree)
+            return;
+
         const uint16_t targetId = g_resonanceThreeTargetId;
-
-        if (!bResonanceThree || targetId == 0 || targetId == s_lastLoggedTargetId)
-            return;
-
-        s_lastLoggedTargetId = targetId;
-
-        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-        if (!exeBase) {
-            AddLog(u8"[Resonance3Debug] TargetID=%u / exeBase 없음", targetId);
-            return;
+        if (targetId != 0 && targetId != s_lastLoggedTargetId) {
+            s_lastLoggedTargetId = targetId;
+            AddLog(u8"[Resonance3Debug] 선택 TargetID=%u Armed=%u",
+                   targetId, (unsigned)g_resonanceThreeArmed);
         }
 
-        int32_t map368 = -999999;
-        int32_t map369 = -999999;
-        bool ok368 = false;
-        bool ok369 = false;
-
-        __try {
-            uintptr_t root368 = *(uintptr_t*)(exeBase + 0x2E98BC8);
-            if (root368 > 0x10000) {
-                map368 = *(int32_t*)(root368 + (uintptr_t)targetId * 4 + 0x226078);
-                ok368 = true;
-            }
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        const uint32_t seq = g_resonanceThreeGetterSeq;
+        if (seq != s_lastGetterSeq) {
+            s_lastGetterSeq = seq;
+            AddLog(u8"[Resonance3Getter] Hit#%u ID=%u Slot=%d Resonance=%u -> %u",
+                   seq,
+                   (unsigned)g_resonanceThreeGetterId,
+                   (int)g_resonanceThreeGetterSlot,
+                   (unsigned)g_resonanceThreeGetterBefore,
+                   (unsigned)g_resonanceThreeGetterAfter);
         }
-
-        __try {
-            uintptr_t root369 = *(uintptr_t*)(exeBase + 0x2E65AF8);
-            if (root369 > 0x10000) {
-                map369 = *(int32_t*)(root369 + (uintptr_t)targetId * 4 + 0x226060);
-                ok369 = true;
-            }
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-        }
-
-        AddLog(u8"[Resonance3Debug] TargetID=%u Armed=%u | CT368 map=%s%d | CT369 map=%s%d",
-               targetId,
-               (unsigned)g_resonanceThreeArmed,
-               ok368 ? "" : "ERR:", map368,
-               ok369 ? "" : "ERR:", map369);
-
-        if (ok368 && map368 == -1)
-            AddLog(u8"[Resonance3Debug] ID %u: CT368 경로는 공명 슬롯 없음(-1)", targetId);
-        if (ok369 && map369 == -1)
-            AddLog(u8"[Resonance3Debug] ID %u: CT369 경로는 공명 슬롯 없음(-1)", targetId);
     }
 
 }
