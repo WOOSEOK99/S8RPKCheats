@@ -158,7 +158,7 @@ namespace DX11Base {
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 222.f * sc), true);
+      ImGui::BeginChild("##CityTop", ImVec2(0.f, 168.f * sc), true);
 
       const float fw = 95.f * sc;
 
@@ -943,7 +943,7 @@ namespace DX11Base {
 
       ImGui::Spacing();
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.12f, 0.16f, 0.82f));
-      ImGui::BeginChild("##ManualSupportPanel", ImVec2(0.f, 142.f * sc), true);
+      ImGui::BeginChild("##ManualSupportPanel", ImVec2(0.f, 116.f * sc), true);
 
       ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.0f, 1.f), u8"[ 수동 즉시 지원 ]");
       ImGui::SameLine(0.f, 16.f * sc);
