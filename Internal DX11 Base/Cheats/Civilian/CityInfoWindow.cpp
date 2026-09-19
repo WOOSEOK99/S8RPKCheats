@@ -1622,6 +1622,7 @@ namespace DX11Base {
       bool readable = false;
       uintptr_t corpsPtr = 0;
       uintptr_t corpsNo = 0;
+      uintptr_t forcePtr = 0;
     };
 
     static OfficerCityCorpsInfo GetOfficerCityCorpsInfo(
@@ -1635,9 +1636,24 @@ namespace DX11Base {
         return info;
 
       info.readable = true;
-      if (info.corpsPtr > 0x10000)
+      if (info.corpsPtr > 0x10000) {
         SafeReadPtrAllowZero(info.corpsPtr + 0x18, &info.corpsNo);
+        SafeReadPtr(info.corpsPtr + 0x10, &info.forcePtr);
+      } else {
+        // 직할 도시는 DivisionData가 없으므로 도시의 소유 세력으로 표시한다.
+        info.forcePtr = GetCityForcePtr(rawCity);
+      }
       return info;
+    }
+
+    static std::string GetOfficerForceShortName(uintptr_t forcePtr) {
+      std::string name = BuildForceName(forcePtr);
+      const std::string suffix = u8" 세력";
+      if (name.size() >= suffix.size() &&
+          name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        name.erase(name.size() - suffix.size());
+      }
+      return name;
     }
 
     static std::string GetOfficerCorpsName(uintptr_t shiftedCityBase,
@@ -1646,11 +1662,17 @@ namespace DX11Base {
           GetOfficerCityCorpsInfo(shiftedCityBase, cityIndex);
       if (!info.readable)
         return u8"군단 ?";
+
+      const std::string forceName =
+          info.forcePtr ? GetOfficerForceShortName(info.forcePtr)
+                        : std::string(u8"미확인");
+
       if (info.corpsPtr <= 0x10000)
-        return u8"직할";
+        return forceName + u8" 직할";
       if (info.corpsNo)
-        return std::to_string((unsigned long long)info.corpsNo) + u8"군단";
-      return u8"군단 ?";
+        return forceName + " " +
+               std::to_string((unsigned long long)info.corpsNo) + u8"군단";
+      return forceName + u8" 군단 ?";
     }
 
     static std::string BuildOfficerCityCorpsLabel(uintptr_t shiftedCityBase,
@@ -2582,6 +2604,7 @@ namespace DX11Base {
       struct CorpsFilterOption {
         uintptr_t corpsPtr = 0;
         uintptr_t corpsNo = 0;
+        int cityIndex = -1;
       };
       std::vector<CorpsFilterOption> corpsOptions;
       for (int idx : s_officerPlayerCities) {
@@ -2597,7 +2620,7 @@ namespace DX11Base {
           }
         }
         if (!exists)
-          corpsOptions.push_back({info.corpsPtr, info.corpsNo});
+          corpsOptions.push_back({info.corpsPtr, info.corpsNo, idx});
       }
       std::sort(corpsOptions.begin(), corpsOptions.end(),
                 [](const CorpsFilterOption &a, const CorpsFilterOption &b) {
@@ -2621,24 +2644,18 @@ namespace DX11Base {
 
       std::string corpsFilterPreview = u8"전체";
       if (s_officerCorpsFilter != OFFICER_CORPS_FILTER_ALL) {
-        if (s_officerCorpsFilter <= 0x10000) {
-          corpsFilterPreview = u8"직할";
-        } else {
-          for (const auto &opt : corpsOptions) {
-            if (opt.corpsPtr == s_officerCorpsFilter) {
-              corpsFilterPreview =
-                  opt.corpsNo
-                      ? (std::to_string((unsigned long long)opt.corpsNo) + u8"군단")
-                      : std::string(u8"군단 ?");
-              break;
-            }
+        for (const auto &opt : corpsOptions) {
+          if (opt.corpsPtr == s_officerCorpsFilter) {
+            corpsFilterPreview =
+                GetOfficerCorpsName(shiftedCityBase, opt.cityIndex);
+            break;
           }
         }
       }
 
       ImGui::TextUnformatted(u8"군단");
       ImGui::SameLine(0.f, 6.f * sc);
-      ImGui::SetNextItemWidth(95.f * sc);
+      ImGui::SetNextItemWidth(135.f * sc);
       if (ImGui::BeginCombo("##OfficerCorpsFilter",
                             corpsFilterPreview.c_str())) {
         const bool allSelected =
@@ -2650,13 +2667,8 @@ namespace DX11Base {
           ImGui::SetItemDefaultFocus();
 
         for (const auto &opt : corpsOptions) {
-          std::string label;
-          if (opt.corpsPtr <= 0x10000)
-            label = u8"직할";
-          else if (opt.corpsNo)
-            label = std::to_string((unsigned long long)opt.corpsNo) + u8"군단";
-          else
-            label = u8"군단 ?";
+          const std::string label =
+              GetOfficerCorpsName(shiftedCityBase, opt.cityIndex);
 
           const bool selected =
               (s_officerCorpsFilter == opt.corpsPtr);
