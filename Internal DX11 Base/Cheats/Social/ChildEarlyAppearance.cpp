@@ -114,25 +114,11 @@ static bool InstallChildCave(uintptr_t hookAddr) {
   Emit8(code, 0x76); const size_t jAlreadyClose = code.size(); Emit8(code, 0x00);
 
   // appearance year = current year + N
+  // 중요: 테스트 버전에서는 출생년도(+0x34)와 사망년도(+0x36)를 절대 수정하지 않습니다.
+  // 실제 나이 데이터는 그대로 두고 등장년도(+0x32)만 앞당깁니다.
   Emit8(code, 0x66); Emit8(code, 0x8B); Emit8(code, 0xCB); // mov cx,bx
   Emit8(code, 0x66); Emit8(code, 0x03); Emit8(code, 0xCA); // add cx,dx
   Emit8(code, 0x66); Emit8(code, 0x89); Emit8(code, 0x48); Emit8(code, 0x32);
-
-  // birth year = appearance year - 15
-  Emit8(code, 0x66); Emit8(code, 0x83); Emit8(code, 0xE9); Emit8(code, 0x0F);
-  Emit8(code, 0x66); Emit8(code, 0x89); Emit8(code, 0x48); Emit8(code, 0x34);
-
-  // death year = min(current year + 99, 270)
-  Emit8(code, 0x66); Emit8(code, 0x83); Emit8(code, 0xC3); Emit8(code, 0x63);
-  Emit8(code, 0x66); Emit8(code, 0x81); Emit8(code, 0xFB); Emit16(code, 270);
-  Emit8(code, 0x76); const size_t jDeathOk = code.size(); Emit8(code, 0x00);
-
-  // mov bx,270
-  Emit8(code, 0x66); Emit8(code, 0xBB); Emit16(code, 270);
-
-  const size_t deathOkPos = code.size();
-  // mov [rax+36],bx
-  Emit8(code, 0x66); Emit8(code, 0x89); Emit8(code, 0x58); Emit8(code, 0x36);
 
   const size_t endPos = code.size();
   Emit8(code, 0x5A); // pop rdx
@@ -143,8 +129,7 @@ static bool InstallChildCave(uintptr_t hookAddr) {
   if (!PatchRel8(code, jNoScenario, endPos) ||
       !PatchRel8(code, jYearLow, endPos) ||
       !PatchRel8(code, jYearHigh, endPos) ||
-      !PatchRel8(code, jAlreadyClose, endPos) ||
-      !PatchRel8(code, jDeathOk, deathOkPos)) {
+      !PatchRel8(code, jAlreadyClose, endPos)) {
     VirtualFree((LPVOID)g_childCaveAddr, 0, MEM_RELEASE);
     g_childCaveAddr = 0;
     return false;
@@ -207,7 +192,7 @@ void SetChildEarlyAppearance(bool enable) {
     }
 
     g_childApplied = true;
-    AddLog(u8"[Children] 자녀 조기 등장 적용: %d년 후",
+    AddLog(u8"[Children] 자녀 조기 등장 적용: %d년 후 (등장년도만 변경)",
            vChildEarlyAppearanceYears);
     return;
   }
