@@ -8,8 +8,11 @@
 #include "../../pch.h"
 #include "../../showlog.h"
 #include "../../Config.h"
+#include "../Officer/OfficerData.h"
 #include "CityData.h"
 #include <windows.h>
+#include <string>
+#include <vector>
 
 namespace DX11Base {
 
@@ -462,14 +465,393 @@ namespace DX11Base {
       ImGui::EndTable();
     }
 
+    // ── 전선 분석: CityData 소유 세력 + 도시 연결망 기반 읽기 전용 판정 ─────
+    // CT 기준:
+    //   CityData + 0x98 -> [ptr + 0x18] = 소유 ForceData
+    // 게시글 기준:
+    //   CityData + 0x20부터 8바이트 x 6 = 인접 도시 CityData 포인터
+    static constexpr uintptr_t OFF_CITY_FORCE_LINK_RAW = 0x98;
+    static constexpr uintptr_t OFF_CITY_CONNECTION_RAW = 0x20;
+    static constexpr uintptr_t OFF_CITY_TROOPS_RAW = 0xC4;
+    static constexpr int CITY_CONNECTION_SLOTS = 6;
+    static constexpr uintptr_t CITY_STRIDE = 0x2A0;
+
+    struct FrontierFaction {
+      uintptr_t forcePtr = 0;
+      std::string name;
+    };
+
+    struct FrontierCityRow {
+      int cityIndex = -1;
+      bool frontline = false;
+      std::vector<int> neighbors;
+      std::vector<int> foreignNeighbors;
+      int unknownConnections = 0;
+      uint32_t gold = 0;
+      uint32_t grain = 0;
+      uint32_t troops = 0;
+    };
+
+    static std::vector<FrontierFaction> s_frontierFactions;
+    static std::vector<FrontierCityRow> s_frontierRows;
+    static uintptr_t s_frontierSelectedForce = 0;
+    static uintptr_t s_frontierPlayerForce = 0;
+    static bool s_frontierDirty = true;
+    static int s_frontierFilter = 0; // 0=전체, 1=전선, 2=후방
+
+    static uintptr_t GetRawCityBase(uintptr_t shiftedCityBase, int cityIndex) {
+      if (shiftedCityBase <= 0x28 || cityIndex < 0 || cityIndex >= g_CityCount)
+        return 0;
+      return (shiftedCityBase - 0x28) + (uintptr_t)cityIndex * CITY_STRIDE;
+    }
+
+    static uintptr_t GetCityForcePtr(uintptr_t rawCity) {
+      if (rawCity <= 0x10000)
+        return 0;
+
+      uintptr_t ownerLink = 0;
+      if (!SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW, &ownerLink))
+        return 0;
+
+      uintptr_t forcePtr = 0;
+      if (!SafeReadPtr(ownerLink + 0x18, &forcePtr))
+        return 0;
+
+      return forcePtr;
+    }
+
+    static int ConnectionPtrToCityIndex(uintptr_t rawCityArrayBase, uintptr_t cityPtr) {
+      if (rawCityArrayBase <= 0x10000 || cityPtr < rawCityArrayBase)
+        return -1;
+
+      const uintptr_t delta = cityPtr - rawCityArrayBase;
+      if ((delta % CITY_STRIDE) != 0)
+        return -1;
+
+      const int idx = (int)(delta / CITY_STRIDE);
+      if (idx < 0 || idx >= g_CityCount)
+        return -1;
+      return idx;
+    }
+
+    static std::string BuildForceName(uintptr_t forcePtr) {
+      if (!forcePtr)
+        return u8"공백지";
+
+      uintptr_t lordPtr = 0;
+      if (SafeReadPtr(forcePtr + 0xC0, &lordPtr)) {
+        uint16_t lordId = 0;
+        if (SafeRead16(lordPtr + 0x08, &lordId)) {
+          auto it = g_officerNames.find((int)lordId);
+          if (it != g_officerNames.end() && !it->second.empty())
+            return it->second + u8" 세력";
+
+          return u8"무장 ID " + std::to_string((int)lordId) + u8" 세력";
+        }
+      }
+
+      char buf[64];
+      sprintf_s(buf, u8"세력 0x%llX", (unsigned long long)forcePtr);
+      return buf;
+    }
+
+    static const char *FindForceName(uintptr_t forcePtr) {
+      if (!forcePtr)
+        return u8"공백지";
+
+      for (const auto &f : s_frontierFactions) {
+        if (f.forcePtr == forcePtr)
+          return f.name.c_str();
+      }
+      return u8"미확인 세력";
+    }
+
+    static void RefreshFrontierAnalysis(uintptr_t p1, uintptr_t shiftedCityBase) {
+      s_frontierFactions.clear();
+      s_frontierRows.clear();
+      s_frontierPlayerForce = 0;
+
+      if (shiftedCityBase <= 0x10000) {
+        s_frontierDirty = false;
+        return;
+      }
+
+      LoadOfficerNames();
+
+      const uintptr_t rawCityArrayBase = shiftedCityBase - 0x28;
+      std::vector<uintptr_t> cityForces(g_CityCount, 0);
+
+      // 1) 51개 도시의 소유 세력 수집
+      for (int i = 0; i < g_CityCount; ++i) {
+        const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, i);
+        cityForces[i] = GetCityForcePtr(rawCity);
+
+        const uintptr_t forcePtr = cityForces[i];
+        if (!forcePtr)
+          continue;
+
+        bool exists = false;
+        for (const auto &f : s_frontierFactions) {
+          if (f.forcePtr == forcePtr) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists) {
+          FrontierFaction f;
+          f.forcePtr = forcePtr;
+          f.name = BuildForceName(forcePtr);
+          s_frontierFactions.push_back(std::move(f));
+        }
+      }
+
+      // 2) 주인공 현재 도시를 통해 주인공 소속 세력을 얻음
+      if (p1 > 0x10000) {
+        uintptr_t playerCity = 0;
+        if (SafeReadPtr(p1 + 0x20, &playerCity))
+          s_frontierPlayerForce = GetCityForcePtr(playerCity);
+      }
+
+      // 최초에는 주인공 세력을 자동 선택. 선택 세력이 사라졌으면 다시 선택.
+      bool selectedStillExists = false;
+      for (const auto &f : s_frontierFactions) {
+        if (f.forcePtr == s_frontierSelectedForce) {
+          selectedStillExists = true;
+          break;
+        }
+      }
+      if (!selectedStillExists) {
+        s_frontierSelectedForce = 0;
+        for (const auto &f : s_frontierFactions) {
+          if (f.forcePtr == s_frontierPlayerForce) {
+            s_frontierSelectedForce = s_frontierPlayerForce;
+            break;
+          }
+        }
+        if (!s_frontierSelectedForce && !s_frontierFactions.empty())
+          s_frontierSelectedForce = s_frontierFactions.front().forcePtr;
+      }
+
+      // 3) 선택 세력 도시만 대상으로 인접 도시의 소유 세력을 비교해 전선/후방 판정
+      if (s_frontierSelectedForce) {
+        for (int i = 0; i < g_CityCount; ++i) {
+          if (cityForces[i] != s_frontierSelectedForce)
+            continue;
+
+          const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, i);
+          FrontierCityRow row;
+          row.cityIndex = i;
+
+          for (int slot = 0; slot < CITY_CONNECTION_SLOTS; ++slot) {
+            uintptr_t connectedPtr = 0;
+            const uintptr_t slotAddr =
+                rawCity + OFF_CITY_CONNECTION_RAW + (uintptr_t)slot * sizeof(uintptr_t);
+
+            // 빈 슬롯(0)은 정상적인 미사용 슬롯.
+            __try {
+              connectedPtr = *(uintptr_t *)slotAddr;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+              connectedPtr = 0;
+            }
+
+            if (!connectedPtr)
+              continue;
+
+            const int connectedIdx = ConnectionPtrToCityIndex(rawCityArrayBase, connectedPtr);
+            if (connectedIdx < 0) {
+              row.unknownConnections++;
+              continue;
+            }
+
+            row.neighbors.push_back(connectedIdx);
+            if (cityForces[connectedIdx] != s_frontierSelectedForce) {
+              row.frontline = true;
+              row.foreignNeighbors.push_back(connectedIdx);
+            }
+          }
+
+          SafeRead32(rawCity + OFF_GOLD, &row.gold);
+          SafeRead32(rawCity + OFF_GRAIN, &row.grain);
+          SafeRead32(rawCity + OFF_CITY_TROOPS_RAW, &row.troops);
+          s_frontierRows.push_back(std::move(row));
+        }
+      }
+
+      s_frontierDirty = false;
+    }
+
+    static std::string BuildCityNameList(const std::vector<int> &indices) {
+      std::string out;
+      for (int idx : indices) {
+        if (idx < 0 || idx >= g_CityCount)
+          continue;
+        if (!out.empty())
+          out += ", ";
+        out += g_CityList[idx].cityname;
+      }
+      return out.empty() ? "-" : out;
+    }
+
+    static std::string BuildForeignCityList(uintptr_t shiftedCityBase,
+                                            const std::vector<int> &indices) {
+      std::string out;
+      for (int idx : indices) {
+        if (idx < 0 || idx >= g_CityCount)
+          continue;
+
+        const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, idx);
+        const uintptr_t forcePtr = GetCityForcePtr(rawCity);
+
+        if (!out.empty())
+          out += ", ";
+        out += g_CityList[idx].cityname;
+        out += "(";
+        out += FindForceName(forcePtr);
+        out += ")";
+      }
+      return out.empty() ? "-" : out;
+    }
+
+    static void DrawFrontierAnalysis(uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
+      if (s_frontierDirty)
+        RefreshFrontierAnalysis(p1, shiftedCityBase);
+
+      ImGui::Spacing();
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.f), u8"[ 전선 분석 ]");
+      ImGui::SameLine(0.f, 18.f * sc);
+
+      const char *selectedName = u8"세력 없음";
+      for (const auto &f : s_frontierFactions) {
+        if (f.forcePtr == s_frontierSelectedForce) {
+          selectedName = f.name.c_str();
+          break;
+        }
+      }
+
+      ImGui::SetNextItemWidth(180.f * sc);
+      if (ImGui::BeginCombo("##FrontierFaction", selectedName)) {
+        for (const auto &f : s_frontierFactions) {
+          const bool selected = (f.forcePtr == s_frontierSelectedForce);
+          if (ImGui::Selectable(f.name.c_str(), selected)) {
+            s_frontierSelectedForce = f.forcePtr;
+            RefreshFrontierAnalysis(p1, shiftedCityBase);
+          }
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      if (s_frontierPlayerForce) {
+        ImGui::SameLine(0.f, 8.f * sc);
+        if (ImGui::SmallButton(u8"주인공 세력")) {
+          s_frontierSelectedForce = s_frontierPlayerForce;
+          RefreshFrontierAnalysis(p1, shiftedCityBase);
+        }
+      }
+
+      ImGui::SameLine(0.f, 8.f * sc);
+      if (ImGui::SmallButton(u8"새로고침##frontier")) {
+        RefreshFrontierAnalysis(p1, shiftedCityBase);
+      }
+
+      int total = 0, front = 0, rear = 0;
+      for (const auto &row : s_frontierRows) {
+        total++;
+        if (row.frontline)
+          front++;
+        else
+          rear++;
+      }
+
+      ImGui::SameLine(0.f, 18.f * sc);
+      ImGui::TextDisabled(u8"전체 %d / 전선 %d / 후방 %d", total, front, rear);
+
+      if (ImGui::RadioButton(u8"전체##FrontierAll", s_frontierFilter == 0))
+        s_frontierFilter = 0;
+      ImGui::SameLine();
+      if (ImGui::RadioButton(u8"전선##FrontierFront", s_frontierFilter == 1))
+        s_frontierFilter = 1;
+      ImGui::SameLine();
+      if (ImGui::RadioButton(u8"후방##FrontierRear", s_frontierFilter == 2))
+        s_frontierFilter = 2;
+
+      ImGui::SameLine(0.f, 20.f * sc);
+      ImGui::TextDisabled(u8"연결 도시 중 하나라도 다른 세력/공백지이면 전선");
+
+      ImGui::Separator();
+
+      static ImGuiTableFlags frontierFlags =
+          ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg |
+          ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit |
+          ImGuiTableFlags_NoSavedSettings;
+
+      if (!ImGui::BeginTable("##FrontierCityTbl", 7, frontierFlags))
+        return;
+
+      ImGui::TableSetupScrollFreeze(2, 1);
+      ImGui::TableSetupColumn(u8"도시", ImGuiTableColumnFlags_WidthFixed, 72.f * sc);
+      ImGui::TableSetupColumn(u8"구분", ImGuiTableColumnFlags_WidthFixed, 55.f * sc);
+      ImGui::TableSetupColumn(u8"접경 도시", ImGuiTableColumnFlags_WidthStretch, 1.1f);
+      ImGui::TableSetupColumn(u8"타세력/공백지 접경", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+      ImGui::TableSetupColumn(u8"금", ImGuiTableColumnFlags_WidthFixed, 82.f * sc);
+      ImGui::TableSetupColumn(u8"군량", ImGuiTableColumnFlags_WidthFixed, 92.f * sc);
+      ImGui::TableSetupColumn(u8"병사", ImGuiTableColumnFlags_WidthFixed, 82.f * sc);
+      ImGui::TableHeadersRow();
+
+      for (const auto &row : s_frontierRows) {
+        if (s_frontierFilter == 1 && !row.frontline)
+          continue;
+        if (s_frontierFilter == 2 && row.frontline)
+          continue;
+
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(g_CityList[row.cityIndex].cityname);
+
+        ImGui::TableSetColumnIndex(1);
+        if (row.frontline)
+          ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.2f, 1.f), u8"전선");
+        else
+          ImGui::TextColored(ImVec4(0.35f, 1.0f, 0.45f, 1.f), u8"후방");
+
+        ImGui::TableSetColumnIndex(2);
+        const std::string neighbors = BuildCityNameList(row.neighbors);
+        ImGui::TextUnformatted(neighbors.c_str());
+        if (row.unknownConnections > 0 && ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::Text(u8"도시 포인터로 해석되지 않은 연결 슬롯: %d개", row.unknownConnections);
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(3);
+        const std::string foreign = BuildForeignCityList(shiftedCityBase, row.foreignNeighbors);
+        ImGui::TextUnformatted(foreign.c_str());
+
+        ImGui::TableSetColumnIndex(4);
+        ImGui::Text("%u", row.gold);
+
+        ImGui::TableSetColumnIndex(5);
+        ImGui::Text("%u", row.grain);
+
+        ImGui::TableSetColumnIndex(6);
+        ImGui::Text("%u", row.troops);
+      }
+
+      ImGui::EndTable();
+    }
+
   } // anonymous namespace
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  공개 API
   // ═══════════════════════════════════════════════════════════════════════════
   void DrawCityInfoWindow(uintptr_t p1, float scale) {
-    if (!bShowCityInfoWin)
+    if (!bShowCityInfoWin) {
+      s_frontierDirty = true;
       return;
+    }
 
     ImGui::SetNextWindowSize(ImVec2(850.f * scale, 790.f * scale), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(650.f * scale, 360.f * scale), ImVec2(1500.f * scale, 950.f * scale));
@@ -482,14 +864,24 @@ namespace DX11Base {
     // 상단: 자동 환전 패널
     DrawAutoExchangePanel(p1, scale);
 
-    // 하단: 도시 리스트
+    // 하단: 기존 도시 리스트 / 읽기 전용 전선 분석
     uintptr_t cityBase = GetCityArrBase();
     if (cityBase <= 0x10000) {
       ImGui::Spacing();
       ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f),
                          u8"도시 배열을 읽을 수 없습니다. 게임 플레이 화면에서 열어주세요.");
-    } else {
-      DrawCityTable(cityBase, scale);
+    } else if (ImGui::BeginTabBar("##CityInfoTabs")) {
+      if (ImGui::BeginTabItem(u8"도시 리스트")) {
+        DrawCityTable(cityBase, scale);
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem(u8"전선 분석")) {
+        DrawFrontierAnalysis(p1, cityBase, scale);
+        ImGui::EndTabItem();
+      }
+
+      ImGui::EndTabBar();
     }
 
     ImGui::End();
