@@ -20,13 +20,6 @@ namespace DX11Base {
     // 한 번의 포인터 해석으로 연·월 동시 읽기 (UI 폴링용)
     bool ReadScenarioDate(unsigned short *outYear, uint8_t *outMonth);
 
-    // 구 CT의 현재 연도 기준 구조:
-    // +0x14 시나리오 ID, +0x16 시작 연도, +0x18 시작 월.
-    // 값 범위까지 검사하며, 자동 기능의 세이브/시나리오 오적용 방지용으로 사용합니다.
-    bool ReadScenarioIdentity(uint8_t *outScenarioId,
-                              unsigned short *outStartYear,
-                              uint8_t *outStartMonth);
-
     // ───────────────────────────────────────────────
     //  설정 및 상태 플래그
     // ───────────────────────────────────────────────
