@@ -9,8 +9,12 @@
 
 #include <psapi.h>
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace DX11Base {
@@ -35,9 +39,74 @@ struct ChildEntry {
   uint16_t birthYear = 0;
   uint16_t deathYear = 0;
   uint16_t appliedTargetYear = 0;
+
+  // 관계 테이블 진단 결과
+  bool relationFound = false;
+  uintptr_t relationAddr = 0;
+  uint8_t relationFlag = 0;
+  uint32_t relationSlot = 0;
 };
 
 static std::unordered_map<uint16_t, ChildEntry> g_children;
+
+static std::atomic<bool> g_childRelationScanning{false};
+static std::atomic<float> g_childRelationScanProgress{0.0f};
+static std::mutex g_childRelationResultMutex;
+
+struct ChildRelationResult {
+  uint16_t childId = 0;
+  uintptr_t relationAddr = 0;
+  uintptr_t targetAddr = 0;
+  uint8_t flag = 0;
+  uint32_t slot = 0;
+};
+
+static std::vector<ChildRelationResult> g_childRelationResults;
+
+static bool SafeRead8(uintptr_t addr, uint8_t* out) {
+  __try {
+    *out = *(uint8_t*)addr;
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static bool SafeRead16(uintptr_t addr, uint16_t* out) {
+  __try {
+    *out = *(uint16_t*)addr;
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static bool SafeRead32(uintptr_t addr, uint32_t* out) {
+  __try {
+    *out = *(uint32_t*)addr;
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static bool SafeReadPtr(uintptr_t addr, uintptr_t* out) {
+  __try {
+    *out = *(uintptr_t*)addr;
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static bool SafeReadMem(uintptr_t addr, void* out, size_t size) {
+  __try {
+    memcpy(out, (const void*)addr, size);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
 
 static bool GetModuleRange(uintptr_t& begin, uintptr_t& end) {
   begin = (uintptr_t)GetModuleHandle(nullptr);
@@ -166,6 +235,157 @@ static bool ApplyChildSchedule(ChildEntry& e) {
   }
 }
 
+static void StartChildRelationScannerAsync() {
+  if (g_childRelationScanning.load())
+    return;
+
+  if (g_savedHeroAddr <= 0x10000) {
+    AddLog(u8"[ChildRelation] 주인공 주소가 유효하지 않습니다.");
+    return;
+  }
+
+  std::unordered_set<uint16_t> childIds;
+  for (const auto& kv : g_children)
+    childIds.insert(kv.first);
+
+  if (childIds.empty()) {
+    AddLog(u8"[ChildRelation] 현재 감지된 자녀 ID가 없습니다. 정보 > 자녀를 한 번 연 뒤 다시 검색해 주세요.");
+    return;
+  }
+
+  const uintptr_t heroAddr = g_savedHeroAddr;
+  g_childRelationScanning = true;
+  g_childRelationScanProgress = 0.0f;
+
+  {
+    std::lock_guard<std::mutex> lock(g_childRelationResultMutex);
+    g_childRelationResults.clear();
+  }
+
+  std::thread([heroAddr, childIds = std::move(childIds)]() {
+    MEMORY_BASIC_INFORMATION mbi{};
+    std::vector<MEMORY_BASIC_INFORMATION> regions;
+    uintptr_t addr = 0;
+    unsigned long long totalSize = 0;
+
+    while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
+      if (mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) &&
+          (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE))) {
+        regions.push_back(mbi);
+        totalSize += mbi.RegionSize;
+      }
+
+      const uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+      if (next <= addr)
+        break;
+      addr = next;
+    }
+
+    const size_t bufferSize = 4096 * 16;
+    std::vector<unsigned char> buffer(bufferSize + 8);
+    std::unordered_set<uintptr_t> seenRelations;
+    unsigned long long processedSize = 0;
+
+    for (const auto& region : regions) {
+      const uintptr_t start = (uintptr_t)region.BaseAddress;
+      const uintptr_t end = start + region.RegionSize;
+      uintptr_t curr = start;
+
+      while (curr < end) {
+        const size_t remaining = (size_t)(end - curr);
+        const size_t toRead = (std::min)(remaining, bufferSize);
+        if (toRead < sizeof(uintptr_t))
+          break;
+
+        if (SafeReadMem(curr, buffer.data(), toRead)) {
+          for (size_t i = 0; i <= toRead - sizeof(uintptr_t); ++i) {
+            uintptr_t candidateHero = 0;
+            memcpy(&candidateHero, buffer.data() + i, sizeof(candidateHero));
+            if (candidateHero != heroAddr)
+              continue;
+
+            const uintptr_t relationAddr = curr + i;
+            if (relationAddr < 8 || seenRelations.count(relationAddr))
+              continue;
+
+            uintptr_t targetAddr = 0;
+            uint16_t targetId = 0;
+            if (!SafeReadPtr(relationAddr + 0x08, &targetAddr) ||
+                targetAddr <= 0x10000 ||
+                !SafeRead16(targetAddr + 0x08, &targetId) ||
+                childIds.count(targetId) == 0) {
+              continue;
+            }
+
+            uint8_t flag = 0;
+            uint32_t slot = 0;
+            if (!SafeRead8(relationAddr - 0x08, &flag))
+              continue;
+            SafeRead32(relationAddr + 0x28, &slot);
+
+            seenRelations.insert(relationAddr);
+
+            ChildRelationResult result;
+            result.childId = targetId;
+            result.relationAddr = relationAddr;
+            result.targetAddr = targetAddr;
+            result.flag = flag;
+            result.slot = slot;
+
+            {
+              std::lock_guard<std::mutex> lock(g_childRelationResultMutex);
+              g_childRelationResults.push_back(result);
+            }
+
+            AddLog(u8"[ChildRelation] ID %u | Relation=%p Target=%p Flag=%u(0x%02X) Slot=%u",
+                   targetId, (void*)relationAddr, (void*)targetAddr,
+                   (unsigned)flag, (unsigned)flag, slot);
+          }
+        }
+
+        processedSize += toRead;
+        curr += toRead;
+        if (totalSize > 0)
+          g_childRelationScanProgress = (float)processedSize / (float)totalSize;
+      }
+    }
+
+    g_childRelationScanProgress = 1.0f;
+    g_childRelationScanning = false;
+    AddLog(u8"[ChildRelation] 자녀 관계 검색 완료.");
+  }).detach();
+}
+
+static void ApplyChildRelationResults() {
+  std::vector<ChildRelationResult> results;
+  {
+    std::lock_guard<std::mutex> lock(g_childRelationResultMutex);
+    results = g_childRelationResults;
+  }
+
+  for (auto& kv : g_children) {
+    kv.second.relationFound = false;
+    kv.second.relationAddr = 0;
+    kv.second.relationFlag = 0;
+    kv.second.relationSlot = 0;
+  }
+
+  for (const auto& r : results) {
+    auto it = g_children.find(r.childId);
+    if (it == g_children.end())
+      continue;
+
+    ChildEntry& e = it->second;
+    if (!e.relationFound) {
+      e.relationFound = true;
+      e.relationAddr = r.relationAddr;
+      e.relationFlag = r.flag;
+      e.relationSlot = r.slot;
+    }
+  }
+}
+
+
 } // namespace
 
 void EnsureChildManagerCapture() {
@@ -246,6 +466,8 @@ void RunChildManagerUpdate() {
 
   for (auto& kv : g_children)
     RefreshChild(kv.second);
+
+  ApplyChildRelationResults();
 }
 
 void DrawChildManagerWindow(float scale) {
@@ -255,7 +477,7 @@ void DrawChildManagerWindow(float scale) {
   EnsureChildManagerCapture();
   RunChildManagerUpdate();
 
-  ImGui::SetNextWindowSize(ImVec2(620.0f * scale, 330.0f * scale), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(760.0f * scale, 390.0f * scale), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin(u8"자녀 관리###ChildManager", &bShowChildManagerWin)) {
     ImGui::End();
     return;
@@ -267,10 +489,27 @@ void DrawChildManagerWindow(float scale) {
                      u8"체크하거나 연수를 변경하면 그 시점 기준으로 한 번만 임관년도를 적용합니다.");
   ImGui::Separator();
 
+  if (g_childRelationScanning.load()) {
+    ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"자녀 관계를 메모리에서 검색 중입니다...");
+    ImGui::ProgressBar(g_childRelationScanProgress.load(), ImVec2(260.0f * scale, 0));
+  } else {
+    if (ImGui::Button(u8"자녀 관계 검색", ImVec2(130.0f * scale, 0))) {
+      StartChildRelationScannerAsync();
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::TextUnformatted(u8"현재 감지된 자녀 ID와 주인공의 관계 레코드를 검색합니다.");
+      ImGui::TextUnformatted(u8"자녀 관계 플래그를 확인하기 위한 진단 기능입니다.");
+      ImGui::EndTooltip();
+    }
+  }
+
+  ImGui::Separator();
+
   if (g_children.empty()) {
     ImGui::TextUnformatted(u8"아직 감지된 자녀가 없습니다.");
     ImGui::TextWrapped(u8"평정 진입/종료 또는 자녀 관련 처리가 발생하면 목록에 자동 추가됩니다.");
-  } else if (ImGui::BeginTable("ChildManagerTable", 7,
+  } else if (ImGui::BeginTable("ChildManagerTable", 9,
                                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                                 ImGuiTableFlags_SizingFixedFit)) {
     ImGui::TableSetupColumn(u8"적용", ImGuiTableColumnFlags_WidthFixed, 45.0f * scale);
@@ -278,6 +517,8 @@ void DrawChildManagerWindow(float scale) {
     ImGui::TableSetupColumn(u8"출생", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
     ImGui::TableSetupColumn(u8"등장", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
     ImGui::TableSetupColumn(u8"사망", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
+    ImGui::TableSetupColumn(u8"관계", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
+    ImGui::TableSetupColumn(u8"슬롯", ImGuiTableColumnFlags_WidthFixed, 55.0f * scale);
     ImGui::TableSetupColumn(u8"몇 년 후", ImGuiTableColumnFlags_WidthFixed, 85.0f * scale);
     ImGui::TableSetupColumn(u8"예약", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableHeadersRow();
@@ -316,6 +557,18 @@ void DrawChildManagerWindow(float scale) {
 
       ImGui::TableNextColumn();
       ImGui::Text("%u", e.deathYear);
+
+      ImGui::TableNextColumn();
+      if (e.relationFound)
+        ImGui::Text("%u", (unsigned)e.relationFlag);
+      else
+        ImGui::TextUnformatted("-");
+
+      ImGui::TableNextColumn();
+      if (e.relationFound)
+        ImGui::Text("%u", e.relationSlot);
+      else
+        ImGui::TextUnformatted("-");
 
       ImGui::TableNextColumn();
       ImGui::SetNextItemWidth(55.0f * scale);
