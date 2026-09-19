@@ -467,6 +467,7 @@ namespace DX11Base {
     }
 
     ApplyStoredConfigs(p1, gameBase);
+    RunYearlyRearSupport(p1);
 
     // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
     RoninMonitor_Tick(p1);

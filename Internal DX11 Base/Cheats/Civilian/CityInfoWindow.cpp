@@ -5,11 +5,17 @@
 #include "../../Cheats.h"
 #include "../../Framework/imgui.h"
 #include "../../MenuState.h"
+#include "../../NotificationManager.h"
 #include "../../pch.h"
 #include "../../showlog.h"
 #include "../../Config.h"
+#include "../Officer/OfficerData.h"
+#include "../System/MonthCapture.h"
 #include "CityData.h"
 #include <windows.h>
+#include <fstream>
+#include <string>
+#include <vector>
 
 namespace DX11Base {
 
@@ -31,6 +37,20 @@ namespace DX11Base {
         *out = *(uintptr_t *)addr;
         return (*out > 0x10000);
       } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    // 0도 정상값으로 허용하는 포인터/QWORD 읽기.
+    // __try는 C++ 소멸자가 있는 함수 안에서 사용할 수 없으므로 별도 helper로 분리한다.
+    static bool SafeReadPtrAllowZero(uintptr_t addr, uintptr_t *out) {
+      if (!out)
+        return false;
+      __try {
+        *out = *(uintptr_t *)addr;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *out = 0;
         return false;
       }
     }
@@ -138,17 +158,17 @@ namespace DX11Base {
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 158.f * sc), true);
+      ImGui::BeginChild("##CityTop", ImVec2(0.f, 168.f * sc), true);
 
-      ImGui::TextColored(ImVec4(1.f, 0.82f, 0.28f, 1.f), u8"[ 자동 환전 설정 ]");
-      // ImGui::SameLine(0.f, 20.f * sc);
-      // ImGui::TextDisabled(u8"(내정 중 양식→금 자동 교환 설정)");
+      const float fw = 95.f * sc;
+
+      // 1) 자동 환전: 모든 도시의 군량 초과분을 금으로 환전
+      ImGui::TextColored(ImVec4(1.f, 0.82f, 0.28f, 1.f),
+                         u8"[ 자동 환전 - 모든 도시 군량 → 금 ]");
       ImGui::Separator();
 
-      float fw = 95.f * sc;
-
       ImGui::TextUnformatted(u8"군량 한도");
-      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
+      ImGui::SameLine();
       ImGui::SetNextItemWidth(fw);
       if (ImGui::InputInt(u8"##gl", &g_cityMaxGrainLimit, 0, 0)) {
         if (g_cityMaxGrainLimit < 0) g_cityMaxGrainLimit = 0;
@@ -159,10 +179,10 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"군량이 이 값을 초과하면 자동으로 금으로 환전합니다.");
         ImGui::EndTooltip();
       }
-      ImGui::SameLine();
 
+      ImGui::SameLine(0.f, 18.f * sc);
       ImGui::TextUnformatted(u8"남길 군량");
-      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
+      ImGui::SameLine();
       ImGui::SetNextItemWidth(fw);
       if (ImGui::InputInt(u8"##kg", &g_cityKeepGrain, 0, 0)) {
         if (g_cityKeepGrain < 0) g_cityKeepGrain = 0;
@@ -173,10 +193,10 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"환전 시 이 수치만큼은 남기고 초과분만 환전합니다.");
         ImGui::EndTooltip();
       }
-      ImGui::SameLine();
 
+      ImGui::SameLine(0.f, 18.f * sc);
       ImGui::TextUnformatted(u8"환전 비율");
-      ImGui::SameLine(); // 다음 아이템을 같은 줄에 배치
+      ImGui::SameLine();
       ImGui::SetNextItemWidth(fw);
       if (ImGui::InputInt(u8"##er", &g_cityExchangeRate, 0, 0)) {
         if (g_cityExchangeRate < 1) g_cityExchangeRate = 1;
@@ -187,8 +207,8 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"군량 N개당 1금으로 환전합니다. (예: 10 입력 시 10군량 -> 1금)");
         ImGui::EndTooltip();
       }
-      ImGui::SameLine(0.f, 18.f * sc);
 
+      ImGui::SameLine(0.f, 20.f * sc);
       if (ImGui::Checkbox(u8"자동 환전##autoex", &g_cityAutoExchangeEnabled)) {
         SaveConfig();
       }
@@ -199,7 +219,11 @@ namespace DX11Base {
       }
 
       ImGui::Spacing();
-      if (ImGui::Checkbox(u8"반란카운트 항상 0##revoltzero", &g_cityRevoltAlwaysZero)) {
+
+      // 2) 반란 카운트
+      ImGui::TextColored(ImVec4(0.75f, 0.86f, 1.f, 1.f), u8"[ 반란 카운트 ]");
+      ImGui::SameLine(0.f, 18.f * sc);
+      if (ImGui::Checkbox(u8"항상 0 유지##revoltzero", &g_cityRevoltAlwaysZero)) {
         if (g_cityRevoltAlwaysZero)
           ResetAllCityRevoltCounters();
         SaveConfig();
@@ -211,8 +235,8 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(0.f, 18.f * sc);
-      if (ImGui::Button(u8"즉시 반란카운터 0으로 설정##revoltreset",
-                        ImVec2(210.f * sc, 0.f))) {
+      if (ImGui::Button(u8"즉시 모든 도시 0으로 설정##revoltreset",
+                        ImVec2(205.f * sc, 0.f))) {
         ResetAllCityRevoltCounters();
       }
       if (ImGui::IsItemHovered()) {
@@ -221,39 +245,44 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::Spacing();
       ImGui::Separator();
 
-      // 일괄 제어 버튼
+      // 3) 모든 도시 일괄 최대화
+      ImGui::TextColored(ImVec4(1.f, 0.58f, 0.58f, 1.f), u8"[ 모든 도시 일괄 최대화 ]");
+
+      const float gap = 10.f * sc;
+      const float avail = ImGui::GetContentRegionAvail().x;
+      const float btnW = (avail - gap * 2.f) / 3.f;
+
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.2f, 0.2f, 1.f));
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.3f, 0.3f, 1.f));
-      if (ImGui::Button(u8"모든 도시 군량/금 최대화##maxall", ImVec2(200.f * sc, 0.f))) {
+
+      if (ImGui::Button(u8"군량 / 금 최대화##maxall", ImVec2(btnW, 0.f))) {
         MaximizeAllCityResources();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 도시 병사 최대화##maxsol", ImVec2(180.f * sc, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"병사 최대화##maxsol", ImVec2(btnW, 0.f))) {
         MaximizeAllCitySoldierMax();
       }
-      
-      ImGui::Spacing();
-      
-      float limitBtnW = 135.f * sc;
-      if (ImGui::Button(u8"모든 개발 최대화##maxdev", ImVec2(limitBtnW, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"개발 최대화##maxdev", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDevMax();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 상업 최대화##maxcom", ImVec2(limitBtnW, 0.f))) {
+
+      if (ImGui::Button(u8"상업 최대화##maxcom", ImVec2(btnW, 0.f))) {
         MaximizeAllCityComMax();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 방어 최대화##maxdef", ImVec2(limitBtnW, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"방어 최대화##maxdef", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDefMax();
       }
-      ImGui::SameLine(0.f, 10.f * sc);
-      if (ImGui::Button(u8"모든 기술 최대화##maxtec", ImVec2(limitBtnW, 0.f))) {
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"기술 최대화##maxtec", ImVec2(btnW, 0.f))) {
         MaximizeAllCityTecMax();
       }
-      ImGui::PopStyleColor(2);
 
+      ImGui::PopStyleColor(2);
       ImGui::EndChild();
       ImGui::PopStyleColor();
     }
@@ -462,14 +491,1088 @@ namespace DX11Base {
       ImGui::EndTable();
     }
 
+    // ── 전선 분석: CityData 소유 세력 + 도시 연결망 기반 읽기 전용 판정 ─────
+    // CT 기준:
+    //   CityData + 0x98 -> [ptr + 0x18] = 소유 ForceData
+    // 게시글 기준:
+    //   CityData + 0x20부터 8바이트 x 6 = 인접 도시 CityData 포인터
+    static constexpr uintptr_t OFF_CITY_FORCE_LINK_RAW = 0x98;
+    static constexpr uintptr_t OFF_CITY_CONNECTION_RAW = 0x20;
+    static constexpr uintptr_t OFF_CITY_TROOPS_RAW = 0xC4;
+    static constexpr int CITY_CONNECTION_SLOTS = 6;
+    static constexpr uintptr_t CITY_STRIDE = 0x2A0;
+
+    struct FrontierFaction {
+      uintptr_t forcePtr = 0;
+      std::string name;
+    };
+
+    struct FrontierCityRow {
+      int cityIndex = -1;
+      bool frontline = false;
+      std::vector<int> neighbors;
+      std::vector<int> foreignNeighbors;
+      int unknownConnections = 0;
+      uint32_t gold = 0;
+      uint32_t grain = 0;
+      uint32_t troops = 0;
+      uint32_t troopMax = 0;
+    };
+
+    static std::vector<FrontierFaction> s_frontierFactions;
+    static std::vector<FrontierCityRow> s_frontierRows;
+    static uintptr_t s_frontierSelectedForce = 0;
+    static uintptr_t s_frontierPlayerForce = 0;
+    static bool s_frontierDirty = true;
+    static int s_frontierFilter = 0; // 0=전체, 1=전선, 2=후방
+
+    // 수동 즉시 지원: 선택 세력 내 도시끼리 자유 이동(전선->전선 포함)
+    static int s_supportSourceCity = -1;
+    static int s_supportTargetCity = -1;
+    static int s_supportMode = 0; // 0=정량, 1=비율
+    static int s_supportFixedGold = 0;
+    static int s_supportFixedGrain = 0;
+    static int s_supportFixedTroops = 0;
+    static int s_supportPercentGold = 0;
+    static int s_supportPercentGrain = 0;
+    static int s_supportPercentTroops = 0;
+
+    struct AutoSupportRoute {
+      bool enabled = true;
+      int sourceCity = -1; // 후방
+      int targetCity = -1; // 전선
+      int mode = 0;        // 0=정량, 1=비율
+      int gold = 0;
+      int grain = 0;
+      int troops = 0;
+    };
+    static std::vector<AutoSupportRoute> s_autoSupportRoutes;
+    static bool s_autoSupportRoutesLoaded = false;
+    static bool s_autoSupportYearlyEnabled = false;
+    static uint8_t s_autoSupportLastObservedMonth = 0;
+    static uint16_t s_autoSupportLastObservedYear = 0;
+
+    static uintptr_t GetRawCityBase(uintptr_t shiftedCityBase, int cityIndex) {
+      if (shiftedCityBase <= 0x28 || cityIndex < 0 || cityIndex >= g_CityCount)
+        return 0;
+      return (shiftedCityBase - 0x28) + (uintptr_t)cityIndex * CITY_STRIDE;
+    }
+
+    static uintptr_t GetCityForcePtr(uintptr_t rawCity) {
+      if (rawCity <= 0x10000)
+        return 0;
+
+      uintptr_t ownerLink = 0;
+      if (!SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW, &ownerLink))
+        return 0;
+
+      uintptr_t forcePtr = 0;
+      if (!SafeReadPtr(ownerLink + 0x18, &forcePtr))
+        return 0;
+
+      return forcePtr;
+    }
+
+    static int ConnectionPtrToCityIndex(uintptr_t rawCityArrayBase, uintptr_t cityPtr) {
+      if (rawCityArrayBase <= 0x10000 || cityPtr < rawCityArrayBase)
+        return -1;
+
+      const uintptr_t delta = cityPtr - rawCityArrayBase;
+      if ((delta % CITY_STRIDE) != 0)
+        return -1;
+
+      const int idx = (int)(delta / CITY_STRIDE);
+      if (idx < 0 || idx >= g_CityCount)
+        return -1;
+      return idx;
+    }
+
+    static std::string BuildForceName(uintptr_t forcePtr) {
+      if (!forcePtr)
+        return u8"공백지";
+
+      uintptr_t lordPtr = 0;
+      if (SafeReadPtr(forcePtr + 0xC0, &lordPtr)) {
+        uint16_t lordId = 0;
+        if (SafeRead16(lordPtr + 0x08, &lordId)) {
+          auto it = g_officerNames.find((int)lordId);
+          if (it != g_officerNames.end() && !it->second.empty())
+            return it->second + u8" 세력";
+
+          return u8"무장 ID " + std::to_string((int)lordId) + u8" 세력";
+        }
+      }
+
+      char buf[64];
+      sprintf_s(buf, u8"세력 0x%llX", (unsigned long long)forcePtr);
+      return buf;
+    }
+
+    static void NormalizeSupportSelections();
+
+    static const char *FindForceName(uintptr_t forcePtr) {
+      if (!forcePtr)
+        return u8"공백지";
+
+      for (const auto &f : s_frontierFactions) {
+        if (f.forcePtr == forcePtr)
+          return f.name.c_str();
+      }
+      return u8"미확인 세력";
+    }
+
+    static void RefreshFrontierAnalysis(uintptr_t p1, uintptr_t shiftedCityBase) {
+      s_frontierFactions.clear();
+      s_frontierRows.clear();
+      s_frontierPlayerForce = 0;
+
+      if (shiftedCityBase <= 0x10000) {
+        s_frontierDirty = false;
+        return;
+      }
+
+      LoadOfficerNames();
+
+      const uintptr_t rawCityArrayBase = shiftedCityBase - 0x28;
+      std::vector<uintptr_t> cityForces(g_CityCount, 0);
+
+      // 1) 51개 도시의 소유 세력 수집
+      for (int i = 0; i < g_CityCount; ++i) {
+        const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, i);
+        cityForces[i] = GetCityForcePtr(rawCity);
+
+        const uintptr_t forcePtr = cityForces[i];
+        if (!forcePtr)
+          continue;
+
+        bool exists = false;
+        for (const auto &f : s_frontierFactions) {
+          if (f.forcePtr == forcePtr) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists) {
+          FrontierFaction f;
+          f.forcePtr = forcePtr;
+          f.name = BuildForceName(forcePtr);
+          s_frontierFactions.push_back(std::move(f));
+        }
+      }
+
+      // 2) 주인공 현재 도시를 통해 주인공 소속 세력을 얻음
+      if (p1 > 0x10000) {
+        uintptr_t playerCity = 0;
+        if (SafeReadPtr(p1 + 0x20, &playerCity))
+          s_frontierPlayerForce = GetCityForcePtr(playerCity);
+      }
+
+      // 최초에는 주인공 세력을 자동 선택. 선택 세력이 사라졌으면 다시 선택.
+      bool selectedStillExists = false;
+      for (const auto &f : s_frontierFactions) {
+        if (f.forcePtr == s_frontierSelectedForce) {
+          selectedStillExists = true;
+          break;
+        }
+      }
+      if (!selectedStillExists) {
+        s_frontierSelectedForce = 0;
+        for (const auto &f : s_frontierFactions) {
+          if (f.forcePtr == s_frontierPlayerForce) {
+            s_frontierSelectedForce = s_frontierPlayerForce;
+            break;
+          }
+        }
+        if (!s_frontierSelectedForce && !s_frontierFactions.empty())
+          s_frontierSelectedForce = s_frontierFactions.front().forcePtr;
+      }
+
+      // 3) 선택 세력 도시만 대상으로 인접 도시의 소유 세력을 비교해 전선/후방 판정
+      if (s_frontierSelectedForce) {
+        for (int i = 0; i < g_CityCount; ++i) {
+          if (cityForces[i] != s_frontierSelectedForce)
+            continue;
+
+          const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, i);
+          FrontierCityRow row;
+          row.cityIndex = i;
+
+          for (int slot = 0; slot < CITY_CONNECTION_SLOTS; ++slot) {
+            uintptr_t connectedPtr = 0;
+            const uintptr_t slotAddr =
+                rawCity + OFF_CITY_CONNECTION_RAW + (uintptr_t)slot * sizeof(uintptr_t);
+
+            // 빈 슬롯(0)은 정상적인 미사용 슬롯.
+            if (!SafeReadPtrAllowZero(slotAddr, &connectedPtr))
+              connectedPtr = 0;
+
+            if (!connectedPtr)
+              continue;
+
+            const int connectedIdx = ConnectionPtrToCityIndex(rawCityArrayBase, connectedPtr);
+            if (connectedIdx < 0) {
+              row.unknownConnections++;
+              continue;
+            }
+
+            row.neighbors.push_back(connectedIdx);
+            if (cityForces[connectedIdx] != s_frontierSelectedForce) {
+              row.frontline = true;
+              row.foreignNeighbors.push_back(connectedIdx);
+            }
+          }
+
+          SafeRead32(rawCity + OFF_GOLD, &row.gold);
+          SafeRead32(rawCity + OFF_GRAIN, &row.grain);
+          SafeRead32(rawCity + OFF_CITY_TROOPS_RAW, &row.troops);
+          SafeRead32(rawCity + OFF_SOL_MAX, &row.troopMax);
+          s_frontierRows.push_back(std::move(row));
+        }
+      }
+
+      s_frontierDirty = false;
+      NormalizeSupportSelections();
+    }
+
+    static std::string BuildCityNameList(const std::vector<int> &indices) {
+      std::string out;
+      for (int idx : indices) {
+        if (idx < 0 || idx >= g_CityCount)
+          continue;
+        if (!out.empty())
+          out += ", ";
+        out += g_CityList[idx].cityname;
+      }
+      return out.empty() ? "-" : out;
+    }
+
+    static std::string BuildForeignCityList(uintptr_t shiftedCityBase,
+                                            const std::vector<int> &indices) {
+      std::string out;
+      for (int idx : indices) {
+        if (idx < 0 || idx >= g_CityCount)
+          continue;
+
+        const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, idx);
+        const uintptr_t forcePtr = GetCityForcePtr(rawCity);
+
+        if (!out.empty())
+          out += ", ";
+        out += g_CityList[idx].cityname;
+        out += "(";
+        out += FindForceName(forcePtr);
+        out += ")";
+      }
+      return out.empty() ? "-" : out;
+    }
+
+    static const FrontierCityRow *FindFrontierRow(int cityIndex) {
+      for (const auto &row : s_frontierRows) {
+        if (row.cityIndex == cityIndex)
+          return &row;
+      }
+      return nullptr;
+    }
+
+    static void NormalizeSupportSelections() {
+      const FrontierCityRow *src = FindFrontierRow(s_supportSourceCity);
+      if (!src) {
+        s_supportSourceCity = s_frontierRows.empty() ? -1 : s_frontierRows.front().cityIndex;
+      }
+
+      const FrontierCityRow *dst = FindFrontierRow(s_supportTargetCity);
+      if (!dst || s_supportTargetCity == s_supportSourceCity) {
+        s_supportTargetCity = -1;
+        for (const auto &row : s_frontierRows) {
+          if (row.cityIndex != s_supportSourceCity) {
+            s_supportTargetCity = row.cityIndex;
+            break;
+          }
+        }
+      }
+    }
+
+    static uint32_t CalcSupportAmount(uint32_t sourceValue, int fixedValue, int percentValue) {
+      uint64_t amount = 0;
+      if (s_supportMode == 0) {
+        amount = fixedValue > 0 ? (uint64_t)fixedValue : 0;
+      } else {
+        int pct = percentValue;
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        amount = ((uint64_t)sourceValue * (uint64_t)pct) / 100ull;
+      }
+
+      if (amount > sourceValue)
+        amount = sourceValue;
+      return (uint32_t)amount;
+    }
+
+    static void ClampSupportInput(int &v, int maxValue) {
+      if (v < 0) v = 0;
+      if (v > maxValue) v = maxValue;
+    }
+
+    static bool ExecuteRearSupport(uintptr_t p1, uintptr_t shiftedCityBase) {
+      // 실행 직전에 소유 세력/전선 판정을 다시 읽어, stale UI 값으로 잘못 보내지 않도록 한다.
+      RefreshFrontierAnalysis(p1, shiftedCityBase);
+      NormalizeSupportSelections();
+
+      const FrontierCityRow *srcRow = FindFrontierRow(s_supportSourceCity);
+      const FrontierCityRow *dstRow = FindFrontierRow(s_supportTargetCity);
+      if (!srcRow || !dstRow || s_supportSourceCity == s_supportTargetCity) {
+        AddLog(u8"[도시지원] 실행 실패: 서로 다른 같은 세력 도시를 선택해야 합니다.");
+        return false;
+      }
+
+      const uintptr_t srcRaw = GetRawCityBase(shiftedCityBase, s_supportSourceCity);
+      const uintptr_t dstRaw = GetRawCityBase(shiftedCityBase, s_supportTargetCity);
+      if (!srcRaw || !dstRaw) {
+        AddLog(u8"[도시지원] 실행 실패: 도시 주소를 확인할 수 없습니다.");
+        return false;
+      }
+
+      const uintptr_t srcForce = GetCityForcePtr(srcRaw);
+      const uintptr_t dstForce = GetCityForcePtr(dstRaw);
+      if (!s_frontierSelectedForce || srcForce != s_frontierSelectedForce ||
+          dstForce != s_frontierSelectedForce) {
+        AddLog(u8"[도시지원] 실행 실패: 두 도시가 현재 선택 세력 소유가 아닙니다.");
+        return false;
+      }
+
+      uint32_t srcGold = 0, srcGrain = 0, srcTroops = 0;
+      uint32_t dstGold = 0, dstGrain = 0, dstTroops = 0, dstTroopMax = 0;
+      if (!SafeRead32(srcRaw + OFF_GOLD, &srcGold) ||
+          !SafeRead32(srcRaw + OFF_GRAIN, &srcGrain) ||
+          !SafeRead32(srcRaw + OFF_CITY_TROOPS_RAW, &srcTroops) ||
+          !SafeRead32(dstRaw + OFF_GOLD, &dstGold) ||
+          !SafeRead32(dstRaw + OFF_GRAIN, &dstGrain) ||
+          !SafeRead32(dstRaw + OFF_CITY_TROOPS_RAW, &dstTroops) ||
+          !SafeRead32(dstRaw + OFF_SOL_MAX, &dstTroopMax)) {
+        AddLog(u8"[도시지원] 실행 실패: 도시 자원 값을 읽지 못했습니다.");
+        return false;
+      }
+
+      uint32_t moveGold = CalcSupportAmount(srcGold, s_supportFixedGold, s_supportPercentGold);
+      uint32_t moveGrain = CalcSupportAmount(srcGrain, s_supportFixedGrain, s_supportPercentGrain);
+      uint32_t moveTroops = CalcSupportAmount(srcTroops, s_supportFixedTroops, s_supportPercentTroops);
+      const uint32_t requestedTroops = moveTroops;
+
+      // 목적지 uint32 오버플로 방지
+      const uint64_t goldRoom = 0xFFFFFFFFull - (uint64_t)dstGold;
+      const uint64_t grainRoom = 0xFFFFFFFFull - (uint64_t)dstGrain;
+      if ((uint64_t)moveGold > goldRoom) moveGold = (uint32_t)goldRoom;
+      if ((uint64_t)moveGrain > grainRoom) moveGrain = (uint32_t)grainRoom;
+
+      // 병력은 목적 도시 병사한도를 넘지 않도록 제한
+      uint32_t troopRoom = 0;
+      if (dstTroopMax > dstTroops)
+        troopRoom = dstTroopMax - dstTroops;
+
+      const bool troopCapLimited = requestedTroops > troopRoom;
+      if (moveTroops > troopRoom)
+        moveTroops = troopRoom;
+
+      if (troopCapLimited) {
+        char notice[256]{};
+        if (troopRoom == 0) {
+          sprintf_s(notice, u8"도시지원: %s 병사 한도(%u)에 도달하여 병력은 이동하지 못했습니다.",
+                    g_CityList[s_supportTargetCity].cityname, dstTroopMax);
+        } else {
+          sprintf_s(notice, u8"도시지원: %s 병사 한도로 요청 %u명 중 %u명만 이동합니다.",
+                    g_CityList[s_supportTargetCity].cityname, requestedTroops, moveTroops);
+        }
+        AddNotification(notice);
+        AddLog(u8"[도시지원] 병력 한도 제한: 요청=%u, 실제=%u, 도착=%u/%u",
+               requestedTroops, moveTroops, dstTroops, dstTroopMax);
+      }
+
+      if (moveGold == 0 && moveGrain == 0 && moveTroops == 0) {
+        AddLog(u8"[도시지원] 이동 가능한 자원이 없습니다. 출발 병력=%u, 도착 병력=%u/%u",
+               srcTroops, dstTroops, dstTroopMax);
+        return false;
+      }
+
+      struct WriteOp {
+        uintptr_t addr;
+        uint32_t before;
+        uint32_t after;
+      };
+      WriteOp ops[6]{};
+      int opCount = 0;
+
+      if (moveGold > 0) {
+        ops[opCount++] = {srcRaw + OFF_GOLD, srcGold, srcGold - moveGold};
+        ops[opCount++] = {dstRaw + OFF_GOLD, dstGold, dstGold + moveGold};
+      }
+      if (moveGrain > 0) {
+        ops[opCount++] = {srcRaw + OFF_GRAIN, srcGrain, srcGrain - moveGrain};
+        ops[opCount++] = {dstRaw + OFF_GRAIN, dstGrain, dstGrain + moveGrain};
+      }
+      if (moveTroops > 0) {
+        ops[opCount++] = {srcRaw + OFF_CITY_TROOPS_RAW, srcTroops, srcTroops - moveTroops};
+        ops[opCount++] = {dstRaw + OFF_CITY_TROOPS_RAW, dstTroops, dstTroops + moveTroops};
+      }
+
+      int written = 0;
+      for (; written < opCount; ++written) {
+        if (!SafeWrite32(ops[written].addr, ops[written].after))
+          break;
+      }
+
+      if (written != opCount) {
+        for (int i = written - 1; i >= 0; --i)
+          SafeWrite32(ops[i].addr, ops[i].before);
+        AddLog(u8"[도시지원] 쓰기 실패: 적용된 변경을 원상 복구했습니다.");
+        return false;
+      }
+
+      AddLog(u8"[도시지원] %s -> %s | 금 %u / 군량 %u / 병력 %u",
+             g_CityList[s_supportSourceCity].cityname,
+             g_CityList[s_supportTargetCity].cityname,
+             moveGold, moveGrain, moveTroops);
+
+      s_snapDirty = true;
+      RefreshFrontierAnalysis(p1, shiftedCityBase);
+      NormalizeSupportSelections();
+      return true;
+    }
+
+    static void DrawRearSupportPanel(uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
+      NormalizeSupportSelections();
+
+      ImGui::Spacing();
+      ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.12f, 0.16f, 0.82f));
+      ImGui::BeginChild("##ManualSupportPanel", ImVec2(0.f, 116.f * sc), true);
+
+      ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.0f, 1.f), u8"[ 수동 즉시 지원 ]");
+      ImGui::SameLine(0.f, 16.f * sc);
+      ImGui::TextDisabled(u8"같은 세력 도시 간 즉시 이동 · 전선 → 전선 가능");
+      ImGui::Separator();
+
+      const char *srcName =
+          (s_supportSourceCity >= 0 && s_supportSourceCity < g_CityCount)
+              ? g_CityList[s_supportSourceCity].cityname
+              : u8"도시 없음";
+      const char *dstName =
+          (s_supportTargetCity >= 0 && s_supportTargetCity < g_CityCount)
+              ? g_CityList[s_supportTargetCity].cityname
+              : u8"도시 없음";
+
+      // 1행: 출발 / 도착 / 방식
+      ImGui::TextUnformatted(u8"보내는 도시");
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::SetNextItemWidth(125.f * sc);
+      if (ImGui::BeginCombo("##SupportSourceCity", srcName)) {
+        for (const auto &row : s_frontierRows) {
+          const bool selected = (row.cityIndex == s_supportSourceCity);
+          if (ImGui::Selectable(g_CityList[row.cityIndex].cityname, selected))
+            s_supportSourceCity = row.cityIndex;
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::SameLine(0.f, 18.f * sc);
+      ImGui::TextUnformatted(u8"→");
+      ImGui::SameLine(0.f, 18.f * sc);
+      ImGui::TextUnformatted(u8"받는 도시");
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::SetNextItemWidth(125.f * sc);
+      if (ImGui::BeginCombo("##SupportTargetCity", dstName)) {
+        for (const auto &row : s_frontierRows) {
+          if (row.cityIndex == s_supportSourceCity)
+            continue;
+          const bool selected = (row.cityIndex == s_supportTargetCity);
+          if (ImGui::Selectable(g_CityList[row.cityIndex].cityname, selected))
+            s_supportTargetCity = row.cityIndex;
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::SameLine(0.f, 24.f * sc);
+      ImGui::TextUnformatted(u8"방식");
+      ImGui::SameLine(0.f, 8.f * sc);
+      if (ImGui::RadioButton(u8"정량##SupportFixed", s_supportMode == 0))
+        s_supportMode = 0;
+      ImGui::SameLine();
+      if (ImGui::RadioButton(u8"비율##SupportPercent", s_supportMode == 1))
+        s_supportMode = 1;
+
+      int *goldInput = (s_supportMode == 0) ? &s_supportFixedGold : &s_supportPercentGold;
+      int *grainInput = (s_supportMode == 0) ? &s_supportFixedGrain : &s_supportPercentGrain;
+      int *troopInput = (s_supportMode == 0) ? &s_supportFixedTroops : &s_supportPercentTroops;
+      const int inputMax = (s_supportMode == 0) ? 2000000000 : 100;
+      const char *unitText = (s_supportMode == 0) ? u8"" : u8"%";
+
+      // 2행: 자원량 + 실행 버튼
+      ImGui::TextUnformatted(u8"금");
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::SetNextItemWidth(100.f * sc);
+      if (ImGui::InputInt("##SupportGold", goldInput, 0, 0))
+        ClampSupportInput(*goldInput, inputMax);
+      if (s_supportMode == 1) {
+        ImGui::SameLine(0.f, 3.f * sc);
+        ImGui::TextUnformatted(unitText);
+      }
+
+      ImGui::SameLine(0.f, 18.f * sc);
+      ImGui::TextUnformatted(u8"군량");
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::SetNextItemWidth(100.f * sc);
+      if (ImGui::InputInt("##SupportGrain", grainInput, 0, 0))
+        ClampSupportInput(*grainInput, inputMax);
+      if (s_supportMode == 1) {
+        ImGui::SameLine(0.f, 3.f * sc);
+        ImGui::TextUnformatted(unitText);
+      }
+
+      ImGui::SameLine(0.f, 18.f * sc);
+      ImGui::TextUnformatted(u8"병력");
+      ImGui::SameLine(0.f, 8.f * sc);
+      ImGui::SetNextItemWidth(100.f * sc);
+      if (ImGui::InputInt("##SupportTroops", troopInput, 0, 0))
+        ClampSupportInput(*troopInput, inputMax);
+      if (s_supportMode == 1) {
+        ImGui::SameLine(0.f, 3.f * sc);
+        ImGui::TextUnformatted(unitText);
+      }
+
+      const bool canExecute = (s_supportSourceCity >= 0 && s_supportTargetCity >= 0);
+      ImGui::SameLine(0.f, 20.f * sc);
+      if (!canExecute)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"지금 지원##RearSupport", ImVec2(110.f * sc, 0.f)))
+        ExecuteRearSupport(p1, shiftedCityBase);
+      if (!canExecute)
+        ImGui::EndDisabled();
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"선택 세력의 어느 도시끼리든 즉시 자원을 이동합니다.");
+        ImGui::TextUnformatted(u8"전선->전선 이동도 가능하며, 실행 직전에 같은 세력인지 다시 확인합니다.");
+        ImGui::TextUnformatted(u8"병력은 도착 도시의 병사한도를 넘지 않습니다.");
+        ImGui::EndTooltip();
+      }
+
+      // 3행: 예상 결과 / 병사 한도 안내
+      uint32_t previewGold = 0, previewGrain = 0, previewTroops = 0;
+      uint32_t previewRequestedTroops = 0;
+      uint32_t previewTroopRoom = 0;
+      const FrontierCityRow *srcRow = FindFrontierRow(s_supportSourceCity);
+      const FrontierCityRow *dstRow = FindFrontierRow(s_supportTargetCity);
+      if (srcRow && dstRow) {
+        previewGold = CalcSupportAmount(srcRow->gold, s_supportFixedGold, s_supportPercentGold);
+        previewGrain = CalcSupportAmount(srcRow->grain, s_supportFixedGrain, s_supportPercentGrain);
+        previewTroops = CalcSupportAmount(srcRow->troops, s_supportFixedTroops, s_supportPercentTroops);
+        previewRequestedTroops = previewTroops;
+
+        const uint64_t goldRoom = 0xFFFFFFFFull - (uint64_t)dstRow->gold;
+        const uint64_t grainRoom = 0xFFFFFFFFull - (uint64_t)dstRow->grain;
+        if ((uint64_t)previewGold > goldRoom) previewGold = (uint32_t)goldRoom;
+        if ((uint64_t)previewGrain > grainRoom) previewGrain = (uint32_t)grainRoom;
+
+        previewTroopRoom =
+            (dstRow->troopMax > dstRow->troops) ? (dstRow->troopMax - dstRow->troops) : 0;
+        if (previewTroops > previewTroopRoom)
+          previewTroops = previewTroopRoom;
+      }
+
+      ImGui::TextDisabled(u8"예상 지원  금 %u / 군량 %u / 병력 %u",
+                          previewGold, previewGrain, previewTroops);
+      if (srcRow && dstRow) {
+        ImGui::SameLine(0.f, 18.f * sc);
+        ImGui::TextDisabled(u8"병력: 출발 %u · 도착 %u/%u · 여유 %u",
+                            srcRow->troops, dstRow->troops, dstRow->troopMax, previewTroopRoom);
+      }
+
+      if (srcRow && dstRow && previewRequestedTroops > previewTroopRoom) {
+        ImGui::TextColored(ImVec4(1.0f, 0.78f, 0.2f, 1.f),
+                           u8"※ 병사 한도 제한: 요청 %u명 중 %u명만 이동 가능",
+                           previewRequestedTroops, previewTroops);
+        if (previewTroopRoom == 0) {
+          ImGui::SameLine(0.f, 8.f * sc);
+          ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.25f, 1.f),
+                             u8"(도착 도시 병사 한도 도달)");
+        }
+      }
+
+      ImGui::EndChild();
+      ImGui::PopStyleColor();
+      ImGui::Separator();
+    }
+
+    static std::string GetAutoSupportRoutePath() {
+      std::filesystem::path p(GetConfigPath());
+      return p.parent_path().append("S8RPK_rear_support_routes.json").string();
+    }
+
+    static void SaveAutoSupportRoutes() {
+      std::ofstream out(GetAutoSupportRoutePath(), std::ios::binary | std::ios::trunc);
+      if (!out.is_open())
+        return;
+
+      out << "{\n";
+      out << "  \"yearly_auto\": " << (s_autoSupportYearlyEnabled ? 1 : 0) << ",\n";
+      out << "  \"routes\": [\n";
+      for (size_t i = 0; i < s_autoSupportRoutes.size(); ++i) {
+        const auto &r = s_autoSupportRoutes[i];
+        out << "    {\"enabled\": " << (r.enabled ? 1 : 0)
+            << ", \"source\": " << r.sourceCity
+            << ", \"target\": " << r.targetCity
+            << ", \"mode\": " << r.mode
+            << ", \"gold\": " << r.gold
+            << ", \"grain\": " << r.grain
+            << ", \"troops\": " << r.troops << "}";
+        if (i + 1 < s_autoSupportRoutes.size())
+          out << ",";
+        out << "\n";
+      }
+      out << "  ]\n}\n";
+    }
+
+    static void LoadAutoSupportRoutes() {
+      if (s_autoSupportRoutesLoaded)
+        return;
+      s_autoSupportRoutesLoaded = true;
+      s_autoSupportRoutes.clear();
+
+      std::ifstream in(GetAutoSupportRoutePath(), std::ios::binary);
+      if (!in.is_open())
+        return;
+
+      std::string line;
+      while (std::getline(in, line)) {
+        if (line.find("\"yearly_auto\"") != std::string::npos) {
+          int yearly = 0;
+          if (sscanf_s(line.c_str(), "  \"yearly_auto\": %d", &yearly) == 1)
+            s_autoSupportYearlyEnabled = (yearly != 0);
+          continue;
+        }
+
+        int enabled = 0, source = -1, target = -1, mode = 0;
+        int gold = 0, grain = 0, troops = 0;
+        const int n = sscanf_s(
+            line.c_str(),
+            "    {\"enabled\": %d, \"source\": %d, \"target\": %d, \"mode\": %d, \"gold\": %d, \"grain\": %d, \"troops\": %d}",
+            &enabled, &source, &target, &mode, &gold, &grain, &troops);
+        if (n != 7)
+          continue;
+        if (source < 0 || source >= g_CityCount || target < 0 || target >= g_CityCount || source == target)
+          continue;
+
+        AutoSupportRoute r;
+        r.enabled = enabled != 0;
+        r.sourceCity = source;
+        r.targetCity = target;
+        r.mode = (mode == 1) ? 1 : 0;
+        r.gold = gold < 0 ? 0 : gold;
+        r.grain = grain < 0 ? 0 : grain;
+        r.troops = troops < 0 ? 0 : troops;
+        if (r.mode == 1) {
+          if (r.gold > 100) r.gold = 100;
+          if (r.grain > 100) r.grain = 100;
+          if (r.troops > 100) r.troops = 100;
+        }
+        s_autoSupportRoutes.push_back(r);
+      }
+    }
+
+    static bool ExecuteAutoSupportRoute(size_t routeIndex, uintptr_t p1, uintptr_t shiftedCityBase) {
+      if (routeIndex >= s_autoSupportRoutes.size())
+        return false;
+
+      RefreshFrontierAnalysis(p1, shiftedCityBase);
+      const AutoSupportRoute &r = s_autoSupportRoutes[routeIndex];
+      const FrontierCityRow *src = FindFrontierRow(r.sourceCity);
+      const FrontierCityRow *dst = FindFrontierRow(r.targetCity);
+
+      if (!src || !dst) {
+        AddNotification(u8"자동 후방지원: 도시 소유 세력이 바뀌어 해당 노선을 건너뜁니다.");
+        return false;
+      }
+      if (src->frontline || !dst->frontline) {
+        char msg[256]{};
+        sprintf_s(msg, u8"자동 후방지원: %s -> %s 노선은 현재 후방->전선 조건이 아니어서 건너뜁니다.",
+                  g_CityList[r.sourceCity].cityname, g_CityList[r.targetCity].cityname);
+        AddNotification(msg);
+        return false;
+      }
+
+      const int oldSource = s_supportSourceCity;
+      const int oldTarget = s_supportTargetCity;
+      const int oldMode = s_supportMode;
+      const int oldFG = s_supportFixedGold, oldFGr = s_supportFixedGrain, oldFT = s_supportFixedTroops;
+      const int oldPG = s_supportPercentGold, oldPGr = s_supportPercentGrain, oldPT = s_supportPercentTroops;
+
+      s_supportSourceCity = r.sourceCity;
+      s_supportTargetCity = r.targetCity;
+      s_supportMode = r.mode;
+      if (r.mode == 0) {
+        s_supportFixedGold = r.gold;
+        s_supportFixedGrain = r.grain;
+        s_supportFixedTroops = r.troops;
+      } else {
+        s_supportPercentGold = r.gold;
+        s_supportPercentGrain = r.grain;
+        s_supportPercentTroops = r.troops;
+      }
+
+      const bool ok = ExecuteRearSupport(p1, shiftedCityBase);
+
+      s_supportSourceCity = oldSource;
+      s_supportTargetCity = oldTarget;
+      s_supportMode = oldMode;
+      s_supportFixedGold = oldFG; s_supportFixedGrain = oldFGr; s_supportFixedTroops = oldFT;
+      s_supportPercentGold = oldPG; s_supportPercentGrain = oldPGr; s_supportPercentTroops = oldPT;
+      NormalizeSupportSelections();
+      return ok;
+    }
+
+    static void DrawAutoSupportRoutes(uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
+      LoadAutoSupportRoutes();
+
+      ImGui::Spacing();
+
+      // 노선 수에 따라 패널이 자연스럽게 커지되, 너무 많아지면 내부 스크롤로 전환.
+      const int routeCount = (int)s_autoSupportRoutes.size();
+      const int visibleRouteCount = (routeCount < 4) ? routeCount : 4;
+      const float routeCardH = 68.f * sc;
+      const float listH = (routeCount == 0) ? 34.f * sc
+                                             : (routeCardH * visibleRouteCount + 4.f * sc);
+      const float panelH = 58.f * sc + listH;
+
+      ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.09f, 0.15f, 0.82f));
+      ImGui::BeginChild("##AutoSupportRoutesPanel", ImVec2(0.f, panelH), true);
+
+      // 헤더
+      ImGui::TextColored(ImVec4(0.85f, 0.65f, 1.0f, 1.f), u8"[ 자동 후방지원 노선 ]");
+      ImGui::SameLine(0.f, 16.f * sc);
+
+      if (ImGui::Checkbox(u8"12월→1월 자동 실행##YearlyRearSupport", &s_autoSupportYearlyEnabled))
+        SaveAutoSupportRoutes();
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"게임에서 12월이 끝나고 1월로 넘어가는 순간 활성 노선을 위에서부터 1회 실행합니다.");
+        ImGui::TextUnformatted(u8"프로그램을 1월에 새로 켠 경우에는 소급 실행하지 않고 다음 12월→1월부터 실행합니다.");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(0.f, 14.f * sc);
+      if (ImGui::SmallButton(u8"+ 노선 추가")) {
+        int rear = -1, front = -1;
+        for (const auto &row : s_frontierRows) {
+          if (!row.frontline && rear < 0) rear = row.cityIndex;
+          if (row.frontline && front < 0) front = row.cityIndex;
+        }
+        if (rear >= 0 && front >= 0) {
+          AutoSupportRoute r;
+          r.sourceCity = rear;
+          r.targetCity = front;
+          s_autoSupportRoutes.push_back(r);
+          SaveAutoSupportRoutes();
+        } else {
+          AddNotification(u8"자동 후방지원: 후방 도시와 전선 도시가 각각 1개 이상 필요합니다.");
+        }
+      }
+
+      ImGui::SameLine(0.f, 8.f * sc);
+      if (ImGui::SmallButton(u8"활성 노선 전체 지금 실행")) {
+        for (size_t i = 0; i < s_autoSupportRoutes.size(); ++i) {
+          if (s_autoSupportRoutes[i].enabled)
+            ExecuteAutoSupportRoute(i, p1, shiftedCityBase);
+        }
+      }
+
+      ImGui::SameLine(0.f, 12.f * sc);
+      ImGui::TextDisabled(u8"후방 → 전선 전용");
+      ImGui::Separator();
+
+      bool saveNeeded = false;
+      int deleteIndex = -1;
+
+      const ImGuiWindowFlags listFlags =
+          (routeCount > 4) ? ImGuiWindowFlags_AlwaysVerticalScrollbar : 0;
+      ImGui::BeginChild("##AutoSupportRouteList", ImVec2(0.f, listH), false, listFlags);
+
+      if (s_autoSupportRoutes.empty()) {
+        ImGui::TextDisabled(u8"등록된 노선이 없습니다.  '+ 노선 추가'로 후방지원 노선을 등록하세요.");
+      }
+
+      for (size_t i = 0; i < s_autoSupportRoutes.size(); ++i) {
+        AutoSupportRoute &r = s_autoSupportRoutes[i];
+        ImGui::PushID((int)i + 10000);
+
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.12f, 0.17f, 0.95f));
+        ImGui::BeginChild("##AutoRouteCard", ImVec2(0.f, 62.f * sc), true);
+
+        // 1행: 노선 / 도시 / 방식 / 실행
+        ImGui::TextColored(ImVec4(0.72f, 0.78f, 1.0f, 1.f), u8"노선 %d", (int)i + 1);
+        ImGui::SameLine(0.f, 10.f * sc);
+        if (ImGui::Checkbox(u8"사용##AutoEnabled", &r.enabled))
+          saveNeeded = true;
+
+        ImGui::SameLine(0.f, 14.f * sc);
+        const char *srcName = (r.sourceCity >= 0 && r.sourceCity < g_CityCount)
+                                  ? g_CityList[r.sourceCity].cityname : u8"후방 도시";
+        ImGui::SetNextItemWidth(105.f * sc);
+        if (ImGui::BeginCombo("##AutoRouteSource", srcName)) {
+          for (const auto &row : s_frontierRows) {
+            if (row.frontline) continue;
+            const bool selected = row.cityIndex == r.sourceCity;
+            if (ImGui::Selectable(g_CityList[row.cityIndex].cityname, selected)) {
+              r.sourceCity = row.cityIndex;
+              saveNeeded = true;
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+          }
+          ImGui::EndCombo();
+        }
+
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::TextUnformatted(u8"→");
+        ImGui::SameLine(0.f, 6.f * sc);
+
+        const char *dstName = (r.targetCity >= 0 && r.targetCity < g_CityCount)
+                                  ? g_CityList[r.targetCity].cityname : u8"전선 도시";
+        ImGui::SetNextItemWidth(105.f * sc);
+        if (ImGui::BeginCombo("##AutoRouteTarget", dstName)) {
+          for (const auto &row : s_frontierRows) {
+            if (!row.frontline) continue;
+            const bool selected = row.cityIndex == r.targetCity;
+            if (ImGui::Selectable(g_CityList[row.cityIndex].cityname, selected)) {
+              r.targetCity = row.cityIndex;
+              saveNeeded = true;
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+          }
+          ImGui::EndCombo();
+        }
+
+        ImGui::SameLine(0.f, 14.f * sc);
+        if (ImGui::RadioButton(u8"정량##AutoFixed", r.mode == 0)) {
+          r.mode = 0;
+          saveNeeded = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton(u8"비율##AutoPercent", r.mode == 1)) {
+          r.mode = 1;
+          saveNeeded = true;
+        }
+
+        ImGui::SameLine(0.f, 14.f * sc);
+        if (ImGui::SmallButton(u8"지금"))
+          ExecuteAutoSupportRoute(i, p1, shiftedCityBase);
+        ImGui::SameLine(0.f, 5.f * sc);
+        if (ImGui::SmallButton(u8"삭제"))
+          deleteIndex = (int)i;
+
+        // 2행: 노선별 자원량
+        const int maxValue = (r.mode == 0) ? 2000000000 : 100;
+
+        ImGui::TextUnformatted(u8"금");
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::SetNextItemWidth(90.f * sc);
+        if (ImGui::InputInt("##AutoGold", &r.gold, 0, 0)) {
+          ClampSupportInput(r.gold, maxValue);
+          saveNeeded = true;
+        }
+        if (r.mode == 1) {
+          ImGui::SameLine(0.f, 2.f * sc);
+          ImGui::TextDisabled("%%");
+        }
+
+        ImGui::SameLine(0.f, 18.f * sc);
+        ImGui::TextUnformatted(u8"군량");
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::SetNextItemWidth(100.f * sc);
+        if (ImGui::InputInt("##AutoGrain", &r.grain, 0, 0)) {
+          ClampSupportInput(r.grain, maxValue);
+          saveNeeded = true;
+        }
+        if (r.mode == 1) {
+          ImGui::SameLine(0.f, 2.f * sc);
+          ImGui::TextDisabled("%%");
+        }
+
+        ImGui::SameLine(0.f, 18.f * sc);
+        ImGui::TextUnformatted(u8"병력");
+        ImGui::SameLine(0.f, 6.f * sc);
+        ImGui::SetNextItemWidth(100.f * sc);
+        if (ImGui::InputInt("##AutoTroops", &r.troops, 0, 0)) {
+          ClampSupportInput(r.troops, maxValue);
+          saveNeeded = true;
+        }
+        if (r.mode == 1) {
+          ImGui::SameLine(0.f, 2.f * sc);
+          ImGui::TextDisabled("%%");
+        }
+
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+        ImGui::PopID();
+      }
+
+      ImGui::EndChild();
+
+      if (deleteIndex >= 0 && deleteIndex < (int)s_autoSupportRoutes.size()) {
+        s_autoSupportRoutes.erase(s_autoSupportRoutes.begin() + deleteIndex);
+        saveNeeded = true;
+      }
+      if (saveNeeded)
+        SaveAutoSupportRoutes();
+
+      ImGui::EndChild();
+      ImGui::PopStyleColor();
+      ImGui::Separator();
+    }
+
+    static void DrawFrontierAnalysis(uintptr_t p1, uintptr_t shiftedCityBase, float sc) {
+      if (s_frontierDirty)
+        RefreshFrontierAnalysis(p1, shiftedCityBase);
+
+      ImGui::Spacing();
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.f), u8"[ 전선 분석 ]");
+      ImGui::SameLine(0.f, 18.f * sc);
+
+      const char *selectedName = u8"세력 없음";
+      for (const auto &f : s_frontierFactions) {
+        if (f.forcePtr == s_frontierSelectedForce) {
+          selectedName = f.name.c_str();
+          break;
+        }
+      }
+
+      ImGui::SetNextItemWidth(180.f * sc);
+      if (ImGui::BeginCombo("##FrontierFaction", selectedName)) {
+        for (const auto &f : s_frontierFactions) {
+          const bool selected = (f.forcePtr == s_frontierSelectedForce);
+          if (ImGui::Selectable(f.name.c_str(), selected)) {
+            s_frontierSelectedForce = f.forcePtr;
+            RefreshFrontierAnalysis(p1, shiftedCityBase);
+          }
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      if (s_frontierPlayerForce) {
+        ImGui::SameLine(0.f, 8.f * sc);
+        if (ImGui::SmallButton(u8"주인공 세력")) {
+          s_frontierSelectedForce = s_frontierPlayerForce;
+          RefreshFrontierAnalysis(p1, shiftedCityBase);
+        }
+      }
+
+      ImGui::SameLine(0.f, 8.f * sc);
+      if (ImGui::SmallButton(u8"새로고침##frontier")) {
+        RefreshFrontierAnalysis(p1, shiftedCityBase);
+      }
+
+      int total = 0, front = 0, rear = 0;
+      for (const auto &row : s_frontierRows) {
+        total++;
+        if (row.frontline)
+          front++;
+        else
+          rear++;
+      }
+
+      ImGui::SameLine(0.f, 18.f * sc);
+      ImGui::TextDisabled(u8"전체 %d / 전선 %d / 후방 %d", total, front, rear);
+
+      if (ImGui::RadioButton(u8"전체##FrontierAll", s_frontierFilter == 0))
+        s_frontierFilter = 0;
+      ImGui::SameLine();
+      if (ImGui::RadioButton(u8"전선##FrontierFront", s_frontierFilter == 1))
+        s_frontierFilter = 1;
+      ImGui::SameLine();
+      if (ImGui::RadioButton(u8"후방##FrontierRear", s_frontierFilter == 2))
+        s_frontierFilter = 2;
+
+      ImGui::SameLine(0.f, 20.f * sc);
+      ImGui::TextDisabled(u8"연결 도시 중 하나라도 다른 세력/공백지이면 전선");
+
+      ImGui::Separator();
+
+      DrawRearSupportPanel(p1, shiftedCityBase, sc);
+      DrawAutoSupportRoutes(p1, shiftedCityBase, sc);
+
+      static ImGuiTableFlags frontierFlags =
+          ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg |
+          ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit |
+          ImGuiTableFlags_NoSavedSettings;
+
+      if (!ImGui::BeginTable("##FrontierCityTbl", 7, frontierFlags))
+        return;
+
+      ImGui::TableSetupScrollFreeze(2, 1);
+      ImGui::TableSetupColumn(u8"도시", ImGuiTableColumnFlags_WidthFixed, 72.f * sc);
+      ImGui::TableSetupColumn(u8"구분", ImGuiTableColumnFlags_WidthFixed, 55.f * sc);
+      ImGui::TableSetupColumn(u8"접경 도시", ImGuiTableColumnFlags_WidthStretch, 1.1f);
+      ImGui::TableSetupColumn(u8"타세력/공백지 접경", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+      ImGui::TableSetupColumn(u8"금", ImGuiTableColumnFlags_WidthFixed, 82.f * sc);
+      ImGui::TableSetupColumn(u8"군량", ImGuiTableColumnFlags_WidthFixed, 92.f * sc);
+      ImGui::TableSetupColumn(u8"병사/한도", ImGuiTableColumnFlags_WidthFixed, 115.f * sc);
+      ImGui::TableHeadersRow();
+
+      for (const auto &row : s_frontierRows) {
+        if (s_frontierFilter == 1 && !row.frontline)
+          continue;
+        if (s_frontierFilter == 2 && row.frontline)
+          continue;
+
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(g_CityList[row.cityIndex].cityname);
+
+        ImGui::TableSetColumnIndex(1);
+        if (row.frontline)
+          ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.2f, 1.f), u8"전선");
+        else
+          ImGui::TextColored(ImVec4(0.35f, 1.0f, 0.45f, 1.f), u8"후방");
+
+        ImGui::TableSetColumnIndex(2);
+        const std::string neighbors = BuildCityNameList(row.neighbors);
+        ImGui::TextUnformatted(neighbors.c_str());
+        if (row.unknownConnections > 0 && ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::Text(u8"도시 포인터로 해석되지 않은 연결 슬롯: %d개", row.unknownConnections);
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(3);
+        const std::string foreign = BuildForeignCityList(shiftedCityBase, row.foreignNeighbors);
+        ImGui::TextUnformatted(foreign.c_str());
+
+        ImGui::TableSetColumnIndex(4);
+        ImGui::Text("%u", row.gold);
+
+        ImGui::TableSetColumnIndex(5);
+        ImGui::Text("%u", row.grain);
+
+        ImGui::TableSetColumnIndex(6);
+        ImGui::Text("%u / %u", row.troops, row.troopMax);
+      }
+
+      ImGui::EndTable();
+    }
+
   } // anonymous namespace
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  공개 API
   // ═══════════════════════════════════════════════════════════════════════════
   void DrawCityInfoWindow(uintptr_t p1, float scale) {
-    if (!bShowCityInfoWin)
+    if (!bShowCityInfoWin) {
+      s_frontierDirty = true;
       return;
+    }
 
     ImGui::SetNextWindowSize(ImVec2(850.f * scale, 790.f * scale), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(650.f * scale, 360.f * scale), ImVec2(1500.f * scale, 950.f * scale));
@@ -482,17 +1585,99 @@ namespace DX11Base {
     // 상단: 자동 환전 패널
     DrawAutoExchangePanel(p1, scale);
 
-    // 하단: 도시 리스트
+    // 하단: 기존 도시 리스트 / 읽기 전용 전선 분석
     uintptr_t cityBase = GetCityArrBase();
     if (cityBase <= 0x10000) {
       ImGui::Spacing();
       ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f),
                          u8"도시 배열을 읽을 수 없습니다. 게임 플레이 화면에서 열어주세요.");
-    } else {
-      DrawCityTable(cityBase, scale);
+    } else if (ImGui::BeginTabBar("##CityInfoTabs")) {
+      if (ImGui::BeginTabItem(u8"도시 리스트")) {
+        DrawCityTable(cityBase, scale);
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem(u8"수송")) {
+        DrawFrontierAnalysis(p1, cityBase, scale);
+        ImGui::EndTabItem();
+      }
+
+      ImGui::EndTabBar();
     }
 
     ImGui::End();
+  }
+
+  void RunYearlyRearSupport(uintptr_t p1) {
+    static ULONGLONG s_lastPollMs = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (now - s_lastPollMs < 500)
+      return;
+    s_lastPollMs = now;
+
+    LoadAutoSupportRoutes();
+
+    uint16_t year = 0;
+    uint8_t month = 0;
+    if (!ReadScenarioDate(&year, &month) || month < 1 || month > 12)
+      return;
+
+    // 처음 관측한 시점은 기준값만 잡고 소급 실행하지 않는다.
+    if (s_autoSupportLastObservedMonth == 0) {
+      s_autoSupportLastObservedMonth = month;
+      s_autoSupportLastObservedYear = year;
+      return;
+    }
+
+    const bool crossedNewYear =
+        (s_autoSupportLastObservedMonth == 12 && month == 1);
+
+    s_autoSupportLastObservedMonth = month;
+    s_autoSupportLastObservedYear = year;
+
+    if (!crossedNewYear || !s_autoSupportYearlyEnabled)
+      return;
+
+    if (p1 <= 0x10000 || s_autoSupportRoutes.empty())
+      return;
+
+    const uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) {
+      AddNotification(u8"자동 후방지원: 도시 데이터를 읽지 못해 이번 연도 지원을 실행하지 못했습니다.");
+      return;
+    }
+
+    // 연간 자동지원은 UI에서 보고 있던 세력과 무관하게 주인공 세력 기준으로 실행한다.
+    const uintptr_t previousSelectedForce = s_frontierSelectedForce;
+    RefreshFrontierAnalysis(p1, cityBase);
+    if (!s_frontierPlayerForce) {
+      AddNotification(u8"자동 후방지원: 주인공 세력을 확인하지 못해 이번 연도 지원을 건너뜁니다.");
+      return;
+    }
+
+    s_frontierSelectedForce = s_frontierPlayerForce;
+    RefreshFrontierAnalysis(p1, cityBase);
+
+    int enabledCount = 0;
+    int successCount = 0;
+    for (size_t i = 0; i < s_autoSupportRoutes.size(); ++i) {
+      if (!s_autoSupportRoutes[i].enabled)
+        continue;
+      enabledCount++;
+      if (ExecuteAutoSupportRoute(i, p1, cityBase))
+        successCount++;
+    }
+
+    char notice[256]{};
+    sprintf_s(notice, u8"%u년 자동 후방지원 완료: 활성 %d개 / 실행 %d개",
+              (unsigned int)year, enabledCount, successCount);
+    AddNotification(notice);
+    AddLog(u8"[자동 후방지원] %u년 1월 자동 실행 완료 (활성 %d / 실행 %d)",
+           (unsigned int)year, enabledCount, successCount);
+
+    // 사용자가 전선 분석에서 보고 있던 세력 선택은 가능한 한 복구한다.
+    s_frontierSelectedForce = previousSelectedForce;
+    RefreshFrontierAnalysis(p1, cityBase);
   }
 
   void ResetAllCityRevoltCounters() {
