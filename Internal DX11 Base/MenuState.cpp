@@ -35,6 +35,7 @@ namespace DX11Base {
   bool bInfiniteGift = false;
   bool bInfiniteTalk = false;
   bool bFastRelationship = false;
+  bool bShowChildManagerWin = false;
 
   // 3. 전쟁/전투 초기화
   bool bSelfHeal = false;
@@ -220,6 +221,7 @@ namespace DX11Base {
            bShowPasswordPopup ||
            bShowTerrainBonusWin ||
            bShowBattleEnvWin ||
+           bShowChildManagerWin ||
            bShowDebug ||
            bShowMemoryEditor;
   }

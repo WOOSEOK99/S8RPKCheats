@@ -171,6 +171,7 @@
     <ClInclude Include="Cheats\War\Defbuildingboost.h" />
     <ClInclude Include="Engine.h" />
     <ClInclude Include="Cheats\Social\Fastrelationship.h" />
+    <ClInclude Include="Cheats\Social\ChildEarlyAppearance.h" />
     <ClInclude Include="Fonts.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="Framework\imconfig.h" />
@@ -280,6 +281,7 @@
     </ClCompile>
     <ClCompile Include="Engine.cpp" />
     <ClCompile Include="Cheats\Social\Fastrelationship.cpp" />
+    <ClCompile Include="Cheats\Social\ChildEarlyAppearance.cpp" />
     <ClCompile Include="Framework\imgui.cpp" />
     <ClCompile Include="Framework\imgui_demo.cpp" />
     <ClCompile Include="Framework\imgui_draw.cpp" />

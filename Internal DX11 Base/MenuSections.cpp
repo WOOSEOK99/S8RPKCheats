@@ -12,6 +12,7 @@
 #include "Cheats/Officer/OfficerRosterResolve.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Social/Fastrelationship.h"
+#include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/Social/Infinitegift.h"
 #include "Cheats/Social/Infinitetalk.h"
 #include "Cheats/Social/InstantLoveCave.h"
@@ -657,6 +658,18 @@ namespace DX11Base {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"배우자가 있어도 무조건 결혼이 됩니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 대신 타 세력의 경우 등용은 안되네요.");
+        ImGui::EndTooltip();
+      }
+
+      if (ImGui::Button(u8"자녀 관리", ImVec2(120.0f * scale, 0))) {
+        bShowChildManagerWin = true;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                           u8"감지된 자녀 목록을 열어 자녀별로 임관 시점을 설정합니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 새로 태어난 자녀도 이후 자녀 처리 시 자동으로 목록에 추가됩니다.");
         ImGui::EndTooltip();
       }
 

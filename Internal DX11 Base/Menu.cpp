@@ -9,6 +9,7 @@
 #include "Cheats/Officer/RoninMonitor.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
+#include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/System/SystemMonth.h"
@@ -915,6 +916,10 @@ namespace DX11Base {
       ImGui::PopStyleVar(2);
     }
 
+    // 자녀 목록 감시/갱신: 관리 창을 닫아도 새 자녀를 계속 감지
+    EnsureChildManagerCapture();
+    RunChildManagerUpdate();
+
     // 도시 반란 카운트 자동 유지 (도시 정보 창을 닫아도 동작)
     RunCityRevoltAlwaysZero();
 
@@ -925,6 +930,7 @@ namespace DX11Base {
     DrawSpouseListWindow(scale);
     DrawSpecialtyInfoWindow(scale);
     DrawCityInfoWindow(p1, scale);
+    DrawChildManagerWindow(scale);
     DrawMemoryNotepadWindow(scale);
     DrawNotificationHistoryWindow(scale);
     MenuSections::DrawTacticsEditWindow(scale);

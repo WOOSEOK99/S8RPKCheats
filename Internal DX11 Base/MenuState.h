@@ -39,6 +39,7 @@ namespace DX11Base {
   extern bool bInfiniteGift;
   extern bool bInfiniteTalk;
   extern bool bFastRelationship;
+  extern bool bShowChildManagerWin;
 
   // 3. 전쟁/전투
   extern bool bSelfHeal;
