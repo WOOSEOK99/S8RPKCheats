@@ -35,6 +35,13 @@ namespace DX11Base {
     static volatile uint8_t g_resonanceThreeGetterBefore = 0;
     static volatile uint8_t g_resonanceThreeGetterAfter = 0;
 
+    // CT298 실제 담화 실행 경로에서 rdi+0x08을 확인하는 진단용.
+    static uintptr_t g_resonanceThreeTalkHookAddr = 0;
+    static uintptr_t g_resonanceThreeTalkCaveAddr = 0;
+    static uint8_t g_resonanceThreeTalkOriginal[7] = { 0 };
+    static volatile uint32_t g_resonanceThreeTalkSeq = 0;
+    static volatile uint16_t g_resonanceThreeTalkId = 0;
+
     static bool InstallResonanceCave(uintptr_t hookAddr) {
         // 코드 케이브 할당 (8.0 버전에 맞춰 AllocNear 사용)
         g_resonanceCaveAddr = AllocNear(hookAddr, 128);
@@ -173,7 +180,7 @@ namespace DX11Base {
     }
 
     static bool InstallResonanceThreeGetter(uintptr_t hookAddr) {
-        g_resonanceThreeGetCaveAddr = AllocNear(hookAddr, 160);
+        g_resonanceThreeGetCaveAddr = AllocNear(hookAddr, 320);
         if (!g_resonanceThreeGetCaveAddr)
             return false;
 
@@ -277,6 +284,50 @@ namespace DX11Base {
                         sizeof(g_resonanceThreeGetOriginal));
     }
 
+    static bool InstallResonanceThreeTalkDiagnostic(uintptr_t hookAddr) {
+        g_resonanceThreeTalkCaveAddr = AllocNear(hookAddr, 128);
+        if (!g_resonanceThreeTalkCaveAddr)
+            return false;
+
+        uint8_t* cave = (uint8_t*)g_resonanceThreeTalkCaveAddr;
+        int cur = 0;
+
+        // CT298의 OR [rdi+0x320],04 바로 다음 명령.
+        // 이 시점의 rdi가 실제 담화 대상 레코드인지 확인한다.
+        cave[cur++] = 0x9C;                         // pushfq
+        cave[cur++] = 0x41; cave[cur++] = 0x53;   // push r11
+
+        // movzx eax, word ptr [rdi+08]
+        cave[cur++] = 0x0F; cave[cur++] = 0xB7; cave[cur++] = 0x47; cave[cur++] = 0x08;
+
+        // mov r11, &g_resonanceThreeTalkId
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTalkId; cur += 8;
+        // mov word ptr [r11], ax
+        cave[cur++] = 0x66; cave[cur++] = 0x41; cave[cur++] = 0x89; cave[cur++] = 0x03;
+
+        // mov r11, &g_resonanceThreeTalkSeq / inc dword ptr [r11]
+        cave[cur++] = 0x49; cave[cur++] = 0xBB;
+        *(uintptr_t*)&cave[cur] = (uintptr_t)&g_resonanceThreeTalkSeq; cur += 8;
+        cave[cur++] = 0x41; cave[cur++] = 0xFF; cave[cur++] = 0x03;
+
+        cave[cur++] = 0x41; cave[cur++] = 0x5B;   // pop r11
+        cave[cur++] = 0x9D;                         // popfq
+
+        // 원본: movzx eax,word ptr [rcx+000072C0]
+        memcpy(&cave[cur], g_resonanceThreeTalkOriginal,
+               sizeof(g_resonanceThreeTalkOriginal));
+        cur += (int)sizeof(g_resonanceThreeTalkOriginal);
+
+        EmitAbsoluteReturn(cave, cur,
+                           hookAddr + sizeof(g_resonanceThreeTalkOriginal));
+        FlushInstructionCache(GetCurrentProcess(),
+                              (LPCVOID)g_resonanceThreeTalkCaveAddr, cur);
+
+        return ApplyJmp(hookAddr, g_resonanceThreeTalkCaveAddr,
+                        sizeof(g_resonanceThreeTalkOriginal));
+    }
+
     static void RemoveResonanceThreeHooks() {
         if (g_resonanceThreeSelectHookAddr && g_resonanceThreeSelectOriginal[0] != 0)
             RestoreBytes(g_resonanceThreeSelectHookAddr, g_resonanceThreeSelectOriginal,
@@ -284,6 +335,9 @@ namespace DX11Base {
         if (g_resonanceThreeGetHookAddr && g_resonanceThreeGetOriginal[0] != 0)
             RestoreBytes(g_resonanceThreeGetHookAddr, g_resonanceThreeGetOriginal,
                          sizeof(g_resonanceThreeGetOriginal));
+        if (g_resonanceThreeTalkHookAddr && g_resonanceThreeTalkOriginal[0] != 0)
+            RestoreBytes(g_resonanceThreeTalkHookAddr, g_resonanceThreeTalkOriginal,
+                         sizeof(g_resonanceThreeTalkOriginal));
 
         if (g_resonanceThreeSelectCaveAddr) {
             VirtualFree((LPVOID)g_resonanceThreeSelectCaveAddr, 0, MEM_RELEASE);
@@ -292,6 +346,10 @@ namespace DX11Base {
         if (g_resonanceThreeGetCaveAddr) {
             VirtualFree((LPVOID)g_resonanceThreeGetCaveAddr, 0, MEM_RELEASE);
             g_resonanceThreeGetCaveAddr = 0;
+        }
+        if (g_resonanceThreeTalkCaveAddr) {
+            VirtualFree((LPVOID)g_resonanceThreeTalkCaveAddr, 0, MEM_RELEASE);
+            g_resonanceThreeTalkCaveAddr = 0;
         }
 
         g_resonanceThreeCaveApplied = false;
@@ -332,6 +390,13 @@ namespace DX11Base {
                         g_resonanceThreeGetHookAddr =
                             FindPattern(exeBase, searchEnd, getterPat);
 
+                        // CT298의 담화 사용 플래그 기록 직후 명령.
+                        // 기존 InfiniteTalk 훅(83 8F 20 03...)과 겹치지 않는다.
+                        const char* talkPat =
+                            "0F B7 81 C0 72 00 00 66 89 87 1A 03 00 00";
+                        g_resonanceThreeTalkHookAddr =
+                            FindPattern(exeBase, searchEnd, talkPat);
+
                         if (g_resonanceThreeSelectHookAddr && g_resonanceThreeGetHookAddr) {
                             memcpy(g_resonanceThreeSelectOriginal,
                                    (void*)g_resonanceThreeSelectHookAddr,
@@ -345,9 +410,19 @@ namespace DX11Base {
                             const bool getterOk =
                                 selectOk && InstallResonanceThreeGetter(g_resonanceThreeGetHookAddr);
 
+                            bool talkDiagOk = false;
+                            if (getterOk && g_resonanceThreeTalkHookAddr) {
+                                memcpy(g_resonanceThreeTalkOriginal,
+                                       (void*)g_resonanceThreeTalkHookAddr,
+                                       sizeof(g_resonanceThreeTalkOriginal));
+                                talkDiagOk =
+                                    InstallResonanceThreeTalkDiagnostic(g_resonanceThreeTalkHookAddr);
+                            }
+
                             if (selectOk && getterOk) {
                                 g_resonanceThreeCaveApplied = true;
-                                AddLog(u8"[Resonance3] 교류 상대 캡처 + 공명 getter 필터 패치 성공");
+                                AddLog(u8"[Resonance3] 교류 상대 캡처 + 공명 getter 필터 패치 성공 (TalkDiag=%d)",
+                                       talkDiagOk ? 1 : 0);
                             } else {
                                 RemoveResonanceThreeHooks();
                                 AddLog(u8"[Resonance3] 교류 상대/공명 getter 패치 적용 실패");
@@ -365,7 +440,8 @@ namespace DX11Base {
         } else {
             if (g_resonanceThreeCaveApplied ||
                 g_resonanceThreeSelectCaveAddr ||
-                g_resonanceThreeGetCaveAddr) {
+                g_resonanceThreeGetCaveAddr ||
+                g_resonanceThreeTalkCaveAddr) {
                 RemoveResonanceThreeHooks();
                 AddLog(u8"[Resonance3] 교류 상대 공명 3개 패치 해제");
             }
@@ -375,6 +451,7 @@ namespace DX11Base {
     void RunResonanceDebugPoll() {
         static uint16_t s_lastLoggedTargetId = 0;
         static uint32_t s_lastGetterSeq = 0;
+        static uint32_t s_lastTalkSeq = 0;
 
         if (!bResonanceThree)
             return;
@@ -384,6 +461,15 @@ namespace DX11Base {
             s_lastLoggedTargetId = targetId;
             AddLog(u8"[Resonance3Debug] 선택 TargetID=%u Armed=%u",
                    targetId, (unsigned)g_resonanceThreeArmed);
+        }
+
+        const uint32_t talkSeq = g_resonanceThreeTalkSeq;
+        if (talkSeq != s_lastTalkSeq) {
+            s_lastTalkSeq = talkSeq;
+            AddLog(u8"[Resonance3Talk] Hit#%u ActualTalkID=%u (SelectTarget=%u)",
+                   talkSeq,
+                   (unsigned)g_resonanceThreeTalkId,
+                   (unsigned)g_resonanceThreeTargetId);
         }
 
         const uint32_t seq = g_resonanceThreeGetterSeq;
