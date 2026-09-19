@@ -2,6 +2,7 @@
 #include "../../pch.h"
 #include "../../showlog.h"
 #include "../../MemoryUtils.h"
+#include "../../Cheats.h"
 #include <thread>
 #include <atomic>
 #include <psapi.h>
