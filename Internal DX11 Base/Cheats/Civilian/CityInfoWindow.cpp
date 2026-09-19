@@ -2191,14 +2191,15 @@ namespace DX11Base {
         uintptr_t corpsNoRaw = 0;
         uintptr_t governorGeneralPtr = 0;
         const bool forceOk = SafeReadPtr(corpsPtr + 0x10, &forcePtr);
-        const bool noOk = SafeReadPtr(corpsPtr + 0x18, &corpsNoRaw);
+        const bool noOk = SafeReadPtrAllowZero(corpsPtr + 0x18, &corpsNoRaw);
         const bool govOk = SafeReadPtr(corpsPtr + 0x20, &governorGeneralPtr);
 
         ImGui::Text(u8"군단 +0x10 세력 후보: %s0x%llX",
                     forceOk ? "" : u8"(읽기 실패) ",
                     (unsigned long long)forcePtr);
-        ImGui::Text(u8"군단 +0x18 원시값: %s0x%llX",
+        ImGui::Text(u8"군단 +0x18 군단 번호: %s%llu (0x%llX)",
                     noOk ? "" : u8"(읽기 실패) ",
+                    (unsigned long long)corpsNoRaw,
                     (unsigned long long)corpsNoRaw);
         ImGui::Text(u8"군단 +0x20 도독 후보: %s0x%llX",
                     govOk ? "" : u8"(읽기 실패) ",
@@ -2213,7 +2214,7 @@ namespace DX11Base {
         const bool forceOk =
             corpsPtr > 0x10000 && SafeReadPtr(corpsPtr + 0x10, &forcePtr);
         const bool noOk =
-            corpsPtr > 0x10000 && SafeReadPtr(corpsPtr + 0x18, &corpsNoRaw);
+            corpsPtr > 0x10000 && SafeReadPtrAllowZero(corpsPtr + 0x18, &corpsNoRaw);
         const bool govOk =
             corpsPtr > 0x10000 && SafeReadPtr(corpsPtr + 0x20, &governorGeneralPtr);
 
@@ -2225,8 +2226,9 @@ namespace DX11Base {
         AddLog(u8"[군단DBG] Corps+0x10 세력 후보 = %s0x%llX",
                forceOk ? "" : u8"(읽기 실패) ",
                (unsigned long long)forcePtr);
-        AddLog(u8"[군단DBG] Corps+0x18 원시값 = %s0x%llX",
+        AddLog(u8"[군단DBG] Corps+0x18 군단 번호 = %s%llu (0x%llX)",
                noOk ? "" : u8"(읽기 실패) ",
+               (unsigned long long)corpsNoRaw,
                (unsigned long long)corpsNoRaw);
         AddLog(u8"[군단DBG] Corps+0x20 도독 후보 = %s0x%llX",
                govOk ? "" : u8"(읽기 실패) ",
@@ -2281,6 +2283,28 @@ namespace DX11Base {
         return false;
       }
 
+      uintptr_t sourceCorps = 0;
+      uintptr_t targetCorps = 0;
+      const bool sourceCorpsOk =
+          SafeReadPtrAllowZero(currentCity + OFF_CITY_CORPS_RAW, &sourceCorps);
+      const bool targetCorpsOk =
+          SafeReadPtrAllowZero(targetRaw + OFF_CITY_CORPS_RAW, &targetCorps);
+      if (!sourceCorpsOk || !targetCorpsOk) {
+        AddNotification(u8"무장 이동: 출발/목적 도시의 군단 정보를 읽지 못했습니다.");
+        return false;
+      }
+
+      const bool crossCorps = (sourceCorps != targetCorps);
+      if (crossCorps && selected->status != 0x28) {
+        AddNotification(u8"무장 이동: 다른 군단으로의 이동은 현재 일반 신분 무장만 허용합니다.");
+        AddLog(u8"[도시 무장] 군단 간 이동 차단: ID %u / 신분 0x%02X / 출발군단 0x%llX / 목적군단 0x%llX",
+               (unsigned int)officerId,
+               (unsigned int)selected->status,
+               (unsigned long long)sourceCorps,
+               (unsigned long long)targetCorps);
+        return false;
+      }
+
       if (!SafeWritePtr(targetOfficerBase + 0x20, targetRaw)) {
         AddNotification(u8"무장 이동: 도시 포인터 쓰기에 실패했습니다.");
         return false;
@@ -2296,9 +2320,13 @@ namespace DX11Base {
                 name.c_str(),
                 g_CityList[s_officerMoveTargetCity].cityname);
       AddNotification(notice);
-      AddLog(u8"[도시 무장] %s -> %s 이동 (+0x20 도시 포인터 변경)",
+      AddLog(u8"[도시 무장] %s -> %s 이동 (+0x20 도시 포인터 변경)%s",
              name.c_str(),
-             g_CityList[s_officerMoveTargetCity].cityname);
+             g_CityList[s_officerMoveTargetCity].cityname,
+             crossCorps ? u8" [군단 간 전속]" : "");
+      AddLog(u8"[도시 무장] 군단: 0x%llX -> 0x%llX (군단 포인터 직접 쓰기 없음)",
+             (unsigned long long)sourceCorps,
+             (unsigned long long)targetCorps);
 
       s_selectedOfficerId = -1;
       s_officerRosterDirty = true;
@@ -2493,7 +2521,9 @@ namespace DX11Base {
         ImGui::TextUnformatted(
             u8"무장의 신분/충성/능력치는 건드리지 않고 +0x20 도시 포인터만 변경합니다.");
         ImGui::TextUnformatted(
-            u8"현재 주인공 세력이 소유한 도시끼리만 이동할 수 있습니다.");
+            u8"현재 주인공 세력이 소유한 도시끼리 이동하며, 목적 도시의 +0x90 군단 소속을 자동으로 따릅니다.");
+        ImGui::TextUnformatted(
+            u8"다른 군단으로의 전속은 현재 일반 신분(0x28) 무장만 허용합니다.");
         ImGui::EndTooltip();
       }
 
