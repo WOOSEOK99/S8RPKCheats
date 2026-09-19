@@ -3276,6 +3276,118 @@ namespace DX11Base {
       return true;
     }
 
+    static bool AppointFirstDeploymentGovernorAtCity(
+        uintptr_t shiftedCityBase, int cityIndex,
+        uintptr_t candidateBase) {
+      if (cityIndex < 0 || cityIndex >= g_CityCount ||
+          candidateBase <= 0x10000)
+        return false;
+
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, cityIndex);
+      if (!rawCity)
+        return false;
+
+      uintptr_t cityCorps = 0;
+      uintptr_t cityGovernor = 0;
+      uintptr_t candidateCity = 0;
+      uintptr_t candidateForce = 0;
+      uint16_t candidatePair = 0;
+      uint8_t candidateLoyalty = 0;
+
+      if (!SafeReadPtrAllowZero(
+              rawCity + OFF_CITY_CORPS_RAW, &cityCorps) ||
+          !SafeReadPtrAllowZero(
+              rawCity + OFF_CITY_FORCE_LINK_RAW, &cityGovernor) ||
+          !SafeReadPtr(
+              candidateBase + 0x20, &candidateCity) ||
+          !SafeReadPtr(
+              candidateBase + 0x18, &candidateForce) ||
+          !SafeRead16(
+              candidateBase + 0x10, &candidatePair) ||
+          !SafeRead8(
+              candidateBase + 0xEC, &candidateLoyalty))
+        return false;
+
+      // 정상 게임에서 두 번 관찰된 빈 도시 최초 임명 패턴:
+      // 일반 28/D3 (0xD328) -> 태수 E8/D2 (0xD2E8),
+      // City+0x98 0 -> 해당 OfficerData*.
+      if (cityCorps != s_corpsDeploymentCorpsPtr ||
+          cityGovernor != 0 ||
+          candidateCity != rawCity ||
+          candidateForce != s_officerPlayerForce ||
+          candidateLoyalty != 100 ||
+          candidatePair != 0xD328u ||
+          GetCityForcePtr(rawCity) != s_officerPlayerForce)
+        return false;
+
+      // 군주/도독/기존 태수가 이미 거주하는 특수 상황에서는 최초 임명을 하지 않는다.
+      for (const auto &row : s_corpsOfficerRows) {
+        if (row.officerBase == candidateBase)
+          continue;
+        if (GetOfficerCurrentCityIndex(
+                shiftedCityBase, row) != cityIndex)
+          continue;
+        if (row.status == 0xC8 ||
+            row.status == 0xD8 ||
+            row.status == 0xE8)
+          return false;
+      }
+
+      const uint16_t candidateAfter = 0xD2E8u;
+      bool pairWritten =
+          SafeWrite16(candidateBase + 0x10, candidateAfter);
+      bool cityWritten = false;
+      if (pairWritten) {
+        cityWritten = SafeWritePtr(
+            rawCity + OFF_CITY_FORCE_LINK_RAW, candidateBase);
+      }
+
+      if (!pairWritten || !cityWritten) {
+        if (cityWritten) {
+          SafeWritePtr(
+              rawCity + OFF_CITY_FORCE_LINK_RAW, 0);
+        }
+        if (pairWritten) {
+          SafeWrite16(candidateBase + 0x10, candidatePair);
+        }
+        return false;
+      }
+
+      uint16_t verifyPair = 0;
+      uintptr_t verifyGovernor = 0;
+      uintptr_t verifyCity = 0;
+      uint8_t verifyLoyalty = 0;
+      const bool verifyOk =
+          SafeRead16(
+              candidateBase + 0x10, &verifyPair) &&
+          SafeReadPtr(
+              candidateBase + 0x20, &verifyCity) &&
+          SafeRead8(
+              candidateBase + 0xEC, &verifyLoyalty) &&
+          SafeReadPtr(
+              rawCity + OFF_CITY_FORCE_LINK_RAW,
+              &verifyGovernor) &&
+          verifyPair == candidateAfter &&
+          verifyCity == rawCity &&
+          verifyLoyalty == 100 &&
+          verifyGovernor == candidateBase;
+
+      if (!verifyOk) {
+        SafeWritePtr(
+            rawCity + OFF_CITY_FORCE_LINK_RAW, 0);
+        SafeWrite16(candidateBase + 0x10, candidatePair);
+        return false;
+      }
+
+      uint16_t candidateId = 0;
+      SafeRead16(candidateBase + 0x08, &candidateId);
+      AddLog(u8"[군단 자동배치 2단계] %s 최초 태수 임명: %s (28/D3 -> E8/D2, City+0x98 설정)",
+             g_CityList[cityIndex].cityname,
+             BuildOfficerName(candidateId).c_str());
+      return true;
+    }
+
     static bool IsDeploymentFixedLeader(uint16_t id) {
       const CityOfficerRow *row = FindCorpsOfficerByRecId(id);
       if (!row)
@@ -3383,9 +3495,8 @@ namespace DX11Base {
           outDeferred->push_back(cityIndex);
       };
 
-      // City+0x98이 비어 있거나 E8을 가리키지 않는 도시는 자동으로
-      // "태수 없음"이라 단정하지 않는다. 거주 C8/D8/E8을 별도 진단하고
-      // 신규 임명 방식이 확정될 때까지 보류한다.
+      // City+0x98==0은 두 번 관찰된 최초 태수 임명 패턴으로 처리 가능하다.
+      // 0이 아닌 포인터가 E8 태수를 가리키지 않는 특수 상태만 보류한다.
       for (const auto &city : s_corpsDeploymentCities) {
         if (!city.recommendedGovernorId ||
             IsDeploymentFixedLeader(city.recommendedGovernorId))
@@ -3397,8 +3508,10 @@ namespace DX11Base {
           continue;
 
         const uintptr_t currentGovernor =
-            ReadDeploymentCityGovernor(shiftedCityBase, city.cityIndex);
-        if (currentGovernor == desired->officerBase)
+            ReadDeploymentCityGovernor(
+                shiftedCityBase, city.cityIndex);
+        if (currentGovernor == desired->officerBase ||
+            currentGovernor == 0)
           continue;
 
         uint8_t currentStatus = 0;
@@ -3569,6 +3682,7 @@ namespace DX11Base {
 
       int moveCount = 0;
       int swapCount = 0;
+      int firstGovernorCount = 0;
       int cycleBreakCount = 0;
       const int deferredCount =
           (int)deferredCities.size();
@@ -3654,9 +3768,25 @@ namespace DX11Base {
               desiredCity != city.cityIndex)
             continue;
 
+          if (currentGovernor == 0) {
+            if (!AppointFirstDeploymentGovernorAtCity(
+                    shiftedCityBase, city.cityIndex,
+                    desired->officerBase)) {
+              failed = true;
+              failReason =
+                  u8"빈 도시 최초 태수 임명 조건(28/D3, 충성100) 또는 쓰기 검증에 실패했습니다.";
+              break;
+            }
+
+            ++firstGovernorCount;
+            progress = true;
+            break;
+          }
+
           if (currentGovernor <= 0x10000) {
             failed = true;
-            failReason = u8"선검사를 통과한 도시의 태수 포인터가 비어 있습니다.";
+            failReason =
+                u8"도시 책임자 포인터가 0이 아닌 비정상 값입니다.";
             break;
           }
 
@@ -3842,11 +3972,13 @@ namespace DX11Base {
 
       char notice[256]{};
       sprintf_s(notice,
-                u8"군단 자동배치 2단계 완료: 태수 교체 %d회 / 이동 %d회 / 보류 %d도시",
-                swapCount, moveCount, deferredCount);
+                u8"군단 자동배치 2단계 완료: 태수 교체 %d회 / 최초 임명 %d회 / 이동 %d회 / 보류 %d도시",
+                swapCount, firstGovernorCount,
+                moveCount, deferredCount);
       AddNotification(notice);
-      AddLog(u8"[군단 자동배치 2단계] 완료: 교체 %d / 이동 %d / 순환해제 %d / 보류 %d",
-             swapCount, moveCount, cycleBreakCount, deferredCount);
+      AddLog(u8"[군단 자동배치 2단계] 완료: 교체 %d / 최초임명 %d / 이동 %d / 순환해제 %d / 보류 %d",
+             swapCount, firstGovernorCount,
+             moveCount, cycleBreakCount, deferredCount);
       return true;
     }
 
@@ -3961,7 +4093,9 @@ namespace DX11Base {
         ImGui::TextUnformatted(
             u8"태수끼리 순환하는 경우 충성 100 일반 장수를 임시 태수로 사용합니다.");
         ImGui::TextUnformatted(
-            u8"City+0x98이 비거나 E8이 아니면 거주 군주/도독/태수를 진단하고 보류합니다.");
+            u8"City+0x98=0은 28/D3 충성100 후보를 E8/D2 최초 태수로 임명합니다.");
+        ImGui::TextUnformatted(
+            u8"0이 아닌 City+0x98이 E8이 아닌 특수 상태만 진단 후 보류합니다.");
         ImGui::TextUnformatted(
             u8"중간 실패 시 적용 대상 도시는 2단계 시작 직전 상태로 전체 원복합니다.");
         ImGui::EndTooltip();
