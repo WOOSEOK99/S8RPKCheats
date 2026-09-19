@@ -6273,10 +6273,7 @@ namespace DX11Base {
       return;
     }
 
-    // 상단: 자동 환전 패널
-    DrawAutoExchangePanel(p1, scale);
-
-    // 하단: 기존 도시 리스트 / 읽기 전용 전선 분석
+    // 탭별 도시 기능
     uintptr_t cityBase = GetCityArrBase();
     if (cityBase <= 0x10000) {
       ImGui::Spacing();
@@ -6284,6 +6281,7 @@ namespace DX11Base {
                          u8"도시 배열을 읽을 수 없습니다. 게임 플레이 화면에서 열어주세요.");
     } else if (ImGui::BeginTabBar("##CityInfoTabs")) {
       if (ImGui::BeginTabItem(u8"도시 리스트")) {
+        DrawAutoExchangePanel(p1, scale);
         DrawCityTable(cityBase, scale);
         ImGui::EndTabItem();
       }
