@@ -10,9 +10,11 @@
 #include "../../showlog.h"
 #include "../../Config.h"
 #include "../Officer/OfficerData.h"
+#include "../Officer/OfficerRosterResolve.h"
 #include "../System/MonthCapture.h"
 #include "CityData.h"
 #include <windows.h>
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -115,6 +117,20 @@ namespace DX11Base {
         return false;
       }
       VirtualProtect((LPVOID)addr, 4, old, &dummy);
+      return true;
+    }
+
+    static bool SafeWritePtr(uintptr_t addr, uintptr_t val) {
+      DWORD old = 0, dummy = 0;
+      if (!VirtualProtect((LPVOID)addr, sizeof(uintptr_t), PAGE_READWRITE, &old))
+        return false;
+      __try {
+        *(uintptr_t *)addr = val;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        VirtualProtect((LPVOID)addr, sizeof(uintptr_t), old, &dummy);
+        return false;
+      }
+      VirtualProtect((LPVOID)addr, sizeof(uintptr_t), old, &dummy);
       return true;
     }
 
@@ -1563,6 +1579,500 @@ namespace DX11Base {
       ImGui::EndTable();
     }
 
+    // ── 도시별 무장 배치 ───────────────────────────────────────────────────
+    struct CityOfficerRow {
+      uintptr_t officerBase = 0;
+      uint16_t id = 0;
+      uint8_t status = 0;
+      uint8_t loyalty = 0;
+      uint8_t lead = 0;
+      uint8_t war = 0;
+      uint8_t intel = 0;
+      uint8_t pol = 0;
+      uint8_t cha = 0;
+    };
+
+    static std::vector<int> s_officerPlayerCities;
+    static std::vector<CityOfficerRow> s_cityOfficerRows;
+    static int s_officerCityIndex = -1;
+    static int s_officerMoveTargetCity = -1;
+    static int s_selectedOfficerId = -1;
+    static uintptr_t s_officerPlayerForce = 0;
+    static bool s_officerRosterDirty = true;
+
+    static bool SafeReadOfficerRow(uintptr_t base, CityOfficerRow *out,
+                                   uintptr_t *outForce, uintptr_t *outCity) {
+      if (!out || !outForce || !outCity)
+        return false;
+      __try {
+        out->officerBase = base;
+        out->id = *(uint16_t *)(base + 0x08);
+        out->status = *(uint8_t *)(base + 0x10);
+        *outForce = *(uintptr_t *)(base + 0x18);
+        *outCity = *(uintptr_t *)(base + 0x20);
+        out->lead = *(uint8_t *)(base + 0xAA);
+        out->war = *(uint8_t *)(base + 0xAB);
+        out->intel = *(uint8_t *)(base + 0xAC);
+        out->pol = *(uint8_t *)(base + 0xAD);
+        out->cha = *(uint8_t *)(base + 0xAE);
+        out->loyalty = *(uint8_t *)(base + 0xEC);
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *outForce = 0;
+        *outCity = 0;
+        return false;
+      }
+    }
+
+    static bool IsEmployedOfficerStatus(uint8_t status) {
+      return status == 0x18 || status == 0x28 || status == 0x38 ||
+             status == 0x48 || status == 0xC8 || status == 0xD8 ||
+             status == 0xE8;
+    }
+
+    static const char *GetOfficerStatusName(uint8_t status) {
+      switch (status) {
+      case 0x18: return u8"군사";
+      case 0x28: return u8"일반";
+      case 0x38: return u8"두령";
+      case 0x48: return u8"동지";
+      case 0xC8: return u8"군주";
+      case 0xD8: return u8"도독";
+      case 0xE8: return u8"태수";
+      default: return u8"기타";
+      }
+    }
+
+    static int GetOfficerStatusSortRank(uint8_t status) {
+      switch (status) {
+      case 0xC8: return 0; // 군주
+      case 0xD8: return 1; // 도독
+      case 0xE8: return 2; // 태수
+      case 0x18: return 3; // 군사
+      case 0x38: return 4; // 두령
+      case 0x48: return 5; // 동지
+      case 0x28: return 6; // 일반
+      default: return 99;
+      }
+    }
+
+    static bool IsCityFrontlineForForce(uintptr_t shiftedCityBase, int cityIndex,
+                                        uintptr_t forcePtr) {
+      if (shiftedCityBase <= 0x10000 || cityIndex < 0 ||
+          cityIndex >= g_CityCount || !forcePtr)
+        return false;
+
+      const uintptr_t rawCityArrayBase = shiftedCityBase - 0x28;
+      const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, cityIndex);
+      for (int slot = 0; slot < CITY_CONNECTION_SLOTS; ++slot) {
+        uintptr_t connectedPtr = 0;
+        if (!SafeReadPtrAllowZero(
+                rawCity + OFF_CITY_CONNECTION_RAW +
+                    (uintptr_t)slot * sizeof(uintptr_t),
+                &connectedPtr) ||
+            !connectedPtr)
+          continue;
+
+        const int connectedIdx =
+            ConnectionPtrToCityIndex(rawCityArrayBase, connectedPtr);
+        if (connectedIdx < 0)
+          continue;
+
+        const uintptr_t connectedRaw =
+            GetRawCityBase(shiftedCityBase, connectedIdx);
+        if (GetCityForcePtr(connectedRaw) != forcePtr)
+          return true;
+      }
+      return false;
+    }
+
+    static void NormalizeOfficerCitySelections() {
+      auto containsCity = [](const std::vector<int> &cities, int idx) {
+        for (int c : cities) {
+          if (c == idx)
+            return true;
+        }
+        return false;
+      };
+
+      if (!containsCity(s_officerPlayerCities, s_officerCityIndex))
+        s_officerCityIndex =
+            s_officerPlayerCities.empty() ? -1 : s_officerPlayerCities.front();
+
+      if (!containsCity(s_officerPlayerCities, s_officerMoveTargetCity) ||
+          s_officerMoveTargetCity == s_officerCityIndex) {
+        s_officerMoveTargetCity = -1;
+        for (int idx : s_officerPlayerCities) {
+          if (idx != s_officerCityIndex) {
+            s_officerMoveTargetCity = idx;
+            break;
+          }
+        }
+      }
+    }
+
+    static void RefreshCityOfficerRoster(uintptr_t p1,
+                                         uintptr_t shiftedCityBase) {
+      s_officerPlayerCities.clear();
+      s_cityOfficerRows.clear();
+      s_officerPlayerForce = 0;
+
+      if (p1 <= 0x10000 || shiftedCityBase <= 0x10000) {
+        s_officerRosterDirty = false;
+        return;
+      }
+
+      uintptr_t playerCity = 0;
+      if (!SafeReadPtr(p1 + 0x20, &playerCity)) {
+        s_officerRosterDirty = false;
+        return;
+      }
+      s_officerPlayerForce = GetCityForcePtr(playerCity);
+      if (!s_officerPlayerForce) {
+        s_officerRosterDirty = false;
+        return;
+      }
+
+      for (int i = 0; i < g_CityCount; ++i) {
+        const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, i);
+        if (GetCityForcePtr(rawCity) == s_officerPlayerForce)
+          s_officerPlayerCities.push_back(i);
+      }
+
+      NormalizeOfficerCitySelections();
+      if (s_officerCityIndex < 0) {
+        s_officerRosterDirty = false;
+        return;
+      }
+
+      uintptr_t rosterBase = 0;
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+      if (!exe ||
+          !TryResolveOfficerRosterArrayBase(exe, &rosterBase) ||
+          rosterBase <= 0x10000) {
+        s_officerRosterDirty = false;
+        return;
+      }
+
+      LoadOfficerNames();
+      const uintptr_t selectedCityRaw =
+          GetRawCityBase(shiftedCityBase, s_officerCityIndex);
+
+      for (int i = 0; i < 5102; ++i) {
+        const uintptr_t officerBase =
+            rosterBase + (uintptr_t)i * 0x3D0;
+        CityOfficerRow row;
+        uintptr_t forcePtr = 0, cityPtr = 0;
+        if (!SafeReadOfficerRow(officerBase, &row, &forcePtr, &cityPtr))
+          continue;
+        if (row.id == 0 || row.id > 5102)
+          continue;
+        if (!IsEmployedOfficerStatus(row.status))
+          continue;
+        if (forcePtr != s_officerPlayerForce || cityPtr != selectedCityRaw)
+          continue;
+
+        s_cityOfficerRows.push_back(row);
+      }
+
+      std::sort(s_cityOfficerRows.begin(), s_cityOfficerRows.end(),
+                [](const CityOfficerRow &a, const CityOfficerRow &b) {
+                  const int ar = GetOfficerStatusSortRank(a.status);
+                  const int br = GetOfficerStatusSortRank(b.status);
+                  if (ar != br)
+                    return ar < br;
+                  if (a.lead != b.lead)
+                    return a.lead > b.lead;
+                  if (a.war != b.war)
+                    return a.war > b.war;
+                  return a.id < b.id;
+                });
+
+      bool selectedStillExists = false;
+      for (const auto &row : s_cityOfficerRows) {
+        if ((int)row.id == s_selectedOfficerId) {
+          selectedStillExists = true;
+          break;
+        }
+      }
+      if (!selectedStillExists)
+        s_selectedOfficerId = -1;
+
+      s_officerRosterDirty = false;
+    }
+
+    static const CityOfficerRow *FindSelectedCityOfficer() {
+      for (const auto &row : s_cityOfficerRows) {
+        if ((int)row.id == s_selectedOfficerId)
+          return &row;
+      }
+      return nullptr;
+    }
+
+    static bool MoveSelectedOfficerToCity(uintptr_t p1,
+                                          uintptr_t shiftedCityBase) {
+      const CityOfficerRow *selected = FindSelectedCityOfficer();
+      if (!selected || s_officerMoveTargetCity < 0 ||
+          s_officerMoveTargetCity >= g_CityCount)
+        return false;
+
+      const uint16_t officerId = selected->id;
+      const uintptr_t targetRaw =
+          GetRawCityBase(shiftedCityBase, s_officerMoveTargetCity);
+      if (!targetRaw ||
+          GetCityForcePtr(targetRaw) != s_officerPlayerForce) {
+        AddNotification(u8"무장 이동: 목적 도시가 현재 주인공 세력 소유가 아닙니다.");
+        return false;
+      }
+
+      uintptr_t rosterBase = 0;
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+      if (!exe ||
+          !TryResolveOfficerRosterArrayBase(exe, &rosterBase) ||
+          rosterBase <= 0x10000)
+        return false;
+
+      uintptr_t targetOfficerBase = 0;
+      for (int i = 0; i < 5102; ++i) {
+        const uintptr_t officerBase =
+            rosterBase + (uintptr_t)i * 0x3D0;
+        uint16_t id = 0;
+        if (!SafeRead16(officerBase + 0x08, &id))
+          continue;
+        if (id == officerId) {
+          targetOfficerBase = officerBase;
+          break;
+        }
+      }
+
+      if (!targetOfficerBase)
+        return false;
+
+      uintptr_t forcePtr = 0, currentCity = 0;
+      if (!SafeReadPtr(targetOfficerBase + 0x18, &forcePtr) ||
+          !SafeReadPtr(targetOfficerBase + 0x20, &currentCity) ||
+          forcePtr != s_officerPlayerForce) {
+        AddNotification(u8"무장 이동: 현재 무장 소속 세력을 다시 확인해주세요.");
+        return false;
+      }
+
+      if (!SafeWritePtr(targetOfficerBase + 0x20, targetRaw)) {
+        AddNotification(u8"무장 이동: 도시 포인터 쓰기에 실패했습니다.");
+        return false;
+      }
+
+      const std::string name =
+          g_officerNames.count(officerId)
+              ? g_officerNames[officerId]
+              : (u8"무장 ID " + std::to_string((int)officerId));
+
+      char notice[256]{};
+      sprintf_s(notice, u8"%s → %s 이동 완료",
+                name.c_str(),
+                g_CityList[s_officerMoveTargetCity].cityname);
+      AddNotification(notice);
+      AddLog(u8"[도시 무장] %s -> %s 이동 (+0x20 도시 포인터 변경)",
+             name.c_str(),
+             g_CityList[s_officerMoveTargetCity].cityname);
+
+      s_selectedOfficerId = -1;
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, shiftedCityBase);
+      return true;
+    }
+
+    static void DrawCityOfficerRoster(uintptr_t p1,
+                                      uintptr_t shiftedCityBase,
+                                      float sc) {
+      if (s_officerRosterDirty)
+        RefreshCityOfficerRoster(p1, shiftedCityBase);
+
+      ImGui::Spacing();
+      ImGui::TextColored(ImVec4(0.55f, 0.90f, 1.0f, 1.f),
+                         u8"[ 내 도시 무장 배치 ]");
+      ImGui::SameLine(0.f, 18.f * sc);
+
+      const char *cityName =
+          (s_officerCityIndex >= 0 &&
+           s_officerCityIndex < g_CityCount)
+              ? g_CityList[s_officerCityIndex].cityname
+              : u8"도시 없음";
+
+      ImGui::SetNextItemWidth(140.f * sc);
+      if (ImGui::BeginCombo("##OfficerCity", cityName)) {
+        for (int idx : s_officerPlayerCities) {
+          const bool selected = (idx == s_officerCityIndex);
+          if (ImGui::Selectable(g_CityList[idx].cityname, selected)) {
+            s_officerCityIndex = idx;
+            s_selectedOfficerId = -1;
+            NormalizeOfficerCitySelections();
+            s_officerRosterDirty = true;
+            RefreshCityOfficerRoster(p1, shiftedCityBase);
+          }
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (ImGui::SmallButton(u8"새로고침##OfficerRoster")) {
+        s_officerRosterDirty = true;
+        RefreshCityOfficerRoster(p1, shiftedCityBase);
+      }
+
+      if (s_officerCityIndex >= 0) {
+        const bool frontline =
+            IsCityFrontlineForForce(shiftedCityBase,
+                                    s_officerCityIndex,
+                                    s_officerPlayerForce);
+        ImGui::SameLine(0.f, 16.f * sc);
+        if (frontline)
+          ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.2f, 1.f),
+                             u8"전선");
+        else
+          ImGui::TextColored(ImVec4(0.35f, 1.0f, 0.45f, 1.f),
+                             u8"후방");
+
+        ImGui::SameLine(0.f, 12.f * sc);
+        ImGui::TextDisabled(u8"무장 %d명",
+                            (int)s_cityOfficerRows.size());
+      }
+
+      ImGui::Separator();
+
+      static ImGuiTableFlags officerFlags =
+          ImGuiTableFlags_BordersInner |
+          ImGuiTableFlags_RowBg |
+          ImGuiTableFlags_ScrollY |
+          ImGuiTableFlags_SizingFixedFit |
+          ImGuiTableFlags_NoSavedSettings;
+
+      const float tableH = 360.f * sc;
+      if (ImGui::BeginTable("##CityOfficerTbl", 8, officerFlags,
+                            ImVec2(0.f, tableH))) {
+        ImGui::TableSetupScrollFreeze(2, 1);
+        ImGui::TableSetupColumn(u8"신분",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                62.f * sc);
+        ImGui::TableSetupColumn(u8"이름",
+                                ImGuiTableColumnFlags_WidthStretch,
+                                1.5f);
+        ImGui::TableSetupColumn(u8"충성",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableSetupColumn(u8"통솔",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableSetupColumn(u8"무력",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableSetupColumn(u8"지력",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableSetupColumn(u8"정치",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableSetupColumn(u8"매력",
+                                ImGuiTableColumnFlags_WidthFixed,
+                                55.f * sc);
+        ImGui::TableHeadersRow();
+
+        for (const auto &row : s_cityOfficerRows) {
+          ImGui::TableNextRow();
+
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextUnformatted(GetOfficerStatusName(row.status));
+
+          ImGui::TableSetColumnIndex(1);
+          const std::string name =
+              g_officerNames.count(row.id)
+                  ? g_officerNames[row.id]
+                  : (u8"무장 ID " + std::to_string((int)row.id));
+          const bool selected =
+              ((int)row.id == s_selectedOfficerId);
+          if (ImGui::Selectable(name.c_str(), selected,
+                                ImGuiSelectableFlags_SpanAllColumns))
+            s_selectedOfficerId = row.id;
+
+          ImGui::TableSetColumnIndex(2);
+          ImGui::Text("%u", (unsigned int)row.loyalty);
+          ImGui::TableSetColumnIndex(3);
+          ImGui::Text("%u", (unsigned int)row.lead);
+          ImGui::TableSetColumnIndex(4);
+          ImGui::Text("%u", (unsigned int)row.war);
+          ImGui::TableSetColumnIndex(5);
+          ImGui::Text("%u", (unsigned int)row.intel);
+          ImGui::TableSetColumnIndex(6);
+          ImGui::Text("%u", (unsigned int)row.pol);
+          ImGui::TableSetColumnIndex(7);
+          ImGui::Text("%u", (unsigned int)row.cha);
+        }
+
+        ImGui::EndTable();
+      }
+
+      const CityOfficerRow *selected = FindSelectedCityOfficer();
+      ImGui::Spacing();
+      if (selected) {
+        const std::string name =
+            g_officerNames.count(selected->id)
+                ? g_officerNames[selected->id]
+                : (u8"무장 ID " +
+                   std::to_string((int)selected->id));
+        ImGui::Text(u8"선택: %s (%s)",
+                    name.c_str(),
+                    GetOfficerStatusName(selected->status));
+      } else {
+        ImGui::TextDisabled(u8"이동할 무장을 목록에서 선택하세요.");
+      }
+
+      ImGui::SameLine(0.f, 24.f * sc);
+      ImGui::TextUnformatted(u8"이동할 도시");
+      ImGui::SameLine(0.f, 8.f * sc);
+
+      const char *targetName =
+          (s_officerMoveTargetCity >= 0 &&
+           s_officerMoveTargetCity < g_CityCount)
+              ? g_CityList[s_officerMoveTargetCity].cityname
+              : u8"도시 없음";
+      ImGui::SetNextItemWidth(130.f * sc);
+      if (ImGui::BeginCombo("##OfficerMoveTarget", targetName)) {
+        for (int idx : s_officerPlayerCities) {
+          if (idx == s_officerCityIndex)
+            continue;
+          const bool isSelected =
+              (idx == s_officerMoveTargetCity);
+          if (ImGui::Selectable(g_CityList[idx].cityname,
+                                isSelected))
+            s_officerMoveTargetCity = idx;
+          if (isSelected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::SameLine(0.f, 12.f * sc);
+      const bool canMove =
+          selected != nullptr && s_officerMoveTargetCity >= 0;
+      if (!canMove)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"선택도시로 이동##MoveCityOfficer",
+                        ImVec2(145.f * sc, 0.f)))
+        MoveSelectedOfficerToCity(p1, shiftedCityBase);
+      if (!canMove)
+        ImGui::EndDisabled();
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"무장의 신분/충성/능력치는 건드리지 않고 +0x20 도시 포인터만 변경합니다.");
+        ImGui::TextUnformatted(
+            u8"현재 주인공 세력이 소유한 도시끼리만 이동할 수 있습니다.");
+        ImGui::EndTooltip();
+      }
+    }
+
   } // anonymous namespace
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1571,6 +2081,7 @@ namespace DX11Base {
   void DrawCityInfoWindow(uintptr_t p1, float scale) {
     if (!bShowCityInfoWin) {
       s_frontierDirty = true;
+      s_officerRosterDirty = true;
       return;
     }
 
@@ -1599,6 +2110,11 @@ namespace DX11Base {
 
       if (ImGui::BeginTabItem(u8"수송")) {
         DrawFrontierAnalysis(p1, cityBase, scale);
+        ImGui::EndTabItem();
+      }
+
+      if (ImGui::BeginTabItem(u8"무장 배치")) {
+        DrawCityOfficerRoster(p1, cityBase, scale);
         ImGui::EndTabItem();
       }
 
