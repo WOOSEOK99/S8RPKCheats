@@ -594,15 +594,28 @@ namespace DX11Base {
       if (rawCity <= 0x10000)
         return 0;
 
+      // 1순위: 현재 태수(City+0x98) -> Officer+0x18 세력
       uintptr_t ownerLink = 0;
-      if (!SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW, &ownerLink))
-        return 0;
-
       uintptr_t forcePtr = 0;
-      if (!SafeReadPtr(ownerLink + 0x18, &forcePtr))
-        return 0;
+      if (SafeReadPtrAllowZero(rawCity + OFF_CITY_FORCE_LINK_RAW, &ownerLink) &&
+          ownerLink > 0x10000 &&
+          SafeReadPtr(ownerLink + 0x18, &forcePtr) &&
+          forcePtr > 0x10000) {
+        return forcePtr;
+      }
 
-      return forcePtr;
+      // 2순위: 태수/장수가 없는 도시도 군단 소속이 남아 있을 수 있음.
+      // City+0x90 -> DivisionData+0x10 세력을 fallback으로 사용한다.
+      uintptr_t corpsPtr = 0;
+      forcePtr = 0;
+      if (SafeReadPtrAllowZero(rawCity + OFF_CITY_CORPS_RAW, &corpsPtr) &&
+          corpsPtr > 0x10000 &&
+          SafeReadPtr(corpsPtr + 0x10, &forcePtr) &&
+          forcePtr > 0x10000) {
+        return forcePtr;
+      }
+
+      return 0;
     }
 
     static int ConnectionPtrToCityIndex(uintptr_t rawCityArrayBase, uintptr_t cityPtr) {
