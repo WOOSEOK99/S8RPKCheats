@@ -598,14 +598,14 @@ namespace DX11Base {
 
       const bool resonanceBusy =
           ::DX11Base::g_resonanceThreadRunning.load() ||
-          ::DX11Base::g_resonanceFourThreadRunning.load();
+          ::DX11Base::g_resonanceThreeThreadRunning.load();
       if (resonanceBusy)
         ImGui::BeginDisabled();
 
       if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
-        if (bResonance && bResonanceFour) {
-          DX11Base::SetDialogueResonanceFour(false);
-          bResonanceFour = false;
+        if (bResonance && bResonanceThree) {
+          DX11Base::SetDialogueResonanceThree(false);
+          bResonanceThree = false;
         }
         DX11Base::SetInstantResonance(bResonance);
         NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
@@ -620,21 +620,21 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(160.0f * scale);
-      if (ImGui::Checkbox(u8"대화 상대 공명 4개 고정", &bResonanceFour)) {
-        if (bResonanceFour && bResonance) {
+      if (ImGui::Checkbox(u8"대화 상대 공명 3개 고정", &bResonanceThree)) {
+        if (bResonanceThree && bResonance) {
           DX11Base::SetInstantResonance(false);
           bResonance = false;
         }
-        DX11Base::SetDialogueResonanceFour(bResonanceFour);
-        NotifyFeatureToggle(u8"대화 상대 공명 4개 고정", bResonanceFour);
+        DX11Base::SetDialogueResonanceThree(bResonanceThree);
+        NotifyFeatureToggle(u8"대화 상대 공명 3개 고정", bResonanceThree);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"교류/담화에서 현재 처리되는 상대 장수의 공명값을 기존 갯수와 관계없이 4로 고정합니다.");
+                           u8"교류/담화에서 현재 처리되는 상대 장수의 공명값을 기존 갯수와 관계없이 3으로 맞춥니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 상생/특수 이벤트 발생 여부를 테스트하기 위한 별도 기능입니다.");
+                           u8"※ 담화 처리에서 다음 공명이 추가되어 4개가 되며 상생/특수 이벤트가 발생하는지 테스트합니다.");
         ImGui::EndTooltip();
       }
 
