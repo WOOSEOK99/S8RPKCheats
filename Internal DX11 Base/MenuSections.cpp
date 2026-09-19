@@ -620,21 +620,21 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(160.0f * scale);
-      if (ImGui::Checkbox(u8"대화 상대 공명 3개 고정", &bResonanceThree)) {
+      if (ImGui::Checkbox(u8"대화 상대 공명 4개 고정", &bResonanceThree)) {
         if (bResonanceThree && bResonance) {
           DX11Base::SetInstantResonance(false);
           bResonance = false;
         }
         DX11Base::SetDialogueResonanceThree(bResonanceThree);
-        NotifyFeatureToggle(u8"대화 상대 공명 3개 고정", bResonanceThree);
+        NotifyFeatureToggle(u8"대화 상대 공명 4개 고정", bResonanceThree);
         SaveConfig();
       }
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"교류 화면에서 선택한 상대 장수의 공명값이 3 미만이면 3으로 맞춥니다.");
+                           u8"교류 화면에서 선택한 상대 장수의 공명값이 4 미만이면 4로 맞춥니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 이후 게임의 정상 공명 증가로 4개가 되는 흐름을 이용합니다.");
+                           u8"※ 테스트용: 선택 상대의 공명값 자체를 4로 맞춥니다.");
         ImGui::EndTooltip();
       }
 
