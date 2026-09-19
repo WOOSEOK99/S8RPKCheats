@@ -2047,15 +2047,166 @@ namespace DX11Base {
       return true;
     }
 
+
+    static bool ApplyGovernorSwap(uintptr_t p1, uintptr_t shiftedCityBase) {
+      NormalizeGovernorDebugSelections();
+
+      const CityOfficerRow *oldGov = FindCityOfficerById(s_governorDbgOldId);
+      const CityOfficerRow *candidate = FindCityOfficerById(s_governorDbgNewId);
+      if (!oldGov || !candidate ||
+          oldGov->status != 0xE8 || candidate->status != 0x28 ||
+          s_officerCityIndex < 0 || s_officerCityIndex >= g_CityCount) {
+        AddNotification(u8"태수 교체: 현재 태수와 일반 후보를 다시 선택해주세요.");
+        return false;
+      }
+
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, s_officerCityIndex);
+      if (!rawCity) {
+        AddNotification(u8"태수 교체: 도시 주소를 확인하지 못했습니다.");
+        return false;
+      }
+
+      uint16_t oldStatusPair = 0;
+      uint16_t newStatusPair = 0;
+      uintptr_t cityGovernor = 0;
+      uintptr_t oldCity = 0, newCity = 0;
+      uintptr_t oldForce = 0, newForce = 0;
+
+      if (!SafeRead16(oldGov->officerBase + 0x10, &oldStatusPair) ||
+          !SafeRead16(candidate->officerBase + 0x10, &newStatusPair) ||
+          !SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW, &cityGovernor) ||
+          !SafeReadPtr(oldGov->officerBase + 0x20, &oldCity) ||
+          !SafeReadPtr(candidate->officerBase + 0x20, &newCity) ||
+          !SafeReadPtr(oldGov->officerBase + 0x18, &oldForce) ||
+          !SafeReadPtr(candidate->officerBase + 0x18, &newForce)) {
+        AddNotification(u8"태수 교체: 현재 메모리 상태를 읽지 못했습니다.");
+        return false;
+      }
+
+      // 정상 게임에서 반복 확인된 상태쌍:
+      // 태수 = [0x10:E8, 0x11:C2] => 0xC2E8
+      // 일반 = [0x10:28, 0x11:C3] => 0xC328
+      if (oldStatusPair != 0xC2E8 || newStatusPair != 0xC328) {
+        AddNotification(u8"태수 교체: 신분 상태값이 예상과 달라 안전을 위해 중단했습니다.");
+        AddLog(u8"[태수교체] 상태 불일치: 기존 0x%04X / 후보 0x%04X (기대 0xC2E8 / 0xC328)",
+               (unsigned int)oldStatusPair, (unsigned int)newStatusPair);
+        return false;
+      }
+
+      if (cityGovernor != oldGov->officerBase) {
+        AddNotification(u8"태수 교체: 도시의 현재 태수 포인터가 선택한 태수와 다릅니다.");
+        AddLog(u8"[태수교체] City+0x98 불일치: 현재 0x%llX / 선택 태수 0x%llX",
+               (unsigned long long)cityGovernor,
+               (unsigned long long)oldGov->officerBase);
+        return false;
+      }
+
+      if (oldCity != rawCity || newCity != rawCity) {
+        AddNotification(u8"태수 교체: 두 무장이 현재 같은 도시에 있지 않습니다.");
+        AddLog(u8"[태수교체] 도시 불일치: city=0x%llX / 기존=0x%llX / 후보=0x%llX",
+               (unsigned long long)rawCity,
+               (unsigned long long)oldCity,
+               (unsigned long long)newCity);
+        return false;
+      }
+
+      if (!oldForce || oldForce != newForce ||
+          (s_officerPlayerForce && oldForce != s_officerPlayerForce)) {
+        AddNotification(u8"태수 교체: 두 무장의 소속 세력이 일치하지 않습니다.");
+        AddLog(u8"[태수교체] 세력 불일치: 기존=0x%llX / 후보=0x%llX / 플레이어=0x%llX",
+               (unsigned long long)oldForce,
+               (unsigned long long)newForce,
+               (unsigned long long)s_officerPlayerForce);
+        return false;
+      }
+
+      const uint16_t oldPairBefore = oldStatusPair;
+      const uint16_t newPairBefore = newStatusPair;
+      const uintptr_t cityGovernorBefore = cityGovernor;
+
+      bool oldWritten = false;
+      bool newWritten = false;
+      bool cityWritten = false;
+
+      oldWritten = SafeWrite16(oldGov->officerBase + 0x10, 0xC328);
+      if (oldWritten)
+        newWritten = SafeWrite16(candidate->officerBase + 0x10, 0xC2E8);
+      if (oldWritten && newWritten)
+        cityWritten = SafeWritePtr(rawCity + OFF_CITY_FORCE_LINK_RAW,
+                                   candidate->officerBase);
+
+      if (!oldWritten || !newWritten || !cityWritten) {
+        if (cityWritten)
+          SafeWritePtr(rawCity + OFF_CITY_FORCE_LINK_RAW, cityGovernorBefore);
+        if (newWritten)
+          SafeWrite16(candidate->officerBase + 0x10, newPairBefore);
+        if (oldWritten)
+          SafeWrite16(oldGov->officerBase + 0x10, oldPairBefore);
+
+        AddNotification(u8"태수 교체: 쓰기 중 실패하여 원래 값으로 복구했습니다.");
+        AddLog(u8"[태수교체] 쓰기 실패/롤백: old=%d new=%d city=%d",
+               oldWritten ? 1 : 0, newWritten ? 1 : 0, cityWritten ? 1 : 0);
+        return false;
+      }
+
+      uint16_t verifyOld = 0, verifyNew = 0;
+      uintptr_t verifyCityGovernor = 0;
+      const bool verifyOk =
+          SafeRead16(oldGov->officerBase + 0x10, &verifyOld) &&
+          SafeRead16(candidate->officerBase + 0x10, &verifyNew) &&
+          SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW, &verifyCityGovernor) &&
+          verifyOld == 0xC328 &&
+          verifyNew == 0xC2E8 &&
+          verifyCityGovernor == candidate->officerBase;
+
+      if (!verifyOk) {
+        SafeWritePtr(rawCity + OFF_CITY_FORCE_LINK_RAW, cityGovernorBefore);
+        SafeWrite16(candidate->officerBase + 0x10, newPairBefore);
+        SafeWrite16(oldGov->officerBase + 0x10, oldPairBefore);
+
+        AddNotification(u8"태수 교체: 적용 후 검증 실패로 원래 값으로 복구했습니다.");
+        AddLog(u8"[태수교체] 검증 실패/롤백: 기존=0x%04X 후보=0x%04X City+0x98=0x%llX",
+               (unsigned int)verifyOld,
+               (unsigned int)verifyNew,
+               (unsigned long long)verifyCityGovernor);
+        return false;
+      }
+
+      const std::string oldName = BuildOfficerDebugName(oldGov->id);
+      const std::string newName = BuildOfficerDebugName(candidate->id);
+      AddLog(u8"[태수교체] %s -> 일반 (0xC2E8 -> 0xC328)",
+             oldName.c_str());
+      AddLog(u8"[태수교체] %s -> 태수 (0xC328 -> 0xC2E8)",
+             newName.c_str());
+      AddLog(u8"[태수교체] %s City+0x98: 0x%llX -> 0x%llX",
+             g_CityList[s_officerCityIndex].cityname,
+             (unsigned long long)cityGovernorBefore,
+             (unsigned long long)candidate->officerBase);
+
+      char notice[256]{};
+      sprintf_s(notice, u8"%s 태수: %s → %s",
+                g_CityList[s_officerCityIndex].cityname,
+                oldName.c_str(), newName.c_str());
+      AddNotification(notice);
+
+      s_governorDbgSnapshot.valid = false;
+      s_selectedOfficerId = -1;
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, shiftedCityBase);
+      NormalizeGovernorDebugSelections();
+      return true;
+    }
+
     static void DrawGovernorDebugPanel(uintptr_t shiftedCityBase, float sc) {
       NormalizeGovernorDebugSelections();
 
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::TextColored(ImVec4(1.0f, 0.68f, 0.30f, 1.f),
-                         u8"[ 태수 교체 메모리 비교 - 읽기 전용 ]");
+                         u8"[ 태수 교체 ]");
       ImGui::SameLine(0.f, 12.f * sc);
-      ImGui::TextDisabled(u8"메모리 쓰기 없음");
+      ImGui::TextDisabled(u8"실제 교체 + 읽기 전용 diff");
 
       const char *cityName =
           (s_officerCityIndex >= 0 && s_officerCityIndex < g_CityCount)
@@ -2109,6 +2260,16 @@ namespace DX11Base {
       const bool canCapture =
           oldGov != nullptr && candidate != nullptr &&
           s_officerCityIndex >= 0;
+
+      if (!canCapture)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"태수 교체 적용##GovernorApply",
+                        ImVec2(145.f * sc, 0.f)))
+        ApplyGovernorSwap(p1, shiftedCityBase);
+      if (!canCapture)
+        ImGui::EndDisabled();
+
+      ImGui::SameLine(0.f, 10.f * sc);
       if (!canCapture)
         ImGui::BeginDisabled();
       if (ImGui::Button(u8"태수교체 기준 저장##GovernorDbgCapture",
@@ -2143,7 +2304,9 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(
-            u8"이 디버그 기능은 저장/비교 모두 읽기만 하며 태수 신분이나 도시 데이터를 직접 수정하지 않습니다.");
+            u8"태수 교체 적용은 확인된 +0x10/+0x11 상태쌍과 City+0x98 태수 포인터만 변경합니다.");
+        ImGui::TextUnformatted(
+            u8"기준 저장/변경값 비교 기능은 계속 읽기 전용입니다.");
         ImGui::EndTooltip();
       }
     }
