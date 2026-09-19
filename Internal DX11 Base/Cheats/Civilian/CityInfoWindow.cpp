@@ -2084,15 +2084,30 @@ namespace DX11Base {
         return false;
       }
 
-      // 정상 게임에서 반복 확인된 상태쌍:
-      // 태수 = [0x10:E8, 0x11:C2] => 0xC2E8
-      // 일반 = [0x10:28, 0x11:C3] => 0xC328
-      if (oldStatusPair != 0xC2E8 || newStatusPair != 0xC328) {
-        AddNotification(u8"태수 교체: 신분 상태값이 예상과 달라 안전을 위해 중단했습니다.");
-        AddLog(u8"[태수교체] 상태 불일치: 기존 0x%04X / 후보 0x%04X (기대 0xC2E8 / 0xC328)",
-               (unsigned int)oldStatusPair, (unsigned int)newStatusPair);
+      // +0x10은 신분 바이트로 확정(E8=태수, 28=일반).
+      // +0x11은 정상 게임 태수 교체에서 두 무장 사이 값이 서로 바뀌는 것이 관측됐으므로
+      // 특정 C2/C3 값으로 고정하지 않고 현재 두 값을 서로 교환한다.
+      const uint8_t oldStatus = (uint8_t)(oldStatusPair & 0xFF);
+      const uint8_t oldAux = (uint8_t)((oldStatusPair >> 8) & 0xFF);
+      const uint8_t newStatus = (uint8_t)(newStatusPair & 0xFF);
+      const uint8_t newAux = (uint8_t)((newStatusPair >> 8) & 0xFF);
+
+      if (oldStatus != 0xE8 || newStatus != 0x28) {
+        AddNotification(u8"태수 교체: 신분 바이트(+0x10)가 예상과 달라 중단했습니다.");
+        AddLog(u8"[태수교체] 신분 불일치: 기존 +0x10=%02X(+0x11=%02X) / 후보 +0x10=%02X(+0x11=%02X)",
+               (unsigned int)oldStatus, (unsigned int)oldAux,
+               (unsigned int)newStatus, (unsigned int)newAux);
         return false;
       }
+
+      const uint16_t oldPairAfter =
+          (uint16_t)(((uint16_t)newAux << 8) | 0x28u);
+      const uint16_t newPairAfter =
+          (uint16_t)(((uint16_t)oldAux << 8) | 0xE8u);
+
+      AddLog(u8"[태수교체] 적용 전 상태쌍: 기존=0x%04X / 후보=0x%04X -> 적용값 기존=0x%04X / 후보=0x%04X",
+             (unsigned int)oldStatusPair, (unsigned int)newStatusPair,
+             (unsigned int)oldPairAfter, (unsigned int)newPairAfter);
 
       if (cityGovernor != oldGov->officerBase) {
         AddNotification(u8"태수 교체: 도시의 현재 태수 포인터가 선택한 태수와 다릅니다.");
@@ -2129,9 +2144,9 @@ namespace DX11Base {
       bool newWritten = false;
       bool cityWritten = false;
 
-      oldWritten = SafeWrite16(oldGov->officerBase + 0x10, 0xC328);
+      oldWritten = SafeWrite16(oldGov->officerBase + 0x10, oldPairAfter);
       if (oldWritten)
-        newWritten = SafeWrite16(candidate->officerBase + 0x10, 0xC2E8);
+        newWritten = SafeWrite16(candidate->officerBase + 0x10, newPairAfter);
       if (oldWritten && newWritten)
         cityWritten = SafeWritePtr(rawCity + OFF_CITY_FORCE_LINK_RAW,
                                    candidate->officerBase);
@@ -2156,8 +2171,8 @@ namespace DX11Base {
           SafeRead16(oldGov->officerBase + 0x10, &verifyOld) &&
           SafeRead16(candidate->officerBase + 0x10, &verifyNew) &&
           SafeReadPtr(rawCity + OFF_CITY_FORCE_LINK_RAW, &verifyCityGovernor) &&
-          verifyOld == 0xC328 &&
-          verifyNew == 0xC2E8 &&
+          verifyOld == oldPairAfter &&
+          verifyNew == newPairAfter &&
           verifyCityGovernor == candidate->officerBase;
 
       if (!verifyOk) {
@@ -2175,10 +2190,12 @@ namespace DX11Base {
 
       const std::string oldName = BuildOfficerDebugName(oldGov->id);
       const std::string newName = BuildOfficerDebugName(candidate->id);
-      AddLog(u8"[태수교체] %s -> 일반 (0xC2E8 -> 0xC328)",
-             oldName.c_str());
-      AddLog(u8"[태수교체] %s -> 태수 (0xC328 -> 0xC2E8)",
-             newName.c_str());
+      AddLog(u8"[태수교체] %s -> 일반 (0x%04X -> 0x%04X)",
+             oldName.c_str(), (unsigned int)oldPairBefore,
+             (unsigned int)oldPairAfter);
+      AddLog(u8"[태수교체] %s -> 태수 (0x%04X -> 0x%04X)",
+             newName.c_str(), (unsigned int)newPairBefore,
+             (unsigned int)newPairAfter);
       AddLog(u8"[태수교체] %s City+0x98: 0x%llX -> 0x%llX",
              g_CityList[s_officerCityIndex].cityname,
              (unsigned long long)cityGovernorBefore,
