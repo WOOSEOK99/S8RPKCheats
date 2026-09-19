@@ -632,9 +632,9 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"교류/담화에서 현재 처리되는 상대 장수의 공명값을 기존 갯수와 관계없이 3으로 맞춥니다.");
+                           u8"교류 화면에서 선택한 상대 장수의 공명값이 3 미만이면 3으로 맞춥니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 담화 처리에서 다음 공명이 추가되어 4개가 되며 상생/특수 이벤트가 발생하는지 테스트합니다.");
+                           u8"※ 이후 게임의 정상 공명 증가로 4개가 되는 흐름을 이용합니다.");
         ImGui::EndTooltip();
       }
 
