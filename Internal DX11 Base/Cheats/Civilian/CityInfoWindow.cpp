@@ -1659,6 +1659,24 @@ namespace DX11Base {
     static constexpr uint8_t CORPS_DEPLOY_STATE_COUNCIL = 0x05;
     static constexpr uint8_t CORPS_DEPLOY_STATE_DOMESTIC = 0x07;
 
+    struct FirstGovernorObserverOfficerSnapshot {
+      uint16_t id = 0;
+      uintptr_t officerBase = 0;
+      uint16_t statusPairBefore = 0;
+      uintptr_t cityPtrBefore = 0;
+    };
+
+    static bool s_firstGovernorObserverActive = false;
+    static int s_firstGovernorObserverCityIndex = -1;
+    static uintptr_t s_firstGovernorObserverRawCity = 0;
+    static uintptr_t s_firstGovernorObserverCityGovernorBefore = 0;
+    static uintptr_t s_firstGovernorObserverLastCityGovernor = 0;
+    static ULONGLONG s_firstGovernorObserverFirstChangeMs = 0;
+    static std::vector<FirstGovernorObserverOfficerSnapshot>
+        s_firstGovernorObserverOfficers;
+    static std::vector<uint16_t>
+        s_firstGovernorObserverLoggedOfficerIds;
+
     struct OfficerCityCorpsInfo {
       bool readable = false;
       uintptr_t corpsPtr = 0;
@@ -4610,6 +4628,273 @@ namespace DX11Base {
     }
 
 
+    static bool HasFirstGovernorObserverLoggedOfficer(
+        uint16_t id) {
+      return std::find(
+                 s_firstGovernorObserverLoggedOfficerIds.begin(),
+                 s_firstGovernorObserverLoggedOfficerIds.end(),
+                 id) !=
+             s_firstGovernorObserverLoggedOfficerIds.end();
+    }
+
+    static void StopFirstGovernorObservation(
+        const char *reason = nullptr) {
+      if (s_firstGovernorObserverActive && reason)
+        AddLog(u8"[최초태수DBG] 관찰 종료: %s", reason);
+
+      s_firstGovernorObserverActive = false;
+      s_firstGovernorObserverCityIndex = -1;
+      s_firstGovernorObserverRawCity = 0;
+      s_firstGovernorObserverCityGovernorBefore = 0;
+      s_firstGovernorObserverLastCityGovernor = 0;
+      s_firstGovernorObserverFirstChangeMs = 0;
+      s_firstGovernorObserverOfficers.clear();
+      s_firstGovernorObserverLoggedOfficerIds.clear();
+    }
+
+    static bool StartFirstGovernorObservation(
+        uintptr_t shiftedCityBase) {
+      if (s_officerCityIndex < 0 ||
+          s_officerCityIndex >= g_CityCount) {
+        AddNotification(
+            u8"최초 태수 관찰: 먼저 대상 도시를 선택해주세요.");
+        return false;
+      }
+
+      const uintptr_t rawCity =
+          GetRawCityBase(shiftedCityBase, s_officerCityIndex);
+      if (!rawCity || s_officerPlayerForce <= 0x10000) {
+        AddNotification(
+            u8"최초 태수 관찰: 도시/세력 정보를 읽지 못했습니다.");
+        return false;
+      }
+
+      int residentCount = 0;
+      for (const auto &row : s_corpsOfficerRows) {
+        if (GetOfficerCurrentCityIndex(
+                shiftedCityBase, row) == s_officerCityIndex)
+          ++residentCount;
+      }
+
+      uintptr_t cityGovernor = 0;
+      if (!SafeReadPtrAllowZero(
+              rawCity + OFF_CITY_FORCE_LINK_RAW,
+              &cityGovernor)) {
+        AddNotification(
+            u8"최초 태수 관찰: City+0x98을 읽지 못했습니다.");
+        return false;
+      }
+
+      if (residentCount != 0 || cityGovernor > 0x10000) {
+        AddNotification(
+            u8"최초 태수 관찰: 거주 0명 / City+0x98=0인 도시에서 시작해주세요.");
+        AddLog(u8"[최초태수DBG] 시작 거부: %s 거주=%d City+0x98=0x%llX",
+               g_CityList[s_officerCityIndex].cityname,
+               residentCount,
+               (unsigned long long)cityGovernor);
+        return false;
+      }
+
+      uintptr_t rosterBase = 0;
+      const uintptr_t exe =
+          (uintptr_t)GetModuleHandle(NULL);
+      if (!exe ||
+          !TryResolveOfficerRosterArrayBase(
+              exe, &rosterBase) ||
+          rosterBase <= 0x10000) {
+        AddNotification(
+            u8"최초 태수 관찰: 무장 배열을 읽지 못했습니다.");
+        return false;
+      }
+
+      std::vector<FirstGovernorObserverOfficerSnapshot>
+          snapshots;
+      snapshots.reserve(512);
+
+      for (int i = 0; i < 5102; ++i) {
+        const uintptr_t officerBase =
+            rosterBase + (uintptr_t)i * 0x3D0;
+
+        uint16_t id = 0;
+        uint16_t statusPair = 0;
+        uintptr_t forcePtr = 0;
+        uintptr_t cityPtr = 0;
+
+        if (!SafeRead16(officerBase + 0x08, &id) ||
+            id < 1 || id > 5102 ||
+            !SafeReadPtr(officerBase + 0x18, &forcePtr) ||
+            forcePtr != s_officerPlayerForce ||
+            !SafeRead16(officerBase + 0x10, &statusPair) ||
+            !SafeReadPtrAllowZero(
+                officerBase + 0x20, &cityPtr))
+          continue;
+
+        FirstGovernorObserverOfficerSnapshot snap;
+        snap.id = id;
+        snap.officerBase = officerBase;
+        snap.statusPairBefore = statusPair;
+        snap.cityPtrBefore = cityPtr;
+        snapshots.push_back(snap);
+      }
+
+      if (snapshots.empty()) {
+        AddNotification(
+            u8"최초 태수 관찰: 플레이어 세력 무장 스냅샷을 만들지 못했습니다.");
+        return false;
+      }
+
+      StopFirstGovernorObservation();
+      s_firstGovernorObserverActive = true;
+      s_firstGovernorObserverCityIndex =
+          s_officerCityIndex;
+      s_firstGovernorObserverRawCity = rawCity;
+      s_firstGovernorObserverCityGovernorBefore =
+          cityGovernor;
+      s_firstGovernorObserverLastCityGovernor =
+          cityGovernor;
+      s_firstGovernorObserverOfficers =
+          std::move(snapshots);
+
+      uintptr_t corpsPtr = 0;
+      SafeReadPtrAllowZero(
+          rawCity + OFF_CITY_CORPS_RAW, &corpsPtr);
+
+      AddLog(u8"[최초태수DBG] 관찰 시작: %s Raw=0x%llX / 거주 0 / City+0x98=0x%llX / 군단=0x%llX / 세력무장 스냅샷 %u명",
+             g_CityList[s_firstGovernorObserverCityIndex].cityname,
+             (unsigned long long)rawCity,
+             (unsigned long long)cityGovernor,
+             (unsigned long long)corpsPtr,
+             (unsigned int)s_firstGovernorObserverOfficers.size());
+      AddLog(u8"[최초태수DBG] 이제 게임의 정상 기능으로 장수 1명을 이 도시에 배치하세요.");
+      AddNotification(
+          u8"최초 태수 관찰 시작: 게임 정상 기능으로 장수 1명을 대상 도시에 배치해주세요.");
+      return true;
+    }
+
+    static void RunFirstGovernorObservationTick() {
+      if (!s_firstGovernorObserverActive ||
+          s_firstGovernorObserverRawCity <= 0x10000 ||
+          s_firstGovernorObserverCityIndex < 0 ||
+          s_firstGovernorObserverCityIndex >= g_CityCount)
+        return;
+
+      uintptr_t cityGovernor = 0;
+      if (!SafeReadPtrAllowZero(
+              s_firstGovernorObserverRawCity +
+                  OFF_CITY_FORCE_LINK_RAW,
+              &cityGovernor))
+        return;
+
+      bool sawArrival = false;
+      for (const auto &snap :
+           s_firstGovernorObserverOfficers) {
+        uintptr_t cityNow = 0;
+        uint16_t statusPairNow = 0;
+        if (!SafeReadPtrAllowZero(
+                snap.officerBase + 0x20, &cityNow) ||
+            !SafeRead16(
+                snap.officerBase + 0x10,
+                &statusPairNow))
+          continue;
+
+        if (cityNow != s_firstGovernorObserverRawCity ||
+            snap.cityPtrBefore ==
+                s_firstGovernorObserverRawCity ||
+            HasFirstGovernorObserverLoggedOfficer(
+                snap.id))
+          continue;
+
+        s_firstGovernorObserverLoggedOfficerIds.push_back(
+            snap.id);
+        sawArrival = true;
+
+        const uint8_t statusBefore =
+            (uint8_t)(snap.statusPairBefore & 0xFF);
+        const uint8_t auxBefore =
+            (uint8_t)((snap.statusPairBefore >> 8) & 0xFF);
+        const uint8_t statusNow =
+            (uint8_t)(statusPairNow & 0xFF);
+        const uint8_t auxNow =
+            (uint8_t)((statusPairNow >> 8) & 0xFF);
+
+        AddLog(u8"[최초태수DBG] 도착 무장: %s(ID %u)",
+               BuildOfficerName(snap.id).c_str(),
+               (unsigned int)snap.id);
+        AddLog(u8"[최초태수DBG] Officer+0x10/+0x11: %02X/%02X -> %02X/%02X (pair 0x%04X -> 0x%04X)",
+               (unsigned int)statusBefore,
+               (unsigned int)auxBefore,
+               (unsigned int)statusNow,
+               (unsigned int)auxNow,
+               (unsigned int)snap.statusPairBefore,
+               (unsigned int)statusPairNow);
+        AddLog(u8"[최초태수DBG] Officer+0x20: 0x%llX -> 0x%llX (%s)",
+               (unsigned long long)snap.cityPtrBefore,
+               (unsigned long long)cityNow,
+               g_CityList[s_firstGovernorObserverCityIndex].cityname);
+      }
+
+      if (cityGovernor !=
+          s_firstGovernorObserverLastCityGovernor) {
+        AddLog(u8"[최초태수DBG] City+0x98 변화: 0x%llX -> 0x%llX",
+               (unsigned long long)
+                   s_firstGovernorObserverLastCityGovernor,
+               (unsigned long long)cityGovernor);
+
+        if (cityGovernor > 0x10000) {
+          uint16_t governorId = 0;
+          uint16_t governorPair = 0;
+          const bool idOk =
+              SafeRead16(cityGovernor + 0x08, &governorId);
+          const bool pairOk =
+              SafeRead16(cityGovernor + 0x10, &governorPair);
+
+          if (idOk && pairOk) {
+            AddLog(u8"[최초태수DBG] City+0x98 대상: %s(ID %u) / +0x10=%02X +0x11=%02X (pair 0x%04X)",
+                   BuildOfficerName(governorId).c_str(),
+                   (unsigned int)governorId,
+                   (unsigned int)(governorPair & 0xFF),
+                   (unsigned int)((governorPair >> 8) & 0xFF),
+                   (unsigned int)governorPair);
+          }
+        }
+
+        s_firstGovernorObserverLastCityGovernor =
+            cityGovernor;
+      }
+
+      const ULONGLONG now = GetTickCount64();
+      if ((sawArrival ||
+           !s_firstGovernorObserverLoggedOfficerIds.empty() ||
+           cityGovernor !=
+               s_firstGovernorObserverCityGovernorBefore) &&
+          s_firstGovernorObserverFirstChangeMs == 0) {
+        s_firstGovernorObserverFirstChangeMs = now;
+      }
+
+      if (s_firstGovernorObserverFirstChangeMs == 0)
+        return;
+
+      // City+0x98이 유효해지면 패턴을 확보한 것이므로 즉시 종료.
+      if (cityGovernor > 0x10000) {
+        AddLog(u8"[최초태수DBG] 패턴 확보 완료: %s / 신규 City+0x98=0x%llX",
+               g_CityList[s_firstGovernorObserverCityIndex].cityname,
+               (unsigned long long)cityGovernor);
+        StopFirstGovernorObservation(
+            u8"신규 책임자 포인터 확인 완료");
+        return;
+      }
+
+      // Officer 이동은 잡혔지만 게임의 책임자 갱신이 늦는 경우를 위해 4초 대기한다.
+      if (now -
+              s_firstGovernorObserverFirstChangeMs >=
+          4000) {
+        AddLog(u8"[최초태수DBG] 4초 후에도 City+0x98=0. 도착 장수의 신분 변화와 게임 화면의 책임자를 직접 확인해주세요.");
+        StopFirstGovernorObservation(
+            u8"City+0x98 갱신 미확인");
+      }
+    }
+
+
     // ── 도시 군단 포인터 확인 (읽기 전용) ────────────────────────────────
     static void DrawCityCorpsPointerDebug(uintptr_t shiftedCityBase, float sc) {
       if (s_officerCityIndex < 0 || s_officerCityIndex >= g_CityCount)
@@ -4695,6 +4980,47 @@ namespace DX11Base {
                govOk ? "" : u8"(읽기 실패) ",
                (unsigned long long)governorGeneralPtr);
       }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.72f, 0.25f, 1.f),
+          u8"[ 최초 태수 관찰 ]");
+      ImGui::SameLine(0.f, 10.f * sc);
+      if (s_firstGovernorObserverActive) {
+        ImGui::TextDisabled(
+            u8"관찰 중: %s",
+            s_firstGovernorObserverCityIndex >= 0 &&
+                    s_firstGovernorObserverCityIndex <
+                        g_CityCount
+                ? g_CityList[
+                      s_firstGovernorObserverCityIndex]
+                      .cityname
+                : u8"?");
+      } else {
+        ImGui::TextDisabled(
+            u8"거주 0명 / City+0x98=0 도시용");
+      }
+
+      if (!s_firstGovernorObserverActive) {
+        if (ImGui::Button(
+                u8"최초 태수 관찰 시작##FirstGovernorObserve",
+                ImVec2(175.f * sc, 0.f))) {
+          StartFirstGovernorObservation(
+              shiftedCityBase);
+        }
+      } else {
+        if (ImGui::Button(
+                u8"관찰 취소##FirstGovernorObserveCancel",
+                ImVec2(120.f * sc, 0.f))) {
+          StopFirstGovernorObservation(
+              u8"사용자 취소");
+        }
+      }
+
+      ImGui::SameLine(0.f, 10.f * sc);
+      ImGui::TextDisabled(
+          u8"시작 후 게임 정상 기능으로 장수 1명을 배치");
     }
 
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
@@ -5208,6 +5534,7 @@ namespace DX11Base {
     s_lastPollMs = now;
 
     RunCorpsDeploymentPhaseMonitor(p1);
+    RunFirstGovernorObservationTick();
 
     LoadAutoSupportRoutes();
 
