@@ -916,8 +916,9 @@ namespace DX11Base {
       ImGui::PopStyleVar(2);
     }
 
-    // 자녀 처리 훅에서 수집된 레코드 주소를 메인 스레드에서 안전하게 로그 출력
-    RunChildDebugLog();
+    // 자녀 목록 감시/갱신: 관리 창을 닫아도 새 자녀를 계속 감지
+    EnsureChildManagerCapture();
+    RunChildManagerUpdate();
 
     // 도시 반란 카운트 자동 유지 (도시 정보 창을 닫아도 동작)
     RunCityRevoltAlwaysZero();
@@ -929,6 +930,7 @@ namespace DX11Base {
     DrawSpouseListWindow(scale);
     DrawSpecialtyInfoWindow(scale);
     DrawCityInfoWindow(p1, scale);
+    DrawChildManagerWindow(scale);
     DrawMemoryNotepadWindow(scale);
     DrawNotificationHistoryWindow(scale);
     MenuSections::DrawTacticsEditWindow(scale);
