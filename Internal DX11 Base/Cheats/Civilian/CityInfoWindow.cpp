@@ -2025,10 +2025,10 @@ namespace DX11Base {
 
       const CityOfficerRow *candidate =
           FindCorpsOfficerById(s_governorGeneralDbgNewId);
-      if (!candidate || candidate->status != 0x28) {
+      if (!candidate || candidate->status != 0xE8) {
         s_governorGeneralDbgNewId = -1;
         for (const auto &row : s_corpsOfficerRows) {
-          if (row.status == 0x28) {
+          if (row.status == 0xE8) {
             s_governorGeneralDbgNewId = row.id;
             break;
           }
@@ -2277,8 +2277,8 @@ namespace DX11Base {
       const CityOfficerRow *candidate =
           FindCorpsOfficerById(s_governorGeneralDbgNewId);
       if (!oldGov || oldGov->status != 0xD8 ||
-          !candidate || candidate->status != 0x28) {
-        AddNotification(u8"도독DBG: 현재 군단의 도독 A와 일반 후보 B를 선택해주세요.");
+          !candidate || candidate->status != 0xE8) {
+        AddNotification(u8"도독DBG: 현재 군단의 도독 A와 태수 후보 B를 선택해주세요.");
         return false;
       }
 
@@ -2349,11 +2349,11 @@ namespace DX11Base {
              oldName.c_str(), (unsigned int)next.oldGovernorGeneralId,
              (unsigned long long)next.oldGovernorGeneralBase,
              (unsigned int)oldPair);
-      AddLog(u8"[도독DBG] 후보 일반 B: %s (ID %u) base=0x%llX 상태쌍=0x%04X",
+      AddLog(u8"[도독DBG] 후보 태수 B: %s (ID %u) base=0x%llX 상태쌍=0x%04X",
              newName.c_str(), (unsigned int)next.newGovernorGeneralId,
              (unsigned long long)next.newGovernorGeneralBase,
              (unsigned int)newPair);
-      AddLog(u8"[도독DBG] 게임 정상 기능으로 A -> 일반 / B -> 도독 교체 후 '변경값 비교'를 누르세요.");
+      AddLog(u8"[도독DBG] 게임 정상 기능으로 A(도독) -> 태수 / B(태수) -> 도독 교체 후 '변경값 비교'를 누르세요.");
       AddNotification(u8"도독DBG: 기준 저장 완료. 정상 게임 기능으로 도독을 교체하세요.");
       return true;
     }
@@ -2751,15 +2751,15 @@ namespace DX11Base {
       const CityOfficerRow *candidate =
           FindCorpsOfficerById(s_governorGeneralDbgNewId);
       const std::string candidateName =
-          candidate ? BuildOfficerDebugName(candidate->id) : u8"일반 없음";
+          candidate ? BuildOfficerDebugName(candidate->id) : u8"태수 없음";
 
-      ImGui::TextUnformatted(u8"후보 일반 B");
+      ImGui::TextUnformatted(u8"후보 태수 B");
       ImGui::SameLine(0.f, 6.f * sc);
       ImGui::SetNextItemWidth(135.f * sc);
       if (ImGui::BeginCombo("##GovernorGeneralDbgNew",
                             candidateName.c_str())) {
         for (const auto &row : s_corpsOfficerRows) {
-          if (row.status != 0x28)
+          if (row.status != 0xE8)
             continue;
           const std::string name = BuildOfficerDebugName(row.id);
           const bool selected =
@@ -2793,7 +2793,7 @@ namespace DX11Base {
         ImGui::EndDisabled();
 
       ImGui::SameLine(0.f, 14.f * sc);
-      ImGui::TextDisabled(u8"후보 B: 현재 군단 전체 도시의 일반 무장");
+      ImGui::TextDisabled(u8"후보 B: 현재 군단 전체 도시의 태수");
 
       if (s_governorGeneralDbgSnapshot.valid) {
         const std::string savedA = BuildOfficerDebugName(
