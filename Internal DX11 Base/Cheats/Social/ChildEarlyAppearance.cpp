@@ -245,8 +245,12 @@ static void StartChildRelationScannerAsync() {
   }
 
   std::unordered_set<uint16_t> childIds;
-  for (const auto& kv : g_children)
+  std::unordered_map<uintptr_t, uint16_t> childAddrToId;
+  for (const auto& kv : g_children) {
     childIds.insert(kv.first);
+    if (kv.second.addr > 0x10000)
+      childAddrToId[kv.second.addr] = kv.first;
+  }
 
   if (childIds.empty()) {
     AddLog(u8"[ChildRelation] 현재 감지된 자녀 ID가 없습니다. 정보 > 자녀를 한 번 연 뒤 다시 검색해 주세요.");
@@ -262,7 +266,9 @@ static void StartChildRelationScannerAsync() {
     g_childRelationResults.clear();
   }
 
-  std::thread([heroAddr, childIds = std::move(childIds)]() {
+  std::thread([heroAddr,
+               childIds = std::move(childIds),
+               childAddrToId = std::move(childAddrToId)]() {
     MEMORY_BASIC_INFORMATION mbi{};
     std::vector<MEMORY_BASIC_INFORMATION> regions;
     uintptr_t addr = 0;
@@ -299,47 +305,96 @@ static void StartChildRelationScannerAsync() {
 
         if (SafeReadMem(curr, buffer.data(), toRead)) {
           for (size_t i = 0; i <= toRead - sizeof(uintptr_t); ++i) {
-            uintptr_t candidateHero = 0;
-            memcpy(&candidateHero, buffer.data() + i, sizeof(candidateHero));
-            if (candidateHero != heroAddr)
-              continue;
+            uintptr_t candidatePtr = 0;
+            memcpy(&candidatePtr, buffer.data() + i, sizeof(candidatePtr));
+            const uintptr_t hitAddr = curr + i;
 
-            const uintptr_t relationAddr = curr + i;
-            if (relationAddr < 8 || seenRelations.count(relationAddr))
-              continue;
+            // 1) 기존 가설: [HeroPtr][ChildPtr]
+            if (candidatePtr == heroAddr) {
+              const uintptr_t relationAddr = hitAddr;
+              if (relationAddr >= 8 && !seenRelations.count(relationAddr)) {
+                uintptr_t targetAddr = 0;
+                uint16_t targetId = 0;
+                if (SafeReadPtr(relationAddr + 0x08, &targetAddr) &&
+                    targetAddr > 0x10000 &&
+                    SafeRead16(targetAddr + 0x08, &targetId) &&
+                    childIds.count(targetId) != 0) {
 
-            uintptr_t targetAddr = 0;
-            uint16_t targetId = 0;
-            if (!SafeReadPtr(relationAddr + 0x08, &targetAddr) ||
-                targetAddr <= 0x10000 ||
-                !SafeRead16(targetAddr + 0x08, &targetId) ||
-                childIds.count(targetId) == 0) {
-              continue;
+                  uint8_t flag = 0;
+                  uint32_t slot = 0;
+                  SafeRead8(relationAddr - 0x08, &flag);
+                  SafeRead32(relationAddr + 0x28, &slot);
+
+                  seenRelations.insert(relationAddr);
+
+                  ChildRelationResult result;
+                  result.childId = targetId;
+                  result.relationAddr = relationAddr;
+                  result.targetAddr = targetAddr;
+                  result.flag = flag;
+                  result.slot = slot;
+
+                  {
+                    std::lock_guard<std::mutex> lock(g_childRelationResultMutex);
+                    g_childRelationResults.push_back(result);
+                  }
+
+                  AddLog(u8"[ChildRelation] 정방향 ID %u | Relation=%p Target=%p Flag=%u(0x%02X) Slot=%u",
+                         targetId, (void*)relationAddr, (void*)targetAddr,
+                         (unsigned)flag, (unsigned)flag, slot);
+                }
+              }
             }
 
-            uint8_t flag = 0;
-            uint32_t slot = 0;
-            if (!SafeRead8(relationAddr - 0x08, &flag))
-              continue;
-            SafeRead32(relationAddr + 0x28, &slot);
+            // 2) 역방향 진단: 자녀 객체 주소를 참조하는 곳을 찾고,
+            //    그 주변 +/-0x40 안에 주인공 포인터가 함께 존재하는지 검사.
+            auto childHit = childAddrToId.find(candidatePtr);
+            if (childHit != childAddrToId.end()) {
+              const uint16_t childId = childHit->second;
 
-            seenRelations.insert(relationAddr);
+              for (ptrdiff_t off = -0x40; off <= 0x40; off += 8) {
+                const uintptr_t probeAddr = hitAddr + off;
+                uintptr_t probePtr = 0;
+                if (!SafeReadPtr(probeAddr, &probePtr) || probePtr != heroAddr)
+                  continue;
 
-            ChildRelationResult result;
-            result.childId = targetId;
-            result.relationAddr = relationAddr;
-            result.targetAddr = targetAddr;
-            result.flag = flag;
-            result.slot = slot;
+                const uintptr_t relationAddr = probeAddr;
+                if (relationAddr < 8 || seenRelations.count(relationAddr))
+                  continue;
 
-            {
-              std::lock_guard<std::mutex> lock(g_childRelationResultMutex);
-              g_childRelationResults.push_back(result);
+                uint8_t flagBeforeHero = 0;
+                uint8_t flagBeforeChild = 0;
+                uint32_t slotFromHero = 0;
+                uint32_t slotFromChild = 0;
+                SafeRead8(relationAddr - 0x08, &flagBeforeHero);
+                if (hitAddr >= 8)
+                  SafeRead8(hitAddr - 0x08, &flagBeforeChild);
+                SafeRead32(relationAddr + 0x28, &slotFromHero);
+                SafeRead32(hitAddr + 0x28, &slotFromChild);
+
+                seenRelations.insert(relationAddr);
+
+                ChildRelationResult result;
+                result.childId = childId;
+                result.relationAddr = relationAddr;
+                result.targetAddr = candidatePtr;
+                result.flag = flagBeforeHero;
+                result.slot = slotFromHero;
+
+                {
+                  std::lock_guard<std::mutex> lock(g_childRelationResultMutex);
+                  g_childRelationResults.push_back(result);
+                }
+
+                AddLog(u8"[ChildRelation] 역방향 ID %u | ChildRef=%p HeroRef=%p 거리=%lld",
+                       childId, (void*)hitAddr, (void*)relationAddr,
+                       (long long)(hitAddr - relationAddr));
+                AddLog(u8"[ChildRelation] 후보값 | Hero-8 Flag=%u(0x%02X) Hero+28=%u | Child-8=%u(0x%02X) Child+28=%u",
+                       (unsigned)flagBeforeHero, (unsigned)flagBeforeHero, slotFromHero,
+                       (unsigned)flagBeforeChild, (unsigned)flagBeforeChild, slotFromChild);
+                break;
+              }
             }
-
-            AddLog(u8"[ChildRelation] ID %u | Relation=%p Target=%p Flag=%u(0x%02X) Slot=%u",
-                   targetId, (void*)relationAddr, (void*)targetAddr,
-                   (unsigned)flag, (unsigned)flag, slot);
           }
         }
 
@@ -352,7 +407,7 @@ static void StartChildRelationScannerAsync() {
 
     g_childRelationScanProgress = 1.0f;
     g_childRelationScanning = false;
-    AddLog(u8"[ChildRelation] 자녀 관계 검색 완료.");
+    AddLog(u8"[ChildRelation] 자녀 관계 검색 완료. (정방향 + 자녀주소 역참조)");
   }).detach();
 }
 
