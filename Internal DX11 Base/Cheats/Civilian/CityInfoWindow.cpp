@@ -2837,16 +2837,28 @@ namespace DX11Base {
       ImGui::TextUnformatted(u8"이동할 도시");
       ImGui::SameLine(0.f, 8.f * sc);
 
+      auto buildMoveTargetLabel = [&](int cityIndex) -> std::string {
+        if (cityIndex < 0 || cityIndex >= g_CityCount)
+          return u8"도시 없음";
+
+        const std::string corpsName =
+            GetOfficerCorpsName(shiftedCityBase, cityIndex);
+        const bool frontline =
+            IsCityFrontlineForForce(shiftedCityBase, cityIndex,
+                                    s_officerPlayerForce);
+        return "[" + corpsName + "][" +
+               std::string(frontline ? u8"전선" : u8"후방") + "] " +
+               g_CityList[cityIndex].cityname;
+      };
+
       const std::string targetName =
-          BuildOfficerCityCorpsLabel(shiftedCityBase,
-                                     s_officerMoveTargetCity);
-      ImGui::SetNextItemWidth(165.f * sc);
+          buildMoveTargetLabel(s_officerMoveTargetCity);
+      ImGui::SetNextItemWidth(195.f * sc);
       if (ImGui::BeginCombo("##OfficerMoveTarget", targetName.c_str())) {
         for (int idx : s_officerPlayerCities) {
           if (idx == s_officerCityIndex)
             continue;
-          const std::string label =
-              BuildOfficerCityCorpsLabel(shiftedCityBase, idx);
+          const std::string label = buildMoveTargetLabel(idx);
           const bool isSelected =
               (idx == s_officerMoveTargetCity);
           if (ImGui::Selectable(label.c_str(), isSelected))
@@ -2861,8 +2873,14 @@ namespace DX11Base {
           s_officerMoveTargetCity < g_CityCount) {
         const std::string targetCorps =
             GetOfficerCorpsName(shiftedCityBase, s_officerMoveTargetCity);
+        const bool targetFrontline =
+            IsCityFrontlineForForce(shiftedCityBase,
+                                    s_officerMoveTargetCity,
+                                    s_officerPlayerForce);
         ImGui::SameLine(0.f, 10.f * sc);
-        ImGui::TextDisabled(u8"→ %s", targetCorps.c_str());
+        ImGui::TextDisabled(u8"→ %s / %s",
+                            targetCorps.c_str(),
+                            targetFrontline ? u8"전선" : u8"후방");
       }
 
       ImGui::SameLine(0.f, 12.f * sc);
