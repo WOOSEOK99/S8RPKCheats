@@ -218,7 +218,7 @@ namespace DX11Base {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(u8"소속 군단 주소");
+        ImGui::TextUnformatted(u8"거주 도시 주소");
         ImGui::TableSetColumnIndex(1);
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ImVec4(1, 1, 0, 1), "%p", (void *)corpsAddr);
