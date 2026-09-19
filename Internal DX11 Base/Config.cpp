@@ -108,5 +108,6 @@ namespace DX11Base {
     AddLog(u8"[Config] 보조 보주 전체 사용 설정 로드%s: %s",
            hasAllSecondaryJewelSetting ? "" : "(기본값)",
            savedAllSecondaryJewels ? "ON" : "OFF");
+
   }
 } // namespace DX11Base

@@ -82,6 +82,37 @@ namespace DX11Base {
       }
     }
 
+    static bool SafeReadS32(uintptr_t addr, int32_t *out) {
+      if (!out)
+        return false;
+      __try {
+        *out = *(int32_t *)addr;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *out = 0;
+        return false;
+      }
+    }
+
+    static bool SafeGetModuleImageEnd(
+        uintptr_t exeBase, uintptr_t *outImageEnd) {
+      if (!exeBase || !outImageEnd)
+        return false;
+      __try {
+        const IMAGE_DOS_HEADER *dos =
+            (const IMAGE_DOS_HEADER *)exeBase;
+        const IMAGE_NT_HEADERS *nt =
+            (const IMAGE_NT_HEADERS *)(
+                exeBase + (uintptr_t)dos->e_lfanew);
+        *outImageEnd =
+            exeBase + (uintptr_t)nt->OptionalHeader.SizeOfImage;
+        return *outImageEnd > exeBase;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *outImageEnd = 0;
+        return false;
+      }
+    }
+
     static bool SafeWrite8(uintptr_t addr, uint8_t val) {
       DWORD old = 0, dummy = 0;
       if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &old))
@@ -1659,6 +1690,24 @@ namespace DX11Base {
     static constexpr uint8_t CORPS_DEPLOY_STATE_COUNCIL = 0x05;
     static constexpr uint8_t CORPS_DEPLOY_STATE_DOMESTIC = 0x07;
 
+    // 군단 자동배치는 설정 파일에 저장하지 않는 세션 전용 기능이다.
+    // 다른 게임/세이브에서 군단 구성이 달라질 수 있으므로 사용자가 매 실행마다 직접 선택한다.
+    struct CorpsAutoDeploymentTarget {
+      uintptr_t corpsPtr = 0;
+      uintptr_t forcePtr = 0;
+      uintptr_t corpsNo = 0;
+      uint16_t governorGeneralId = 0;
+    };
+
+    static bool s_corpsAutoDeploymentEachCouncil = false;
+    static std::vector<CorpsAutoDeploymentTarget>
+        s_corpsAutoDeploymentTargets;
+    static uintptr_t s_corpsAutoContextP1 = 0;
+    static uintptr_t s_corpsAutoContextForce = 0;
+    static uintptr_t s_corpsAutoContextCityBase = 0;
+    static uint16_t s_corpsAutoLastObservedYear = 0;
+    static uint8_t s_corpsAutoLastObservedMonth = 0;
+
     struct OfficerCityCorpsInfo {
       bool readable = false;
       uintptr_t corpsPtr = 0;
@@ -1687,6 +1736,177 @@ namespace DX11Base {
         info.forcePtr = GetCityForcePtr(rawCity);
       }
       return info;
+    }
+
+    static bool ReadOfficerIdFromPtr(
+        uintptr_t officerPtr, uint16_t *outId) {
+      if (!outId || officerPtr <= 0x10000)
+        return false;
+      uint16_t id = 0;
+      if (!SafeRead16(officerPtr + 0x08, &id) ||
+          id == 0 || id > 5102)
+        return false;
+      *outId = id;
+      return true;
+    }
+
+    static bool ReadCorpsGovernorGeneralId(
+        uintptr_t corpsPtr, uint16_t *outId) {
+      if (!outId || corpsPtr <= 0x10000)
+        return false;
+      uintptr_t governorPtr = 0;
+      if (!SafeReadPtrAllowZero(
+              corpsPtr + 0x20, &governorPtr) ||
+          governorPtr <= 0x10000)
+        return false;
+      return ReadOfficerIdFromPtr(governorPtr, outId);
+    }
+
+    static bool HasCorpsAutoDeploymentTarget(
+        uintptr_t corpsPtr) {
+      for (const auto &target : s_corpsAutoDeploymentTargets) {
+        if (target.corpsPtr == corpsPtr)
+          return true;
+      }
+      return false;
+    }
+
+    static void ClearCorpsAutoDeploymentSession(
+        const char *reason, bool notifyUser = false) {
+      const bool hadState =
+          s_corpsAutoDeploymentEachCouncil ||
+          !s_corpsAutoDeploymentTargets.empty();
+
+      s_corpsAutoDeploymentEachCouncil = false;
+      s_corpsAutoDeploymentTargets.clear();
+      s_corpsAutoContextP1 = 0;
+      s_corpsAutoContextForce = 0;
+      s_corpsAutoContextCityBase = 0;
+      s_corpsAutoLastObservedYear = 0;
+      s_corpsAutoLastObservedMonth = 0;
+
+      if (hadState) {
+        AddLog(u8"[군단 자동배치] 세션 설정 초기화: %s",
+               reason ? reason : u8"게임 상태 변경");
+        if (notifyUser) {
+          AddNotification(
+              u8"군단 자동배치: 다른 게임/세이브 가능성이 감지되어 자동 대상 선택을 초기화했습니다.");
+        }
+      }
+    }
+
+    static bool AddCorpsAutoDeploymentTarget(
+        const OfficerCityCorpsInfo &info, uintptr_t p1,
+        uintptr_t shiftedCityBase) {
+      if (!info.readable || info.corpsPtr <= 0x10000 ||
+          info.forcePtr <= 0x10000 || info.corpsNo == 0)
+        return false;
+
+      if (HasCorpsAutoDeploymentTarget(info.corpsPtr))
+        return true;
+
+      uint16_t governorGeneralId = 0;
+      ReadCorpsGovernorGeneralId(
+          info.corpsPtr, &governorGeneralId);
+
+      // 첫 대상 지정 시 현재 게임 컨텍스트를 함께 묶는다.
+      if (s_corpsAutoDeploymentTargets.empty()) {
+        s_corpsAutoContextP1 = p1;
+        s_corpsAutoContextForce = info.forcePtr;
+        s_corpsAutoContextCityBase = shiftedCityBase;
+        ReadScenarioDate(
+            &s_corpsAutoLastObservedYear,
+            &s_corpsAutoLastObservedMonth);
+      } else if (s_corpsAutoContextP1 != p1 ||
+                 s_corpsAutoContextForce != info.forcePtr ||
+                 s_corpsAutoContextCityBase != shiftedCityBase) {
+        return false;
+      }
+
+      CorpsAutoDeploymentTarget target;
+      target.corpsPtr = info.corpsPtr;
+      target.forcePtr = info.forcePtr;
+      target.corpsNo = info.corpsNo;
+      target.governorGeneralId = governorGeneralId;
+      s_corpsAutoDeploymentTargets.push_back(target);
+
+      AddLog(u8"[군단 자동배치] 자동 대상 추가: %llu군단 / 도독 ID %u / corps 0x%llX",
+             (unsigned long long)info.corpsNo,
+             (unsigned int)governorGeneralId,
+             (unsigned long long)info.corpsPtr);
+      return true;
+    }
+
+    static void RemoveCorpsAutoDeploymentTarget(
+        uintptr_t corpsPtr, const char *reason = nullptr) {
+      for (size_t i = 0; i < s_corpsAutoDeploymentTargets.size(); ++i) {
+        if (s_corpsAutoDeploymentTargets[i].corpsPtr != corpsPtr)
+          continue;
+
+        AddLog(u8"[군단 자동배치] 자동 대상 제거: %llu군단%s%s",
+               (unsigned long long)
+                   s_corpsAutoDeploymentTargets[i].corpsNo,
+               reason ? u8" / " : "",
+               reason ? reason : "");
+        s_corpsAutoDeploymentTargets.erase(
+            s_corpsAutoDeploymentTargets.begin() + i);
+        break;
+      }
+
+      if (s_corpsAutoDeploymentTargets.empty()) {
+        s_corpsAutoContextP1 = 0;
+        s_corpsAutoContextForce = 0;
+        s_corpsAutoContextCityBase = 0;
+        s_corpsAutoLastObservedYear = 0;
+        s_corpsAutoLastObservedMonth = 0;
+      }
+    }
+
+    static void PruneMissingCorpsAutoDeploymentTargets(
+        uintptr_t shiftedCityBase) {
+      if (s_corpsAutoDeploymentTargets.empty())
+        return;
+
+      std::vector<uintptr_t> liveCorps;
+      for (int cityIndex : s_officerPlayerCities) {
+        const OfficerCityCorpsInfo info =
+            GetOfficerCityCorpsInfo(
+                shiftedCityBase, cityIndex);
+        if (!info.readable || info.corpsPtr <= 0x10000 ||
+            info.forcePtr != s_officerPlayerForce)
+          continue;
+
+        bool exists = false;
+        for (uintptr_t ptr : liveCorps) {
+          if (ptr == info.corpsPtr) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists)
+          liveCorps.push_back(info.corpsPtr);
+      }
+
+      for (size_t i = 0;
+           i < s_corpsAutoDeploymentTargets.size();) {
+        bool found = false;
+        for (uintptr_t ptr : liveCorps) {
+          if (ptr == s_corpsAutoDeploymentTargets[i].corpsPtr) {
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          ++i;
+          continue;
+        }
+
+        AddLog(u8"[군단 자동배치] %llu군단이 현재 세력에서 사라져 자동 대상에서 제거",
+               (unsigned long long)
+                   s_corpsAutoDeploymentTargets[i].corpsNo);
+        s_corpsAutoDeploymentTargets.erase(
+            s_corpsAutoDeploymentTargets.begin() + i);
+      }
     }
 
     static std::string GetOfficerForceShortName(uintptr_t forcePtr) {
@@ -2189,6 +2409,10 @@ namespace DX11Base {
 
     static bool BuildCorpsDeploymentRecommendation(
         uintptr_t shiftedCityBase);
+    static bool ApplyCorpsDeploymentMovements(
+        uintptr_t p1, uintptr_t shiftedCityBase);
+    static bool ApplyCorpsDeploymentGovernorStage(
+        uintptr_t p1, uintptr_t shiftedCityBase);
 
     static int GetCorpsDeploymentBaselineTargetCount(int cityIndex) {
       for (const auto &base : s_corpsDeploymentTargetBaseline) {
@@ -2266,6 +2490,47 @@ namespace DX11Base {
 
     static void RunCorpsDeploymentPhaseMonitor(uintptr_t p1) {
       const uint8_t state = ReadCorpsDeploymentRelevantGameState();
+
+      // 같은 실행 중 다른 세이브를 불러오는 경우를 최대한 보수적으로 감지한다.
+      if (!s_corpsAutoDeploymentTargets.empty()) {
+        const uintptr_t cityBase = GetCityArrBase();
+        uintptr_t playerCity = 0;
+        uintptr_t currentForce = 0;
+        uint16_t year = 0;
+        uint8_t month = 0;
+
+        const bool contextOk =
+            p1 > 0x10000 &&
+            p1 == s_corpsAutoContextP1 &&
+            cityBase > 0x10000 &&
+            cityBase == s_corpsAutoContextCityBase &&
+            SafeReadPtr(p1 + 0x20, &playerCity) &&
+            (currentForce = GetCityForcePtr(playerCity)) > 0x10000 &&
+            currentForce == s_corpsAutoContextForce &&
+            ReadScenarioDate(&year, &month);
+
+        if (!contextOk) {
+          ClearCorpsAutoDeploymentSession(
+              u8"게임/P1/세력/도시 배열 변경", true);
+        } else if (s_corpsAutoLastObservedYear != 0) {
+          const int previousMonthIndex =
+              (int)s_corpsAutoLastObservedYear * 12 +
+              (int)s_corpsAutoLastObservedMonth;
+          const int currentMonthIndex =
+              (int)year * 12 + (int)month;
+          if (currentMonthIndex < previousMonthIndex) {
+            ClearCorpsAutoDeploymentSession(
+                u8"게임 날짜 역행(다른 세이브 로드 가능성)", true);
+          } else {
+            s_corpsAutoLastObservedYear = year;
+            s_corpsAutoLastObservedMonth = month;
+          }
+        } else {
+          s_corpsAutoLastObservedYear = year;
+          s_corpsAutoLastObservedMonth = month;
+        }
+      }
+
       if (state == 0)
         return;
 
@@ -2285,20 +2550,96 @@ namespace DX11Base {
         return;
 
       ResetCorpsDeploymentTargetBaseline();
-      s_officerRosterDirty = true;
 
-      const uintptr_t cityBase = GetCityArrBase();
-      if (p1 > 0x10000 && cityBase > 0x10000 &&
-          s_officerCityIndex >= 0) {
-        RefreshCityOfficerRoster(p1, cityBase);
-        if (s_officerSelectedCorpsPtr > 0x10000) {
-          BuildCorpsDeploymentRecommendation(cityBase);
-          AddLog(u8"[군단 자동배치] 평정 진입(07->05): 현재 선택 군단 새 배치 계획 생성");
-          return;
-        }
+      if (!s_corpsAutoDeploymentEachCouncil) {
+        AddLog(u8"[군단 자동배치] 평정 진입(07->05): 자동 실행 OFF");
+        return;
       }
 
-      AddLog(u8"[군단 자동배치] 평정 진입(07->05): 이전 배치 계획 초기화");
+      if (s_corpsAutoDeploymentTargets.empty()) {
+        AddLog(u8"[군단 자동배치] 평정 진입(07->05): 자동 대상 군단 없음");
+        return;
+      }
+
+      const uintptr_t cityBase = GetCityArrBase();
+      if (p1 <= 0x10000 || cityBase <= 0x10000) {
+        ClearCorpsAutoDeploymentSession(
+            u8"도시/주인공 데이터 없음", true);
+        return;
+      }
+
+      const int previousCityIndex = s_officerCityIndex;
+
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, cityBase);
+      PruneMissingCorpsAutoDeploymentTargets(cityBase);
+
+      // 실행 중 벡터가 변하지 않도록 현재 대상 포인터만 복사한다.
+      std::vector<uintptr_t> targets;
+      for (const auto &target : s_corpsAutoDeploymentTargets)
+        targets.push_back(target.corpsPtr);
+
+      int successCount = 0;
+      int failCount = 0;
+      for (uintptr_t targetCorpsPtr : targets) {
+        int targetCityIndex = -1;
+        uintptr_t targetCorpsNo = 0;
+
+        for (int cityIndex : s_officerPlayerCities) {
+          const OfficerCityCorpsInfo info =
+              GetOfficerCityCorpsInfo(cityBase, cityIndex);
+          if (!info.readable ||
+              info.corpsPtr != targetCorpsPtr ||
+              info.forcePtr != s_officerPlayerForce)
+            continue;
+          targetCityIndex = cityIndex;
+          targetCorpsNo = info.corpsNo;
+          break;
+        }
+
+        if (targetCityIndex < 0) {
+          RemoveCorpsAutoDeploymentTarget(
+              targetCorpsPtr, u8"군단 소멸/소속 변경");
+          continue;
+        }
+
+        ResetCorpsDeploymentTargetBaseline();
+        s_officerCityIndex = targetCityIndex;
+        s_officerRosterDirty = true;
+        RefreshCityOfficerRoster(p1, cityBase);
+
+        bool ok =
+            s_officerSelectedCorpsPtr == targetCorpsPtr &&
+            BuildCorpsDeploymentRecommendation(cityBase);
+
+        if (ok)
+          ok = ApplyCorpsDeploymentMovements(p1, cityBase);
+        if (ok)
+          ok = ApplyCorpsDeploymentGovernorStage(p1, cityBase);
+
+        if (ok)
+          ++successCount;
+        else
+          ++failCount;
+
+        AddLog(u8"[군단 자동배치] 평정 자동 실행: %llu군단 / 결과 %s",
+               (unsigned long long)targetCorpsNo,
+               ok ? u8"완료" : u8"실패");
+      }
+
+      if (previousCityIndex >= 0 &&
+          previousCityIndex < g_CityCount)
+        s_officerCityIndex = previousCityIndex;
+      s_officerRosterDirty = true;
+      RefreshCityOfficerRoster(p1, cityBase);
+
+      char notice[192]{};
+      sprintf_s(
+          notice,
+          u8"군단 자동배치 완료: 성공 %d군단 / 실패 %d군단 / 현재 대상 %d군단",
+          successCount, failCount,
+          (int)s_corpsAutoDeploymentTargets.size());
+      AddNotification(notice);
     }
 
 
@@ -4058,6 +4399,100 @@ namespace DX11Base {
       ImGui::SameLine(0.f, 12.f * sc);
       ImGui::TextDisabled(u8"계획 / 단계 적용");
 
+      if (ImGui::Checkbox(
+              u8"매 평정 자동 배치 사용##CorpsAutoEachCouncil",
+              &s_corpsAutoDeploymentEachCouncil)) {
+        AddLog(u8"[군단 자동배치] 매 평정 자동 실행: %s",
+               s_corpsAutoDeploymentEachCouncil ? "ON" : "OFF");
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"ON이면 아래에서 체크한 군단들을 평정 진입(07->05) 때 각각 독립적으로 자동 배치합니다.");
+        ImGui::TextUnformatted(
+            u8"이 설정과 군단 선택은 설정파일에 저장하지 않으며 현재 게임 실행 중에만 유지됩니다.");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(0.f, 12.f * sc);
+      ImGui::TextDisabled(
+          u8"※ 세이브마다 군단 생성/해체 상태가 달라질 수 있어 게임 시작 후 직접 선택해야 합니다.");
+
+      struct CorpsAutoUiOption {
+        OfficerCityCorpsInfo info;
+        int cityIndex = -1;
+      };
+      std::vector<CorpsAutoUiOption> autoCorpsOptions;
+      for (int cityIndex : s_officerPlayerCities) {
+        const OfficerCityCorpsInfo info =
+            GetOfficerCityCorpsInfo(
+                shiftedCityBase, cityIndex);
+        if (!info.readable || info.corpsPtr <= 0x10000 ||
+            info.forcePtr != s_officerPlayerForce)
+          continue;
+
+        bool exists = false;
+        for (const auto &option : autoCorpsOptions) {
+          if (option.info.corpsPtr == info.corpsPtr) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists)
+          autoCorpsOptions.push_back({info, cityIndex});
+      }
+
+      PruneMissingCorpsAutoDeploymentTargets(
+          shiftedCityBase);
+
+      ImGui::TextUnformatted(u8"자동 적용 군단");
+      if (autoCorpsOptions.empty()) {
+        ImGui::SameLine(0.f, 8.f * sc);
+        ImGui::TextDisabled(u8"현재 생성된 군단 없음");
+      } else {
+        for (size_t i = 0; i < autoCorpsOptions.size(); ++i) {
+          auto &option = autoCorpsOptions[i];
+          bool selected =
+              HasCorpsAutoDeploymentTarget(
+                  option.info.corpsPtr);
+
+          if (i > 0)
+            ImGui::SameLine(0.f, 12.f * sc);
+
+          ImGui::PushID((void *)option.info.corpsPtr);
+          const std::string label =
+              GetOfficerCorpsName(
+                  shiftedCityBase, option.cityIndex);
+          if (ImGui::Checkbox(label.c_str(), &selected)) {
+            if (selected) {
+              if (!AddCorpsAutoDeploymentTarget(
+                      option.info, p1,
+                      shiftedCityBase)) {
+                AddNotification(
+                    u8"군단 자동배치: 현재 게임 컨텍스트가 달라 대상 군단을 추가하지 못했습니다.");
+              }
+            } else {
+              RemoveCorpsAutoDeploymentTarget(
+                  option.info.corpsPtr,
+                  u8"사용자 선택 해제");
+            }
+          }
+          ImGui::PopID();
+        }
+      }
+
+      if (!s_corpsAutoDeploymentTargets.empty()) {
+        ImGui::SameLine(0.f, 14.f * sc);
+        ImGui::TextDisabled(
+            u8"선택 %d군단",
+            (int)s_corpsAutoDeploymentTargets.size());
+      }
+
+      ImGui::TextDisabled(
+          u8"군단이 해체되면 자동 대상에서 제거됩니다. 새 군단은 목록에 나타나며 필요하면 직접 체크하세요.");
+      ImGui::TextDisabled(
+          u8"다른 세이브를 불러오거나 게임 컨텍스트가 바뀌면 오적용 방지를 위해 자동 설정/대상을 모두 초기화합니다.");
+
       const bool canBuild = s_officerSelectedCorpsPtr > 0x10000;
       if (!canBuild)
         ImGui::BeginDisabled();
@@ -4918,6 +5353,438 @@ namespace DX11Base {
 
     }
 
+
+    // ── 구 CT 기반 무장 관계 탐색 (읽기 전용) ─────────────────────────────
+    // SAN8R v13.54 CT 기준:
+    // 숙명: stride 0x20, +08/+10 Officer*, +18 relation(1 상극/2 상생), +19 발생
+    // 관계: stride 0x40, +08 relation(1 의형제/2 배우자/3 원수/4 호적수),
+    //       +10/+18/+20/+28/+30 Officer*, +38 flag
+    static constexpr uintptr_t LEGACY_SYNERGETIC_PTR_OFFSET = 0x433210;
+    static constexpr uintptr_t LEGACY_RELATION_PTR_OFFSET = 0x462BA8;
+    static constexpr uintptr_t LEGACY_RELATION_PTR_DELTA =
+        LEGACY_RELATION_PTR_OFFSET - LEGACY_SYNERGETIC_PTR_OFFSET;
+
+    static bool IsRelationshipRosterOfficerPtr(
+        uintptr_t ptr, uintptr_t rosterBase) {
+      if (ptr < rosterBase)
+        return false;
+      const uintptr_t delta = ptr - rosterBase;
+      if (delta >= (uintptr_t)5102 * 0x3D0)
+        return false;
+      return (delta % 0x3D0) == 0;
+    }
+
+    static bool ReadRelationshipOfficerId(
+        uintptr_t ptr, uintptr_t rosterBase, uint16_t *outId) {
+      if (!outId ||
+          !IsRelationshipRosterOfficerPtr(ptr, rosterBase))
+        return false;
+      uint16_t id = 0;
+      if (!SafeRead16(ptr + 0x08, &id) ||
+          id == 0 || id > 5200)
+        return false;
+      *outId = id;
+      return true;
+    }
+
+    static int ScoreSynergeticBase(
+        uintptr_t base, uintptr_t rosterBase,
+        int sampleCount = 384) {
+      if (base <= 0x10000 || rosterBase <= 0x10000)
+        return -1;
+
+      int valid = 0;
+      int invalid = 0;
+      for (int i = 0; i < sampleCount; ++i) {
+        const uintptr_t slot =
+            base + (uintptr_t)i * 0x20;
+        uint8_t relation = 0;
+        if (!SafeRead8(slot + 0x18, &relation))
+          return -1;
+        if (relation == 0)
+          continue;
+        if (relation != 1 && relation != 2) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+
+        uintptr_t p1 = 0, p2 = 0;
+        if (!SafeReadPtrAllowZero(slot + 0x08, &p1) ||
+            !SafeReadPtrAllowZero(slot + 0x10, &p2) ||
+            !IsRelationshipRosterOfficerPtr(p1, rosterBase) ||
+            !IsRelationshipRosterOfficerPtr(p2, rosterBase)) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+        ++valid;
+      }
+      return valid;
+    }
+
+    static bool TryResolveSynergeticBaseFromLegacyCt(
+        uintptr_t exeBase, uintptr_t gameBase,
+        uintptr_t rosterBase, uintptr_t *outBase,
+        uintptr_t *outFieldOffset, uintptr_t *outPatternAddr) {
+      if (!outBase || !outFieldOffset || !outPatternAddr)
+        return false;
+      *outBase = 0;
+      *outFieldOffset = 0;
+      *outPatternAddr = 0;
+
+      // 구 CT가 사용하던 시그니처:
+      // 48 8D [modrm + disp32] 48 3B ? 44 0F ? ? 77 ? 48 8B
+      uintptr_t imageEnd = 0;
+      SafeGetModuleImageEnd(exeBase, &imageEnd);
+
+      const std::string pattern =
+          "48 8D ? ? ? ? ? 48 3B ? 44 0F ? ? 77 ? 48 8B";
+
+      if (imageEnd > exeBase) {
+        uintptr_t search = exeBase;
+        for (int matchIndex = 0;
+             matchIndex < 32 && search + 32 < imageEnd;
+             ++matchIndex) {
+          const uintptr_t found =
+              FindPattern(search, imageEnd, pattern);
+          if (!found)
+            break;
+
+          int32_t disp = 0;
+          SafeReadS32(found + 3, &disp);
+
+          if (disp > 0) {
+            uintptr_t tablePtr = 0;
+            if (SafeReadPtrAllowZero(
+                    gameBase + (uintptr_t)(uint32_t)disp,
+                    &tablePtr) &&
+                tablePtr > 0x10000) {
+              const uintptr_t candidate = tablePtr + 0xA0;
+              const int score =
+                  ScoreSynergeticBase(candidate, rosterBase);
+              if (score >= 3) {
+                *outBase = candidate;
+                *outFieldOffset =
+                    (uintptr_t)(uint32_t)disp;
+                *outPatternAddr = found;
+                return true;
+              }
+            }
+          }
+          search = found + 1;
+        }
+      }
+
+      // 시그니처가 달라졌을 때를 위한 제한적 fallback.
+      // 구 CT 오프셋 근처의 gameBase 포인터 필드만 읽어 구조 점수로 확인한다.
+      const intptr_t window = 0x10000;
+      for (intptr_t delta = -window;
+           delta <= window; delta += 8) {
+        const intptr_t signedOff =
+            (intptr_t)LEGACY_SYNERGETIC_PTR_OFFSET + delta;
+        if (signedOff <= 0)
+          continue;
+
+        uintptr_t tablePtr = 0;
+        if (!SafeReadPtrAllowZero(
+                gameBase + (uintptr_t)signedOff,
+                &tablePtr) ||
+            tablePtr <= 0x10000)
+          continue;
+
+        const uintptr_t candidate = tablePtr + 0xA0;
+        const int score =
+            ScoreSynergeticBase(candidate, rosterBase, 256);
+        if (score >= 3) {
+          *outBase = candidate;
+          *outFieldOffset = (uintptr_t)signedOff;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static int ScoreRelationshipBase(
+        uintptr_t base, uintptr_t rosterBase,
+        int sampleCount = 384) {
+      if (base <= 0x10000 || rosterBase <= 0x10000)
+        return -1;
+
+      int valid = 0;
+      int invalid = 0;
+      for (int i = 0; i < sampleCount; ++i) {
+        const uintptr_t slot =
+            base + (uintptr_t)i * 0x40;
+        uint8_t relation = 0;
+        if (!SafeRead8(slot + 0x08, &relation))
+          return -1;
+        if (relation == 0)
+          continue;
+        if (relation < 1 || relation > 4) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+
+        uintptr_t p1 = 0, p2 = 0;
+        if (!SafeReadPtrAllowZero(slot + 0x10, &p1) ||
+            !SafeReadPtrAllowZero(slot + 0x18, &p2) ||
+            !IsRelationshipRosterOfficerPtr(p1, rosterBase) ||
+            !IsRelationshipRosterOfficerPtr(p2, rosterBase)) {
+          if (++invalid > 3)
+            return -1;
+          continue;
+        }
+        ++valid;
+      }
+      return valid;
+    }
+
+    static bool TryResolveRelationshipBaseFromLegacyCt(
+        uintptr_t gameBase, uintptr_t rosterBase,
+        uintptr_t synergeticFieldOffset,
+        uintptr_t *outBase, uintptr_t *outFieldOffset) {
+      if (!outBase || !outFieldOffset)
+        return false;
+      *outBase = 0;
+      *outFieldOffset = 0;
+
+      const uintptr_t center =
+          synergeticFieldOffset > 0
+              ? synergeticFieldOffset +
+                    LEGACY_RELATION_PTR_DELTA
+              : LEGACY_RELATION_PTR_OFFSET;
+
+      // 먼저 구 CT의 상대 거리 그대로 확인.
+      uintptr_t tablePtr = 0;
+      if (SafeReadPtrAllowZero(
+              gameBase + center, &tablePtr) &&
+          tablePtr > 0x10000 &&
+          tablePtr > 0x80) {
+        const uintptr_t candidate = tablePtr - 0x80;
+        if (ScoreRelationshipBase(
+                candidate, rosterBase) >= 3) {
+          *outBase = candidate;
+          *outFieldOffset = center;
+          return true;
+        }
+      }
+
+      // PK에서 필드가 조금 이동했을 가능성만 제한적으로 탐색한다.
+      const intptr_t window = 0x20000;
+      for (intptr_t delta = -window;
+           delta <= window; delta += 8) {
+        if (delta == 0)
+          continue;
+        const intptr_t signedOff =
+            (intptr_t)center + delta;
+        if (signedOff <= 0)
+          continue;
+
+        uintptr_t ptr = 0;
+        if (!SafeReadPtrAllowZero(
+                gameBase + (uintptr_t)signedOff, &ptr) ||
+            ptr <= 0x10080)
+          continue;
+
+        const uintptr_t candidate = ptr - 0x80;
+        const int score =
+            ScoreRelationshipBase(
+                candidate, rosterBase, 256);
+        if (score >= 3) {
+          *outBase = candidate;
+          *outFieldOffset = (uintptr_t)signedOff;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static const char *GetLegacyRelationshipName(
+        uint8_t relation) {
+      switch (relation) {
+      case 1: return u8"의형제";
+      case 2: return u8"배우자";
+      case 3: return u8"원수";
+      case 4: return u8"호적수";
+      default: return u8"?";
+      }
+    }
+
+    static const char *GetLegacySynergeticName(
+        uint8_t relation) {
+      switch (relation) {
+      case 1: return u8"상극";
+      case 2: return u8"상생";
+      default: return u8"?";
+      }
+    }
+
+    static void LogSelectedOfficerRelationshipProbe(
+        const CityOfficerRow &selected) {
+      const uintptr_t exe =
+          (uintptr_t)GetModuleHandle(NULL);
+      const uintptr_t gameBase = GetGameBase();
+
+      uintptr_t rosterBase = 0;
+      if (!exe || gameBase <= 0x10000 ||
+          !TryResolveOfficerRosterArrayBase(
+              exe, &rosterBase) ||
+          rosterBase <= 0x10000) {
+        AddLog(u8"[관계DBG] 기본 주소 확보 실패: exe=0x%llX gameBase=0x%llX roster=0x%llX",
+               (unsigned long long)exe,
+               (unsigned long long)gameBase,
+               (unsigned long long)rosterBase);
+        return;
+      }
+
+      AddLog(u8"[관계DBG] ===== %s(ID %u) 관계 탐색 시작 =====",
+             BuildOfficerName(selected.id).c_str(),
+             (unsigned int)selected.id);
+      AddLog(u8"[관계DBG] Officer=0x%llX / Roster=0x%llX / stride=0x3D0",
+             (unsigned long long)selected.officerBase,
+             (unsigned long long)rosterBase);
+
+      uintptr_t synerBase = 0;
+      uintptr_t synerFieldOffset = 0;
+      uintptr_t synerPattern = 0;
+      if (TryResolveSynergeticBaseFromLegacyCt(
+              exe, gameBase, rosterBase,
+              &synerBase, &synerFieldOffset,
+              &synerPattern)) {
+        AddLog(u8"[관계DBG] 숙명 테이블 후보 확인: gameBase+0x%llX -> base 0x%llX / AOB 0x%llX",
+               (unsigned long long)synerFieldOffset,
+               (unsigned long long)synerBase,
+               (unsigned long long)synerPattern);
+
+        int foundCount = 0;
+        for (int i = 0; i < 5000; ++i) {
+          const uintptr_t slot =
+              synerBase + (uintptr_t)i * 0x20;
+          uintptr_t p1 = 0, p2 = 0;
+          uint8_t relation = 0, occurred = 0;
+          if (!SafeReadPtrAllowZero(slot + 0x08, &p1) ||
+              !SafeReadPtrAllowZero(slot + 0x10, &p2) ||
+              !SafeRead8(slot + 0x18, &relation) ||
+              !SafeRead8(slot + 0x19, &occurred))
+            break;
+          if ((relation != 1 && relation != 2) ||
+              (p1 != selected.officerBase &&
+               p2 != selected.officerBase))
+            continue;
+
+          const uintptr_t other =
+              p1 == selected.officerBase ? p2 : p1;
+          uint16_t otherId = 0;
+          if (!ReadRelationshipOfficerId(
+                  other, rosterBase, &otherId))
+            continue;
+
+          AddLog(u8"[관계DBG][숙명] 슬롯 %d / %s / 상대 %s(ID %u) / 발생값 0x%02X",
+                 i + 1,
+                 GetLegacySynergeticName(relation),
+                 BuildOfficerName(otherId).c_str(),
+                 (unsigned int)otherId,
+                 (unsigned int)occurred);
+          ++foundCount;
+        }
+        AddLog(u8"[관계DBG] 숙명 일치 %d건", foundCount);
+      } else {
+        AddLog(u8"[관계DBG] 숙명 테이블 후보를 찾지 못했습니다. 구 CT AOB/0x433210 근처 재탐색 필요");
+      }
+
+      uintptr_t relationBase = 0;
+      uintptr_t relationFieldOffset = 0;
+      if (TryResolveRelationshipBaseFromLegacyCt(
+              gameBase, rosterBase, synerFieldOffset,
+              &relationBase, &relationFieldOffset)) {
+        AddLog(u8"[관계DBG] 관계 테이블 후보 확인: gameBase+0x%llX -> base 0x%llX",
+               (unsigned long long)relationFieldOffset,
+               (unsigned long long)relationBase);
+
+        int foundCount = 0;
+        for (int i = 0; i < 3000; ++i) {
+          const uintptr_t slot =
+              relationBase + (uintptr_t)i * 0x40;
+          uint8_t relation = 0;
+          if (!SafeRead8(slot + 0x08, &relation))
+            break;
+          if (relation < 1 || relation > 4)
+            continue;
+
+          uintptr_t members[5]{};
+          bool readOk = true;
+          for (int j = 0; j < 5; ++j) {
+            if (!SafeReadPtrAllowZero(
+                    slot + 0x10 + (uintptr_t)j * 8,
+                    &members[j])) {
+              readOk = false;
+              break;
+            }
+          }
+          if (!readOk)
+            break;
+
+          bool containsSelected = false;
+          for (uintptr_t member : members) {
+            if (member == selected.officerBase) {
+              containsSelected = true;
+              break;
+            }
+          }
+          if (!containsSelected)
+            continue;
+
+          uintptr_t flag = 0;
+          SafeReadPtrAllowZero(slot + 0x38, &flag);
+          AddLog(u8"[관계DBG][관계] 슬롯 %d / %s / flag 0x%llX",
+                 i + 1,
+                 GetLegacyRelationshipName(relation),
+                 (unsigned long long)flag);
+
+          uint16_t loggedIds[5]{};
+          int loggedCount = 0;
+          for (int j = 0; j < 5; ++j) {
+            const uintptr_t member = members[j];
+            if (!member ||
+                member == selected.officerBase)
+              continue;
+
+            uint16_t memberId = 0;
+            if (!ReadRelationshipOfficerId(
+                    member, rosterBase, &memberId))
+              continue;
+
+            bool duplicate = false;
+            for (int k = 0; k < loggedCount; ++k) {
+              if (loggedIds[k] == memberId) {
+                duplicate = true;
+                break;
+              }
+            }
+            if (duplicate)
+              continue;
+
+            loggedIds[loggedCount++] = memberId;
+            AddLog(u8"[관계DBG][관계]   +%02X 슬롯%d: %s(ID %u)",
+                   0x10 + j * 8, j + 1,
+                   BuildOfficerName(memberId).c_str(),
+                   (unsigned int)memberId);
+          }
+          ++foundCount;
+        }
+        AddLog(u8"[관계DBG] 의형제/배우자/원수/호적수 일치 %d건",
+               foundCount);
+      } else {
+        AddLog(u8"[관계DBG] 관계 테이블 후보를 찾지 못했습니다. 구 CT 상대거리(+0x%llX) 근처 재탐색 필요",
+               (unsigned long long)LEGACY_RELATION_PTR_DELTA);
+      }
+
+      AddLog(u8"[관계DBG] ===== 관계 탐색 종료 =====");
+    }
+
+
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
                                           uintptr_t shiftedCityBase) {
       const CityOfficerRow *selected = FindSelectedCityOfficer();
@@ -5285,6 +6152,22 @@ namespace DX11Base {
         ImGui::TextDisabled(u8"이동할 무장을 목록에서 선택하세요.");
       }
 
+      if (bShowDebug && selected) {
+        ImGui::SameLine(0.f, 12.f * sc);
+        if (ImGui::SmallButton(
+                u8"관계 탐색 로그##OfficerRelationshipProbe")) {
+          LogSelectedOfficerRelationshipProbe(*selected);
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"구 CT의 숙명(0x20) / 의형제·배우자·원수·호적수(0x40) 구조를 기준으로 PK 주소를 읽기 전용 탐색합니다.");
+          ImGui::TextUnformatted(
+              u8"메모리 쓰기는 하지 않으며 결과는 로그 창에 출력됩니다.");
+          ImGui::EndTooltip();
+        }
+      }
+
       ImGui::SameLine(0.f, 24.f * sc);
       ImGui::TextUnformatted(u8"이동할 도시");
       ImGui::SameLine(0.f, 8.f * sc);
@@ -5390,10 +6273,7 @@ namespace DX11Base {
       return;
     }
 
-    // 상단: 자동 환전 패널
-    DrawAutoExchangePanel(p1, scale);
-
-    // 하단: 기존 도시 리스트 / 읽기 전용 전선 분석
+    // 탭별 도시 기능
     uintptr_t cityBase = GetCityArrBase();
     if (cityBase <= 0x10000) {
       ImGui::Spacing();
@@ -5401,6 +6281,7 @@ namespace DX11Base {
                          u8"도시 배열을 읽을 수 없습니다. 게임 플레이 화면에서 열어주세요.");
     } else if (ImGui::BeginTabBar("##CityInfoTabs")) {
       if (ImGui::BeginTabItem(u8"도시 리스트")) {
+        DrawAutoExchangePanel(p1, scale);
         DrawCityTable(cityBase, scale);
         ImGui::EndTabItem();
       }
@@ -5419,6 +6300,13 @@ namespace DX11Base {
     }
 
     ImGui::End();
+  }
+
+  void ResetCorpsAutoDeploymentSession() {
+    ClearCorpsAutoDeploymentSession(
+        u8"게임/P1 리셋 감지", false);
+    s_corpsDeploymentLastRelevantGameState = 0;
+    ResetCorpsDeploymentTargetBaseline();
   }
 
   void RunYearlyRearSupport(uintptr_t p1) {
