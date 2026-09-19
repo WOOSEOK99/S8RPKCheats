@@ -1597,7 +1597,7 @@ namespace DX11Base {
         ImGui::EndTabItem();
       }
 
-      if (ImGui::BeginTabItem(u8"전선 분석")) {
+      if (ImGui::BeginTabItem(u8"수송")) {
         DrawFrontierAnalysis(p1, cityBase, scale);
         ImGui::EndTabItem();
       }
