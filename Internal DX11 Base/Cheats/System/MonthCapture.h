@@ -23,8 +23,8 @@ namespace DX11Base {
     // 다른 데이터 구조 진단 시 같은 베이스를 재사용하기 위한 읽기 전용 helper입니다.
     uintptr_t GetScenarioDataCenterAddress();
 
-    // 옛 CT의 "현재년도 - 0x1C, bit 1" 관계를 현재 시나리오 데이터에 대입한
-    // 연회 후보 값을 읽기 전용으로 로그에 출력합니다. 메모리 쓰기는 하지 않습니다.
+    // 옛 CT의 실제 무제한 연회 필드(+0x6EA4)와 현재년도(+0x6F78)의
+    // 상대차이 0xD4를 현재 구조에 대입한 후보 값을 읽기 전용으로 출력합니다.
     bool LogBanquetFlagCandidate();
 
     // 현재 담화/기증 AOB를 기준으로 옛 CT의 상대거리를 적용하고,
