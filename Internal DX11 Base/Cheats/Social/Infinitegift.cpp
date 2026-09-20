@@ -21,137 +21,86 @@ namespace DX11Base {
   static uint8_t g_giftOriginal[10] = {};
   static bool g_giftApplied = false;
 
-  // ───────────────────────────────────────────────
-  // 교류 상태 객체 캡처 (디버그 전용)
-  // 기증 완료 플래그를 갱신하는 명령의 RSI를 저장하고,
-  // 현재 설치되어 있던 원본/패치 10바이트는 그대로 실행한다.
-  // ───────────────────────────────────────────────
-  static uintptr_t g_giftCaptureCaveAddr = 0;
-  static uintptr_t g_giftCapturedInteractionBase = 0;
-  static uint8_t g_giftCaptureOriginal[10] = {};
-  static bool g_giftCaptureApplied = false;
+  namespace {
+    static const uint8_t kGiftOriginalBytes[10] = {
+        0x81, 0x8E, 0x20, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00};
+    static const uint8_t kGiftPatchedBytes[10] = {
+        0x81, 0xA6, 0x20, 0x03, 0x00, 0x00, 0xFF, 0xFB, 0xFF, 0xFF};
 
-  bool StartGiftInteractionCapture() {
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    if (!exeBase)
-      return false;
+    static uintptr_t ResolveGiftFlagCode(uintptr_t exeBase) {
+      uintptr_t found = FindPattern(
+          exeBase, exeBase + 0x3000000,
+          "81 8E 20 03 00 00 00 04 00 00");
+      if (!found) {
+        found = FindPattern(
+            exeBase, exeBase + 0x3000000,
+            "81 A6 20 03 00 00 FF FB FF FF");
+      }
+      return found;
+    }
 
-    g_giftCapturedInteractionBase = 0;
+    static bool WriteGiftCode(const uint8_t* bytes) {
+      if (!g_giftHookAddr || !bytes)
+        return false;
 
-    if (g_giftCaptureApplied) {
-      AddLog(u8"[교류캡처DBG] 기증 캡처값 초기화 완료. 이제 기증을 1회 실행하세요.");
+      DWORD old = 0, tmp = 0;
+      if (!VirtualProtect((LPVOID)g_giftHookAddr, 10, PAGE_EXECUTE_READWRITE, &old))
+        return false;
+
+      memcpy((void*)g_giftHookAddr, bytes, 10);
+      FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_giftHookAddr, 10);
+      VirtualProtect((LPVOID)g_giftHookAddr, 10, old, &tmp);
       return true;
     }
+  }
 
-    if (!g_giftHookAddr) {
-      // 원본 상태 우선, 이미 기증 무제한이 적용된 경우 패치 바이트도 허용.
-      g_giftHookAddr = FindPattern(exeBase, exeBase + 0x3000000,
-                                   "81 8E 20 03 00 00 00 04 00 00");
-      if (!g_giftHookAddr) {
-        g_giftHookAddr = FindPattern(exeBase, exeBase + 0x3000000,
-                                     "81 A6 20 03 00 00 FF FB FF FF");
+  void LogDuelDebateNearGiftCandidates() {
+    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+    if (!exeBase) {
+      AddLog(u8"[교류근처DBG] SAN8R.exe 베이스를 찾지 못했습니다.");
+      return;
+    }
+
+    uintptr_t gift = ResolveGiftFlagCode(exeBase);
+    if (!gift) {
+      AddLog(u8"[교류근처DBG] 현재 기증 +0x320 코드를 찾지 못했습니다.");
+      return;
+    }
+
+    // 옛 CT에서 같은 +0x320 플래그 묶음:
+    // 토론 = 기증 - 0x210, 대련 = 기증 - 0x180
+    const uintptr_t debate = gift - 0x210;
+    const uintptr_t duel = gift - 0x180;
+
+    auto logWindow = [&](const char* name, uintptr_t center) {
+      constexpr size_t kBefore = 0x30;
+      constexpr size_t kSize = 0x70;
+      if (center <= exeBase + kBefore || !IsValidPtr(center - kBefore, kSize)) {
+        AddLog(u8"[교류근처DBG] %s 범위가 유효하지 않습니다.", name);
+        return;
       }
-    }
 
-    if (!g_giftHookAddr) {
-      AddLog(u8"[교류캡처DBG] 기증 상태 플래그 코드를 찾지 못했습니다.");
-      return false;
-    }
+      const uint8_t* p = (const uint8_t*)(center - kBefore);
+      char bytes[kSize * 3 + 1] = {};
+      size_t out = 0;
+      for (size_t i = 0; i < kSize && out + 4 < sizeof(bytes); ++i) {
+        out += (size_t)snprintf(
+            bytes + out, sizeof(bytes) - out,
+            "%02X%s", p[i], (i + 1 < kSize) ? " " : "");
+      }
 
-    memcpy(g_giftCaptureOriginal, (const void*)g_giftHookAddr, 10);
+      AddLog(u8"[교류근처DBG] %s 예상 RVA:+0x%llX range=+0x%llX~+0x%llX",
+             name,
+             (unsigned long long)(center - exeBase),
+             (unsigned long long)(center - kBefore - exeBase),
+             (unsigned long long)(center - kBefore + kSize - 1 - exeBase));
+      AddLog("[교류근처DBG] %s bytes=%s", name, bytes);
+    };
 
-    g_giftCaptureCaveAddr = AllocNear(g_giftHookAddr, 128);
-    if (!g_giftCaptureCaveAddr) {
-      AddLog(u8"[교류캡처DBG] 기증 캡처 cave 할당 실패.");
-      return false;
-    }
-
-    uint8_t* cave = (uint8_t*)g_giftCaptureCaveAddr;
-    int p = 0;
-
-    // push rax
-    cave[p++] = 0x50;
-
-    // mov rax, &g_giftCapturedInteractionBase
-    cave[p++] = 0x48;
-    cave[p++] = 0xB8;
-    *(uintptr_t*)&cave[p] = (uintptr_t)&g_giftCapturedInteractionBase;
-    p += 8;
-
-    // mov [rax], rsi
-    cave[p++] = 0x48;
-    cave[p++] = 0x89;
-    cave[p++] = 0x30;
-
-    // pop rax
-    cave[p++] = 0x58;
-
-    // 캡처 설치 직전의 10바이트를 그대로 실행
-    memcpy(&cave[p], g_giftCaptureOriginal, 10);
-    p += 10;
-
-    // 절대 복귀 점프
-    const uintptr_t retAddr = g_giftHookAddr + 10;
-    cave[p++] = 0xFF;
-    cave[p++] = 0x25;
-    cave[p++] = 0x00;
-    cave[p++] = 0x00;
-    cave[p++] = 0x00;
-    cave[p++] = 0x00;
-    *(uintptr_t*)&cave[p] = retAddr;
-    p += 8;
-
-    if (!ApplyJmp(g_giftHookAddr, g_giftCaptureCaveAddr, 10)) {
-      VirtualFree((LPVOID)g_giftCaptureCaveAddr, 0, MEM_RELEASE);
-      g_giftCaptureCaveAddr = 0;
-      AddLog(u8"[교류캡처DBG] 기증 캡처 훅 설치 실패.");
-      return false;
-    }
-
-    g_giftCaptureApplied = true;
-    AddLog(u8"[교류캡처DBG] 기증 상태 객체 캡처 시작. 기증을 1회 실행한 뒤 결과 확인을 누르세요.");
-    return true;
-  }
-
-  void LogGiftInteractionCaptureResult() {
-    if (!g_giftCaptureApplied) {
-      AddLog(u8"[교류캡처DBG] 먼저 기증 상태 객체 캡처를 시작해주세요.");
-      return;
-    }
-
-    if (!g_giftCapturedInteractionBase) {
-      AddLog(u8"[교류캡처DBG] 아직 기증 코드가 호출되지 않았습니다.");
-      return;
-    }
-
-    const uintptr_t flagAddr = g_giftCapturedInteractionBase + 0x320;
-    if (!IsValidPtr(flagAddr, sizeof(uint32_t))) {
-      AddLog(u8"[교류캡처DBG] 캡처 base=%p / +0x320 주소가 유효하지 않습니다.",
-             (void*)g_giftCapturedInteractionBase);
-      return;
-    }
-
-    const uint32_t raw = *(const uint32_t*)flagAddr;
-    AddLog(u8"[교류캡처DBG] base=%p +0x320 raw=0x%08X / 담화(bit2)=%u 대련(bit8)=%u 토론(bit9)=%u 기증(bit10)=%u",
-           (void*)g_giftCapturedInteractionBase,
-           raw,
-           (raw & 0x00000004u) ? 1u : 0u,
-           (raw & 0x00000100u) ? 1u : 0u,
-           (raw & 0x00000200u) ? 1u : 0u,
-           (raw & 0x00000400u) ? 1u : 0u);
-  }
-
-  void StopGiftInteractionCapture() {
-    if (!g_giftCaptureApplied)
-      return;
-
-    RestoreBytes(g_giftHookAddr, g_giftCaptureOriginal, 10);
-    VirtualFree((LPVOID)g_giftCaptureCaveAddr, 0, MEM_RELEASE);
-    g_giftCaptureCaveAddr = 0;
-    g_giftCapturedInteractionBase = 0;
-    g_giftCaptureApplied = false;
-
-    AddLog(u8"[교류캡처DBG] 기증 상태 객체 캡처 훅 해제 완료.");
+    AddLog(u8"[교류근처DBG] 기증 기준 RVA:+0x%llX / 토론 예상=-0x210 / 대련 예상=-0x180",
+           (unsigned long long)(gift - exeBase));
+    logWindow(u8"토론", debate);
+    logWindow(u8"대련", duel);
   }
 
   void SetInfiniteGift(bool enable) {
@@ -159,36 +108,39 @@ namespace DX11Base {
     if (!exeBase)
       return;
 
-    if (!g_giftHookAddr) {
-      uintptr_t found = FindPattern(exeBase, exeBase + 0x3000000, "81 8E 20 03 00 00 00 04 00 00");
-      if (found) g_giftHookAddr = found;
-    }
-
-    AddLog("[DEBUG] giftHookAddr: %p", (void *)g_giftHookAddr);
+    if (!g_giftHookAddr)
+      g_giftHookAddr = ResolveGiftFlagCode(exeBase);
 
     if (!g_giftHookAddr)
       return;
 
-    if (!g_giftApplied && enable) {
-      memcpy(g_giftOriginal, (void *)g_giftHookAddr, 10);
+    const bool isOriginal =
+        memcmp((const void*)g_giftHookAddr, kGiftOriginalBytes, 10) == 0;
+    const bool isPatched =
+        memcmp((const void*)g_giftHookAddr, kGiftPatchedBytes, 10) == 0;
 
-      DWORD old, tmp;
-      VirtualProtect((LPVOID)g_giftHookAddr, 10, PAGE_EXECUTE_READWRITE, &old);
+    if (enable) {
+      if (isPatched) {
+        g_giftApplied = true;
+        return;
+      }
+      if (!isOriginal) {
+        AddLog(u8"[기증] 예상하지 못한 코드 상태라 무제한 패치를 적용하지 않았습니다.");
+        return;
+      }
 
-      // and [rsi+0x320], 0xFFFFFBFF
-      // 81 A6 20 03 00 00 FF FB FF FF
-      uint8_t patch[] = {0x81, 0xA6, 0x20, 0x03, 0x00, 0x00, 0xFF, 0xFB, 0xFF, 0xFF};
-      memcpy((void *)g_giftHookAddr, patch, 10);
+      memcpy(g_giftOriginal, kGiftOriginalBytes, 10);
+      if (WriteGiftCode(kGiftPatchedBytes))
+        g_giftApplied = true;
 
-      VirtualProtect((LPVOID)g_giftHookAddr, 10, old, &tmp);
-      g_giftApplied = true;
-
-    } else if (g_giftApplied && !enable) {
-      DWORD old, tmp;
-      VirtualProtect((LPVOID)g_giftHookAddr, 10, PAGE_EXECUTE_READWRITE, &old);
-      memcpy((void *)g_giftHookAddr, g_giftOriginal, 10);
-      VirtualProtect((LPVOID)g_giftHookAddr, 10, old, &tmp);
+    } else {
+      // 디버그 훅/상태 플래그와 무관하게 실제 코드가 AND 패치로 남아 있으면
+      // 항상 원본 OR 명령으로 복구한다.
+      if (isPatched) {
+        if (WriteGiftCode(kGiftOriginalBytes)) {
+          AddLog(u8"[기증] 무제한 코드 원본 복구 완료.");
+        }
+      }
       g_giftApplied = false;
     }
-  }
-} // namespace DX11Base
+  }} // namespace DX11Base
