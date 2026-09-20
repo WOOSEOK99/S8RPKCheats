@@ -943,6 +943,65 @@ static void FlushPregnancyDebugResults() {
       u8"[임신DBG] 모든 값은 읽기 전용 진단입니다. 아직 임신 record base로 확정하지 않습니다.");
 }
 
+static bool RefreshCanonicalPregnancyTableCached() {
+  std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+
+  if (!g_pregnancyCanonicalTable.valid ||
+      g_pregnancyCanonicalTable.base <= 0x10000) {
+    return false;
+  }
+
+  PregnancyCanonicalTable refreshed =
+      g_pregnancyCanonicalTable;
+
+  for (int slot = 0; slot < 3; ++slot) {
+    PregnancyDebugRecordDump d;
+    const uintptr_t slotAddr =
+        refreshed.base + (uintptr_t)slot * 0x28;
+
+    if (!ReadPregnancyDebugRecord(slotAddr, &d) ||
+        d.q00OfficerId == 0 ||
+        d.q00OfficerId != refreshed.spouseIds[(size_t)slot]) {
+      g_pregnancyCanonicalTable.valid = false;
+      return false;
+    }
+
+    refreshed.slots[(size_t)slot] = d;
+  }
+
+  g_pregnancyCanonicalTable = refreshed;
+  return true;
+}
+
+static PregnancyCanonicalTable GetCanonicalPregnancySnapshot() {
+  std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+  return g_pregnancyCanonicalTable;
+}
+
+static const char* GetPregnancySlotState(
+    const PregnancyDebugRecordDump& d) {
+  if (d.pregnancyFlag == 1 &&
+      d.remainingMonths >= 1 &&
+      d.remainingMonths <= 12 &&
+      d.childPtr == 0) {
+    return u8"임신 중";
+  }
+
+  if (d.pregnancyFlag == 1 &&
+      d.remainingMonths == 0 &&
+      d.childOfficerId != 0) {
+    return u8"출산 완료";
+  }
+
+  if (d.pregnancyFlag == 0 &&
+      d.remainingMonths == 0 &&
+      d.childPtr == 0) {
+    return u8"비임신";
+  }
+
+  return u8"미확인";
+}
+
 static bool RefreshChild(ChildEntry& e) {
   if (!e.addr || !IsValidPtr(e.addr, 0x38))
     return false;
@@ -1163,6 +1222,8 @@ void RunChildManagerUpdate() {
   for (auto& kv : g_children)
     RefreshChild(kv.second);
 
+  RefreshCanonicalPregnancyTableCached();
+
   FlushPregnancyDebugResults();
   FlushPregnancySpouseDebugResults();
 }
@@ -1287,43 +1348,119 @@ void DrawChildManagerWindow(float scale) {
                      u8"※ 자녀 출생/임관/주인공 변경은 혈연 데이터를 다시 읽어 목록에 자동 반영합니다.");
 
   ImGui::Separator();
-  ImGui::TextDisabled(u8"임신 구조 DBG (읽기 전용)");
+  ImGui::TextUnformatted(u8"임신 상태 (게임 기본 3슬롯)");
 
-  if (g_pregnancyDebugScanning.load()) {
-    ImGui::TextUnformatted(u8"최근 출생 자녀 기준 구조를 검색 중...");
-    ImGui::ProgressBar(
-        g_pregnancyDebugProgress.load(),
-        ImVec2(260.0f * scale, 0));
-  } else {
-    if (ImGui::Button(
-            u8"출산 후 구조 DBG",
-            ImVec2(145.0f * scale, 0))) {
-      StartPregnancyDebugScanAsync();
+  const PregnancyCanonicalTable pregnancy =
+      GetCanonicalPregnancySnapshot();
+
+  if (pregnancy.valid) {
+    if (ImGui::BeginTable(
+            "PregnancyStatusTable", 5,
+            ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_SizingFixedFit)) {
+      ImGui::TableSetupColumn(
+          u8"슬롯", ImGuiTableColumnFlags_WidthFixed,
+          45.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"배우자", ImGuiTableColumnFlags_WidthFixed,
+          135.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"상태", ImGuiTableColumnFlags_WidthFixed,
+          85.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"남은 개월", ImGuiTableColumnFlags_WidthFixed,
+          75.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"자녀", ImGuiTableColumnFlags_WidthFixed,
+          90.0f * scale);
+      ImGui::TableHeadersRow();
+
+      for (int slot = 0; slot < 3; ++slot) {
+        const PregnancyDebugRecordDump& d =
+            pregnancy.slots[(size_t)slot];
+        const uint16_t spouseId =
+            pregnancy.spouseIds[(size_t)slot];
+
+        ImGui::TableNextRow();
+
+        ImGui::TableNextColumn();
+        ImGui::Text("%d", slot + 1);
+
+        ImGui::TableNextColumn();
+        auto spouseNameIt = g_officerNames.find(spouseId);
+        if (spouseNameIt != g_officerNames.end() &&
+            !spouseNameIt->second.empty()) {
+          ImGui::Text(
+              "%s (%u)",
+              spouseNameIt->second.c_str(), spouseId);
+        } else {
+          ImGui::Text(u8"ID %u", spouseId);
+        }
+
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(GetPregnancySlotState(d));
+
+        ImGui::TableNextColumn();
+        if (d.pregnancyFlag == 1 &&
+            d.remainingMonths >= 1 &&
+            d.remainingMonths <= 12) {
+          ImGui::Text(u8"%u개월",
+                      (unsigned)d.remainingMonths);
+        } else {
+          ImGui::TextUnformatted(u8"-");
+        }
+
+        ImGui::TableNextColumn();
+        if (d.childOfficerId != 0)
+          ImGui::Text(u8"ID %u", d.childOfficerId);
+        else
+          ImGui::TextUnformatted(u8"-");
+      }
+
+      ImGui::EndTable();
     }
+
+    ImGui::TextDisabled(
+        u8"canonical base=%p / stride=0x28",
+        (void*)pregnancy.base);
+  } else {
+    ImGui::TextDisabled(
+        u8"임신 슬롯 주소를 아직 찾지 못했습니다. 아래 검색을 한 번 실행하세요.");
   }
 
-  ImGui::SameLine();
-
   if (g_pregnancySpouseScanning.load()) {
-    ImGui::TextUnformatted(u8"배우자 기준 임신 구조 검색 중...");
+    ImGui::TextUnformatted(u8"임신 슬롯 검색 중...");
     ImGui::ProgressBar(
         g_pregnancySpouseProgress.load(),
         ImVec2(220.0f * scale, 0));
   } else {
     if (ImGui::Button(
-            u8"임신중 배우자 DBG",
-            ImVec2(150.0f * scale, 0))) {
+            u8"임신 슬롯 검색",
+            ImVec2(130.0f * scale, 0))) {
       StartPregnancySpouseDebugScanAsync();
     }
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
       ImGui::TextUnformatted(
-          u8"배우자 포인터가 record +0x00에 있는 후보를 직접 찾습니다.");
+          u8"현재 배우자 포인터를 기준으로 게임 기본 3개 임신 슬롯을 찾습니다.");
       ImGui::TextUnformatted(
-          u8"아직 자녀 목록에 없는 태아도 +0x10 포인터와 능력 상한 raw 값을 확인할 수 있습니다.");
+          u8"한 번 찾으면 현재 세션에서는 해당 3슬롯을 직접 다시 읽습니다.");
       ImGui::TextUnformatted(
-          u8"읽기 전용이며 메모리는 수정하지 않습니다.");
+          u8"현재 단계는 읽기 전용이며 메모리는 수정하지 않습니다.");
       ImGui::EndTooltip();
+    }
+  }
+
+  ImGui::SameLine();
+
+  if (g_pregnancyDebugScanning.load()) {
+    ImGui::TextUnformatted(u8"출산 후 구조 확인 중...");
+  } else {
+    if (ImGui::Button(
+            u8"출산 후 DBG",
+            ImVec2(110.0f * scale, 0))) {
+      StartPregnancyDebugScanAsync();
     }
   }
 
