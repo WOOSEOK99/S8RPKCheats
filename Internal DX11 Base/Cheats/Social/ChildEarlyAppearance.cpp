@@ -336,6 +336,147 @@ static bool TryReadDirectPregnancyTableAt(
   return true;
 }
 
+static bool FindPregnancyTableNearGameBase(
+    uintptr_t gameBase,
+    PregnancyCanonicalTable* out) {
+  if (!out || gameBase <= 0x10000)
+    return false;
+
+  std::unordered_set<uintptr_t> spousePtrs;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    for (const PregnancySpouseOption& option :
+         g_pregnancyCurrentSpouses) {
+      if (option.addr > 0x10000)
+        spousePtrs.insert(NormalizeOfficerPtr(option.addr));
+    }
+  }
+
+  if (spousePtrs.empty())
+    return false;
+
+  constexpr uintptr_t kScanSize = 0x400000; // gameBase 기준 +4MB만 검색
+  constexpr size_t kChunkSize = 0x10000;    // 64KB
+  const uintptr_t scanStart = gameBase;
+  const uintptr_t scanEnd = gameBase + kScanSize;
+  const ULONGLONG started = GetTickCount64();
+
+  size_t pointerHits = 0;
+  size_t candidatesTested = 0;
+  std::unordered_set<uintptr_t> testedBases;
+  std::vector<uint8_t> buffer(kChunkSize);
+
+  uintptr_t cursor = scanStart;
+  while (cursor < scanEnd) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery((LPCVOID)cursor, &mbi, sizeof(mbi)) != sizeof(mbi))
+      break;
+
+    const uintptr_t regionStart =
+        (std::max)(cursor, (uintptr_t)mbi.BaseAddress);
+    const uintptr_t regionEnd =
+        (std::min)(
+            scanEnd,
+            (uintptr_t)mbi.BaseAddress + mbi.RegionSize);
+
+    const bool readable =
+        mbi.State == MEM_COMMIT &&
+        !(mbi.Protect & PAGE_GUARD) &&
+        !(mbi.Protect & PAGE_NOACCESS);
+
+    if (readable && regionEnd > regionStart) {
+      for (uintptr_t curr = regionStart;
+           curr < regionEnd;) {
+        const size_t remaining =
+            (size_t)(regionEnd - curr);
+        const size_t toRead =
+            (std::min)(remaining, kChunkSize);
+
+        if (SafeReadMem(curr, buffer.data(), toRead)) {
+          size_t i =
+              (size_t)((8 - (curr & 7)) & 7);
+
+          for (; i + sizeof(uintptr_t) <= toRead;
+               i += sizeof(uintptr_t)) {
+            uintptr_t rawPtr = 0;
+            memcpy(
+                &rawPtr,
+                buffer.data() + i,
+                sizeof(rawPtr));
+
+            if (spousePtrs.count(
+                    NormalizeOfficerPtr(rawPtr)) == 0) {
+              continue;
+            }
+
+            ++pointerHits;
+            const uintptr_t hitAddr = curr + i;
+
+            // 배우자 포인터는 slot +0x00이므로,
+            // 이 hit가 slot0/1/2 중 어디인지 각각 시험합니다.
+            for (int slot = 0; slot < 3; ++slot) {
+              const uintptr_t back =
+                  (uintptr_t)slot * 0x28;
+              if (hitAddr < gameBase + back)
+                continue;
+
+              const uintptr_t candidateBase =
+                  hitAddr - back;
+              if (candidateBase < scanStart ||
+                  candidateBase + 0x28 * 3 > scanEnd ||
+                  !testedBases.insert(candidateBase).second) {
+                continue;
+              }
+
+              ++candidatesTested;
+
+              PregnancyCanonicalTable table;
+              if (!TryReadDirectPregnancyTableAt(
+                      candidateBase, &table)) {
+                continue;
+              }
+
+              const uintptr_t relative =
+                  candidateBase - gameBase;
+              if (relative + 0x10 <= 0xFFFFFFFFull) {
+                g_childRearingOffset =
+                    (uint32_t)(relative + 0x10);
+              }
+
+              *out = table;
+
+              AddLog(
+                  u8"[임신슬롯] gameBase 근처 검색 성공: table=%p / relative=+0x%llX / childOffset=0x%X / ptrHits=%zu / 후보=%zu / %llums",
+                  (void*)candidateBase,
+                  (unsigned long long)relative,
+                  g_childRearingOffset,
+                  pointerHits,
+                  candidatesTested,
+                  (unsigned long long)(
+                      GetTickCount64() - started));
+              return true;
+            }
+          }
+        }
+
+        curr += toRead;
+      }
+    }
+
+    if (regionEnd <= cursor)
+      break;
+    cursor = regionEnd;
+  }
+
+  AddLog(
+      u8"[임신슬롯] gameBase 근처 +4MB 검색 실패: ptrHits=%zu / 후보=%zu / %llums",
+      pointerHits,
+      candidatesTested,
+      (unsigned long long)(
+          GetTickCount64() - started));
+  return false;
+}
+
 static bool ResolvePregnancyTableDirect(
     PregnancyCanonicalTable* out) {
   if (!out)
@@ -468,6 +609,13 @@ static bool ResolvePregnancyTableDirect(
         return true;
       }
     }
+  }
+
+  // 마지막 fallback: 전체 프로세스가 아니라 현재 runtime gameBase의
+  // +4MB 범위만 배우자 포인터 기준으로 가볍게 검사합니다.
+  if (FindPregnancyTableNearGameBase(
+          runtimeGameBase, out)) {
+    return true;
   }
 
   return false;
