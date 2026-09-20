@@ -12,9 +12,10 @@ namespace DX11Base {
         // 게임 모듈 내 인스턴스 포인터(고정) → 실제 데이터 블록
         constexpr uintptr_t kScenarioInstanceStaticOffset = 0x2E98BC8;
         constexpr uintptr_t kScenarioYearOffset = 0x72D0;
-        // 옛 CT의 "연회 = 현재년도 - 0x1C, bit 1" 관계를 현재 구조에 대입한
-        // 읽기 전용 진단 후보입니다. 실제 연회 필드로 확정된 값은 아닙니다.
-        constexpr uintptr_t kBanquetFlagCandidateOffset = kScenarioYearOffset - 0x1C; // 0x72B4
+        // 옛 CT의 실제 "무제한 <연회>" 코드가 +0x6EA4 bit 1을 사용했고,
+        // 같은 CT의 현재년도 +0x6F78과의 차이는 0xD4였습니다.
+        // 현재년도 +0x72D0에 같은 상대차이를 적용한 읽기 전용 후보입니다.
+        constexpr uintptr_t kBanquetFlagCandidateOffset = kScenarioYearOffset - 0xD4; // 0x71FC
         // 월 후킹 패턴 mov [rsi+0x72D2], al 과 동일 오프셋
         constexpr uintptr_t kScenarioMonthOffset = 0x72D2;
 
