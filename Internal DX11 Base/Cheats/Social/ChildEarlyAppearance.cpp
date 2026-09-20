@@ -103,6 +103,15 @@ struct PregnancyCanonicalTable {
 
 static PregnancyCanonicalTable g_pregnancyCanonicalTable;
 
+struct PregnancySpouseOption {
+  uint16_t id = 0;
+  uintptr_t addr = 0;
+};
+
+static std::vector<PregnancySpouseOption> g_pregnancyCurrentSpouses;
+static int g_pregnancySwapSlot = -1;
+static uint16_t g_pregnancySwapSpouseId = 0;
+
 static bool ResolveHeroAndRoster(
     uintptr_t& rosterBase,
     uintptr_t& heroMaster,
@@ -340,6 +349,26 @@ static void StartPregnancySpouseDebugScanAsync() {
   if (spouseTargets.empty()) {
     AddLog(u8"[임신배우자DBG] 배우자 무장 주소를 찾지 못했습니다.");
     return;
+  }
+
+  {
+    std::vector<PregnancySpouseOption> options;
+    options.reserve(spouseTargets.size());
+    for (const auto& kv : spouseTargets) {
+      PregnancySpouseOption option;
+      option.addr = kv.first;
+      option.id = kv.second;
+      options.push_back(option);
+    }
+    std::sort(
+        options.begin(), options.end(),
+        [](const PregnancySpouseOption& a,
+           const PregnancySpouseOption& b) {
+          return a.id < b.id;
+        });
+
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    g_pregnancyCurrentSpouses = std::move(options);
   }
 
   AddLog(
@@ -949,6 +978,222 @@ static void FlushPregnancyDebugResults() {
       u8"[임신DBG] 모든 값은 읽기 전용 진단입니다. 아직 임신 record base로 확정하지 않습니다.");
 }
 
+static bool IsPregnancySlotSafeForSwap(
+    const PregnancyDebugRecordDump& d) {
+  return d.valid &&
+         d.pregnancyFlag == 0 &&
+         d.remainingMonths == 0 &&
+         d.childPtr == 0;
+}
+
+static std::vector<PregnancySpouseOption>
+GetPregnancyOutsideSpouseOptions(
+    const PregnancyCanonicalTable& table) {
+  std::vector<PregnancySpouseOption> allSpouses;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    allSpouses = g_pregnancyCurrentSpouses;
+  }
+
+  std::vector<PregnancySpouseOption> outside;
+  for (const PregnancySpouseOption& option : allSpouses) {
+    bool inSlot = false;
+    for (uint16_t slotId : table.spouseIds) {
+      if (slotId == option.id) {
+        inSlot = true;
+        break;
+      }
+    }
+    if (!inSlot)
+      outside.push_back(option);
+  }
+  return outside;
+}
+
+static bool ApplyPregnancySpouseSlotSwap(
+    int slotIndex,
+    uint16_t newSpouseId) {
+  if (slotIndex < 0 || slotIndex >= 3 ||
+      newSpouseId == 0) {
+    return false;
+  }
+
+  PregnancyCanonicalTable snapshot =
+      GetCanonicalPregnancySnapshot();
+  if (!snapshot.valid) {
+    AddLog(
+        u8"[임신슬롯교체] canonical 3슬롯을 먼저 검색해야 합니다.");
+    return false;
+  }
+
+  for (uint16_t slotId : snapshot.spouseIds) {
+    if (slotId == newSpouseId) {
+      AddLog(
+          u8"[임신슬롯교체] ID %u는 이미 임신 슬롯에 있습니다.",
+          newSpouseId);
+      return false;
+    }
+  }
+
+  const uintptr_t slotAddr =
+      snapshot.base + (uintptr_t)slotIndex * 0x28;
+
+  PregnancyDebugRecordDump current;
+  if (!ReadPregnancyDebugRecord(slotAddr, &current) ||
+      current.q00OfficerId !=
+          snapshot.spouseIds[(size_t)slotIndex]) {
+    AddLog(
+        u8"[임신슬롯교체] slot%d 현재 데이터 재검증 실패",
+        slotIndex + 1);
+    return false;
+  }
+
+  if (!IsPregnancySlotSafeForSwap(current)) {
+    AddLog(
+        u8"[임신슬롯교체] slot%d 배우자 ID %u는 비임신 빈 상태가 아니어서 교체 차단",
+        slotIndex + 1, current.q00OfficerId);
+    return false;
+  }
+
+  uintptr_t newSpouseAddr = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    for (const PregnancySpouseOption& option :
+         g_pregnancyCurrentSpouses) {
+      if (option.id == newSpouseId) {
+        newSpouseAddr = NormalizeOfficerPtr(option.addr);
+        break;
+      }
+    }
+  }
+
+  if (newSpouseAddr <= 0x10000 ||
+      TryReadOfficerIdFromPointer(newSpouseAddr) != newSpouseId) {
+    AddLog(
+        u8"[임신슬롯교체] 새 배우자 ID %u의 무장 주소 검증 실패",
+        newSpouseId);
+    return false;
+  }
+
+  std::array<uint8_t, 0x28> backup{};
+  if (!SafeReadMem(
+          slotAddr, backup.data(), backup.size())) {
+    AddLog(
+        u8"[임신슬롯교체] slot%d 백업 읽기 실패",
+        slotIndex + 1);
+    return false;
+  }
+
+  DWORD oldProt = 0;
+  DWORD tmpProt = 0;
+  bool wrote = false;
+
+  __try {
+    if (!VirtualProtect(
+            (LPVOID)slotAddr, 0x28,
+            PAGE_READWRITE, &oldProt)) {
+      AddLog(
+          u8"[임신슬롯교체] slot%d 쓰기 권한 설정 실패",
+          slotIndex + 1);
+      return false;
+    }
+
+    // CETRAINER spouseSlotRelocation()의 슬롯 초기화/재배치와
+    // 동일한 필드만 선택 슬롯 하나에 적용합니다.
+    *(uintptr_t*)(slotAddr + 0x00) = newSpouseAddr;
+    *(uint8_t*)(slotAddr + 0x08) = 100;
+    *(uint8_t*)(slotAddr + 0x09) = 0;
+    *(uint8_t*)(slotAddr + 0x0A) = 0;
+    *(uintptr_t*)(slotAddr + 0x10) = 0;
+    memset((void*)(slotAddr + 0x1E), 0, 5);
+    wrote = true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    wrote = false;
+  }
+
+  if (oldProt != 0) {
+    VirtualProtect(
+        (LPVOID)slotAddr, 0x28,
+        oldProt, &tmpProt);
+  }
+
+  PregnancyDebugRecordDump verify;
+  const bool verified =
+      wrote &&
+      ReadPregnancyDebugRecord(slotAddr, &verify) &&
+      verify.q00OfficerId == newSpouseId &&
+      verify.pregnancyCooldown == 100 &&
+      verify.pregnancyFlag == 0 &&
+      verify.remainingMonths == 0 &&
+      verify.childPtr == 0 &&
+      std::all_of(
+          verify.capRaw.begin(), verify.capRaw.end(),
+          [](uint8_t v) { return v == 0; });
+
+  if (!verified) {
+    DWORD restoreProt = 0;
+    DWORD restoreTmp = 0;
+    bool restored = false;
+
+    __try {
+      if (VirtualProtect(
+              (LPVOID)slotAddr, 0x28,
+              PAGE_READWRITE, &restoreProt)) {
+        memcpy(
+            (void*)slotAddr,
+            backup.data(), backup.size());
+        restored = true;
+        VirtualProtect(
+            (LPVOID)slotAddr, 0x28,
+            restoreProt, &restoreTmp);
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      restored = false;
+    }
+
+    AddLog(
+        u8"[임신슬롯교체] slot%d 적용 검증 실패 -> 원복 %s",
+        slotIndex + 1,
+        restored ? u8"성공" : u8"실패");
+    return false;
+  }
+
+  const uint16_t oldSpouseId =
+      current.q00OfficerId;
+
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    g_pregnancyCanonicalTable.spouseIds[
+        (size_t)slotIndex] = newSpouseId;
+    g_pregnancyCanonicalTable.slots[
+        (size_t)slotIndex] = verify;
+
+    // 교체되어 슬롯 밖으로 나온 배우자도 다음 교체 대상으로 유지합니다.
+    bool oldFound = false;
+    for (PregnancySpouseOption& option :
+         g_pregnancyCurrentSpouses) {
+      if (option.id == oldSpouseId) {
+        option.addr = NormalizeOfficerPtr(current.q00);
+        oldFound = true;
+        break;
+      }
+    }
+    if (!oldFound) {
+      PregnancySpouseOption oldOption;
+      oldOption.id = oldSpouseId;
+      oldOption.addr = NormalizeOfficerPtr(current.q00);
+      g_pregnancyCurrentSpouses.push_back(oldOption);
+    }
+  }
+
+  g_pregnancySwapSpouseId = 0;
+
+  AddLog(
+      u8"[임신슬롯교체] slot%d 배우자 교체 성공: ID %u -> ID %u / cooldown=100(가능도 0%%)",
+      slotIndex + 1, oldSpouseId, newSpouseId);
+  return true;
+}
+
 static bool RefreshCanonicalPregnancyTableCached() {
   std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
 
@@ -1438,6 +1683,192 @@ void DrawChildManagerWindow(float scale) {
       }
 
       ImGui::EndTable();
+    }
+
+    const std::vector<PregnancySpouseOption> outsideSpouses =
+        GetPregnancyOutsideSpouseOptions(pregnancy);
+
+    std::vector<int> swappableSlots;
+    for (int slot = 0; slot < 3; ++slot) {
+      if (IsPregnancySlotSafeForSwap(
+              pregnancy.slots[(size_t)slot])) {
+        swappableSlots.push_back(slot);
+      }
+    }
+
+    if (!outsideSpouses.empty()) {
+      ImGui::Spacing();
+      ImGui::TextDisabled(
+          u8"3슬롯 밖 배우자 교체 테스트");
+
+      if (std::find(
+              swappableSlots.begin(),
+              swappableSlots.end(),
+              g_pregnancySwapSlot) ==
+          swappableSlots.end()) {
+        g_pregnancySwapSlot =
+            swappableSlots.empty()
+                ? -1
+                : swappableSlots.front();
+      }
+
+      bool selectedOutsideStillValid = false;
+      for (const PregnancySpouseOption& option :
+           outsideSpouses) {
+        if (option.id == g_pregnancySwapSpouseId) {
+          selectedOutsideStillValid = true;
+          break;
+        }
+      }
+      if (!selectedOutsideStillValid) {
+        g_pregnancySwapSpouseId =
+            outsideSpouses.front().id;
+      }
+
+      const char* targetPreview =
+          u8"교체 가능한 슬롯 없음";
+      char targetBuffer[128] = {};
+      if (g_pregnancySwapSlot >= 0) {
+        const uint16_t currentId =
+            pregnancy.spouseIds[
+                (size_t)g_pregnancySwapSlot];
+        auto it = g_officerNames.find(currentId);
+        if (it != g_officerNames.end() &&
+            !it->second.empty()) {
+          snprintf(
+              targetBuffer, sizeof(targetBuffer),
+              u8"슬롯%d - %s (%u)",
+              g_pregnancySwapSlot + 1,
+              it->second.c_str(), currentId);
+        } else {
+          snprintf(
+              targetBuffer, sizeof(targetBuffer),
+              u8"슬롯%d - ID %u",
+              g_pregnancySwapSlot + 1,
+              currentId);
+        }
+        targetPreview = targetBuffer;
+      }
+
+      ImGui::SetNextItemWidth(180.0f * scale);
+      if (ImGui::BeginCombo(
+              u8"교체할 슬롯",
+              targetPreview)) {
+        for (int slot : swappableSlots) {
+          const uint16_t currentId =
+              pregnancy.spouseIds[(size_t)slot];
+          char label[128] = {};
+          auto it = g_officerNames.find(currentId);
+          if (it != g_officerNames.end() &&
+              !it->second.empty()) {
+            snprintf(
+                label, sizeof(label),
+                u8"슬롯%d - %s (%u)",
+                slot + 1,
+                it->second.c_str(), currentId);
+          } else {
+            snprintf(
+                label, sizeof(label),
+                u8"슬롯%d - ID %u",
+                slot + 1, currentId);
+          }
+
+          const bool selected =
+              g_pregnancySwapSlot == slot;
+          if (ImGui::Selectable(label, selected))
+            g_pregnancySwapSlot = slot;
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::SameLine();
+
+      char spousePreview[128] = {};
+      const char* spousePreviewText =
+          u8"슬롯 밖 배우자";
+      for (const PregnancySpouseOption& option :
+           outsideSpouses) {
+        if (option.id != g_pregnancySwapSpouseId)
+          continue;
+
+        auto it = g_officerNames.find(option.id);
+        if (it != g_officerNames.end() &&
+            !it->second.empty()) {
+          snprintf(
+              spousePreview, sizeof(spousePreview),
+              "%s (%u)",
+              it->second.c_str(), option.id);
+        } else {
+          snprintf(
+              spousePreview, sizeof(spousePreview),
+              u8"ID %u", option.id);
+        }
+        spousePreviewText = spousePreview;
+        break;
+      }
+
+      ImGui::SetNextItemWidth(150.0f * scale);
+      if (ImGui::BeginCombo(
+              u8"넣을 배우자",
+              spousePreviewText)) {
+        for (const PregnancySpouseOption& option :
+             outsideSpouses) {
+          char label[128] = {};
+          auto it = g_officerNames.find(option.id);
+          if (it != g_officerNames.end() &&
+              !it->second.empty()) {
+            snprintf(
+                label, sizeof(label),
+                "%s (%u)",
+                it->second.c_str(), option.id);
+          } else {
+            snprintf(
+                label, sizeof(label),
+                u8"ID %u", option.id);
+          }
+
+          const bool selected =
+              g_pregnancySwapSpouseId == option.id;
+          if (ImGui::Selectable(label, selected))
+            g_pregnancySwapSpouseId = option.id;
+          if (selected)
+            ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::SameLine();
+
+      const bool canSwap =
+          g_pregnancySwapSlot >= 0 &&
+          g_pregnancySwapSpouseId != 0;
+
+      if (!canSwap)
+        ImGui::BeginDisabled();
+
+      if (ImGui::Button(
+              u8"슬롯 교체",
+              ImVec2(100.0f * scale, 0))) {
+        ApplyPregnancySpouseSlotSwap(
+            g_pregnancySwapSlot,
+            g_pregnancySwapSpouseId);
+      }
+
+      if (!canSwap)
+        ImGui::EndDisabled();
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"비임신(+09=0/+0A=0/+10=NULL) 슬롯만 교체합니다.");
+        ImGui::TextUnformatted(
+            u8"임신 중/출산 완료 슬롯은 선택 대상에서 제외합니다.");
+        ImGui::TextUnformatted(
+            u8"새 슬롯은 cooldown=100(임신 가능도 0%%)으로 초기화합니다.");
+        ImGui::EndTooltip();
+      }
     }
 
     ImGui::TextDisabled(
