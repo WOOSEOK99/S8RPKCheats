@@ -73,6 +73,9 @@ namespace DX11Base {
   static void RebuildSelectedOfficerBases();
 
   // ID는 고유하므로 단건 상태 변경 시 전체 재스캔 없이 캐시 항목만 즉시 갱신
+  static void DrawOfficerRelationshipInfo(
+      uintptr_t officerBase, float scale);
+
   static bool UpdateOfficerStatusInAllCache(int officerID, uint8_t newStatus) {
     for (auto &info : s_allOfficerCache) {
       if (info.officerID == officerID) {
@@ -812,6 +815,11 @@ namespace DX11Base {
 
       ImGui::EndTable();
     }
+
+    // [외형 & 특징] 바로 아래에 공통 관계 정보를 표시합니다.
+    // pGame은 주인공/선택 무장/모든 무장 어느 경로든 ID 기준 조회가 가능하므로 공통 사용합니다.
+    ImGui::Spacing();
+    DrawOfficerRelationshipInfo(pGame, scale);
   }
 
   // --- [모든 무장 일괄 랜덤 기재 부여] ---
@@ -1536,6 +1544,123 @@ namespace DX11Base {
       if (i < 2)
         ImGui::Separator();
       ImGui::PopID();
+    }
+  }
+
+
+  static std::string BuildRelationshipNameList(
+      const std::vector<uint16_t>& ids) {
+    if (ids.empty())
+      return u8"없음";
+
+    std::string result;
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (i > 0)
+        result += u8", ";
+
+      auto it = g_officerNames.find((int)ids[i]);
+      if (it != g_officerNames.end() && !it->second.empty())
+        result += it->second;
+      else
+        result += u8"ID " + std::to_string((int)ids[i]);
+    }
+    return result;
+  }
+
+  static void DrawOfficerRelationshipInfo(
+      uintptr_t officerBase, float scale) {
+    static uintptr_t s_cachedRelationshipOfficer = 0;
+    static OfficerRelationshipInfo s_cachedRelationshipInfo;
+    static bool s_cachedRelationshipRead = false;
+
+    if (officerBase != s_cachedRelationshipOfficer) {
+      s_cachedRelationshipOfficer = officerBase;
+      s_cachedRelationshipInfo = OfficerRelationshipInfo{};
+      s_cachedRelationshipRead =
+          GetOfficerRelationshipInfo(
+              officerBase, s_cachedRelationshipInfo);
+    }
+
+    if (ImGui::BeginTable("OfficerRelationshipHeader", 1)) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::PushStyleColor(
+          ImGuiCol_Header,
+          ImVec4(0.25f, 0.45f, 0.70f, 0.20f));
+      ImGui::PushStyleColor(
+          ImGuiCol_Text,
+          ImVec4(0.55f, 0.82f, 1.0f, 1.0f));
+      ImGui::Selectable(
+          u8" [ 관계 정보 ]", true,
+          ImGuiSelectableFlags_SpanAllColumns |
+          ImGuiSelectableFlags_Disabled);
+      ImGui::PopStyleColor(2);
+      ImGui::EndTable();
+    }
+
+    if (!s_cachedRelationshipRead ||
+        !s_cachedRelationshipInfo.valid) {
+      ImGui::TextDisabled(
+          u8"관계 데이터를 읽을 수 없습니다.");
+      return;
+    }
+
+    const std::string sworn =
+        BuildRelationshipNameList(
+            s_cachedRelationshipInfo.swornBrothers);
+    const std::string spouses =
+        BuildRelationshipNameList(
+            s_cachedRelationshipInfo.spouses);
+    const std::string synergetic =
+        BuildRelationshipNameList(
+            s_cachedRelationshipInfo.synergetic);
+    const std::string antipathetic =
+        BuildRelationshipNameList(
+            s_cachedRelationshipInfo.antipathetic);
+    const std::string enemies =
+        BuildRelationshipNameList(
+            s_cachedRelationshipInfo.enemies);
+    const std::string rivals =
+        BuildRelationshipNameList(
+            s_cachedRelationshipInfo.rivals);
+
+    if (ImGui::BeginTable(
+            "OfficerRelationshipTable", 2,
+            ImGuiTableFlags_BordersInnerH |
+            ImGuiTableFlags_SizingStretchProp |
+            ImGuiTableFlags_NoSavedSettings)) {
+      ImGui::TableSetupColumn(
+          u8"관계",
+          ImGuiTableColumnFlags_WidthFixed,
+          72.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"무장",
+          ImGuiTableColumnFlags_WidthStretch);
+
+      auto drawRow =
+          [](const char* label, const std::string& value) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(label);
+            ImGui::TableSetColumnIndex(1);
+            if (value == u8"없음")
+              ImGui::TextDisabled(u8"없음");
+            else
+              ImGui::TextWrapped("%s", value.c_str());
+          };
+
+      drawRow(u8"의형제", sworn);
+      drawRow(u8"배우자", spouses);
+      drawRow(u8"상생", synergetic);
+      drawRow(u8"상극", antipathetic);
+
+      // 현재 실제 데이터에서 발견되는 경우에만 추가 관계를 표시한다.
+      if (!s_cachedRelationshipInfo.enemies.empty())
+        drawRow(u8"원수", enemies);
+      if (!s_cachedRelationshipInfo.rivals.empty())
+        drawRow(u8"호적수", rivals);
+
+      ImGui::EndTable();
     }
   }
 
