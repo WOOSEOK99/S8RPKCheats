@@ -46,7 +46,6 @@
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
-#include "debug.h"
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -686,7 +685,23 @@ namespace DX11Base {
         if (::DX11Base::g_loyaltyThreadRunning.load())
           ImGui::EndDisabled();
 
-        // 4행: AI 친밀도 가속
+        // 4행: 대련 / 토론
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"대련 실행 무제한", &bInfiniteDuel)) {
+          DX11Base::SetInfiniteDuel(bInfiniteDuel);
+          NotifyFeatureToggle(u8"대련 실행 무제한", bInfiniteDuel);
+          SaveConfig();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"토론 실행 무제한", &bInfiniteDebate)) {
+          DX11Base::SetInfiniteDebate(bInfiniteDebate);
+          NotifyFeatureToggle(u8"토론 실행 무제한", bInfiniteDebate);
+          SaveConfig();
+        }
+
+        // 5행: AI 친밀도 가속
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(
@@ -716,7 +731,7 @@ namespace DX11Base {
 
         ImGui::TableSetColumnIndex(1);
 
-        // 5행: 결혼 / 자녀 관리
+        // 6행: 결혼 / 자녀 관리
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -752,44 +767,6 @@ namespace DX11Base {
         }
 
         ImGui::EndTable();
-      }
-
-      if (::DX11Base::bShowDebug) {
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextDisabled(u8"[교류 무제한 진단]");
-        if (ImGui::Button(u8"1. 교류 상태 객체 캡처##InteractionStateCapture",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::StartInteractionStateCaptureFromGift();
-        }
-        if (ImGui::Button(u8"2. 현재 플래그 확인##InteractionStateRead",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::LogCapturedInteractionState();
-        }
-        if (ImGui::Button(u8"캡처 취소/초기화##InteractionStateCancel",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::CancelInteractionStateCapture();
-        }
-        if (ImGui::Button(u8"3. 대련 사용 bit8 해제 테스트##ClearDuelBitTest",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::ClearCapturedDuelUsedBitForTest();
-        }
-        if (ImGui::Button(u8"4. 토론 사용 bit9 해제 테스트##ClearDebateBitTest",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::ClearCapturedDebateUsedBitForTest();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextUnformatted(
-              u8"선물 기증 무제한을 OFF한 상태에서 1번 → 기증 1회 → 2번 순서로 사용하세요.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-              u8"첫 확인 후 캡처 훅은 자동 원복되고, 같은 +0x320 상태값만 계속 읽습니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"그 뒤 대련/토론을 각각 실행하고 2번을 다시 눌러 bit8/bit9 변화를 확인하세요.");
-          ImGui::EndTooltip();
-        }
       }
 
       EndSection(); // 결혼/인연
