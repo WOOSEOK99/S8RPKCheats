@@ -64,6 +64,14 @@ namespace DX11Base {
     bool GetOfficerAffinityAddress(
         uint16_t officerId1, uint16_t officerId2,
         uintptr_t& outAddress, uint8_t* outCurrentValue = nullptr);
+    // 디버그 검증용: 친밀도를 +1 썼다가 즉시 원복하고 두 단계 모두 재읽기 검증합니다.
+    // 성공해도 최종 게임 값은 호출 전 값으로 복원됩니다.
+    bool TestOfficerAffinityWriteRoundTrip(
+        uint16_t officerId1, uint16_t officerId2,
+        uintptr_t& outAddress,
+        uint8_t& outOriginal,
+        uint8_t& outTestValue,
+        uint8_t& outRestored);
     bool ArmOfficerAffinityWriteProbe(
         uint16_t officerId1, uint16_t officerId2);
     bool ConsumeOfficerAffinityWriteProbe(
