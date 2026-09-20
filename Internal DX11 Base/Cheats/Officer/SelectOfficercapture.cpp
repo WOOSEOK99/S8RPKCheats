@@ -1549,6 +1549,7 @@ namespace DX11Base {
 
 
   static std::string BuildRelationshipNameList(
+      uint16_t sourceOfficerId,
       const std::vector<uint16_t>& ids) {
     if (ids.empty())
       return u8"없음";
@@ -1563,6 +1564,14 @@ namespace DX11Base {
         result += it->second;
       else
         result += u8"ID " + std::to_string((int)ids[i]);
+
+      uint8_t affinity = 0;
+      if (GetOfficerAffinity(
+              sourceOfficerId, ids[i], affinity)) {
+        result += u8" [친밀 ";
+        result += std::to_string((int)affinity);
+        result += "]";
+      }
     }
     return result;
   }
@@ -1605,23 +1614,33 @@ namespace DX11Base {
       return;
     }
 
+    uint16_t relationshipSourceId = 0;
+    if (officerBase > 0x10000)
+      UnsafeRead16(officerBase + 0x08, &relationshipSourceId);
+
     const std::string sworn =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.swornBrothers);
     const std::string spouses =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.spouses);
     const std::string synergetic =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.synergetic);
     const std::string antipathetic =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.antipathetic);
     const std::string enemies =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.enemies);
     const std::string rivals =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.rivals);
 
     if (ImGui::BeginTable(
