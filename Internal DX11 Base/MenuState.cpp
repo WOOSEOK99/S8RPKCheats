@@ -37,6 +37,7 @@ namespace DX11Base {
   bool bInfiniteTalk = false;
   bool bInfiniteDuel = false;
   bool bInfiniteDebate = false;
+  bool bInfiniteMediation = false;
   bool bFastRelationship = false;
   bool bShowChildManagerWin = false;
 

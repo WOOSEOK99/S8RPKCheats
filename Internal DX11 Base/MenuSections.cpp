@@ -225,23 +225,6 @@ namespace DX11Base {
           SaveConfig();
         }
 
-        ImGui::SameLine(160.0f * scale);
-
-        if (ImGui::Checkbox(u8"연회 무제한", &bInfiniteBanquet)) {
-          if (bInfiniteBanquet)
-            ::DX11Base::TickInfiniteBanquet();
-          NotifyFeatureToggle(u8"연회 무제한", bInfiniteBanquet);
-          SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"연회 실행 후 생기는 사용 완료 플래그만 자동으로 해제하여 계속 연회할 수 있게 합니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 다른 상태 비트는 그대로 유지합니다.");
-          ImGui::EndTooltip();
-        }
-
         if (ImGui::Checkbox(u8"청부 무한 유지 (주점)", &bInfiniteTavernRequests)) {
           NotifyFeatureToggle(u8"청부 무한 유지 (주점)", bInfiniteTavernRequests);
           SaveConfig();
@@ -574,13 +557,16 @@ namespace DX11Base {
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       BeginSection();
-      ImGui::TextColored(ImVec4(0.82f, 0.7f, 0.55f, 1.0f), u8"[ 결혼/인연 관련 ]");
+      ImGui::TextColored(
+          ImVec4(0.82f, 0.7f, 0.55f, 1.0f),
+          u8"[ 교류 ]");
 
       bool wasRunning = ::DX11Base::g_initThreadRunning;
 
       auto DrawLoveCheckbox = [&](const char *label, bool *var, LoveMode mode) {
         if (wasRunning)
           ImGui::BeginDisabled();
+
         if (ImGui::Checkbox(label, var)) {
           if (*var) {
             if (mode == LoveMode::Normal)
@@ -589,6 +575,7 @@ namespace DX11Base {
               bLoveCave = false;
             DX11Base::SetInstantLoveCave(false);
           }
+
           DX11Base::SetInstantLoveCave(*var, mode);
           NotifyFeatureToggle(label, *var);
           SaveConfig();
@@ -598,15 +585,30 @@ namespace DX11Base {
           ImGui::EndDisabled();
       };
 
-      if (ImGui::BeginTable("SocialRelationLayout", 2,
-                            ImGuiTableFlags_SizingStretchSame |
-                            ImGuiTableFlags_NoSavedSettings)) {
-        ImGui::TableSetupColumn("SocialLeft", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableSetupColumn("SocialRight", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+      if (ImGui::BeginTable(
+              "SocialInteractionLayout",
+              2,
+              ImGuiTableFlags_SizingStretchSame |
+                  ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn(
+            "SocialUnlimited",
+            ImGuiTableColumnFlags_WidthStretch,
+            1.0f);
+        ImGui::TableSetupColumn(
+            "SocialOthers",
+            ImGuiTableColumnFlags_WidthStretch,
+            1.0f);
 
-        // 1행: 경애 관련
+        // 1행: 선물 기증 무제한 / 즉시 경애
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
+          DX11Base::SetInfiniteGift(bInfiniteGift);
+          NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
+          SaveConfig();
+        }
+
+        ImGui::TableSetColumnIndex(1);
         if (ImGui::Checkbox(u8"즉시 경애 맺기", &bFastRelationship)) {
           DX11Base::SetFastRelationship(bFastRelationship);
           NotifyFeatureToggle(u8"즉시 경애 맺기", bFastRelationship);
@@ -614,55 +616,74 @@ namespace DX11Base {
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"교류로 관계가 갱신되는 대상의 친밀도를 100으로 처리해 즉시 경애 상태로 진입시킵니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 기존 즉시 경애 패치 대신 CT ID 321 방식을 사용합니다.");
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"교류로 관계가 갱신되는 대상의 친밀도를 100으로 처리해 즉시 경애 상태로 진입시킵니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 기존 즉시 경애 패치 대신 CT ID 321 방식을 사용합니다.");
           ImGui::EndTooltip();
         }
 
-        ImGui::TableSetColumnIndex(1);
-        DrawLoveCheckbox(u8"혐오/상극 무시 경애", &bHateCave, LoveMode::HateIgnore);
-
-        // 2행: 공명 / 선물
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        const bool resonanceBusy =
-            ::DX11Base::g_resonanceThreadRunning.load();
-        if (resonanceBusy)
-          ImGui::BeginDisabled();
-
-        if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
-          DX11Base::SetInstantResonance(bResonance);
-          NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
-          SaveConfig();
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"무조건 공명갯수 4개로 되고,");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"다음번 담화때 상생 발생함.");
-          ImGui::EndTooltip();
-        }
-
-        if (resonanceBusy)
-          ImGui::EndDisabled();
-
-        ImGui::TableSetColumnIndex(1);
-        if (ImGui::Checkbox(u8"선물 기증 무제한", &bInfiniteGift)) {
-          DX11Base::SetInfiniteGift(bInfiniteGift);
-          NotifyFeatureToggle(u8"선물 기증 무제한", bInfiniteGift);
-          SaveConfig();
-        }
-
-        // 3행: 담화 / 충성도
+        // 2행: 담화 무제한 / 혐오·상극 무시
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(u8"담화 실행 무제한", &bInfiniteTalk)) {
           DX11Base::SetInfiniteTalk(bInfiniteTalk);
           NotifyFeatureToggle(u8"담화 실행 무제한", bInfiniteTalk);
+          SaveConfig();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        DrawLoveCheckbox(
+            u8"혐오/상극 무시 경애",
+            &bHateCave,
+            LoveMode::HateIgnore);
+
+        // 3행: 대련 무제한 / 공명
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"대련 실행 무제한", &bInfiniteDuel)) {
+          DX11Base::SetInfiniteDuel(bInfiniteDuel);
+          NotifyFeatureToggle(u8"대련 실행 무제한", bInfiniteDuel);
+          SaveConfig();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        {
+          const bool resonanceBusy =
+              ::DX11Base::g_resonanceThreadRunning.load();
+
+          if (resonanceBusy)
+            ImGui::BeginDisabled();
+
+          if (ImGui::Checkbox(u8"무조건 공명 발생", &bResonance)) {
+            DX11Base::SetInstantResonance(bResonance);
+            NotifyFeatureToggle(u8"무조건 공명 발생", bResonance);
+            SaveConfig();
+          }
+
+          if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextColored(
+                ImVec4(1, 1, 0, 1),
+                u8"무조건 공명갯수 4개로 되고,");
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                u8"다음번 담화때 상생 발생함.");
+            ImGui::EndTooltip();
+          }
+
+          if (resonanceBusy)
+            ImGui::EndDisabled();
+        }
+
+        // 4행: 토론 무제한 / 충성도
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"토론 실행 무제한", &bInfiniteDebate)) {
+          DX11Base::SetInfiniteDebate(bInfiniteDebate);
+          NotifyFeatureToggle(u8"토론 실행 무제한", bInfiniteDebate);
           SaveConfig();
         }
 
@@ -678,33 +699,36 @@ namespace DX11Base {
 
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"교류 클릭시 목록에 있는 모든 무장의 충성이 100이 됨.");
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"교류 클릭시 목록에 있는 모든 무장의 충성이 100이 됨.");
           ImGui::EndTooltip();
         }
 
         if (::DX11Base::g_loyaltyThreadRunning.load())
           ImGui::EndDisabled();
 
-        // 4행: 대련 / 토론
+        // 5행: 중개 무제한 / AI 친밀도 가속
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        if (ImGui::Checkbox(u8"대련 실행 무제한", &bInfiniteDuel)) {
-          DX11Base::SetInfiniteDuel(bInfiniteDuel);
-          NotifyFeatureToggle(u8"대련 실행 무제한", bInfiniteDuel);
+        if (ImGui::Checkbox(u8"중개 무제한", &bInfiniteMediation)) {
+          if (bInfiniteMediation)
+            ::DX11Base::TickInfiniteMediation();
+          NotifyFeatureToggle(u8"중개 무제한", bInfiniteMediation);
           SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"중개 실행 후 생기는 사용 완료 플래그(+0x71E5 bit6)만 자동으로 해제합니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 다른 상태 비트는 그대로 유지합니다.");
+          ImGui::EndTooltip();
         }
 
         ImGui::TableSetColumnIndex(1);
-        if (ImGui::Checkbox(u8"토론 실행 무제한", &bInfiniteDebate)) {
-          DX11Base::SetInfiniteDebate(bInfiniteDebate);
-          NotifyFeatureToggle(u8"토론 실행 무제한", bInfiniteDebate);
-          SaveConfig();
-        }
-
-        // 5행: AI 친밀도 가속
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(
                 u8"AI 친밀도 가속",
                 &g_autoAffinityGrowthEnabled)) {
@@ -730,10 +754,44 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
+        // 6행: 연회 무제한 / 자녀 관리
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"연회 무제한", &bInfiniteBanquet)) {
+          if (bInfiniteBanquet)
+            ::DX11Base::TickInfiniteBanquet();
+          NotifyFeatureToggle(u8"연회 무제한", bInfiniteBanquet);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"연회 실행 후 생기는 사용 완료 플래그만 자동으로 해제하여 계속 연회할 수 있게 합니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 다른 상태 비트는 그대로 유지합니다.");
+          ImGui::EndTooltip();
+        }
+
         ImGui::TableSetColumnIndex(1);
+        if (ImGui::Button(
+                u8"자녀 관리",
+                ImVec2(120.0f * scale, 0))) {
+          bShowChildManagerWin = true;
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"감지된 자녀 목록을 열어 자녀별로 임관 시점을 설정합니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 새로 태어난 자녀도 이후 자녀 처리 시 자동으로 목록에 추가됩니다.");
+          ImGui::EndTooltip();
+        }
 
-        // 6행: 결혼 / 자녀 관리
-
+        // 7행: 결혼 무제한 / 빈칸
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         bool tempMarriage = ::DX11Base::marriageApplied;
@@ -742,38 +800,27 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"결혼 무제한", tempMarriage);
           SaveConfig();
         }
-
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"배우자가 있어도 무조건 결혼이 됩니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 상대가 경애 상태일 때 기존 배우자 제한을 우회합니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 대신 타 세력의 경우 등용은 안되네요.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::TableSetColumnIndex(1);
-        if (ImGui::Button(u8"자녀 관리", ImVec2(120.0f * scale, 0))) {
-          bShowChildManagerWin = true;
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"감지된 자녀 목록을 열어 자녀별로 임관 시점을 설정합니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 새로 태어난 자녀도 이후 자녀 처리 시 자동으로 목록에 추가됩니다.");
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"배우자가 있어도 무조건 결혼이 됩니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 상대가 경애 상태일 때 기존 배우자 제한을 우회합니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 대신 타 세력의 경우 등용은 안되네요.");
           ImGui::EndTooltip();
         }
 
         ImGui::EndTable();
       }
 
-      EndSection(); // 결혼/인연
+      EndSection(); // 교류
     }
 
-    void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale) {
+        void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.7f, 1.0f), u8"[ 전쟁 관련 ]");
 
