@@ -2812,6 +2812,9 @@ namespace DX11Base {
       for (int i = 0; i < relationshipOfficerCount; ++i)
         relationshipParent[i] = i;
 
+      const ULONGLONG relationshipBuildStartMs =
+          GetTickCount64();
+
       auto relationFind = [&](int index) {
         int root = index;
         while (relationshipParent[root] != root)
@@ -2831,22 +2834,41 @@ namespace DX11Base {
           relationshipParent[rb] = ra;
       };
 
+      // ID -> 군단 행 인덱스를 한 번 만들어 관계마다 전체 장수 목록을
+      // 다시 선형 탐색하지 않도록 한다.
+      std::vector<int> relationshipIndexById(5103, -1);
+      std::vector<uintptr_t> relationshipOfficerBases;
+      relationshipOfficerBases.reserve(relationshipOfficerCount);
+      for (int i = 0; i < relationshipOfficerCount; ++i) {
+        const uint16_t id = s_corpsOfficerRows[i].id;
+        if (id < relationshipIndexById.size())
+          relationshipIndexById[id] = i;
+        relationshipOfficerBases.push_back(
+            s_corpsOfficerRows[i].officerBase);
+      }
+
       auto findCorpsRowIndexById = [&](uint16_t id) {
-        for (int i = 0; i < relationshipOfficerCount; ++i) {
-          if (s_corpsOfficerRows[i].id == id)
-            return i;
-        }
-        return -1;
+        if (id >= relationshipIndexById.size())
+          return -1;
+        return relationshipIndexById[id];
       };
 
+      // 기존에는 장수 한 명마다 관계/숙명 테이블(최대 3000+5000칸)을
+      // 다시 훑었다. 자동배치에서는 전체 군단을 한 번의 배치 조회로 읽는다.
+      std::vector<OfficerRelationshipInfo> relationshipInfos;
+      const bool relationshipBatchValid =
+          GetOfficerRelationshipInfoBatch(
+              relationshipOfficerBases,
+              relationshipInfos);
+
       for (int i = 0; i < relationshipOfficerCount; ++i) {
-        OfficerRelationshipInfo relationInfo;
-        if (!GetOfficerRelationshipInfo(
-                s_corpsOfficerRows[i].officerBase,
-                relationInfo) ||
-            !relationInfo.valid)
+        if (!relationshipBatchValid ||
+            i >= (int)relationshipInfos.size() ||
+            !relationshipInfos[i].valid)
           continue;
 
+        const OfficerRelationshipInfo &relationInfo =
+            relationshipInfos[i];
         const std::vector<uint16_t> *sameCityRelations[] = {
             &relationInfo.swornBrothers,
             &relationInfo.spouses,
@@ -2869,23 +2891,11 @@ namespace DX11Base {
         }
       }
 
-      std::vector<std::vector<int>> relationshipGroups;
-      for (int i = 0; i < relationshipOfficerCount; ++i) {
-        const int root = relationFind(i);
-        std::vector<int> *group = nullptr;
-        for (auto &candidate : relationshipGroups) {
-          if (!candidate.empty() &&
-              relationFind(candidate.front()) == root) {
-            group = &candidate;
-            break;
-          }
-        }
-        if (!group) {
-          relationshipGroups.push_back({});
-          group = &relationshipGroups.back();
-        }
-        group->push_back(i);
-      }
+      // 루트 인덱스를 그대로 버킷으로 사용해 그룹 생성도 한 번의 순회로 끝낸다.
+      std::vector<std::vector<int>> relationshipGroups(
+          relationshipOfficerCount);
+      for (int i = 0; i < relationshipOfficerCount; ++i)
+        relationshipGroups[relationFind(i)].push_back(i);
 
       auto ensureRelationshipGroupCapacity =
           [&](int targetCityIndex, int memberCount) {
@@ -2979,9 +2989,11 @@ namespace DX11Base {
         return best ? best->cityIndex : -1;
       };
 
+      int relationshipGroupCount = 0;
       for (const auto &group : relationshipGroups) {
         if (group.size() < 2)
           continue;
+        ++relationshipGroupCount;
 
         int anchorCity = -1;
         bool anchorConflict = false;
@@ -3115,9 +3127,18 @@ namespace DX11Base {
         }
 
         if (bShowDebug) {
+          std::string groupMemberNames;
+          for (int memberIndex : group) {
+            if (!groupMemberNames.empty())
+              groupMemberNames += u8", ";
+            groupMemberNames += BuildOfficerName(
+                s_corpsOfficerRows[memberIndex].id);
+          }
+
           AddLog(
-              u8"[군단 자동배치 관계] %d명 그룹 -> %s (%s%s)",
+              u8"[군단 자동배치 관계] %d명 그룹 [%s] -> %s (%s%s)",
               (int)group.size(),
+              groupMemberNames.c_str(),
               g_CityList[targetCity].cityname,
               FindDeploymentCity(targetCity) &&
                       FindDeploymentCity(targetCity)->frontline
@@ -3127,6 +3148,16 @@ namespace DX11Base {
                   ? u8", 통솔/무력 우선"
                   : "");
         }
+      }
+
+      if (bShowDebug) {
+        AddLog(
+            u8"[군단 자동배치 관계] 관계 조회/그룹 계산 %llums (군단 %d명 / 관계 그룹 %d개)",
+            (unsigned long long)(
+                GetTickCount64() -
+                relationshipBuildStartMs),
+            relationshipOfficerCount,
+            relationshipGroupCount);
       }
 
       // 완전히 빈 도시는 기존 태수(E8)를 끌어오지 않는다.
