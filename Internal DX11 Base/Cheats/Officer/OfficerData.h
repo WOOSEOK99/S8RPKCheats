@@ -60,6 +60,17 @@ namespace DX11Base {
     // 2026-09-20 추적: 1650 압축 인덱스 + ScenarioDataCenter+0x24206.
     // 읽기 전용이며 0~100 범위만 유효값으로 반환합니다.
     bool GetOfficerAffinity(uint16_t officerId1, uint16_t officerId2, uint8_t& outAffinity);
+    // 친밀도 실제 저장 명령을 읽기 전용으로 추적하기 위한 디버그 검증 API.
+    bool GetOfficerAffinityAddress(
+        uint16_t officerId1, uint16_t officerId2,
+        uintptr_t& outAddress, uint8_t* outCurrentValue = nullptr);
+    bool ArmOfficerAffinityWriteProbe(
+        uint16_t officerId1, uint16_t officerId2);
+    bool ConsumeOfficerAffinityWriteProbe(
+        uintptr_t& outExpectedAddress,
+        uintptr_t& outCapturedAddress,
+        uint8_t& outWrittenValue);
+    void DisarmOfficerAffinityWriteProbe();
     // 여러 무장의 관계를 한 번의 테이블 스캔으로 읽습니다.
     // 자동배치처럼 다수 무장을 동시에 검사할 때 개별 반복 스캔으로 인한 프리징을 줄입니다.
     bool GetOfficerRelationshipInfoBatch(
