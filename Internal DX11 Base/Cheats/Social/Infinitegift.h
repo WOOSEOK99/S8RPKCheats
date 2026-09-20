@@ -3,8 +3,10 @@
 namespace DX11Base {
   void SetInfiniteGift(bool enable);
 
-  // 디버그: 현재 기증 +0x320 코드 위치를 기준으로
-  // 옛 CT의 상대거리에서 대련/토론 후보 주변 바이트만 읽습니다.
-  void LogDuelDebateNearGiftCandidates();
+  // 디버그: 기증 원본 코드에서 공통 교류 상태 객체(RSI)를 1회 캡처한 뒤
+  // 훅을 즉시 원복하고 +0x320 행동별 비트를 읽습니다.
+  bool StartInteractionStateCaptureFromGift();
+  void LogCapturedInteractionState();
+  void CancelInteractionStateCapture();
 
 } // namespace DX11Base
