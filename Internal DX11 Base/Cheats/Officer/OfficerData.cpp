@@ -426,6 +426,136 @@ namespace DX11Base {
             return firstEmpty >= 0;
         }
 
+        bool TryWriteSynergeticSlotPOD(
+            uintptr_t slot,
+            uintptr_t officer1,
+            uintptr_t officer2) {
+            if (slot <= 0x10000 ||
+                officer1 <= 0x10000 ||
+                officer2 <= 0x10000)
+                return false;
+
+            // +0x00의 공통 객체/VT 포인터는 절대 건드리지 않는다.
+            // 빈 슬롯에서 실제 관계 데이터 영역(+0x08~+0x1F)만 백업 후 기록한다.
+            uint8_t backup[0x18]{};
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(
+                    (LPVOID)(slot + 0x08),
+                    sizeof(backup),
+                    PAGE_READWRITE,
+                    &oldProtect))
+                return false;
+
+            bool ok = false;
+            __try {
+                memcpy(backup, (const void*)(slot + 0x08), sizeof(backup));
+
+                // 포인터와 occurred를 먼저 기록하고 relation을 마지막에 활성화한다.
+                *(uintptr_t*)(slot + 0x08) = officer1;
+                *(uintptr_t*)(slot + 0x10) = officer2;
+                *(uint8_t*)(slot + 0x19) = 0;
+                for (int i = 0x1A; i < 0x20; ++i)
+                    *(uint8_t*)(slot + i) = 0;
+                *(uint8_t*)(slot + 0x18) = 2;
+
+                ok =
+                    *(uintptr_t*)(slot + 0x08) == officer1 &&
+                    *(uintptr_t*)(slot + 0x10) == officer2 &&
+                    *(uint8_t*)(slot + 0x18) == 2 &&
+                    *(uint8_t*)(slot + 0x19) == 0;
+
+                if (!ok)
+                    memcpy((void*)(slot + 0x08), backup, sizeof(backup));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                __try {
+                    memcpy((void*)(slot + 0x08), backup, sizeof(backup));
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                }
+                ok = false;
+            }
+
+            DWORD dummyProtect = 0;
+            VirtualProtect(
+                (LPVOID)(slot + 0x08),
+                sizeof(backup),
+                oldProtect,
+                &dummyProtect);
+            return ok;
+        }
+
+        bool TryCreateSynergeticRelation(
+            uintptr_t synerBase,
+            uintptr_t rosterBase,
+            uintptr_t officer1,
+            uintptr_t officer2,
+            int* outSlotIndex) {
+            if (outSlotIndex)
+                *outSlotIndex = -1;
+            if (synerBase <= 0x10000 ||
+                rosterBase <= 0x10000 ||
+                !IsRosterOfficerPtr(officer1, rosterBase) ||
+                !IsRosterOfficerPtr(officer2, rosterBase) ||
+                officer1 == officer2)
+                return false;
+
+            uint16_t id1 = 0, id2 = 0;
+            if (!ReadOfficerIdFromRosterPtr(officer1, rosterBase, &id1) ||
+                !ReadOfficerIdFromRosterPtr(officer2, rosterBase, &id2) ||
+                id1 == id2)
+                return false;
+
+            int firstEmpty = -1;
+            for (int i = 0; i < 5000; ++i) {
+                const uintptr_t slot = synerBase + (uintptr_t)i * 0x20;
+                uintptr_t p1 = 0, p2 = 0;
+                uint8_t relation = 0, occurred = 0;
+                if (!SafeRelReadPtr(slot + 0x08, &p1) ||
+                    !SafeRelReadPtr(slot + 0x10, &p2) ||
+                    !SafeRelRead8(slot + 0x18, &relation) ||
+                    !SafeRelRead8(slot + 0x19, &occurred))
+                    break;
+
+                if (relation == 1 || relation == 2) {
+                    uint16_t existing1 = 0, existing2 = 0;
+                    if (ReadOfficerIdFromRosterPtr(p1, rosterBase, &existing1) &&
+                        ReadOfficerIdFromRosterPtr(p2, rosterBase, &existing2) &&
+                        ((existing1 == id1 && existing2 == id2) ||
+                         (existing1 == id2 && existing2 == id1))) {
+                        // 이미 관계가 있으면 성공으로 취급하되 새 슬롯은 만들지 않는다.
+                        if (outSlotIndex)
+                            *outSlotIndex = i;
+                        return true;
+                    }
+                    continue;
+                }
+
+                // 실측된 빈 슬롯 규칙: relation=0, occurred=0, 두 장수 포인터=0.
+                if (firstEmpty < 0 &&
+                    relation == 0 &&
+                    occurred == 0 &&
+                    p1 == 0 &&
+                    p2 == 0) {
+                    firstEmpty = i;
+                    break;
+                }
+            }
+
+            if (firstEmpty < 0)
+                return false;
+
+            const uintptr_t emptySlot =
+                synerBase + (uintptr_t)firstEmpty * 0x20;
+            if (!TryWriteSynergeticSlotPOD(
+                    emptySlot, officer1, officer2))
+                return false;
+
+            if (outSlotIndex)
+                *outSlotIndex = firstEmpty;
+            return true;
+        }
+
         void AddUniqueRelationshipId(std::vector<uint16_t>& values, uint16_t id) {
             if (id == 0)
                 return;
@@ -1653,17 +1783,41 @@ namespace DX11Base {
                             compatibilityBonus,
                             interestBonus);
 
-                        if (!dumpedSynerProbeThisCouncil) {
-                            if (hasSynerProbeTable) {
+                        if (hasSynerProbeTable) {
+                            int synerSlotIndex = -1;
+                            if (TryCreateSynergeticRelation(
+                                    synerProbeBase,
+                                    rosterBase,
+                                    left.base,
+                                    right.base,
+                                    &synerSlotIndex)) {
+                                AddLog(
+                                    u8"[친밀자동] 상생 생성 성공: %s(ID %u) <-> %s(ID %u) / 슬롯 #%d",
+                                    AutoAffinityName(left.id).c_str(),
+                                    (unsigned int)left.id,
+                                    AutoAffinityName(right.id).c_str(),
+                                    (unsigned int)right.id,
+                                    synerSlotIndex);
+                            } else {
+                                AddLog(
+                                    u8"[친밀자동] 상생 생성 실패: %s(ID %u) <-> %s(ID %u)",
+                                    AutoAffinityName(left.id).c_str(),
+                                    (unsigned int)left.id,
+                                    AutoAffinityName(right.id).c_str(),
+                                    (unsigned int)right.id);
+                            }
+
+                            if (!dumpedSynerProbeThisCouncil) {
                                 DumpSynergeticSlotBytes(
                                     synerProbeBase,
                                     rosterBase,
                                     left.id,
                                     right.id);
-                            } else {
-                                AddLog(
-                                    u8"[상생슬롯DBG] 상생 테이블 해석 실패");
+                                dumpedSynerProbeThisCouncil = true;
                             }
+                        } else if (!dumpedSynerProbeThisCouncil) {
+                            AddLog(
+                                u8"[상생슬롯DBG] 상생 테이블 해석 실패");
                             dumpedSynerProbeThisCouncil = true;
                         }
                     }
