@@ -330,28 +330,17 @@ namespace DX11Base {
         if (!exeBase)
             return 0;
 
-        MODULEINFO mi{};
-        if (!GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi)))
+        // 기존 프로젝트에서 실제 동작 확인된 결혼 제한 패턴.
+        // "mov rax,[rdi+10] / cmp r14,rax" 지점을 찾고,
+        // 바로 2바이트 앞의 JNE(75 xx) / 패치된 JMP(EB xx)를 사용합니다.
+        const uintptr_t searchAddr =
+            FindPattern(exeBase, exeBase + 0x3000000,
+                        "48 8B 47 10 4C 3B F0");
+        if (!searchAddr || searchAddr <= exeBase + 2)
             return 0;
 
-        // CT "Remove Marriage Restrictions"와 동일한 AOB.
-        // 첫 바이트가 기존 배우자 제한 분기의 JNE(75 xx)이며,
-        // 활성화 시 opcode만 JMP(EB xx)로 바꿉니다.
-        const char* marriagePatternNormal =
-            "75 ?? 48 8B ?? ?? 4C ?? ?? ?? 74 ?? 4C ?? ?? ?? ?? 75";
-        const char* marriagePatternPatched =
-            "EB ?? 48 8B ?? ?? 4C ?? ?? ?? 74 ?? 4C ?? ?? ?? ?? 75";
-
-        uintptr_t found =
-            FindPattern(exeBase, exeBase + mi.SizeOfImage,
-                        marriagePatternNormal);
-        if (!found) {
-            found =
-                FindPattern(exeBase, exeBase + mi.SizeOfImage,
-                            marriagePatternPatched);
-        }
-
-        if (!found || !IsValidPtr(found, 2))
+        const uintptr_t found = searchAddr - 2;
+        if (!IsValidPtr(found, 2))
             return 0;
 
         const uint8_t op = *(uint8_t*)found;
@@ -366,17 +355,17 @@ namespace DX11Base {
         if (!exeBase)
             return;
 
-        // 1. CT "Remove Marriage Restrictions"의 AOB로 JNE 지점을 직접 검색.
+        // 1. 기존 동작 확인 패턴으로 JNE/JMP 지점을 검색.
         if (!marriageAddr) {
             marriageAddr = FindMarriageConditionAddress();
             if (marriageAddr) {
                 AddLog(
-                    "[Marriage] AOB found: %p / original=%02X %02X",
+                    "[Marriage] original pattern found: %p / current=%02X %02X",
                     (void*)marriageAddr,
                     *(uint8_t*)(marriageAddr + 0),
                     *(uint8_t*)(marriageAddr + 1));
             } else {
-                AddLog("[Marriage] Remove Marriage Restrictions AOB not found");
+                AddLog("[Marriage] original marriage pattern not found");
             }
         }
 
@@ -412,17 +401,17 @@ namespace DX11Base {
             return;
         }
 
-        // CT "Remove Marriage Restrictions" AOB로 실제 분기 주소를 해석합니다.
+        // 기존 프로젝트에서 동작 확인된 패턴으로 실제 분기 주소를 해석합니다.
         if (!marriageAddr) {
             marriageAddr = FindMarriageConditionAddress();
             if (marriageAddr) {
                 AddLog(
-                    "[Marriage] AOB found: %p / current=%02X %02X",
+                    "[Marriage] original pattern found: %p / current=%02X %02X",
                     (void*)marriageAddr,
                     *(uint8_t*)(marriageAddr + 0),
                     *(uint8_t*)(marriageAddr + 1));
             } else {
-                AddLog("[Marriage] Remove Marriage Restrictions AOB not found");
+                AddLog("[Marriage] original marriage pattern not found");
                 marriageApplied = false;
                 return;
             }
