@@ -745,6 +745,10 @@ namespace DX11Base {
                           ImVec2(-FLT_MIN, 0))) {
           ::DX11Base::LogBanquetFlagCandidate();
         }
+        if (ImGui::Button(u8"연회 코드 후보 검색##BanquetCodeDebug",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::ScanBanquetCodeCandidates();
+        }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
