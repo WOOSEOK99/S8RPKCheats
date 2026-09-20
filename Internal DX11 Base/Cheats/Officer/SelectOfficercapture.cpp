@@ -73,6 +73,9 @@ namespace DX11Base {
   static void RebuildSelectedOfficerBases();
 
   // ID는 고유하므로 단건 상태 변경 시 전체 재스캔 없이 캐시 항목만 즉시 갱신
+  static void DrawOfficerRelationshipInfo(
+      uintptr_t officerBase, float scale);
+
   static bool UpdateOfficerStatusInAllCache(int officerID, uint8_t newStatus) {
     for (auto &info : s_allOfficerCache) {
       if (info.officerID == officerID) {
@@ -812,6 +815,11 @@ namespace DX11Base {
 
       ImGui::EndTable();
     }
+
+    // [외형 & 특징] 바로 아래에 공통 관계 정보를 표시합니다.
+    // pGame은 주인공/선택 무장/모든 무장 어느 경로든 ID 기준 조회가 가능하므로 공통 사용합니다.
+    ImGui::Spacing();
+    DrawOfficerRelationshipInfo(pGame, scale);
   }
 
   // --- [모든 무장 일괄 랜덤 기재 부여] ---
@@ -1906,10 +1914,6 @@ namespace DX11Base {
         }
         DrawOfficerHeader(pBase, scale, pSnap);
         DrawOfficerTalents(pSnap, scale, pBase);
-        if (asChild) {
-          ImGui::Spacing();
-          DrawOfficerRelationshipInfo(pBase, scale);
-        }
         ImGui::EndTabItem();
       }
       if (ImGui::BeginTabItem(u8"능력/상태")) {
