@@ -1368,6 +1368,26 @@ namespace DX11Base {
         int failedCount = 0;
         int negativeAffinityCount = 0;
 
+        const uintptr_t affinityArrayBase =
+            dataCenter + kCurrentAffinityBaseOffset;
+        const size_t affinityArraySize =
+            (size_t)kAffinityOfficerCount *
+            (size_t)(kAffinityOfficerCount - 1) / 2u;
+
+        DWORD affinityOldProtect = 0;
+        if (!VirtualProtect(
+                (LPVOID)affinityArrayBase,
+                affinityArraySize,
+                PAGE_READWRITE,
+                &affinityOldProtect)) {
+            AddLog(
+                u8"[친밀자동] 평정 진입(07->05): 친밀도 배열 쓰기 권한 확보 실패");
+            return;
+        }
+
+        const ULONGLONG affinityStartMs =
+            GetTickCount64();
+
         size_t groupBegin = 0;
         while (groupBegin < officers.size()) {
             size_t groupEnd =
@@ -1454,18 +1474,27 @@ namespace DX11Base {
                             (int)rawAffinity + gain);
                     const uint8_t next =
                         (uint8_t)nextInt;
-                    uint8_t previousValue = 0;
 
-                    if (!SetOfficerAffinity(
-                            left.id, right.id,
-                            next, &previousValue)) {
+                    bool writeOk = false;
+                    __try {
+                        *(volatile uint8_t*)affinityAddress =
+                            next;
+                        writeOk =
+                            (*(volatile uint8_t*)affinityAddress ==
+                             next);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER) {
+                        writeOk = false;
+                    }
+
+                    if (!writeOk) {
                         ++failedCount;
                         continue;
                     }
 
                     ++increasedCount;
 
-                    if (previousValue < 100 &&
+                    if (rawAffinity < 100 &&
                         next == 100) {
                         ++reachedHundredCount;
                         AddLog(
@@ -1474,7 +1503,7 @@ namespace DX11Base {
                             (unsigned int)left.id,
                             AutoAffinityName(right.id).c_str(),
                             (unsigned int)right.id,
-                            (unsigned int)previousValue,
+                            (unsigned int)rawAffinity,
                             compatibilityBonus,
                             interestBonus);
                     }
@@ -1483,6 +1512,16 @@ namespace DX11Base {
 
             groupBegin = groupEnd;
         }
+
+        DWORD affinityDummyProtect = 0;
+        VirtualProtect(
+            (LPVOID)affinityArrayBase,
+            affinityArraySize,
+            affinityOldProtect,
+            &affinityDummyProtect);
+
+        const ULONGLONG affinityElapsedMs =
+            GetTickCount64() - affinityStartMs;
 
         AddLog(
             u8"[친밀자동] 평정 진입(07->05) 완료: AI %d명 / 같은 세력·도시 후보 %d쌍 / 증가 %d / 증가0 %d / 음수친밀 제외 %d / 100 도달 %d / 실패 %d / 메타데이터 제외 %d명",
@@ -1494,6 +1533,9 @@ namespace DX11Base {
             reachedHundredCount,
             failedCount,
             invalidMetaCount);
+        AddLog(
+            u8"[친밀자동] 처리시간 %llums (친밀 배열 쓰기 권한 1회 설정)",
+            (unsigned long long)affinityElapsedMs);
     }
 
     bool GetOfficerTalentDetailed(uintptr_t officerBase, int slot, TalentInfo& outInfo) {
