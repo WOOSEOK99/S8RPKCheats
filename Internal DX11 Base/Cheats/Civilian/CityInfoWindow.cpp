@@ -6313,6 +6313,299 @@ namespace DX11Base {
     }
 
 
+
+    // ── 친밀도 배열 후보 탐색 (읽기 전용) ────────────────────────────────
+    // 구 CT의 고정 주소/오프셋은 사용하지 않는다.
+    // 확인된 사실만 사용:
+    //   1) 두 무장 조합당 1바이트
+    //   2) 대칭 조합을 한 번만 저장하는 삼각 배열
+    // 현재 PK에서는 옛 1650 압축 인덱스와 현재 5102 ID 직결 인덱스
+    // 두 가설을 모두 점수화하여 후보만 로그로 남긴다.
+    struct AffinityProbeCandidate {
+      uintptr_t base = 0;
+      uintptr_t relativeOffset = 0;
+      int score = -999999;
+      int plausiblePositive = 0;
+      int zeroCount = 0;
+      int negativeCount = 0;
+      std::vector<int> values;
+    };
+
+    static int LegacyAffinityIndexFromOfficerId(uint16_t id) {
+      if (id >= 1 && id <= 1000)
+        return (int)id;
+      if (id >= 2001 && id <= 2100)
+        return (int)id - 1000;
+      if (id >= 4001 && id <= 4200)
+        return (int)id - 2900;
+      if (id >= 5001 && id <= 5100)
+        return (int)id - 3700;
+      if (id >= 3001 && id <= 3150)
+        return (int)id - 1600;
+      if (id >= 5101 && id <= 5200)
+        return (int)id - 3550;
+      return -1;
+    }
+
+    static bool CalcAffinityTriangularOffset(
+        int index1, int index2, int officerCount,
+        uintptr_t *outOffset) {
+      if (!outOffset || officerCount < 2 ||
+          index1 < 1 || index2 < 1 ||
+          index1 > officerCount || index2 > officerCount ||
+          index1 == index2)
+        return false;
+
+      int leftIndex = (std::min)(index1, index2);
+      int rightIndex = (std::max)(index1, index2);
+      const uint64_t left = (uint64_t)(leftIndex - 1);
+      const uint64_t width = (uint64_t)(officerCount - 1);
+      const uint64_t rowStart =
+          left * (2ull * width - (left - 1ull)) / 2ull;
+      const uint64_t offset =
+          rowStart + (uint64_t)(rightIndex - leftIndex - 1);
+      *outOffset = (uintptr_t)offset;
+      return true;
+    }
+
+    static void InsertAffinityProbeCandidate(
+        std::vector<AffinityProbeCandidate> &best,
+        const AffinityProbeCandidate &candidate,
+        size_t maxCount) {
+      best.push_back(candidate);
+      std::sort(
+          best.begin(), best.end(),
+          [](const AffinityProbeCandidate &a,
+             const AffinityProbeCandidate &b) {
+            if (a.score != b.score)
+              return a.score > b.score;
+            if (a.plausiblePositive != b.plausiblePositive)
+              return a.plausiblePositive > b.plausiblePositive;
+            return a.relativeOffset < b.relativeOffset;
+          });
+      if (best.size() > maxCount)
+        best.resize(maxCount);
+    }
+
+    static void LogAffinityProbeForSelectedOfficer(
+        const CityOfficerRow &selected) {
+      OfficerRelationshipInfo relationInfo;
+      if (!GetOfficerRelationshipInfo(
+              selected.officerBase, relationInfo) ||
+          !relationInfo.valid) {
+        AddLog(u8"[친밀DBG] %s: 관계 정보를 읽지 못해 후보 탐색을 중단합니다.",
+               BuildOfficerName(selected.id).c_str());
+        return;
+      }
+
+      struct RelatedSample {
+        uint16_t id = 0;
+        const char *label = nullptr;
+      };
+      std::vector<RelatedSample> samples;
+
+      auto addSamples =
+          [&](const std::vector<uint16_t> &ids,
+              const char *label) {
+        for (uint16_t id : ids) {
+          if (id == 0 || id == selected.id)
+            continue;
+          bool duplicate = false;
+          for (const auto &sample : samples) {
+            if (sample.id == id) {
+              duplicate = true;
+              break;
+            }
+          }
+          if (!duplicate)
+            samples.push_back({id, label});
+          if (samples.size() >= 12)
+            return;
+        }
+      };
+
+      // 친밀도가 양수일 가능성이 높은 직접/상생 관계만 검증 샘플로 사용한다.
+      addSamples(relationInfo.spouses, u8"배우자");
+      addSamples(relationInfo.swornBrothers, u8"의형제");
+      addSamples(relationInfo.synergetic, u8"상생");
+
+      if (samples.empty()) {
+        AddLog(u8"[친밀DBG] %s: 배우자/의형제/상생 관계가 없어 친밀 배열 후보를 검증할 샘플이 없습니다.",
+               BuildOfficerName(selected.id).c_str());
+        return;
+      }
+
+      const uintptr_t dataCenter =
+          GetScenarioDataCenterAddress();
+      if (dataCenter <= 0x10000) {
+        AddLog(u8"[친밀DBG] 현재 PK 시나리오 데이터 인스턴스를 찾지 못했습니다.");
+        return;
+      }
+
+      AddLog(u8"[친밀DBG] ===== %s(ID %u) 친밀 배열 후보 탐색 시작 =====",
+             BuildOfficerName(selected.id).c_str(),
+             (unsigned int)selected.id);
+      AddLog(u8"[친밀DBG] 현재 시나리오 데이터 인스턴스 = 0x%llX / 샘플 %d명",
+             (unsigned long long)dataCenter,
+             (int)samples.size());
+      AddLog(u8"[친밀DBG] 구 CT의 +0x7060/1650명은 주소로 사용하지 않음. 1650 압축/5102 ID직결 두 구조만 비교.");
+
+      struct Hypothesis {
+        const char *name;
+        int officerCount;
+        bool legacyCompressed;
+      };
+      const Hypothesis hypotheses[] = {
+          {u8"1650 압축 인덱스(구 구조 가설)", 1650, true},
+          {u8"5102 ID 직결 인덱스(현재 구조 가설)", 5102, false}};
+
+      // 친밀 베이스는 구 CT에서 날짜 필드와 같은 큰 데이터 블록 안에 있었다.
+      // 현재 날짜 필드가 이 인스턴스 +0x72D0에서 검증되어 있으므로,
+      // 고정값을 믿지 않고 인스턴스 +0x3000~+0x12000를 8바이트 정렬로 탐색한다.
+      constexpr uintptr_t kScanBegin = 0x3000;
+      constexpr uintptr_t kScanEnd = 0x12000;
+      constexpr uintptr_t kScanStep = 8;
+
+      for (const auto &hyp : hypotheses) {
+        std::vector<uintptr_t> pairOffsets;
+        std::vector<RelatedSample> validSamples;
+        pairOffsets.reserve(samples.size());
+        validSamples.reserve(samples.size());
+
+        const int selectedIndex =
+            hyp.legacyCompressed
+                ? LegacyAffinityIndexFromOfficerId(selected.id)
+                : (int)selected.id;
+        if (selectedIndex < 1 ||
+            selectedIndex > hyp.officerCount) {
+          AddLog(u8"[친밀DBG] %s: 선택 무장 인덱스 변환 실패",
+                 hyp.name);
+          continue;
+        }
+
+        for (const auto &sample : samples) {
+          const int otherIndex =
+              hyp.legacyCompressed
+                  ? LegacyAffinityIndexFromOfficerId(sample.id)
+                  : (int)sample.id;
+          uintptr_t pairOffset = 0;
+          if (otherIndex < 1 ||
+              otherIndex > hyp.officerCount ||
+              !CalcAffinityTriangularOffset(
+                  selectedIndex, otherIndex,
+                  hyp.officerCount, &pairOffset))
+            continue;
+          pairOffsets.push_back(pairOffset);
+          validSamples.push_back(sample);
+        }
+
+        if (pairOffsets.empty()) {
+          AddLog(u8"[친밀DBG] %s: 유효한 관계 샘플 인덱스가 없습니다.",
+                 hyp.name);
+          continue;
+        }
+
+        std::vector<AffinityProbeCandidate> best;
+        for (uintptr_t rel = kScanBegin;
+             rel <= kScanEnd; rel += kScanStep) {
+          AffinityProbeCandidate candidate;
+          candidate.base = dataCenter + rel;
+          candidate.relativeOffset = rel;
+          candidate.score = 0;
+          candidate.values.reserve(pairOffsets.size());
+
+          bool readable = true;
+          for (uintptr_t pairOffset : pairOffsets) {
+            uint8_t raw = 0;
+            if (!SafeRead8(
+                    candidate.base + pairOffset, &raw)) {
+              readable = false;
+              break;
+            }
+
+            const int value =
+                (int)(int8_t)raw;
+            candidate.values.push_back(value);
+
+            // 배우자/의형제/상생은 게임 표시를 위해 0이 아닌 친밀값을
+            // 가지는 구조였다는 구 CT 단서만 점수에 사용한다.
+            if (value > 0 && value <= 100) {
+              ++candidate.plausiblePositive;
+              candidate.score += 5;
+              if (value >= 45)
+                candidate.score += 2;
+            } else if (value == 0) {
+              ++candidate.zeroCount;
+              candidate.score -= 2;
+            } else {
+              ++candidate.negativeCount;
+              candidate.score -= 4;
+            }
+          }
+
+          if (!readable)
+            continue;
+
+          // 모든 샘플이 우연히 동일 바이트(특히 0/FF)인 넓은 패딩영역을 약하게 감점.
+          bool allSame = !candidate.values.empty();
+          for (size_t i = 1; i < candidate.values.size(); ++i) {
+            if (candidate.values[i] != candidate.values[0]) {
+              allSame = false;
+              break;
+            }
+          }
+          if (allSame && candidate.values.size() >= 2)
+            candidate.score -= 2;
+
+          if (candidate.plausiblePositive > 0)
+            InsertAffinityProbeCandidate(
+                best, candidate, 8);
+        }
+
+        AddLog(u8"[친밀DBG] -- %s / 유효 샘플 %d명 --",
+               hyp.name, (int)validSamples.size());
+        if (best.empty()) {
+          AddLog(u8"[친밀DBG] 후보 없음");
+          continue;
+        }
+
+        for (size_t rank = 0;
+             rank < best.size(); ++rank) {
+          const auto &candidate = best[rank];
+          std::string values;
+          for (size_t i = 0;
+               i < candidate.values.size() &&
+               i < validSamples.size(); ++i) {
+            if (!values.empty())
+              values += u8" | ";
+            values += validSamples[i].label;
+            values += ":";
+            values += BuildOfficerName(
+                validSamples[i].id);
+            values += "=";
+            values += std::to_string(
+                candidate.values[i]);
+          }
+
+          AddLog(
+              u8"[친밀DBG] 후보%u dataCenter+0x%llX = 0x%llX / 점수 %d / 양수 %d / 0 %d / 음수·범위밖 %d / %s",
+              (unsigned int)(rank + 1),
+              (unsigned long long)
+                  candidate.relativeOffset,
+              (unsigned long long)
+                  candidate.base,
+              candidate.score,
+              candidate.plausiblePositive,
+              candidate.zeroCount,
+              candidate.negativeCount,
+              values.c_str());
+        }
+      }
+
+      AddLog(u8"[친밀DBG] ===== 친밀 배열 후보 탐색 종료 =====");
+    }
+
+
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
                                           uintptr_t shiftedCityBase) {
       const CityOfficerRow *selected = FindSelectedCityOfficer();
@@ -6692,6 +6985,22 @@ namespace DX11Base {
               u8"구 CT의 숙명(0x20) / 의형제·배우자·원수·호적수(0x40) 구조를 기준으로 PK 주소를 읽기 전용 탐색합니다.");
           ImGui::TextUnformatted(
               u8"메모리 쓰기는 하지 않으며 결과는 로그 창에 출력됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(0.f, 6.f * sc);
+        if (ImGui::SmallButton(
+                u8"친밀 후보 로그##OfficerAffinityProbe")) {
+          LogAffinityProbeForSelectedOfficer(*selected);
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"현재 PK의 시나리오 데이터에서 친밀도 삼각 배열 후보를 읽기 전용 탐색합니다.");
+          ImGui::TextUnformatted(
+              u8"구 CT의 고정 주소는 사용하지 않고 1650 압축/5102 ID직결 두 구조를 비교합니다.");
+          ImGui::TextUnformatted(
+              u8"배우자·의형제·상생 관계가 있는 무장을 선택한 뒤 실행하세요.");
           ImGui::EndTooltip();
         }
       }
