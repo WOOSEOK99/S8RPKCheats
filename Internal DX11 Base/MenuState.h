@@ -25,6 +25,7 @@ namespace DX11Base {
   extern bool bNonggyeongCity;
   extern bool bSangeopCity;
   extern bool bAttitudeHack;
+  extern bool bInfiniteBanquet; // 연회 사용 플래그 bit1 지속 해제
   extern bool bZeroInfamy;
   extern bool bSelectOfficerFirstInit;
   extern bool bDomestics;        // 내정 배율
