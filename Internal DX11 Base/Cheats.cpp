@@ -325,20 +325,46 @@ namespace DX11Base {
     bool marriageSaved = false;
     bool marriageApplied = false;
 
+    static uintptr_t FindMarriageConditionAddress() {
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        if (!exeBase)
+            return 0;
+
+        MODULEINFO mi{};
+        if (!GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi)))
+            return 0;
+
+        // CT "Remove Marriage Restrictions"와 동일한 AOB.
+        // 첫 바이트가 기존 배우자 제한 분기의 JNE(75 xx)이며,
+        // 활성화 시 opcode만 JMP(EB xx)로 바꿉니다.
+        const char* marriagePattern =
+            "75 ?? 48 8B ?? ?? 4C ?? ?? ?? 74 ?? 4C ?? ?? ?? ?? 75";
+
+        const uintptr_t found =
+            FindPattern(exeBase, exeBase + mi.SizeOfImage, marriagePattern);
+
+        if (!found || !IsValidPtr(found, 2) || *(uint8_t*)found != 0x75)
+            return 0;
+
+        return found;
+    }
+
     void ToggleMarriageCondition() {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase)
             return;
 
-        // 1. 와일드카드 없는 고정 패턴으로 검색 (A350 지점)
+        // 1. CT "Remove Marriage Restrictions"의 AOB로 JNE 지점을 직접 검색.
         if (!marriageAddr) {
-            // "mov rax,[rdi+10]" -> 48 8B 47 10
-            uintptr_t searchAddr = FindPattern(exeBase, exeBase + 0x3000000, "48 8B 47 10 4C 3B F0");
-
-            if (searchAddr) {
-                // 찾은 주소에서 2바이트 앞이 바로 '75 21' (jne) 지점입니다.
-                marriageAddr = searchAddr - 2;
-                AddLog("[DEBUG] [marriageAddr]: %02X", *(uint8_t *)(marriageAddr));
+            marriageAddr = FindMarriageConditionAddress();
+            if (marriageAddr) {
+                AddLog(
+                    "[Marriage] AOB found: %p / original=%02X %02X",
+                    (void*)marriageAddr,
+                    *(uint8_t*)(marriageAddr + 0),
+                    *(uint8_t*)(marriageAddr + 1));
+            } else {
+                AddLog("[Marriage] Remove Marriage Restrictions AOB not found");
             }
         }
 
@@ -355,7 +381,7 @@ namespace DX11Base {
         VirtualProtect((LPVOID)marriageAddr, 2, PAGE_EXECUTE_READWRITE, &old);
 
         if (!marriageApplied) {
-            // 75 21 (jne) -> EB 21 (jmp) 로 교체
+            // CT와 동일하게 JNE(75 xx) -> JMP(EB xx), 분기 변위는 유지.
             *(BYTE *)marriageAddr = 0xEB;
             marriageApplied = true;
         } else {
@@ -372,11 +398,18 @@ namespace DX11Base {
         if (!exeBase)
             return;
 
-        // 1. 패턴 검색 (최초 1회 실행)
+        // 1. CT "Remove Marriage Restrictions"의 AOB로 JNE 지점을 직접 검색.
         if (!marriageAddr) {
-            uintptr_t searchAddr = FindPattern(exeBase, exeBase + 0x3000000, "48 8B 47 10 4C 3B F0");
-            if (searchAddr)
-                marriageAddr = searchAddr - 2;
+            marriageAddr = FindMarriageConditionAddress();
+            if (marriageAddr) {
+                AddLog(
+                    "[Marriage] AOB found: %p / original=%02X %02X",
+                    (void*)marriageAddr,
+                    *(uint8_t*)(marriageAddr + 0),
+                    *(uint8_t*)(marriageAddr + 1));
+            } else {
+                AddLog("[Marriage] Remove Marriage Restrictions AOB not found");
+            }
         }
 
         if (!marriageAddr)
@@ -396,7 +429,7 @@ namespace DX11Base {
         DWORD old;
         if (VirtualProtect((LPVOID)marriageAddr, 2, PAGE_EXECUTE_READWRITE, &old)) {
             if (enable) {
-                // JNE (75) -> JMP (EB) 강제 점프 적용
+                // CT와 동일하게 JNE(75 xx) -> JMP(EB xx), 분기 변위는 유지.
                 *(BYTE *)marriageAddr = 0xEB;
             } else {
                 // 원본 데이터(75 21) 복구
