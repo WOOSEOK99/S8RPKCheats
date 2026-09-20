@@ -8,7 +8,13 @@
 #include "../../showlog.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstring>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace DX11Base {
@@ -34,6 +40,39 @@ static std::unordered_map<uint16_t, ChildEntry> g_children;
 static ULONGLONG g_lastChildScanMs = 0;
 static uint16_t g_lastHeroId = 0;
 
+// 임신 레코드 구조 탐색용 임시 read-only 진단.
+// 과거 CT 힌트: stride 0x28, +0x09 임신 flag, +0x0A 남은 개월,
+// +0x10 자녀 pointer, +0x1E~+0x22 자녀 능력 상한 후보.
+struct PregnancyDebugRecordDump {
+  bool valid = false;
+  uintptr_t base = 0;
+  uintptr_t q00 = 0;
+  uintptr_t q08 = 0;
+  uintptr_t childPtr = 0;
+  uint16_t q00OfficerId = 0;
+  uint16_t q08OfficerId = 0;
+  uint16_t childOfficerId = 0;
+  uint8_t pregnancyFlag = 0;
+  uint8_t remainingMonths = 0;
+  std::array<uint8_t, 5> capRaw{};
+};
+
+struct PregnancyDebugHit {
+  uint16_t anchorChildId = 0;
+  uintptr_t anchorChildAddr = 0;
+  uintptr_t childPtrRefAddr = 0;
+  uintptr_t recordBase = 0;
+  bool expectedFlagMonthRange = false;
+  std::array<PregnancyDebugRecordDump, 5> neighborhood{};
+};
+
+static std::atomic<bool> g_pregnancyDebugScanning{false};
+static std::atomic<float> g_pregnancyDebugProgress{0.0f};
+static std::atomic<bool> g_pregnancyDebugResultsReady{false};
+static std::mutex g_pregnancyDebugMutex;
+static std::vector<PregnancyDebugHit> g_pregnancyDebugResults;
+static size_t g_pregnancyDebugTotalHits = 0;
+
 static uintptr_t NormalizeOfficerPtr(uintptr_t p) {
   return p & 0x0000FFFFFFFFFFFFULL;
 }
@@ -54,6 +93,306 @@ static bool SafeReadPtr(uintptr_t addr, uintptr_t* out) {
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
   }
+}
+
+static bool SafeRead8(uintptr_t addr, uint8_t* out) {
+  __try {
+    *out = *(uint8_t*)addr;
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static bool SafeReadMem(uintptr_t addr, void* out, size_t size) {
+  __try {
+    memcpy(out, (const void*)addr, size);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+static uint16_t TryReadOfficerIdFromPointer(uintptr_t rawPtr) {
+  const uintptr_t p = NormalizeOfficerPtr(rawPtr);
+  if (p <= 0x10000)
+    return 0;
+
+  uint16_t id = 0;
+  if (!SafeRead16(p + 0x08, &id) || id < 1 || id > 5102)
+    return 0;
+  return id;
+}
+
+static bool ReadPregnancyDebugRecord(
+    uintptr_t base,
+    PregnancyDebugRecordDump* out) {
+  if (!out || base <= 0x10000)
+    return false;
+
+  PregnancyDebugRecordDump dump;
+  dump.base = base;
+
+  if (!SafeReadPtr(base + 0x00, &dump.q00) ||
+      !SafeReadPtr(base + 0x08, &dump.q08) ||
+      !SafeRead8(base + 0x09, &dump.pregnancyFlag) ||
+      !SafeRead8(base + 0x0A, &dump.remainingMonths) ||
+      !SafeReadPtr(base + 0x10, &dump.childPtr) ||
+      !SafeReadMem(base + 0x1E, dump.capRaw.data(), dump.capRaw.size())) {
+    return false;
+  }
+
+  dump.q00OfficerId = TryReadOfficerIdFromPointer(dump.q00);
+  dump.q08OfficerId = TryReadOfficerIdFromPointer(dump.q08);
+  dump.childOfficerId = TryReadOfficerIdFromPointer(dump.childPtr);
+  dump.valid = true;
+  *out = dump;
+  return true;
+}
+
+static bool IsPregnancyDebugScanRegion(
+    const MEMORY_BASIC_INFORMATION& mbi) {
+  if (mbi.State != MEM_COMMIT ||
+      (mbi.Protect & PAGE_GUARD) ||
+      (mbi.Protect & PAGE_NOACCESS)) {
+    return false;
+  }
+
+  const DWORD protection = mbi.Protect & 0xFF;
+  return protection == PAGE_READWRITE ||
+         protection == PAGE_WRITECOPY ||
+         protection == PAGE_EXECUTE_READWRITE ||
+         protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+static void StartPregnancyDebugScanAsync() {
+  if (g_pregnancyDebugScanning.load())
+    return;
+
+  std::unordered_map<uintptr_t, uint16_t> childTargets;
+  childTargets.reserve(g_children.size());
+  for (const auto& kv : g_children) {
+    const ChildEntry& child = kv.second;
+    const uintptr_t normalized = NormalizeOfficerPtr(child.addr);
+    if (normalized > 0x10000)
+      childTargets[normalized] = child.id;
+  }
+
+  if (childTargets.empty()) {
+    AddLog(u8"[임신DBG] 현재 주인공의 자녀 주소가 없어 검색을 시작할 수 없습니다.");
+    return;
+  }
+
+  g_pregnancyDebugScanning = true;
+  g_pregnancyDebugProgress = 0.0f;
+  g_pregnancyDebugResultsReady = false;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancyDebugMutex);
+    g_pregnancyDebugResults.clear();
+    g_pregnancyDebugTotalHits = 0;
+  }
+
+  std::thread([childTargets = std::move(childTargets)]() {
+    MEMORY_BASIC_INFORMATION mbi{};
+    std::vector<MEMORY_BASIC_INFORMATION> regions;
+    unsigned long long totalSize = 0;
+    uintptr_t addr = 0;
+
+    while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
+      if (IsPregnancyDebugScanRegion(mbi)) {
+        regions.push_back(mbi);
+        totalSize += mbi.RegionSize;
+      }
+
+      const uintptr_t next =
+          (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+      if (next <= addr)
+        break;
+      addr = next;
+    }
+
+    constexpr size_t kChunkSize = 256 * 1024;
+    constexpr size_t kMaxStoredHits = 512;
+    std::vector<uint8_t> buffer(kChunkSize);
+    std::vector<PregnancyDebugHit> hits;
+    hits.reserve(64);
+    std::unordered_set<uintptr_t> seenRecordBases;
+    unsigned long long processedSize = 0;
+    size_t totalHits = 0;
+
+    for (const auto& region : regions) {
+      const uintptr_t regionStart =
+          (uintptr_t)region.BaseAddress;
+      const uintptr_t regionEnd =
+          regionStart + region.RegionSize;
+
+      for (uintptr_t curr = regionStart;
+           curr < regionEnd;) {
+        const size_t remaining =
+            (size_t)(regionEnd - curr);
+        const size_t toRead =
+            (std::min)(remaining, kChunkSize);
+
+        if (SafeReadMem(curr, buffer.data(), toRead)) {
+          size_t i =
+              (size_t)((8 - (curr & 7)) & 7);
+          for (; i + sizeof(uintptr_t) <= toRead;
+               i += sizeof(uintptr_t)) {
+            uintptr_t rawPtr = 0;
+            memcpy(&rawPtr, buffer.data() + i,
+                   sizeof(rawPtr));
+
+            const uintptr_t normalized =
+                NormalizeOfficerPtr(rawPtr);
+            auto childIt = childTargets.find(normalized);
+            if (childIt == childTargets.end())
+              continue;
+
+            const uintptr_t refAddr = curr + i;
+            if (refAddr < 0x10)
+              continue;
+
+            const uintptr_t recordBase = refAddr - 0x10;
+            if (!seenRecordBases.insert(recordBase).second)
+              continue;
+
+            PregnancyDebugRecordDump center;
+            if (!ReadPregnancyDebugRecord(
+                    recordBase, &center)) {
+              continue;
+            }
+
+            if (NormalizeOfficerPtr(center.childPtr) !=
+                normalized) {
+              continue;
+            }
+
+            totalHits++;
+            if (hits.size() >= kMaxStoredHits)
+              continue;
+
+            PregnancyDebugHit hit;
+            hit.anchorChildId = childIt->second;
+            hit.anchorChildAddr = normalized;
+            hit.childPtrRefAddr = refAddr;
+            hit.recordBase = recordBase;
+            hit.expectedFlagMonthRange =
+                center.pregnancyFlag <= 1 &&
+                center.remainingMonths <= 12;
+
+            for (int rel = -2; rel <= 2; ++rel) {
+              const intptr_t slotSigned =
+                  (intptr_t)recordBase +
+                  (intptr_t)rel * 0x28;
+              if (slotSigned <= 0x10000)
+                continue;
+
+              ReadPregnancyDebugRecord(
+                  (uintptr_t)slotSigned,
+                  &hit.neighborhood[(size_t)(rel + 2)]);
+            }
+
+            hits.push_back(hit);
+          }
+        }
+
+        processedSize += toRead;
+        if (totalSize > 0) {
+          g_pregnancyDebugProgress =
+              (float)((double)processedSize /
+                      (double)totalSize);
+        }
+
+        curr += toRead;
+      }
+    }
+
+    std::stable_sort(
+        hits.begin(), hits.end(),
+        [](const PregnancyDebugHit& a,
+           const PregnancyDebugHit& b) {
+          return a.expectedFlagMonthRange >
+                 b.expectedFlagMonthRange;
+        });
+
+    {
+      std::lock_guard<std::mutex> lock(
+          g_pregnancyDebugMutex);
+      g_pregnancyDebugResults = std::move(hits);
+      g_pregnancyDebugTotalHits = totalHits;
+    }
+
+    g_pregnancyDebugProgress = 1.0f;
+    g_pregnancyDebugScanning = false;
+    g_pregnancyDebugResultsReady = true;
+  }).detach();
+}
+
+static void FlushPregnancyDebugResults() {
+  if (!g_pregnancyDebugResultsReady.exchange(false))
+    return;
+
+  std::vector<PregnancyDebugHit> hits;
+  size_t totalHits = 0;
+  {
+    std::lock_guard<std::mutex> lock(
+        g_pregnancyDebugMutex);
+    hits = g_pregnancyDebugResults;
+    totalHits = g_pregnancyDebugTotalHits;
+  }
+
+  AddLog(
+      u8"[임신DBG] 검색 완료: 자녀 pointer(+0x10) 역참조 후보 %zu개 / 저장 %zu개",
+      totalHits, hits.size());
+
+  constexpr size_t kMaxLogHits = 64;
+  const size_t logCount =
+      (std::min)(hits.size(), kMaxLogHits);
+
+  for (size_t i = 0; i < logCount; ++i) {
+    const PregnancyDebugHit& hit = hits[i];
+    AddLog(
+        u8"[임신DBG] 후보 #%zu | 자녀 ID %u addr=%p | ref=%p -> record=%p | +09/+0A 범위=%s",
+        i + 1, hit.anchorChildId,
+        (void*)hit.anchorChildAddr,
+        (void*)hit.childPtrRefAddr,
+        (void*)hit.recordBase,
+        hit.expectedFlagMonthRange ? "OK" : "RAW");
+
+    for (int rel = -2; rel <= 2; ++rel) {
+      const PregnancyDebugRecordDump& d =
+          hit.neighborhood[(size_t)(rel + 2)];
+      if (!d.valid) {
+        AddLog(
+            u8"[임신DBG]   rel %+d (stride 0x28) 읽기 실패",
+            rel);
+        continue;
+      }
+
+      AddLog(
+          u8"[임신DBG]   rel %+d base=%p | +00=%p(ID:%u) +08=%p(ID:%u) | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
+          rel, (void*)d.base,
+          (void*)d.q00, d.q00OfficerId,
+          (void*)d.q08, d.q08OfficerId,
+          (unsigned)d.pregnancyFlag,
+          (unsigned)d.remainingMonths,
+          (void*)d.childPtr, d.childOfficerId,
+          (unsigned)d.capRaw[0],
+          (unsigned)d.capRaw[1],
+          (unsigned)d.capRaw[2],
+          (unsigned)d.capRaw[3],
+          (unsigned)d.capRaw[4]);
+    }
+  }
+
+  if (hits.size() > kMaxLogHits) {
+    AddLog(
+        u8"[임신DBG] 로그는 앞 %zu개 후보까지만 출력했습니다. (저장 후보 %zu개)",
+        kMaxLogHits, hits.size());
+  }
+
+  AddLog(
+      u8"[임신DBG] 모든 값은 읽기 전용 진단입니다. 아직 임신 record base로 확정하지 않습니다.");
 }
 
 static bool RefreshChild(ChildEntry& e) {
@@ -275,6 +614,8 @@ void RunChildManagerUpdate() {
 
   for (auto& kv : g_children)
     RefreshChild(kv.second);
+
+  FlushPregnancyDebugResults();
 }
 
 void DrawChildManagerWindow(float scale) {
@@ -395,6 +736,32 @@ void DrawChildManagerWindow(float scale) {
                      u8"※ 선택된 자녀만 등장년도와 출생년도를 함께 조정하며 사망년도는 변경하지 않습니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 자녀 출생/임관/주인공 변경은 혈연 데이터를 다시 읽어 목록에 자동 반영합니다.");
+
+  ImGui::Separator();
+  ImGui::TextDisabled(u8"임신 구조 DBG (읽기 전용)");
+
+  if (g_pregnancyDebugScanning.load()) {
+    ImGui::TextUnformatted(u8"자녀 포인터 역참조로 임신 레코드 후보를 검색 중...");
+    ImGui::ProgressBar(
+        g_pregnancyDebugProgress.load(),
+        ImVec2(280.0f * scale, 0));
+  } else {
+    if (ImGui::Button(
+            u8"임신 구조 DBG 검색",
+            ImVec2(150.0f * scale, 0))) {
+      StartPregnancyDebugScanAsync();
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::TextUnformatted(
+          u8"현재 자녀의 무장 포인터가 메모리에서 참조되는 위치를 찾습니다.");
+      ImGui::TextUnformatted(
+          u8"각 참조를 +0x10 자녀 pointer 후보로 보고 stride 0x28 주변 레코드를 로그로 출력합니다.");
+      ImGui::TextUnformatted(
+          u8"+0x09 flag / +0x0A 남은 개월 / +0x1E~+0x22 raw 값만 읽으며 메모리는 수정하지 않습니다.");
+      ImGui::EndTooltip();
+    }
+  }
 
   ImGui::End();
 }
