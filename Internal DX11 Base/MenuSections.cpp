@@ -36,6 +36,7 @@
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/FactionLordBonus.h"
+#include "Cheats/War/GovernorPrisonerDisposal.h"
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
@@ -906,6 +907,42 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"- 체크 상태와 적용값은 설정 파일에 저장되어 다음 실행 시 다시 불러옵니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                            u8"※ 체크 해제 시 활성화 전에 읽어둔 원래 값으로 복구합니다.");
+        ImGui::EndTooltip();
+      }
+
+      if (ImGui::Checkbox(u8"도독 포로 직접 처분", &bGovernorPrisonerDisposal)) {
+        const bool requested = bGovernorPrisonerDisposal;
+        if (!DX11Base::SetGovernorPrisonerDisposal(requested))
+          bGovernorPrisonerDisposal = DX11Base::IsGovernorPrisonerDisposalApplied();
+        NotifyFeatureToggle(u8"도독 포로 직접 처분", bGovernorPrisonerDisposal);
+        SaveConfig();
+      }
+      const bool governorPrisonerHovered = ImGui::IsItemHovered();
+
+      ImGui::SameLine(190.0f * scale);
+      if (ImGui::Checkbox(u8"특권 1개 소비", &bGovernorPrisonerConsumePrivilege)) {
+        SaveConfig();
+      }
+      const bool governorPrivilegeHovered = ImGui::IsItemHovered();
+
+      if (governorPrisonerHovered) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"도독이 통치권 내 도시의 정규군 전투에서 승리했을 때 포로를 직접 처분할지 선택할 수 있게 합니다.");
+        ImGui::TextUnformatted(u8"- 조건을 만족하면 포로 처분 전에 예/아니오 질문이 표시됩니다.");
+        ImGui::TextUnformatted(u8"- 아니오를 선택하면 원래 게임의 포로 처분 흐름을 그대로 따릅니다.");
+        ImGui::TextUnformatted(u8"- 체크 상태와 특권 소비 옵션은 설정 파일에 저장됩니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 게임 버전의 후킹 지점 바이트가 다르면 안전을 위해 적용하지 않습니다.");
+        ImGui::EndTooltip();
+      }
+
+      if (governorPrivilegeHovered) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"OFF: 예를 선택해도 특권을 소비하지 않습니다.");
+        ImGui::TextUnformatted(u8"ON: 예를 선택하면 특권 1개를 소비한 뒤 직접 처분합니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 특권이 0개이면 특권 소비 모드에서 직접 처분할 수 없습니다.");
         ImGui::EndTooltip();
       }
 

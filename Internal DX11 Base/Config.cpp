@@ -7,6 +7,7 @@
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/War/ShortBattleCooldown.h"
+#include "Cheats/War/GovernorPrisonerDisposal.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -135,6 +136,8 @@ namespace DX11Base {
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
     UpsertBoolConfigValue("bShortBattleCooldownEnabled", bShortBattleCooldownEnabled);
     UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
+    UpsertBoolConfigValue("bGovernorPrisonerDisposal", bGovernorPrisonerDisposal);
+    UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
     UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
@@ -148,6 +151,24 @@ namespace DX11Base {
       bAIWarImprove = savedAIWarImprove;
       SetAIWarImprove(savedAIWarImprove);
       AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
+    }
+
+    bool savedGovernorPrisonerConsumePrivilege = false;
+    if (LoadBoolConfigValue("bGovernorPrisonerConsumePrivilege",
+                            savedGovernorPrisonerConsumePrivilege)) {
+      bGovernorPrisonerConsumePrivilege = savedGovernorPrisonerConsumePrivilege;
+    }
+
+    bool savedGovernorPrisonerDisposal = false;
+    if (LoadBoolConfigValue("bGovernorPrisonerDisposal",
+                            savedGovernorPrisonerDisposal)) {
+      bGovernorPrisonerDisposal = savedGovernorPrisonerDisposal;
+      if (!SetGovernorPrisonerDisposal(savedGovernorPrisonerDisposal))
+        bGovernorPrisonerDisposal = IsGovernorPrisonerDisposalApplied();
+
+      AddLog(u8"[Config] 도독 포로 직접 처분 설정 로드: %s / 특권소비=%s",
+             bGovernorPrisonerDisposal ? "ON" : "OFF",
+             bGovernorPrisonerConsumePrivilege ? "ON" : "OFF");
     }
 
     int savedShortBattleCooldownDays = 3;

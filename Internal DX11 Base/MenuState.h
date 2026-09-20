@@ -58,6 +58,8 @@ namespace DX11Base {
   extern bool bBattleMapShuffle;
   extern bool bShortBattleCooldownEnabled;
   extern int iShortBattleCooldownDays;
+  extern bool bGovernorPrisonerDisposal;
+  extern bool bGovernorPrisonerConsumePrivilege;
 
   // 전투 환경 / 조건 설정
   extern bool bWeatherSkillSimple;

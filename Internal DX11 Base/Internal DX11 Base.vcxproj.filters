@@ -188,6 +188,9 @@
     <ClInclude Include="Cheats\War\ShortBattleCooldown.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\GovernorPrisonerDisposal.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\SiegeWarfare.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -395,6 +398,9 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\ShortBattleCooldown.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\GovernorPrisonerDisposal.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\SiegeWarfare.cpp">
