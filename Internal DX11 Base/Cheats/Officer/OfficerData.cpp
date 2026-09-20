@@ -1095,9 +1095,12 @@ namespace DX11Base {
     namespace {
         constexpr uint8_t kAutoAffinityCouncilState = 0x05;
         constexpr uint8_t kAutoAffinityDomesticState = 0x07;
-        constexpr uintptr_t kOfficerCompatibilityOffset = 0x5D;
-        constexpr uintptr_t kOfficerInterestOffset = 0x83;
-        constexpr uintptr_t kOfficerFavoredReputationOffset = 0xA4;
+        // 구 0x3C0 무장 구조 대비 현재 PK 0x3D0 구조에서 +0x10 이동 후보.
+        // 선택 무장 실측 검증이 끝날 때까지 자동 쓰기는 아래 verified 플래그로 차단한다.
+        constexpr uintptr_t kOfficerCompatibilityOffset = 0x6D;
+        constexpr uintptr_t kOfficerInterestOffset = 0x93;
+        constexpr uintptr_t kOfficerFavoredReputationOffset = 0xB4;
+        constexpr bool kAutoAffinityMetadataVerified = false;
 
         bool IsAutoAffinityOfficerStatus(uint8_t status) {
             return status == 0x18 || status == 0x28 ||
@@ -1220,6 +1223,16 @@ namespace DX11Base {
 
         if (!g_autoAffinityGrowthEnabled) {
             ResetAutoAffinityGrowthState();
+            return;
+        }
+
+        if (!kAutoAffinityMetadataVerified) {
+            static bool s_loggedMetadataHold = false;
+            if (!s_loggedMetadataHold) {
+                AddLog(
+                    u8"[친밀자동] 상성/흥미/중시 현재 PK 오프셋 검증 전이라 자동 상승을 일시 중지합니다.");
+                s_loggedMetadataHold = true;
+            }
             return;
         }
 
