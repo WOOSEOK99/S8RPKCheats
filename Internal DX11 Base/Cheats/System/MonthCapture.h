@@ -19,6 +19,9 @@ namespace DX11Base {
     bool ReadScenarioMonth(uint8_t *outMonth);
     // 한 번의 포인터 해석으로 연·월 동시 읽기 (UI 폴링용)
     bool ReadScenarioDate(unsigned short *outYear, uint8_t *outMonth);
+    // 현재 버전에서 검증 중인 시나리오 데이터 인스턴스 주소를 반환합니다.
+    // 다른 데이터 구조 진단 시 같은 베이스를 재사용하기 위한 읽기 전용 helper입니다.
+    uintptr_t GetScenarioDataCenterAddress();
 
     // ───────────────────────────────────────────────
     //  설정 및 상태 플래그
