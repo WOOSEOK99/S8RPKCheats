@@ -27,6 +27,10 @@ namespace DX11Base {
     bool CaptureBanquetDiffBaseline();
     bool CompareBanquetDiffAfter();
 
+    // 실측된 연회 상태 +0x71E4의 bit1만 1회 해제합니다.
+    // 다른 비트는 보존하며 readback으로 검증합니다.
+    bool ClearBanquetUsedBitForTest();
+
     // 옛 CT의 실제 무제한 연회 필드(+0x6EA4)와 현재년도(+0x6F78)의
     // 상대차이 0xD4를 현재 구조에 대입한 후보 값을 읽기 전용으로 출력합니다.
     bool LogBanquetFlagCandidate();
