@@ -63,6 +63,9 @@ struct PregnancyDebugHit {
   uintptr_t childPtrRefAddr = 0;
   uintptr_t recordBase = 0;
   bool expectedFlagMonthRange = false;
+  uint16_t spouseMatchId = 0;
+  int spouseMatchOffset = -1;
+  int score = 0;
   std::array<PregnancyDebugRecordDump, 5> neighborhood{};
 };
 
@@ -72,6 +75,11 @@ static std::atomic<bool> g_pregnancyDebugResultsReady{false};
 static std::mutex g_pregnancyDebugMutex;
 static std::vector<PregnancyDebugHit> g_pregnancyDebugResults;
 static size_t g_pregnancyDebugTotalHits = 0;
+
+static bool ResolveHeroAndRoster(
+    uintptr_t& rosterBase,
+    uintptr_t& heroMaster,
+    uint16_t& heroId);
 
 static uintptr_t NormalizeOfficerPtr(uintptr_t p) {
   return p & 0x0000FFFFFFFFFFFFULL;
@@ -169,30 +177,91 @@ static void StartPregnancyDebugScanAsync() {
   if (g_pregnancyDebugScanning.load())
     return;
 
-  std::unordered_map<uintptr_t, uint16_t> childTargets;
-  childTargets.reserve(g_children.size());
-  for (const auto& kv : g_children) {
-    const ChildEntry& child = kv.second;
-    const uintptr_t normalized = NormalizeOfficerPtr(child.addr);
-    if (normalized > 0x10000)
-      childTargets[normalized] = child.id;
-  }
-
-  if (childTargets.empty()) {
-    AddLog(u8"[임신DBG] 현재 주인공의 자녀 주소가 없어 검색을 시작할 수 없습니다.");
+  uintptr_t rosterBase = 0;
+  uintptr_t heroMaster = 0;
+  uint16_t heroId = 0;
+  if (!ResolveHeroAndRoster(
+          rosterBase, heroMaster, heroId)) {
+    AddLog(
+        u8"[임신DBG] 주인공/무장 배열 주소 해석 실패");
     return;
   }
+
+  // 가장 최근 출생 자녀 하나만 앵커로 사용합니다.
+  // 출생 직전/직후 비교에서 막 태어난 자녀 포인터가 가장 강한 표식입니다.
+  const ChildEntry* targetChild = nullptr;
+  for (const auto& kv : g_children) {
+    const ChildEntry& child = kv.second;
+    if (!targetChild ||
+        child.birthYear > targetChild->birthYear ||
+        (child.birthYear == targetChild->birthYear &&
+         child.id > targetChild->id)) {
+      targetChild = &child;
+    }
+  }
+
+  if (!targetChild ||
+      NormalizeOfficerPtr(targetChild->addr) <= 0x10000) {
+    AddLog(
+        u8"[임신DBG] 현재 주인공의 자녀 주소가 없어 검색을 시작할 수 없습니다.");
+    return;
+  }
+
+  const uintptr_t targetChildAddr =
+      NormalizeOfficerPtr(targetChild->addr);
+  const uint16_t targetChildId = targetChild->id;
+  const uint16_t targetChildBirth = targetChild->birthYear;
+
+  // 현재 배우자 ID를 관계 테이블에서 얻고, 실제 무장 배열 주소와 연결합니다.
+  std::unordered_set<uint16_t> spouseIds;
+  OfficerRelationshipInfo relInfo;
+  if (GetOfficerRelationshipInfo(heroMaster, relInfo) &&
+      relInfo.valid) {
+    for (uint16_t id : relInfo.spouses)
+      spouseIds.insert(id);
+  }
+
+  std::unordered_map<uintptr_t, uint16_t> spouseTargets;
+  if (!spouseIds.empty()) {
+    bool seenOfficerIds[5103] = {};
+    for (int i = 0; i < 5102; ++i) {
+      const uintptr_t officerBase =
+          rosterBase + (uintptr_t)i * 0x3D0;
+
+      uint16_t id = 0;
+      if (!SafeRead16(officerBase + 0x08, &id) ||
+          id < 1 || id > 5102 ||
+          seenOfficerIds[id]) {
+        continue;
+      }
+      seenOfficerIds[id] = true;
+
+      if (spouseIds.count(id) != 0) {
+        spouseTargets[
+            NormalizeOfficerPtr(officerBase)] = id;
+      }
+    }
+  }
+
+  AddLog(
+      u8"[임신DBG] 집중 검색 시작: Hero ID %u / 최신 자녀 ID %u (출생 %u) / 배우자 %zu명",
+      heroId, targetChildId, targetChildBirth,
+      spouseTargets.size());
 
   g_pregnancyDebugScanning = true;
   g_pregnancyDebugProgress = 0.0f;
   g_pregnancyDebugResultsReady = false;
   {
-    std::lock_guard<std::mutex> lock(g_pregnancyDebugMutex);
+    std::lock_guard<std::mutex> lock(
+        g_pregnancyDebugMutex);
     g_pregnancyDebugResults.clear();
     g_pregnancyDebugTotalHits = 0;
   }
 
-  std::thread([childTargets = std::move(childTargets)]() {
+  std::thread([
+      targetChildAddr,
+      targetChildId,
+      spouseTargets = std::move(spouseTargets)]() {
     MEMORY_BASIC_INFORMATION mbi{};
     std::vector<MEMORY_BASIC_INFORMATION> regions;
     unsigned long long totalSize = 0;
@@ -242,11 +311,10 @@ static void StartPregnancyDebugScanAsync() {
             memcpy(&rawPtr, buffer.data() + i,
                    sizeof(rawPtr));
 
-            const uintptr_t normalized =
-                NormalizeOfficerPtr(rawPtr);
-            auto childIt = childTargets.find(normalized);
-            if (childIt == childTargets.end())
+            if (NormalizeOfficerPtr(rawPtr) !=
+                targetChildAddr) {
               continue;
+            }
 
             const uintptr_t refAddr = curr + i;
             if (refAddr < 0x10)
@@ -263,7 +331,7 @@ static void StartPregnancyDebugScanAsync() {
             }
 
             if (NormalizeOfficerPtr(center.childPtr) !=
-                normalized) {
+                targetChildAddr) {
               continue;
             }
 
@@ -272,13 +340,40 @@ static void StartPregnancyDebugScanAsync() {
               continue;
 
             PregnancyDebugHit hit;
-            hit.anchorChildId = childIt->second;
-            hit.anchorChildAddr = normalized;
+            hit.anchorChildId = targetChildId;
+            hit.anchorChildAddr = targetChildAddr;
             hit.childPtrRefAddr = refAddr;
             hit.recordBase = recordBase;
             hit.expectedFlagMonthRange =
                 center.pregnancyFlag <= 1 &&
                 center.remainingMonths <= 12;
+
+            // 배우자 포인터의 정확한 필드 위치는 아직 미확정입니다.
+            // 0x28 레코드 안의 qword 경계들을 모두 비교해 후보를 우선순위화합니다.
+            static constexpr int kProbeOffsets[] = {
+                0x00, 0x08, 0x18, 0x20
+            };
+            for (int off : kProbeOffsets) {
+              uintptr_t p = 0;
+              if (!SafeReadPtr(recordBase + off, &p))
+                continue;
+
+              auto spouseIt = spouseTargets.find(
+                  NormalizeOfficerPtr(p));
+              if (spouseIt == spouseTargets.end())
+                continue;
+
+              hit.spouseMatchId = spouseIt->second;
+              hit.spouseMatchOffset = off;
+              break;
+            }
+
+            if (hit.spouseMatchId != 0)
+              hit.score += 100;
+            if (hit.expectedFlagMonthRange)
+              hit.score += 20;
+            if (center.childOfficerId == targetChildId)
+              hit.score += 10;
 
             for (int rel = -2; rel <= 2; ++rel) {
               const intptr_t slotSigned =
@@ -289,7 +384,8 @@ static void StartPregnancyDebugScanAsync() {
 
               ReadPregnancyDebugRecord(
                   (uintptr_t)slotSigned,
-                  &hit.neighborhood[(size_t)(rel + 2)]);
+                  &hit.neighborhood[
+                      (size_t)(rel + 2)]);
             }
 
             hits.push_back(hit);
@@ -311,8 +407,9 @@ static void StartPregnancyDebugScanAsync() {
         hits.begin(), hits.end(),
         [](const PregnancyDebugHit& a,
            const PregnancyDebugHit& b) {
-          return a.expectedFlagMonthRange >
-                 b.expectedFlagMonthRange;
+          if (a.score != b.score)
+            return a.score > b.score;
+          return a.recordBase < b.recordBase;
         });
 
     {
@@ -342,7 +439,7 @@ static void FlushPregnancyDebugResults() {
   }
 
   AddLog(
-      u8"[임신DBG] 검색 완료: 자녀 pointer(+0x10) 역참조 후보 %zu개 / 저장 %zu개",
+      u8"[임신DBG] 집중 검색 완료: 최신 자녀 pointer(+0x10) 역참조 후보 %zu개 / 저장 %zu개",
       totalHits, hits.size());
 
   constexpr size_t kMaxLogHits = 64;
@@ -352,11 +449,18 @@ static void FlushPregnancyDebugResults() {
   for (size_t i = 0; i < logCount; ++i) {
     const PregnancyDebugHit& hit = hits[i];
     AddLog(
-        u8"[임신DBG] 후보 #%zu | 자녀 ID %u addr=%p | ref=%p -> record=%p | +09/+0A 범위=%s",
-        i + 1, hit.anchorChildId,
+        u8"[임신DBG] 후보 #%zu | score=%d | 자녀 ID %u addr=%p | ref=%p -> record=%p | 배우자 ID=%u off=%s | +09/+0A 범위=%s",
+        i + 1, hit.score, hit.anchorChildId,
         (void*)hit.anchorChildAddr,
         (void*)hit.childPtrRefAddr,
         (void*)hit.recordBase,
+        hit.spouseMatchId,
+        hit.spouseMatchOffset >= 0
+            ? (hit.spouseMatchOffset == 0x00 ? "+00" :
+               hit.spouseMatchOffset == 0x08 ? "+08" :
+               hit.spouseMatchOffset == 0x18 ? "+18" :
+               hit.spouseMatchOffset == 0x20 ? "+20" : "?")
+            : "-",
         hit.expectedFlagMonthRange ? "OK" : "RAW");
 
     for (int rel = -2; rel <= 2; ++rel) {
