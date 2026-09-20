@@ -60,6 +60,21 @@ namespace DX11Base {
     // 2026-09-20 추적: 1650 압축 인덱스 + ScenarioDataCenter+0x24206.
     // 읽기 전용이며 0~100 범위만 유효값으로 반환합니다.
     bool GetOfficerAffinity(uint16_t officerId1, uint16_t officerId2, uint8_t& outAffinity);
+    bool SetOfficerAffinity(
+        uint16_t officerId1, uint16_t officerId2,
+        uint8_t value, uint8_t* outPreviousValue = nullptr);
+    bool IncreaseOfficerAffinity(
+        uint16_t officerId1, uint16_t officerId2,
+        uint8_t amount,
+        uint8_t* outPreviousValue = nullptr,
+        uint8_t* outNewValue = nullptr);
+
+    // 같은 세력·같은 도시에서 생활하는 무장들의 기존 친밀도를 월 1회 성장시킵니다.
+    // 설정은 현재 실행 세션에만 유지합니다.
+    extern bool g_autoAffinityGrowthEnabled;
+    extern int g_autoAffinityMonthlyGain;
+    void ResetAutoAffinityGrowthState();
+    void TickAutoAffinityGrowth(uintptr_t protagonistBase);
     // 친밀도 실제 저장 명령을 읽기 전용으로 추적하기 위한 디버그 검증 API.
     bool GetOfficerAffinityAddress(
         uint16_t officerId1, uint16_t officerId2,
