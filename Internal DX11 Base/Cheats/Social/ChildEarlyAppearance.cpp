@@ -6,6 +6,7 @@
 #include "../../Cheats/Officer/OfficerData.h"
 #include "../../Cheats/Officer/OfficerRosterResolve.h"
 #include "../../showlog.h"
+#include "../../debug.h"
 
 #include <algorithm>
 #include <array>
@@ -756,7 +757,7 @@ static bool ApplyPregnancySpouseSlotSwap(
   g_pregnancySwapSpouseId = 0;
 
   AddLog(
-      u8"[임신슬롯교체] slot%d 배우자 교체 성공: ID %u -> ID %u / cooldown=100(가능도 0%%)",
+      u8"[임신슬롯교체] slot%d 배우자 교체 성공: ID %u -> ID %u / cooldown=100(가능성 0%%)",
       slotIndex + 1, oldSpouseId, newSpouseId);
   return true;
 }
@@ -1081,9 +1082,9 @@ void DrawChildManagerWindow(float scale) {
   }
 
   ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                     u8"무장 혈연 데이터의 부친/모친 포인터를 기준으로 현재 주인공의 자녀를 직접 표시합니다.");
+                     u8"현재 주인공의 자녀를 확인하고 자녀별 임관 시점을 설정합니다.");
   ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1),
-                     u8"체크하거나 연수를 변경하면 그 시점 기준으로 한 번만 임관년도를 적용합니다.");
+                     u8"자녀를 체크한 뒤 '몇 년 후'를 변경하면 해당 시점으로 임관 연도가 적용됩니다.");
 
   if (ImGui::Button(u8"목록 새로고침", ImVec2(110.0f * scale, 0))) {
     ScanCurrentHeroChildren(true);
@@ -1209,7 +1210,7 @@ void DrawChildManagerWindow(float scale) {
           u8"상태", ImGuiTableColumnFlags_WidthFixed,
           85.0f * scale);
       ImGui::TableSetupColumn(
-          u8"임신 가능도", ImGuiTableColumnFlags_WidthFixed,
+          u8"임신 가능성", ImGuiTableColumnFlags_WidthFixed,
           85.0f * scale);
       ImGui::TableSetupColumn(
           u8"출산까지", ImGuiTableColumnFlags_WidthFixed,
@@ -1288,7 +1289,7 @@ void DrawChildManagerWindow(float scale) {
     if (!outsideSpouses.empty()) {
       ImGui::Spacing();
       ImGui::TextDisabled(
-          u8"3슬롯 밖 배우자 교체 테스트");
+          u8"3슬롯 밖 배우자 교체 : 임신을 하기 위한 배우자는 1~3슬롯에 배치해야 합니다.");
 
       if (std::find(
               swappableSlots.begin(),
@@ -1455,14 +1456,16 @@ void DrawChildManagerWindow(float scale) {
         ImGui::TextUnformatted(
             u8"임신 중/출산 완료 슬롯은 선택 대상에서 제외합니다.");
         ImGui::TextUnformatted(
-            u8"새 슬롯은 cooldown=100(임신 가능도 0%%)으로 초기화합니다.");
+            u8"새 슬롯은 cooldown=100(임신 가능성 0%%)으로 초기화합니다.");
         ImGui::EndTooltip();
       }
     }
 
-    ImGui::TextDisabled(
-        u8"canonical base=%p / stride=0x28",
-        (void*)pregnancy.base);
+    if (bShowDebug) {
+      ImGui::TextDisabled(
+          u8"canonical base=%p / stride=0x28",
+          (void*)pregnancy.base);
+    }
   } else {
     ImGui::TextDisabled(
         u8"임신 3슬롯 직접 경로를 확인하지 못했습니다. 창을 닫았다가 다시 열면 다시 확인합니다.");
