@@ -69,9 +69,9 @@ namespace DX11Base {
         uint8_t* outPreviousValue = nullptr,
         uint8_t* outNewValue = nullptr);
 
-    // 평정(07->05)마다 주인공을 제외한 AI 무장끼리 친밀도를 자동 성장시킵니다.
-    // 같은 세력·같은 도시만 대상으로 하며, 상성/흥미/중시명성 일치도를 반영합니다.
-    // 설정은 현재 실행 세션에만 유지합니다.
+    // 분기 평정월(1/4/7/10월) 시작 시 주인공을 제외한 AI 무장끼리 친밀도를 자동 성장시킵니다.
+    // 같은 세력·같은 도시만 대상으로 하며, 상성/흥미/중시 일치도를 반영합니다.
+    // 관계(부부/의형제/상생)는 직접 생성하지 않으며 설정은 JSON에 저장됩니다.
     extern bool g_autoAffinityGrowthEnabled;
     void ResetAutoAffinityGrowthState();
     void TickAutoAffinityGrowth(uintptr_t protagonistBase);
