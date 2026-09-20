@@ -4947,65 +4947,59 @@ namespace DX11Base {
           ++movableAdviser;
       }
 
-      ImGui::SameLine(0.f, 12.f * sc);
-      const bool hasMovable = movableNormal > 0 || movableAdviser > 0;
-      if (!hasMovable)
-        ImGui::BeginDisabled();
-      if (ImGui::Button(u8"1단계 배치 적용##CorpsDeploymentMoveApply",
-                        ImVec2(145.f * sc, 0.f))) {
-        ApplyCorpsDeploymentMovements(p1, shiftedCityBase);
-      }
-      if (!hasMovable)
-        ImGui::EndDisabled();
-
-      ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::TextDisabled(u8"일반 %d / 군사 %d 이동 예정",
-                          movableNormal, movableAdviser);
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(
-            u8"1단계는 같은 군단 안에서 일반/군사의 도시만 이동합니다.");
-        ImGui::TextUnformatted(
-            u8"군주·도독·태수의 신분과 태수 포인터는 아직 변경하지 않습니다.");
-        ImGui::EndTooltip();
-      }
-
+      const bool hasMovable =
+          movableNormal > 0 || movableAdviser > 0;
       int deferredGovernorChanges = 0;
       const int pendingGovernorChanges =
           CountPendingDeploymentGovernorChanges(
               shiftedCityBase, &deferredGovernorChanges);
+      const bool canApplyDeployment =
+          hasMovable || pendingGovernorChanges > 0;
+
       ImGui::SameLine(0.f, 12.f * sc);
-      const bool canApplyGovernorStage =
-          !hasMovable && pendingGovernorChanges > 0;
-      if (!canApplyGovernorStage)
+      if (!canApplyDeployment)
         ImGui::BeginDisabled();
-      if (ImGui::Button(u8"2단계 태수 적용##CorpsDeploymentGovernorApply",
-                        ImVec2(145.f * sc, 0.f))) {
-        ApplyCorpsDeploymentGovernorStage(p1, shiftedCityBase);
+      if (ImGui::Button(u8"배치 적용##CorpsDeploymentApply",
+                        ImVec2(120.f * sc, 0.f))) {
+        bool applied = true;
+
+        // 내부 안전 절차는 유지한다.
+        // 먼저 일반/군사 이동을 끝낸 뒤, 갱신된 현재 상태에서 태수/E8 단계를 처리한다.
+        if (hasMovable)
+          applied =
+              ApplyCorpsDeploymentMovements(
+                  p1, shiftedCityBase);
+
+        if (applied) {
+          int deferredAfterMove = 0;
+          const int pendingAfterMove =
+              CountPendingDeploymentGovernorChanges(
+                  shiftedCityBase, &deferredAfterMove);
+          if (pendingAfterMove > 0)
+            ApplyCorpsDeploymentGovernorStage(
+                p1, shiftedCityBase);
+        }
       }
-      if (!canApplyGovernorStage)
+      if (!canApplyDeployment)
         ImGui::EndDisabled();
 
       ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::TextDisabled(u8"태수 변경 %d / 보류 %d 도시",
-                          pendingGovernorChanges,
-                          deferredGovernorChanges);
+      ImGui::TextDisabled(
+          u8"일반 %d / 군사 %d 이동 · 태수 변경 %d / 보류 %d 도시",
+          movableNormal, movableAdviser,
+          pendingGovernorChanges,
+          deferredGovernorChanges);
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(
-            u8"기존 태수를 현지에서 일반 신분으로 해제한 뒤 필요한 경우 이동합니다.");
+            u8"한 번에 적용합니다: 일반/군사 이동 후 태수/E8 처리를 순서대로 실행합니다.");
         ImGui::TextUnformatted(
-            u8"태수끼리 순환하는 경우 충성 100 일반 장수를 임시 태수로 사용합니다.");
+            u8"각 단계의 기존 검증·안전장치·롤백 규칙은 그대로 유지됩니다.");
         ImGui::TextUnformatted(
-            u8"빈 도시는 충성100 28/D3 일반장수를 먼저 배치한 경우에만 최초 태수(E8/D2)로 임명합니다.");
+            u8"태수 순환 시 충성 100 일반 장수를 임시 태수로 사용하며, 관계 그룹원은 버퍼에서 제외됩니다.");
         ImGui::TextUnformatted(
-            u8"안전한 일반장수가 없으면 빈 도시는 이번 계획에서 그대로 두고 AI 처리를 기다립니다.");
-        ImGui::TextUnformatted(
-            u8"0이 아닌 City+0x98이 E8이 아닌 특수 상태만 진단 후 보류합니다.");
-        ImGui::TextUnformatted(
-            u8"중간 실패 시 적용 대상 도시는 2단계 시작 직전 상태로 전체 원복합니다.");
+            u8"안전한 최초 태수 후보가 없는 빈 도시와 특수 책임자 상태는 기존 규칙대로 보류합니다.");
         ImGui::EndTooltip();
       }
 
