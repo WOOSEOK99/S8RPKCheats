@@ -899,8 +899,12 @@ namespace DX11Base {
       if (shortCooldownHovered) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"단기접전 재발생 쿨타임 값을 변경합니다.");
-        ImGui::TextUnformatted(u8"체크 해제 시 활성화 전에 읽어둔 값으로 복구합니다.");
+                           u8"전쟁에 출전한 부대 전체에 공통으로 적용되는 단기접전 재발생 대기일을 변경합니다.");
+        ImGui::TextUnformatted(u8"- 장수별 개별 쿨타임이 아니라 전투 전체의 공통 쿨타임입니다.");
+        ImGui::TextUnformatted(u8"- 기본값은 10이며, 예를 들어 3으로 설정하면 공통 쿨타임을 3으로 적용합니다.");
+        ImGui::TextUnformatted(u8"- 체크 상태와 적용값은 설정 파일에 저장되어 다음 실행 시 다시 불러옵니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 체크 해제 시 활성화 전에 읽어둔 원래 값으로 복구합니다.");
         ImGui::EndTooltip();
       }
 
