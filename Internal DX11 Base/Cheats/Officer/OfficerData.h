@@ -56,6 +56,11 @@ namespace DX11Base {
     // 현재 PK에서 확인된 관계/숙명 테이블을 읽어 선택 무장의 관계를 정리합니다.
     // 읽기 전용이며, 숙명의 비활성(+0x19 != 0) 및 직접 관계 중복은 제외합니다.
     bool GetOfficerRelationshipInfo(uintptr_t officerBase, OfficerRelationshipInfo& outInfo);
+    // 여러 무장의 관계를 한 번의 테이블 스캔으로 읽습니다.
+    // 자동배치처럼 다수 무장을 동시에 검사할 때 개별 반복 스캔으로 인한 프리징을 줄입니다.
+    bool GetOfficerRelationshipInfoBatch(
+        const std::vector<uintptr_t>& officerBases,
+        std::vector<OfficerRelationshipInfo>& outInfos);
 
     // Data loading functions
     void LoadOfficerNames();
