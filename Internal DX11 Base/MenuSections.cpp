@@ -757,21 +757,26 @@ namespace DX11Base {
       if (::DX11Base::bShowDebug) {
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::TextDisabled(u8"[교류 무제한 진단 / 읽기 전용]");
-        if (ImGui::Button(u8"교류 상태값 확인##InteractionFlagsDebug",
+        ImGui::TextDisabled(u8"[교류 무제한 진단]");
+        if (ImGui::Button(u8"1. 대련/토론 캡처 시작·초기화##DuelDebateCaptureStart",
                           ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::LogInteractionUsageFlags(p1);
+          ::DX11Base::StartDuelDebateCapture();
+        }
+        if (ImGui::Button(u8"2. 캡처 결과 확인##DuelDebateCaptureResult",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::LogDuelDebateCaptureResult();
+        }
+        if (ImGui::Button(u8"캡처 훅 해제##DuelDebateCaptureStop",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::StopDuelDebateCapture();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
-              u8"주인공 +0x320의 담화/대련/토론/기증 사용 비트를 읽습니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-              u8"대련 또는 토론 실행 전/후 각각 눌러 변화한 비트를 확인하세요.");
+              u8"1번 후 대련 또는 토론을 1회 실행하고 2번을 누르면 실제 상태 객체 주소를 확인합니다.");
           ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 메모리 쓰기/패치는 하지 않습니다.");
+              u8"※ setter 원본 동작은 그대로 실행하며 RCX 주소만 캡처합니다.");
           ImGui::EndTooltip();
         }
       }
