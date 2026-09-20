@@ -77,8 +77,6 @@ namespace DX11Base {
   static bool s_appResonance = false;
   static bool s_appGift = false;
   static bool s_appTalk = false;
-  static bool s_appDuel = false;
-  static bool s_appDebate = false;
   static bool s_appRelation = false;
   static bool s_appMarriage = false;
   static bool s_appSelfHeal = false;
@@ -120,8 +118,6 @@ namespace DX11Base {
       {"bResonance", u8"무조건 공명 발생", &bResonance, &s_appResonance, SetInstantResonance, false, true},
       {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false, true},
       {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false, true},
-      {"bInfiniteDuel", u8"대련 무한", &bInfiniteDuel, &s_appDuel, SetInfiniteDuel, false, true},
-      {"bInfiniteDebate", u8"토론 무한", &bInfiniteDebate, &s_appDebate, SetInfiniteDebate, false, true},
       {"bFastRelationship", u8"즉시 경애 맺기", &bFastRelationship, &s_appRelation, SetFastRelationship, false, true},
       {"bAutoAffinityGrowth", u8"AI 친밀도 가속", &g_autoAffinityGrowthEnabled, nullptr, nullptr, false, true},
       {"marriageApplied", u8"결혼 무제한", &marriageApplied, &s_appMarriage, SetMarriageCondition, false, true},
