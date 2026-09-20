@@ -770,6 +770,14 @@ namespace DX11Base {
                           ImVec2(-FLT_MIN, 0))) {
           ::DX11Base::CancelInteractionStateCapture();
         }
+        if (ImGui::Button(u8"3. 대련 사용 bit8 해제 테스트##ClearDuelBitTest",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::ClearCapturedDuelUsedBitForTest();
+        }
+        if (ImGui::Button(u8"4. 토론 사용 bit9 해제 테스트##ClearDebateBitTest",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::ClearCapturedDebateUsedBitForTest();
+        }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
