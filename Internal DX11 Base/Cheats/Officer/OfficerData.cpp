@@ -669,6 +669,78 @@ namespace DX11Base {
         return true;
     }
 
+
+    bool TestOfficerAffinityWriteRoundTrip(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uintptr_t& outAddress,
+        uint8_t& outOriginal,
+        uint8_t& outTestValue,
+        uint8_t& outRestored) {
+        outAddress = 0;
+        outOriginal = 0;
+        outTestValue = 0;
+        outRestored = 0;
+
+        uint8_t current = 0;
+        uintptr_t address = 0;
+        if (!GetOfficerAffinityAddress(
+                officerId1, officerId2,
+                address, &current))
+            return false;
+
+        // 100이면 +1이 불가능하므로 99로 내리지 않고 테스트하지 않는다.
+        if (current >= 100)
+            return false;
+
+        const uint8_t testValue =
+            (uint8_t)(current + 1);
+
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                (LPVOID)address, 1,
+                PAGE_READWRITE, &oldProtect))
+            return false;
+
+        bool writeTestOk = false;
+        bool restoreOk = false;
+        uint8_t verifyTest = 0;
+        uint8_t verifyRestore = 0;
+
+        __try {
+            *(volatile uint8_t*)address =
+                testValue;
+            verifyTest =
+                *(volatile uint8_t*)address;
+            writeTestOk =
+                (verifyTest == testValue);
+
+            // 테스트 성공 여부와 관계없이 원래 값으로 되돌린다.
+            *(volatile uint8_t*)address =
+                current;
+            verifyRestore =
+                *(volatile uint8_t*)address;
+            restoreOk =
+                (verifyRestore == current);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            writeTestOk = false;
+            restoreOk = false;
+        }
+
+        DWORD dummy = 0;
+        VirtualProtect(
+            (LPVOID)address, 1,
+            oldProtect, &dummy);
+
+        outAddress = address;
+        outOriginal = current;
+        outTestValue = verifyTest;
+        outRestored = verifyRestore;
+
+        return writeTestOk && restoreOk;
+    }
+
     bool GetOfficerAffinity(
         uint16_t officerId1,
         uint16_t officerId2,
