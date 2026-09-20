@@ -23,6 +23,7 @@ namespace DX11Base {
   bool bNonggyeongCity = false;
   bool bSangeopCity = false;
   bool bAttitudeHack = false;
+  bool bInfiniteBanquet = false;
   bool bDomestics = false;
   float fDomesticsPlayer = 2.0f;
   float fDomesticsForce = 1.25f;
