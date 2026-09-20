@@ -741,24 +741,20 @@ namespace DX11Base {
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::TextDisabled(u8"[연회 진단 / 읽기 전용]");
-        if (ImGui::Button(u8"연회 후보값 로그 출력##BanquetDebug",
+        if (ImGui::Button(u8"연회 상태 확인##BanquetDebug",
                           ImVec2(-FLT_MIN, 0))) {
           ::DX11Base::LogBanquetFlagCandidate();
-        }
-        if (ImGui::Button(u8"연회 코드 후보 검색##BanquetCodeDebug",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::ScanBanquetCodeCandidates();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
-              u8"옛 CT의 '현재년도 - 0x1C, bit 1' 관계를 현재 시나리오 데이터에 대입해 후보값만 읽습니다.");
+              u8"현재 시나리오 데이터의 +0x71FC 값을 읽어 연회 bit1 상태를 확인합니다.");
           ImGui::TextColored(
               ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-              u8"연회 전/후 각각 버튼을 눌러 raw 값과 bit1 변화 여부를 비교하세요.");
+              u8"연회 전 한 번, 연회 후 한 번 눌러 두 로그만 비교하면 됩니다.");
           ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 메모리 쓰기, 후킹, 패치는 하지 않습니다.");
+              u8"※ 읽기만 하며 게임 메모리는 수정하지 않습니다.");
           ImGui::EndTooltip();
         }
       }
