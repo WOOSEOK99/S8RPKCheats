@@ -1,5 +1,6 @@
 #include "OfficerData.h"
 #include "OfficerRosterResolve.h"
+#include "../System/MonthCapture.h"
 #include "../../Cheats.h"
 #include "pch.h"
 #include <filesystem>
@@ -319,7 +320,87 @@ namespace DX11Base {
             }
             return false;
         }
+
+        constexpr uintptr_t kCurrentAffinityBaseOffset = 0x24206;
+        constexpr int kAffinityOfficerCount = 1650;
+
+        int GetAffinityCompressedIndex(uint16_t id) {
+            if (id >= 1 && id <= 1000)
+                return (int)id;
+            if (id >= 2001 && id <= 2100)
+                return (int)id - 1000;
+            if (id >= 4001 && id <= 4200)
+                return (int)id - 2900;
+            if (id >= 5001 && id <= 5100)
+                return (int)id - 3700;
+            if (id >= 3001 && id <= 3150)
+                return (int)id - 1600;
+            if (id >= 5101 && id <= 5200)
+                return (int)id - 3550;
+            return -1;
+        }
+
+        bool CalcAffinityPairOffset(
+            int index1, int index2, uintptr_t* outOffset) {
+            if (!outOffset ||
+                index1 < 1 || index2 < 1 ||
+                index1 > kAffinityOfficerCount ||
+                index2 > kAffinityOfficerCount ||
+                index1 == index2)
+                return false;
+
+            const int leftIndex = (std::min)(index1, index2);
+            const int rightIndex = (std::max)(index1, index2);
+            const uint64_t left = (uint64_t)(leftIndex - 1);
+            const uint64_t width =
+                (uint64_t)(kAffinityOfficerCount - 1);
+            const uint64_t rowStart =
+                left * (2ull * width - (left - 1ull)) / 2ull;
+            *outOffset =
+                (uintptr_t)(rowStart +
+                (uint64_t)(rightIndex - leftIndex - 1));
+            return true;
+        }
     } // namespace
+
+
+    bool GetOfficerAffinity(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uint8_t& outAffinity) {
+        outAffinity = 0;
+        if (officerId1 == 0 || officerId2 == 0 ||
+            officerId1 == officerId2)
+            return false;
+
+        const int index1 =
+            GetAffinityCompressedIndex(officerId1);
+        const int index2 =
+            GetAffinityCompressedIndex(officerId2);
+        uintptr_t pairOffset = 0;
+        if (!CalcAffinityPairOffset(
+                index1, index2, &pairOffset))
+            return false;
+
+        const uintptr_t dataCenter =
+            GetScenarioDataCenterAddress();
+        if (dataCenter <= 0x10000)
+            return false;
+
+        uint8_t value = 0;
+        if (!SafeRelRead8(
+                dataCenter +
+                    kCurrentAffinityBaseOffset +
+                    pairOffset,
+                &value))
+            return false;
+
+        if (value > 100)
+            return false;
+
+        outAffinity = value;
+        return true;
+    }
 
     bool GetOfficerRelationshipInfoBatch(
         const std::vector<uintptr_t>& officerBases,
