@@ -7322,6 +7322,29 @@ namespace DX11Base {
       }
 
       if (bShowDebug && selected) {
+        uintptr_t affinityExpectedAddr = 0;
+        uintptr_t affinityCapturedAddr = 0;
+        uint8_t affinityWrittenValue = 0;
+        if (ConsumeOfficerAffinityWriteProbe(
+                affinityExpectedAddr,
+                affinityCapturedAddr,
+                affinityWrittenValue)) {
+          uint8_t verifyValue = 0;
+          const bool verifyOk =
+              SafeRead8(
+                  affinityCapturedAddr,
+                  &verifyValue) &&
+              verifyValue == affinityWrittenValue;
+          AddLog(
+              u8"[친밀쓰기DBG] 캡처 성공: 주소=0x%llX / 저장값=%u / 현재값=%u / 검증=%s",
+              (unsigned long long)
+                  affinityCapturedAddr,
+              (unsigned int)
+                  affinityWrittenValue,
+              (unsigned int)verifyValue,
+              verifyOk ? "OK" : "불일치");
+        }
+
         ImGui::SameLine(0.f, 12.f * sc);
         if (ImGui::SmallButton(
                 u8"관계 탐색 로그##OfficerRelationshipProbe")) {
@@ -7368,6 +7391,44 @@ namespace DX11Base {
               u8"스냅샷 저장 후 게임에서 주인공과 선택 무장의 친밀도를 실제로 변화시키고 비교하세요.");
           ImGui::TextUnformatted(
               u8"변화한 1바이트 위치에서 친밀도 배열 베이스 후보를 역산합니다. 메모리 쓰기는 하지 않습니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(0.f, 6.f * sc);
+        if (ImGui::SmallButton(
+                u8"친밀 쓰기 검증##OfficerAffinityWriteProbe")) {
+          uint16_t heroId = 0;
+          if (p1 > 0x10000 &&
+              SafeRead16(p1 + 0x08, &heroId) &&
+              ArmOfficerAffinityWriteProbe(
+                  heroId, selected->id)) {
+            uintptr_t expectedAddr = 0;
+            uint8_t currentAffinity = 0;
+            GetOfficerAffinityAddress(
+                heroId, selected->id,
+                expectedAddr, &currentAffinity);
+            AddLog(
+                u8"[친밀쓰기DBG] 검증 대기: %s(ID %u) <-> %s(ID %u) / 예상주소=0x%llX / 현재 친밀=%u",
+                BuildOfficerName(heroId).c_str(),
+                (unsigned int)heroId,
+                BuildOfficerName(selected->id).c_str(),
+                (unsigned int)selected->id,
+                (unsigned long long)
+                    expectedAddr,
+                (unsigned int)currentAffinity);
+            AddLog(
+                u8"[친밀쓰기DBG] 이제 게임에서 이 두 무장의 친밀도를 한 번 변화시키세요. 실제 게임 write가 예상주소에 들어오면 자동 캡처합니다.");
+          } else {
+            AddLog(
+                u8"[친밀쓰기DBG] 검증 준비 실패: 친밀 주소 계산 또는 현재 CT ID300 저장 패턴 탐색 실패");
+          }
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"현재 SAN8RPK.CT ID 300의 최종 친밀도 저장 명령을 읽기 전용으로 추적합니다.");
+          ImGui::TextUnformatted(
+              u8"예상 친밀 주소와 정확히 일치하는 write만 한 번 캡처하며 게임 값은 변경하지 않습니다.");
           ImGui::EndTooltip();
         }
       }
