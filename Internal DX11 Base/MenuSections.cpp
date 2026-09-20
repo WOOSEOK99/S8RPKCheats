@@ -220,6 +220,23 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+        ImGui::SameLine(160.0f * scale);
+        if (ImGui::Checkbox(u8"연회 무제한", &bInfiniteBanquet)) {
+          if (bInfiniteBanquet)
+            ::DX11Base::TickInfiniteBanquet();
+          NotifyFeatureToggle(u8"연회 무제한", bInfiniteBanquet);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"연회 실행 후 생기는 사용 완료 플래그만 자동으로 해제하여 계속 연회할 수 있게 합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 다른 상태 비트는 그대로 유지합니다.");
+          ImGui::EndTooltip();
+        }
+
         if (ImGui::Checkbox(u8"명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
           NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
           SaveConfig();
@@ -735,36 +752,6 @@ namespace DX11Base {
         }
 
         ImGui::EndTable();
-      }
-
-      if (::DX11Base::bShowDebug) {
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextDisabled(u8"[연회 진단 / 읽기 전용]");
-        if (ImGui::Button(u8"1. 연회 전 저장##BanquetDiffBefore",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::CaptureBanquetDiffBaseline();
-        }
-        if (ImGui::Button(u8"2. 연회 후 비교##BanquetDiffAfter",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::CompareBanquetDiffAfter();
-        }
-        if (ImGui::Button(u8"3. 연회 사용 플래그 해제 테스트##BanquetClearTest",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::ClearBanquetUsedBitForTest();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextUnformatted(
-              u8"1번을 누른 뒤 게임에서 연회를 한 번 실행하고 2번을 누르세요.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-              u8"시나리오 데이터 +0x6000~+0x8000 중 실제로 바뀐 값만 로그에 출력합니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 읽기만 하며 게임 메모리는 수정하지 않습니다.");
-          ImGui::EndTooltip();
-        }
       }
 
       EndSection(); // 결혼/인연
