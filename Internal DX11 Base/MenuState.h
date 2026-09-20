@@ -41,6 +41,7 @@ namespace DX11Base {
   extern bool bInfiniteTalk;
   extern bool bInfiniteDuel;
   extern bool bInfiniteDebate;
+  extern bool bInfiniteMediation; // 중개 사용 완료 +0x71E5 bit6 지속 해제
   extern bool bFastRelationship;
   extern bool bShowChildManagerWin;
 
