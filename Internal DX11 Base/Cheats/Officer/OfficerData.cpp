@@ -1396,24 +1396,27 @@ namespace DX11Base {
                             leftRel, right.id))
                         continue;
 
-                    uintptr_t affinityAddress = 0;
-                    uint8_t rawAffinity = 0;
-                    if (!GetOfficerAffinityAddress(
-                            left.id, right.id,
-                            affinityAddress,
-                            &rawAffinity)) {
-                        // 친밀도 -1(0xFF) 같은 signed 음수는
-                        // 기존 reader에서 유효 범위 밖으로 빠진다.
-                        uintptr_t pairAddress = 0;
-                        uint8_t ignored = 0;
-                        if (GetOfficerAffinityAddress(
-                                left.id, right.id,
-                                pairAddress, &ignored)) {
-                            (void)pairAddress;
-                        }
-                        ++negativeAffinityCount;
+                    const int leftAffinityIndex =
+                        GetAffinityCompressedIndex(left.id);
+                    const int rightAffinityIndex =
+                        GetAffinityCompressedIndex(right.id);
+                    uintptr_t pairOffset = 0;
+                    if (!CalcAffinityPairOffset(
+                            leftAffinityIndex,
+                            rightAffinityIndex,
+                            &pairOffset))
                         continue;
-                    }
+
+                    const uintptr_t affinityAddress =
+                        dataCenter +
+                        kCurrentAffinityBaseOffset +
+                        pairOffset;
+
+                    uint8_t rawAffinity = 0;
+                    if (!SafeRelRead8(
+                            affinityAddress,
+                            &rawAffinity))
+                        continue;
 
                     const int8_t signedAffinity =
                         (int8_t)rawAffinity;
