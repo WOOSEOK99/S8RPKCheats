@@ -46,6 +46,7 @@
 #include "pch.h"
 #include "showcal.h"
 #include "showlog.h"
+#include "debug.h"
 
 namespace DX11Base {
   // 글로벌/네임스페이스 변수들에 대한 extern 선언 (정의는 다른 cpp 파일에 있음)
@@ -751,6 +752,25 @@ namespace DX11Base {
         }
 
         ImGui::EndTable();
+      }
+
+      if (::DX11Base::bShowDebug) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextDisabled(u8"[교류 무제한 진단 / 읽기 전용]");
+        if (ImGui::Button(u8"대련/토론 코드 후보 검색##DuelDebateDebug",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::ScanDuelDebateFlagCandidates();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"현재 EXE에서 대련 bit8(0x100), 토론 bit9(0x200) 코드 후보를 검색합니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 메모리 쓰기/패치는 하지 않습니다.");
+          ImGui::EndTooltip();
+        }
       }
 
       EndSection(); // 결혼/인연
