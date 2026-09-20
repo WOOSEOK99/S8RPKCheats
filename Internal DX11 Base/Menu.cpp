@@ -397,6 +397,12 @@ namespace DX11Base {
         *(unsigned char *)(p1 + 0xEE) = 200;
     }
 
+    // 연회 무제한: 확인된 시나리오 데이터 +0x71E4의 bit1만 지속 해제.
+    // 매 프레임 호출되더라도 bit1이 이미 0이면 쓰기를 하지 않습니다.
+    if (bInfiniteBanquet) {
+      DX11Base::TickInfiniteBanquet();
+    }
+
     // 저장게임 로드 시 보주 개방 비트맵이 세이브 데이터로 덮이는 경우 자동 재적용.
     DX11Base::TickJewelSettings();
 

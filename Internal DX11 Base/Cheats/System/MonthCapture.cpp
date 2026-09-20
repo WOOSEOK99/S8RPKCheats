@@ -38,6 +38,34 @@ namespace DX11Base {
         return ResolveScenarioDataCenter();
     }
 
+    bool TickInfiniteBanquet() {
+        const uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter)
+            return false;
+
+        // 실게임 검증: 연회 실행 전/후 +0x71E4가 0x15 -> 0x17로 변하며
+        // bit 1(0x02)만 연회 사용 완료 상태를 나타냄.
+        constexpr uintptr_t kBanquetUsedFlagOffset = 0x71E4;
+        const uintptr_t addr = dataCenter + kBanquetUsedFlagOffset;
+        if (!IsValidPtr(addr, 1))
+            return false;
+
+        const uint8_t before = *(const uint8_t*)addr;
+        if ((before & 0x02u) == 0)
+            return true;
+
+        DWORD oldProt = 0;
+        if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &oldProt))
+            return false;
+
+        *(uint8_t*)addr = (uint8_t)(before & (uint8_t)~0x02u);
+
+        DWORD tmp = 0;
+        VirtualProtect((LPVOID)addr, 1, oldProt, &tmp);
+
+        return ((*(const uint8_t*)addr & 0x02u) == 0);
+    }
+
     void UpdateYear(unsigned short targetYear) {
         uintptr_t dataCenter = ResolveScenarioDataCenter();
         if (!dataCenter)

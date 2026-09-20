@@ -112,6 +112,7 @@ namespace DX11Base {
       {"bNonggyeongCity", u8"농경도시 버프", &bNonggyeongCity, &s_appNonggyeongCity, SetNonggyeongCity, false, true},
       {"bSangeopCity", u8"상업도시 버프", &bSangeopCity, &s_appSangeopCity, SetSangeopCity, false, true},
       {"bAttitudeHack", u8"견문시 민심최대", &bAttitudeHack, &s_appAttitude, SetInstantAttitude, false, true},
+      {"bInfiniteBanquet", u8"연회 무제한", &bInfiniteBanquet, nullptr, nullptr, false, true},
       {"bHateCave", u8"상극 무시/동지 조건 완화", &bHateCave, &s_appLoveHate, ApplyLoveHate, false, true},
       {"bLoyalty", u8"충성도 변경", &bLoyalty, &s_appLoyalty, SetInstantLoyalty, false, true},
       {"bResonance", u8"무조건 공명 발생", &bResonance, &s_appResonance, SetInstantResonance, false, true},

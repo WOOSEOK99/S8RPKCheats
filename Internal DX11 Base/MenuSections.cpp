@@ -224,6 +224,23 @@ namespace DX11Base {
           SaveConfig();
         }
 
+        ImGui::SameLine(160.0f * scale);
+
+        if (ImGui::Checkbox(u8"연회 무제한", &bInfiniteBanquet)) {
+          if (bInfiniteBanquet)
+            ::DX11Base::TickInfiniteBanquet();
+          NotifyFeatureToggle(u8"연회 무제한", bInfiniteBanquet);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"연회 실행 후 생기는 사용 완료 플래그만 자동으로 해제하여 계속 연회할 수 있게 합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 다른 상태 비트는 그대로 유지합니다.");
+          ImGui::EndTooltip();
+        }
+
         if (ImGui::Checkbox(u8"청부 무한 유지 (주점)", &bInfiniteTavernRequests)) {
           NotifyFeatureToggle(u8"청부 무한 유지 (주점)", bInfiniteTavernRequests);
           SaveConfig();
