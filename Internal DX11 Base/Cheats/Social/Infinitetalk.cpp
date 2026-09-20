@@ -22,6 +22,91 @@ namespace DX11Base {
     static uintptr_t g_talkCaveAddr = 0;
     static bool g_talkApplied = false;
 
+    void ScanDuelDebateFlagCandidates() {
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        if (!exeBase) {
+            AddLog(u8"[교류DBG] SAN8R.exe 베이스를 찾지 못했습니다.");
+            return;
+        }
+
+        MODULEINFO mi{};
+        if (!GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi))) {
+            AddLog(u8"[교류DBG] 모듈 정보를 읽지 못했습니다.");
+            return;
+        }
+
+        const uintptr_t exeEnd = exeBase + mi.SizeOfImage;
+        const uint8_t* b = (const uint8_t*)exeBase;
+        const size_t len = (size_t)mi.SizeOfImage;
+
+        unsigned int duelHits = 0;
+        unsigned int debateHits = 0;
+
+        auto logHit = [&](const char* name, const char* kind, size_t i) {
+            const uintptr_t addr = exeBase + i;
+            const size_t remain = len - i;
+            const size_t n = remain < 16 ? remain : 16;
+            char bytes[16 * 3 + 1] = {};
+            size_t p = 0;
+            for (size_t k = 0; k < n && p + 3 < sizeof(bytes); ++k) {
+                p += (size_t)snprintf(bytes + p, sizeof(bytes) - p,
+                                      "%02X%s", b[i + k], (k + 1 < n) ? " " : "");
+            }
+            AddLog(u8"[교류DBG] %s 후보 %s RVA:+0x%llX bytes=%s",
+                   name, kind,
+                   (unsigned long long)(addr - exeBase),
+                   bytes);
+        };
+
+        for (size_t i = 0; i + 10 <= len; ++i) {
+            // OR dword ptr [reg+0x320], imm32
+            if (b[i] == 0x81 &&
+                (b[i + 1] & 0xF8) == 0x88 &&
+                b[i + 2] == 0x20 && b[i + 3] == 0x03 &&
+                b[i + 4] == 0x00 && b[i + 5] == 0x00) {
+
+                const uint32_t imm = *(const uint32_t*)&b[i + 6];
+                if (imm == 0x00000100u) {
+                    ++duelHits;
+                    logHit("대련(bit8)", "OR [reg+320],100", i);
+                } else if (imm == 0x00000200u) {
+                    ++debateHits;
+                    logHit("토론(bit9)", "OR [reg+320],200", i);
+                }
+            }
+
+            // BTS dword ptr [reg+0x320], imm8
+            if (b[i] == 0x0F && b[i + 1] == 0xBA &&
+                (b[i + 2] & 0xF8) == 0xA8 &&
+                b[i + 3] == 0x20 && b[i + 4] == 0x03 &&
+                b[i + 5] == 0x00 && b[i + 6] == 0x00) {
+
+                if (b[i + 7] == 0x08) {
+                    ++duelHits;
+                    logHit("대련(bit8)", "BTS [reg+320],8", i);
+                } else if (b[i + 7] == 0x09) {
+                    ++debateHits;
+                    logHit("토론(bit9)", "BTS [reg+320],9", i);
+                }
+            }
+
+            // 레지스터에서 bit를 세운 뒤 메모리에 저장하는 형태도 보조 탐색.
+            if (b[i] == 0x0F && b[i + 1] == 0xBA &&
+                (b[i + 2] & 0xF8) == 0xE8) {
+                if (b[i + 3] == 0x08) {
+                    ++duelHits;
+                    logHit("대련(bit8)", "BTS reg,8", i);
+                } else if (b[i + 3] == 0x09) {
+                    ++debateHits;
+                    logHit("토론(bit9)", "BTS reg,9", i);
+                }
+            }
+        }
+
+        AddLog(u8"[교류DBG] 검색 완료. 대련(bit8) 후보=%u / 토론(bit9) 후보=%u / EXE size=0x%llX",
+               duelHits, debateHits, (unsigned long long)(exeEnd - exeBase));
+    }
+
     void SetInfiniteTalk(bool enable) {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase)
