@@ -19,59 +19,63 @@ namespace DX11Base {
     static bool g_talkApplied = false;
 
     namespace {
-        struct InteractionBitPatch {
+        struct InteractionCodePatch {
             uintptr_t addr = 0;
-            uint8_t originalModRm = 0;
+            uint8_t original[10] = {};
+            uint8_t size = 0;
         };
 
-        static std::vector<InteractionBitPatch> g_duelPatches;
-        static std::vector<InteractionBitPatch> g_debatePatches;
+        static std::vector<InteractionCodePatch> g_duelPatches;
+        static std::vector<InteractionCodePatch> g_debatePatches;
         static bool g_duelApplied = false;
         static bool g_debateApplied = false;
 
-        static bool Has320ReadAndWriteNearby(
-            const uint8_t* code, size_t len, size_t center) {
-            const size_t begin = (center > 40) ? center - 40 : 0;
-            const size_t end = (center + 48 < len) ? center + 48 : len;
-
-            bool hasRead = false;
-            bool hasWrite = false;
-
-            for (size_t j = begin; j + 6 <= end; ++j) {
-                // mov r32,[reg+0x320]
-                if (code[j] == 0x8B &&
-                    (code[j + 1] & 0xC0) == 0x80 &&
-                    code[j + 2] == 0x20 && code[j + 3] == 0x03 &&
-                    code[j + 4] == 0x00 && code[j + 5] == 0x00) {
-                    hasRead = true;
-                }
-
-                // mov [reg+0x320],r32
-                if (code[j] == 0x89 &&
-                    (code[j + 1] & 0xC0) == 0x80 &&
-                    code[j + 2] == 0x20 && code[j + 3] == 0x03 &&
-                    code[j + 4] == 0x00 && code[j + 5] == 0x00) {
-                    hasWrite = true;
-                }
-            }
-
-            return hasRead && hasWrite;
-        }
-
-        static bool WriteOneByte(uintptr_t addr, uint8_t value) {
-            DWORD old = 0, tmp = 0;
-            if (!VirtualProtect((LPVOID)addr, 1, PAGE_EXECUTE_READWRITE, &old))
+        static bool IsExecutableAddress(uintptr_t addr) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)))
                 return false;
 
-            *(uint8_t*)addr = value;
-            FlushInstructionCache(GetCurrentProcess(), (LPCVOID)addr, 1);
-            VirtualProtect((LPVOID)addr, 1, old, &tmp);
+            const DWORD p = mbi.Protect & 0xFFu;
+            return p == PAGE_EXECUTE ||
+                   p == PAGE_EXECUTE_READ ||
+                   p == PAGE_EXECUTE_READWRITE ||
+                   p == PAGE_EXECUTE_WRITECOPY;
+        }
+
+        static bool WriteCodeBytes(
+            uintptr_t addr, const uint8_t* bytes, size_t size) {
+            if (!addr || !bytes || size == 0)
+                return false;
+
+            DWORD old = 0, tmp = 0;
+            if (!VirtualProtect(
+                    (LPVOID)addr, size, PAGE_EXECUTE_READWRITE, &old))
+                return false;
+
+            memcpy((void*)addr, bytes, size);
+            FlushInstructionCache(
+                GetCurrentProcess(), (LPCVOID)addr, size);
+            VirtualProtect((LPVOID)addr, size, old, &tmp);
             return true;
+        }
+
+        static void SavePatch(
+            std::vector<InteractionCodePatch>& patches,
+            uintptr_t addr,
+            const uint8_t* original,
+            size_t size) {
+            InteractionCodePatch p{};
+            p.addr = addr;
+            p.size = (uint8_t)size;
+            memcpy(p.original, original, size);
+            patches.push_back(p);
         }
 
         static size_t ApplyInteractionBitPatch(
             uint8_t bitIndex,
-            std::vector<InteractionBitPatch>& patches) {
+            uint32_t bitMask,
+            std::vector<InteractionCodePatch>& patches,
+            const char* label) {
             uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
             if (!exeBase)
                 return 0;
@@ -83,58 +87,89 @@ namespace DX11Base {
 
             const uint8_t* code = (const uint8_t*)exeBase;
             const size_t len = (size_t)mi.SizeOfImage;
+            const uint32_t clearMask = ~bitMask;
 
             patches.clear();
+            size_t directOrCount = 0;
+            size_t directBtsCount = 0;
 
-            for (size_t i = 0; i + 4 <= len; ++i) {
-                // BTS r32, imm8. 옛 CT와 현재 코드 모두
-                // +0x320을 읽고/쓰는 setter 내부에서 bit8/bit9를 BTS로 세운다.
-                if (code[i] == 0x0F && code[i + 1] == 0xBA &&
-                    (code[i + 2] & 0xC0) == 0xC0 &&
-                    (code[i + 2] & 0x38) == 0x28 &&
-                    code[i + 3] == bitIndex &&
-                    Has320ReadAndWriteNearby(code, len, i)) {
+            for (size_t i = 0; i + 10 <= len; ++i) {
+                const uintptr_t addr = exeBase + i;
+                if (!IsExecutableAddress(addr))
+                    continue;
 
-                    const uintptr_t modrmAddr = exeBase + i + 2;
-                    const uint8_t original = code[i + 2];
-                    const uint8_t patched =
-                        (uint8_t)((original & 0xC7u) | 0x30u); // BTS(/5) -> BTR(/6)
+                // 기증과 동일한 형태:
+                //   or dword ptr [reg+0x320], imm32
+                // 대련 imm32=0x100, 토론 imm32=0x200
+                if (code[i] == 0x81 &&
+                    (code[i + 1] & 0xF8) == 0x88 &&
+                    (code[i + 1] & 0x07) != 0x04 &&
+                    code[i + 2] == 0x20 && code[i + 3] == 0x03 &&
+                    code[i + 4] == 0x00 && code[i + 5] == 0x00 &&
+                    *(const uint32_t*)&code[i + 6] == bitMask) {
 
-                    if (WriteOneByte(modrmAddr, patched)) {
-                        patches.push_back({modrmAddr, original});
+                    uint8_t patched[10];
+                    memcpy(patched, &code[i], 10);
+
+                    // OR(/1) -> AND(/4), displacement/register는 그대로 유지.
+                    patched[1] =
+                        (uint8_t)((patched[1] & 0xC7u) | 0x20u);
+                    *(uint32_t*)&patched[6] = clearMask;
+
+                    if (WriteCodeBytes(addr, patched, 10)) {
+                        SavePatch(patches, addr, &code[i], 10);
+                        ++directOrCount;
+                        AddLog(
+                            u8"[%s] OR->AND 패치 RVA:+0x%llX",
+                            label,
+                            (unsigned long long)i);
                     }
                     continue;
                 }
 
-                // BTS dword ptr [reg+0x320], imm8 직접형.
+                // 옛 CT와 같은 직접 BTS 형태:
+                //   bts dword ptr [reg+0x320], bit
                 if (i + 8 <= len &&
                     code[i] == 0x0F && code[i + 1] == 0xBA &&
-                    (code[i + 2] & 0xC0) == 0x80 &&
-                    (code[i + 2] & 0x38) == 0x28 &&
-                    (code[i + 2] & 0x07) != 0x04 && // SIB형 제외
+                    (code[i + 2] & 0xF8) == 0xA8 &&
+                    (code[i + 2] & 0x07) != 0x04 &&
                     code[i + 3] == 0x20 && code[i + 4] == 0x03 &&
                     code[i + 5] == 0x00 && code[i + 6] == 0x00 &&
                     code[i + 7] == bitIndex) {
 
-                    const uintptr_t modrmAddr = exeBase + i + 2;
-                    const uint8_t original = code[i + 2];
-                    const uint8_t patched =
-                        (uint8_t)((original & 0xC7u) | 0x30u);
+                    uint8_t patched[8];
+                    memcpy(patched, &code[i], 8);
 
-                    if (WriteOneByte(modrmAddr, patched)) {
-                        patches.push_back({modrmAddr, original});
+                    // BTS(/5) -> BTR(/6)
+                    patched[2] =
+                        (uint8_t)((patched[2] & 0xC7u) | 0x30u);
+
+                    if (WriteCodeBytes(addr, patched, 8)) {
+                        SavePatch(patches, addr, &code[i], 8);
+                        ++directBtsCount;
+                        AddLog(
+                            u8"[%s] BTS->BTR 패치 RVA:+0x%llX",
+                            label,
+                            (unsigned long long)i);
                     }
                 }
             }
+
+            AddLog(
+                u8"[%s] +0x320 bit%d 패치 완료: OR형=%llu / BTS형=%llu",
+                label,
+                (int)bitIndex,
+                (unsigned long long)directOrCount,
+                (unsigned long long)directBtsCount);
 
             return patches.size();
         }
 
         static void RestoreInteractionBitPatches(
-            std::vector<InteractionBitPatch>& patches) {
+            std::vector<InteractionCodePatch>& patches) {
             for (const auto& p : patches) {
-                if (p.addr)
-                    WriteOneByte(p.addr, p.originalModRm);
+                if (p.addr && p.size)
+                    WriteCodeBytes(p.addr, p.original, p.size);
             }
             patches.clear();
         }
@@ -145,11 +180,12 @@ namespace DX11Base {
             if (g_duelApplied)
                 return;
 
-            const size_t count = ApplyInteractionBitPatch(0x08, g_duelPatches);
+            const size_t count = ApplyInteractionBitPatch(
+                0x08, 0x00000100u, g_duelPatches, u8"대련");
             g_duelApplied = (count > 0);
-            AddLog(u8"[대련] +0x320 bit8 무제한 패치 %s (적용 지점 %llu개)",
-                   g_duelApplied ? u8"적용" : u8"실패",
-                   (unsigned long long)count);
+
+            if (!g_duelApplied)
+                AddLog(u8"[대련] +0x320 bit8 실제 사용 코드 패치를 찾지 못했습니다.");
         } else {
             RestoreInteractionBitPatches(g_duelPatches);
             g_duelApplied = false;
@@ -161,11 +197,12 @@ namespace DX11Base {
             if (g_debateApplied)
                 return;
 
-            const size_t count = ApplyInteractionBitPatch(0x09, g_debatePatches);
+            const size_t count = ApplyInteractionBitPatch(
+                0x09, 0x00000200u, g_debatePatches, u8"토론");
             g_debateApplied = (count > 0);
-            AddLog(u8"[토론] +0x320 bit9 무제한 패치 %s (적용 지점 %llu개)",
-                   g_debateApplied ? u8"적용" : u8"실패",
-                   (unsigned long long)count);
+
+            if (!g_debateApplied)
+                AddLog(u8"[토론] +0x320 bit9 실제 사용 코드 패치를 찾지 못했습니다.");
         } else {
             RestoreInteractionBitPatches(g_debatePatches);
             g_debateApplied = false;
