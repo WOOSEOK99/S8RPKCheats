@@ -327,15 +327,24 @@ static void StartPregnancySpouseDebugScanAsync() {
             hit.recordBase = recordBase;
             hit.record = dump;
 
-            // 점수는 정렬용일 뿐 구조 확정 판정은 하지 않습니다.
-            if (dump.pregnancyFlag <= 1)
-              hit.score += 30;
-            if (dump.remainingMonths <= 12)
-              hit.score += 30;
-            if (dump.childPtr == 0 || dump.childOfficerId != 0)
+            // 실측 결과:
+            // 출산 전 손상향(ID 565): +09=1, +0A=3, +10=0
+            // 출산 직후 같은 배우자: +09=1, +0A=0, +10=자녀 4001
+            // 따라서 +09는 임신 여부 자체가 아니라 활성/사용 플래그 계열로 보고,
+            // +0A를 남은 임신 개월 후보로 우선 평가합니다.
+            if (dump.pregnancyFlag == 1)
+              hit.score += 80;
+            if (dump.remainingMonths >= 1 &&
+                dump.remainingMonths <= 12)
+              hit.score += 120;
+            else if (dump.remainingMonths == 0)
               hit.score += 20;
+            if (dump.childPtr == 0)
+              hit.score += 30;
+            else if (dump.childOfficerId != 0)
+              hit.score += 60;
             if (PregnancyCapsLookPlausible(dump))
-              hit.score += 40;
+              hit.score += 20;
 
             hits.push_back(hit);
           }
@@ -394,9 +403,21 @@ static void FlushPregnancySpouseDebugResults() {
   for (size_t i = 0; i < logCount; ++i) {
     const PregnancySpouseDebugHit& hit = hits[i];
     const PregnancyDebugRecordDump& d = hit.record;
+    const char* state =
+        (d.pregnancyFlag == 1 &&
+         d.remainingMonths >= 1 &&
+         d.remainingMonths <= 12 &&
+         d.childPtr == 0)
+            ? u8"임신중 후보"
+            : (d.pregnancyFlag == 1 &&
+               d.remainingMonths == 0 &&
+               d.childOfficerId != 0)
+                  ? u8"출산완료 후보"
+                  : u8"기타";
+
     AddLog(
-        u8"[임신배우자DBG] 후보 #%zu | score=%d | 배우자 ID %u addr=%p | record=%p | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
-        i + 1, hit.score, hit.spouseId,
+        u8"[임신배우자DBG] 후보 #%zu | %s | score=%d | 배우자 ID %u addr=%p | record=%p | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
+        i + 1, state, hit.score, hit.spouseId,
         (void*)hit.spouseAddr, (void*)hit.recordBase,
         (unsigned)d.pregnancyFlag,
         (unsigned)d.remainingMonths,
@@ -414,8 +435,22 @@ static void FlushPregnancySpouseDebugResults() {
         kMaxLogHits, hits.size());
   }
 
+  size_t pregnantCount = 0;
+  for (const PregnancySpouseDebugHit& hit : hits) {
+    const PregnancyDebugRecordDump& d = hit.record;
+    if (d.pregnancyFlag == 1 &&
+        d.remainingMonths >= 1 &&
+        d.remainingMonths <= 12 &&
+        d.childPtr == 0) {
+      pregnantCount++;
+    }
+  }
+
   AddLog(
-      u8"[임신배우자DBG] read-only 진단입니다. +09/+0A 의미는 출산 전후 비교 후 확정합니다.");
+      u8"[임신배우자DBG] 실측 규칙 임신중 후보: %zu개 | 기준 +09=1, +0A=1..12, +10=NULL",
+      pregnantCount);
+  AddLog(
+      u8"[임신배우자DBG] read-only 진단입니다. +09는 활성/사용 플래그 계열로 보고 직접 수정하지 않습니다.");
 }
 
 static void StartPregnancyDebugScanAsync() {
