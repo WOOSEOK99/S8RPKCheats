@@ -800,7 +800,7 @@ namespace DX11Base {
               u8"선물 기증 무제한 OFF → 1번 → 기증 1회 → 2번 → 보주에서 중개 1회 → 3번.");
           ImGui::TextColored(
               ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-              u8"교류 객체 +0x000~+0x7FF의 중개 전/후 변경 바이트와 DWORD를 비교합니다.");
+              u8"GameBase/ScenarioDataCenter +0x0000~+0xFFFF의 중개 전/후 변경을 비교합니다.");
           ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
               u8"※ 비교만 하며 게임 데이터 값은 수정하지 않습니다.");
