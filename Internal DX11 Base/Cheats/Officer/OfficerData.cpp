@@ -52,13 +52,11 @@ namespace DX11Base {
     bool g_effectsLoaded = false;
 
     bool g_autoAffinityGrowthEnabled = false;
-    int g_autoAffinityMonthlyGain = 1;
 
     namespace {
-        uint16_t g_autoAffinityLastYear = 0;
-        uint8_t g_autoAffinityLastMonth = 0;
         uintptr_t g_autoAffinityLastDataCenter = 0;
         uintptr_t g_autoAffinityLastProtagonist = 0;
+        uint8_t g_autoAffinityLastRelevantGameState = 0;
     }
 
     RosterStats SafeReadRosterStats(uintptr_t targetBase) {
@@ -1087,14 +1085,20 @@ namespace DX11Base {
     }
 
 
+
     void ResetAutoAffinityGrowthState() {
-        g_autoAffinityLastYear = 0;
-        g_autoAffinityLastMonth = 0;
         g_autoAffinityLastDataCenter = 0;
         g_autoAffinityLastProtagonist = 0;
+        g_autoAffinityLastRelevantGameState = 0;
     }
 
     namespace {
+        constexpr uint8_t kAutoAffinityCouncilState = 0x05;
+        constexpr uint8_t kAutoAffinityDomesticState = 0x07;
+        constexpr uintptr_t kOfficerCompatibilityOffset = 0x5D;
+        constexpr uintptr_t kOfficerInterestOffset = 0x83;
+        constexpr uintptr_t kOfficerFavoredReputationOffset = 0xA4;
+
         bool IsAutoAffinityOfficerStatus(uint8_t status) {
             return status == 0x18 || status == 0x28 ||
                    status == 0x38 || status == 0x48 ||
@@ -1114,13 +1118,11 @@ namespace DX11Base {
         bool ShouldSkipAutoAffinityPair(
             const OfficerRelationshipInfo& info,
             uint16_t otherId) {
-            // 이미 완성된 긍정 관계는 추가 성장 대상에서 제외한다.
             if (HasId(info.swornBrothers, otherId) ||
                 HasId(info.spouses, otherId) ||
                 HasId(info.synergetic, otherId))
                 return true;
 
-            // 명시적인 부정 관계도 자연 성장시키지 않는다.
             return HasId(info.antipathetic, otherId) ||
                    HasId(info.enemies, otherId) ||
                    HasId(info.rivals, otherId);
@@ -1133,6 +1135,61 @@ namespace DX11Base {
                 return it->second;
             return u8"ID " + std::to_string((int)id);
         }
+
+        int CalcCompatibilityDistance(
+            uint8_t a, uint8_t b) {
+            const int diff =
+                std::abs((int)a - (int)b);
+            return (std::min)(diff, 150 - diff);
+        }
+
+        int CalcCompatibilityBonus(
+            uint8_t a, uint8_t b) {
+            const int distance =
+                CalcCompatibilityDistance(a, b);
+            // 0~75를 5 간격 15~0으로 환산.
+            // 0~4 => 15, 5~9 => 14, ... , 70~74 => 1, 75 => 0.
+            const int bonus =
+                15 - (distance / 5);
+            return (std::max)(0, bonus);
+        }
+
+        int CalcInterestAndReputationBonus(
+            uint8_t interestA,
+            uint8_t interestB,
+            uint8_t reputationA,
+            uint8_t reputationB) {
+            int matches = 0;
+            for (int bit = 0; bit < 4; ++bit) {
+                const bool a =
+                    (interestA & (1u << bit)) != 0;
+                const bool b =
+                    (interestB & (1u << bit)) != 0;
+                if (a == b)
+                    ++matches;
+            }
+            if (reputationA == reputationB)
+                ++matches;
+            return matches * 3;
+        }
+
+        uint8_t ReadAutoAffinityRelevantGameState() {
+            const uintptr_t gameBase =
+                GetGameBase();
+            if (gameBase <= 0x10000)
+                return 0;
+
+            uint8_t state = 0;
+            if (!SafeRelRead8(
+                    gameBase + 0xD0,
+                    &state))
+                return 0;
+
+            return (state == kAutoAffinityCouncilState ||
+                    state == kAutoAffinityDomesticState)
+                       ? state
+                       : 0;
+        }
     }
 
     void TickAutoAffinityGrowth(
@@ -1140,7 +1197,7 @@ namespace DX11Base {
         static ULONGLONG s_lastPollMs = 0;
         const ULONGLONG now =
             GetTickCount64();
-        if (now - s_lastPollMs < 500)
+        if (now - s_lastPollMs < 250)
             return;
         s_lastPollMs = now;
 
@@ -1151,53 +1208,48 @@ namespace DX11Base {
 
         const uintptr_t dataCenter =
             GetScenarioDataCenterAddress();
-        uint16_t year = 0;
-        uint8_t month = 0;
         if (dataCenter <= 0x10000 ||
-            protagonistBase <= 0x10000 ||
-            !ReadScenarioDate(&year, &month) ||
-            month < 1 || month > 12)
+            protagonistBase <= 0x10000)
             return;
 
-        // 게임/주인공 컨텍스트 변경 시 소급 적용하지 않고 새 기준만 잡는다.
         if (g_autoAffinityLastDataCenter != dataCenter ||
             g_autoAffinityLastProtagonist != protagonistBase) {
             g_autoAffinityLastDataCenter = dataCenter;
             g_autoAffinityLastProtagonist = protagonistBase;
-            g_autoAffinityLastYear = year;
-            g_autoAffinityLastMonth = month;
+            g_autoAffinityLastRelevantGameState = 0;
+        }
+
+        uint16_t protagonistId = 0;
+        if (!SafeRelRead16(
+                protagonistBase + 0x08,
+                &protagonistId) ||
+            protagonistId < 1 ||
+            protagonistId > 5102)
+            return;
+
+        const uint8_t state =
+            ReadAutoAffinityRelevantGameState();
+        if (state == 0)
+            return;
+
+        if (g_autoAffinityLastRelevantGameState == 0) {
+            g_autoAffinityLastRelevantGameState =
+                state;
             return;
         }
 
-        if (g_autoAffinityLastYear == 0 ||
-            g_autoAffinityLastMonth == 0) {
-            g_autoAffinityLastYear = year;
-            g_autoAffinityLastMonth = month;
-            return;
-        }
-
-        const int previousSerial =
-            (int)g_autoAffinityLastYear * 12 +
-            (int)g_autoAffinityLastMonth;
-        const int currentSerial =
-            (int)year * 12 + (int)month;
-
-        if (currentSerial == previousSerial)
+        if (state ==
+            g_autoAffinityLastRelevantGameState)
             return;
 
-        g_autoAffinityLastYear = year;
-        g_autoAffinityLastMonth = month;
+        const uint8_t previous =
+            g_autoAffinityLastRelevantGameState;
+        g_autoAffinityLastRelevantGameState =
+            state;
 
-        // 정확히 한 달 진행이 아닌 경우는 세이브 로드/날짜 편집 가능성이 있으므로 건너뛴다.
-        if (currentSerial != previousSerial + 1) {
-            AddLog(
-                u8"[친밀자동] 날짜 점프 감지: %u년 %u월 -> %u년 %u월. 이번 증가는 건너뜁니다.",
-                (unsigned int)(previousSerial / 12),
-                (unsigned int)(previousSerial % 12),
-                (unsigned int)year,
-                (unsigned int)month);
+        if (previous != kAutoAffinityDomesticState ||
+            state != kAutoAffinityCouncilState)
             return;
-        }
 
         const uintptr_t exe =
             (uintptr_t)GetModuleHandle(nullptr);
@@ -1213,6 +1265,9 @@ namespace DX11Base {
             uintptr_t force = 0;
             uintptr_t city = 0;
             uint16_t id = 0;
+            uint8_t compatibility = 0;
+            uint8_t interest = 0;
+            uint8_t favoredReputation = 0;
             size_t relationIndex = 0;
         };
 
@@ -1220,6 +1275,8 @@ namespace DX11Base {
         std::vector<uintptr_t> officerBases;
         officers.reserve(1600);
         officerBases.reserve(1600);
+
+        int invalidMetaCount = 0;
 
         for (int i = 0; i < 5102; ++i) {
             const uintptr_t base =
@@ -1229,9 +1286,13 @@ namespace DX11Base {
             uint8_t status = 0;
             uintptr_t force = 0;
             uintptr_t city = 0;
+            uint8_t compatibility = 0;
+            uint8_t interest = 0;
+            uint8_t favoredReputation = 0;
 
             if (!SafeRelRead16(base + 0x08, &id) ||
                 id < 1 || id > 5102 ||
+                id == protagonistId ||
                 !SafeRelRead8(base + 0x10, &status) ||
                 !IsAutoAffinityOfficerStatus(status) ||
                 !SafeRelReadPtr(base + 0x18, &force) ||
@@ -1240,25 +1301,54 @@ namespace DX11Base {
                 city <= 0x10000)
                 continue;
 
+            if (!SafeRelRead8(
+                    base + kOfficerCompatibilityOffset,
+                    &compatibility) ||
+                !SafeRelRead8(
+                    base + kOfficerInterestOffset,
+                    &interest) ||
+                !SafeRelRead8(
+                    base + kOfficerFavoredReputationOffset,
+                    &favoredReputation) ||
+                compatibility > 149 ||
+                favoredReputation < 1 ||
+                favoredReputation > 6) {
+                ++invalidMetaCount;
+                continue;
+            }
+
             AutoAffinityOfficer officer;
             officer.base = base;
             officer.force = force;
             officer.city = city;
             officer.id = id;
-            officer.relationIndex = officerBases.size();
+            officer.compatibility = compatibility;
+            officer.interest =
+                (uint8_t)(interest & 0x0F);
+            officer.favoredReputation =
+                favoredReputation;
+            officer.relationIndex =
+                officerBases.size();
             officers.push_back(officer);
             officerBases.push_back(base);
         }
 
-        if (officers.size() < 2)
+        if (officers.size() < 2) {
+            AddLog(
+                u8"[친밀자동] 평정 진입(07->05): 유효 AI 무장 부족 / 메타데이터 제외 %d명",
+                invalidMetaCount);
             return;
+        }
 
         std::vector<OfficerRelationshipInfo>
             relationships;
         if (!GetOfficerRelationshipInfoBatch(
                 officerBases, relationships) ||
-            relationships.size() != officerBases.size())
+            relationships.size() != officerBases.size()) {
+            AddLog(
+                u8"[친밀자동] 평정 진입(07->05): 관계 테이블 읽기 실패");
             return;
+        }
 
         std::sort(
             officers.begin(), officers.end(),
@@ -1271,19 +1361,17 @@ namespace DX11Base {
                 return a.id < b.id;
             });
 
-        const int gain =
-            (std::max)(1,
-                (std::min)(10,
-                    g_autoAffinityMonthlyGain));
-
-        int pairCount = 0;
+        int candidateCount = 0;
         int increasedCount = 0;
+        int zeroGainCount = 0;
         int reachedHundredCount = 0;
         int failedCount = 0;
+        int negativeAffinityCount = 0;
 
         size_t groupBegin = 0;
         while (groupBegin < officers.size()) {
-            size_t groupEnd = groupBegin + 1;
+            size_t groupEnd =
+                groupBegin + 1;
             while (groupEnd < officers.size() &&
                    officers[groupEnd].force ==
                        officers[groupBegin].force &&
@@ -1308,42 +1396,84 @@ namespace DX11Base {
                             leftRel, right.id))
                         continue;
 
-                    uint8_t current = 0;
-                    if (!GetOfficerAffinity(
+                    uintptr_t affinityAddress = 0;
+                    uint8_t rawAffinity = 0;
+                    if (!GetOfficerAffinityAddress(
                             left.id, right.id,
-                            current))
+                            affinityAddress,
+                            &rawAffinity)) {
+                        // 친밀도 -1(0xFF) 같은 signed 음수는
+                        // 기존 reader에서 유효 범위 밖으로 빠진다.
+                        uintptr_t pairAddress = 0;
+                        uint8_t ignored = 0;
+                        if (GetOfficerAffinityAddress(
+                                left.id, right.id,
+                                pairAddress, &ignored)) {
+                            (void)pairAddress;
+                        }
+                        ++negativeAffinityCount;
+                        continue;
+                    }
+
+                    const int8_t signedAffinity =
+                        (int8_t)rawAffinity;
+                    if (signedAffinity <= -1) {
+                        ++negativeAffinityCount;
+                        continue;
+                    }
+                    if (rawAffinity >= 100)
                         continue;
 
-                    // 0은 아직 친밀 관계가 형성되지 않은 쌍으로 보고 새로 시작시키지 않는다.
-                    if (current == 0 ||
-                        current >= 100)
+                    const int compatibilityBonus =
+                        CalcCompatibilityBonus(
+                            left.compatibility,
+                            right.compatibility);
+                    const int interestBonus =
+                        CalcInterestAndReputationBonus(
+                            left.interest,
+                            right.interest,
+                            left.favoredReputation,
+                            right.favoredReputation);
+                    const int gain =
+                        compatibilityBonus +
+                        interestBonus;
+
+                    ++candidateCount;
+
+                    if (gain <= 0) {
+                        ++zeroGainCount;
                         continue;
+                    }
 
-                    ++pairCount;
+                    const int nextInt =
+                        (std::min)(
+                            100,
+                            (int)rawAffinity + gain);
+                    const uint8_t next =
+                        (uint8_t)nextInt;
+                    uint8_t previousValue = 0;
 
-                    uint8_t previous = 0;
-                    uint8_t next = 0;
-                    if (!IncreaseOfficerAffinity(
+                    if (!SetOfficerAffinity(
                             left.id, right.id,
-                            (uint8_t)gain,
-                            &previous, &next)) {
+                            next, &previousValue)) {
                         ++failedCount;
                         continue;
                     }
 
-                    if (next > previous)
-                        ++increasedCount;
+                    ++increasedCount;
 
-                    if (previous < 100 &&
+                    if (previousValue < 100 &&
                         next == 100) {
                         ++reachedHundredCount;
                         AddLog(
-                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 (관계 생성 후보)",
+                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 / 상성 +%d / 흥미·명성 +%d (상생 후보)",
                             AutoAffinityName(left.id).c_str(),
                             (unsigned int)left.id,
                             AutoAffinityName(right.id).c_str(),
                             (unsigned int)right.id,
-                            (unsigned int)previous);
+                            (unsigned int)previousValue,
+                            compatibilityBonus,
+                            interestBonus);
                     }
                 }
             }
@@ -1352,14 +1482,15 @@ namespace DX11Base {
         }
 
         AddLog(
-            u8"[친밀자동] %u년 %u월 성장 완료: 같은 세력/도시 대상쌍 %d / 증가 %d / 100 도달 %d / 실패 %d / 월 +%d",
-            (unsigned int)year,
-            (unsigned int)month,
-            pairCount,
+            u8"[친밀자동] 평정 진입(07->05) 완료: AI %d명 / 같은 세력·도시 후보 %d쌍 / 증가 %d / 증가0 %d / 음수친밀 제외 %d / 100 도달 %d / 실패 %d / 메타데이터 제외 %d명",
+            (int)officers.size(),
+            candidateCount,
             increasedCount,
+            zeroGainCount,
+            negativeAffinityCount,
             reachedHundredCount,
             failedCount,
-            gain);
+            invalidMetaCount);
     }
 
     bool GetOfficerTalentDetailed(uintptr_t officerBase, int slot, TalentInfo& outInfo) {
