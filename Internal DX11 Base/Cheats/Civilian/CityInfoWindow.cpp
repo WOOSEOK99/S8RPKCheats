@@ -7322,6 +7322,39 @@ namespace DX11Base {
       }
 
       if (bShowDebug && selected) {
+        uint16_t debugHeroId = 0;
+        uint8_t debugPairAffinity = 0;
+        uintptr_t debugAffinityAddr = 0;
+        const bool debugAffinityReadable =
+            p1 > 0x10000 &&
+            SafeRead16(p1 + 0x08, &debugHeroId) &&
+            debugHeroId >= 1 && debugHeroId <= 5102 &&
+            GetOfficerAffinityAddress(
+                debugHeroId, selected->id,
+                debugAffinityAddr,
+                &debugPairAffinity);
+
+        if (debugAffinityReadable) {
+          ImGui::SameLine(0.f, 12.f * sc);
+          ImGui::TextColored(
+              ImVec4(0.55f, 0.90f, 0.65f, 1.0f),
+              u8"현재 친밀: %u",
+              (unsigned int)debugPairAffinity);
+          if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::Text(
+                u8"%s(ID %u) <-> %s(ID %u)",
+                BuildOfficerName(debugHeroId).c_str(),
+                (unsigned int)debugHeroId,
+                BuildOfficerName(selected->id).c_str(),
+                (unsigned int)selected->id);
+            ImGui::Text(
+                u8"친밀 주소: 0x%llX",
+                (unsigned long long)debugAffinityAddr);
+            ImGui::EndTooltip();
+          }
+        }
+
         uintptr_t affinityExpectedAddr = 0;
         uintptr_t affinityCapturedAddr = 0;
         uint8_t affinityWrittenValue = 0;
