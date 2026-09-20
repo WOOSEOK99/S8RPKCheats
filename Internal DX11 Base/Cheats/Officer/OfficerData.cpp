@@ -1190,6 +1190,23 @@ namespace DX11Base {
                        ? state
                        : 0;
         }
+
+        // SEH는 std::vector/string 등의 소멸자가 있는 TickAutoAffinityGrowth
+        // 본문에서 사용할 수 없으므로 POD 전용 헬퍼로 분리한다.
+        bool TryWriteAffinityByte(
+            uintptr_t address,
+            uint8_t value) {
+            __try {
+                *(volatile uint8_t*)address =
+                    value;
+                return
+                    *(volatile uint8_t*)address ==
+                    value;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+        }
     }
 
     void TickAutoAffinityGrowth(
@@ -1475,19 +1492,9 @@ namespace DX11Base {
                     const uint8_t next =
                         (uint8_t)nextInt;
 
-                    bool writeOk = false;
-                    __try {
-                        *(volatile uint8_t*)affinityAddress =
-                            next;
-                        writeOk =
-                            (*(volatile uint8_t*)affinityAddress ==
-                             next);
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER) {
-                        writeOk = false;
-                    }
-
-                    if (!writeOk) {
+                    if (!TryWriteAffinityByte(
+                            affinityAddress,
+                            next)) {
                         ++failedCount;
                         continue;
                     }
