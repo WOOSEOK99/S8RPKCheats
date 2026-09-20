@@ -187,6 +187,50 @@ namespace DX11Base {
     AddLog(u8"[교류상태DBG] 캡처 취소/초기화 완료.");
   }
 
+  bool ClearCapturedDuelUsedBitForTest() {
+    if (!g_interactionCapturedBase) {
+      AddLog(u8"[교류TEST] 먼저 교류 상태 객체를 캡처해주세요.");
+      return false;
+    }
+
+    const uintptr_t addr = g_interactionCapturedBase + 0x320;
+    if (!IsValidPtr(addr, sizeof(uint32_t))) {
+      AddLog(u8"[교류TEST] 저장된 +0x320 주소가 유효하지 않습니다.");
+      return false;
+    }
+
+    const uint32_t before = *(const uint32_t*)addr;
+    const uint32_t after = before & ~0x00000100u;
+    *(uint32_t*)addr = after;
+    const uint32_t readback = *(const uint32_t*)addr;
+
+    AddLog(u8"[교류TEST] 대련 bit8 해제: 0x%08X -> 0x%08X / readback=0x%08X",
+           before, after, readback);
+    return readback == after;
+  }
+
+  bool ClearCapturedDebateUsedBitForTest() {
+    if (!g_interactionCapturedBase) {
+      AddLog(u8"[교류TEST] 먼저 교류 상태 객체를 캡처해주세요.");
+      return false;
+    }
+
+    const uintptr_t addr = g_interactionCapturedBase + 0x320;
+    if (!IsValidPtr(addr, sizeof(uint32_t))) {
+      AddLog(u8"[교류TEST] 저장된 +0x320 주소가 유효하지 않습니다.");
+      return false;
+    }
+
+    const uint32_t before = *(const uint32_t*)addr;
+    const uint32_t after = before & ~0x00000200u;
+    *(uint32_t*)addr = after;
+    const uint32_t readback = *(const uint32_t*)addr;
+
+    AddLog(u8"[교류TEST] 토론 bit9 해제: 0x%08X -> 0x%08X / readback=0x%08X",
+           before, after, readback);
+    return readback == after;
+  }
+
   void SetInfiniteGift(bool enable) {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
     if (!exeBase)
