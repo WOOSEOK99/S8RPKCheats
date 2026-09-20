@@ -2,11 +2,6 @@
 
 namespace DX11Base {
   void SetInfiniteTalk(bool enable);
-  void ScanDuelDebateFlagCandidates();
-  void LogDuelDebateFocusedCandidates();
-  void LogInteractionUsageFlags(uintptr_t officerBase);
-  bool StartDuelDebateCapture();
-  void LogDuelDebateCaptureResult();
-  void StopDuelDebateCapture();
-
+  void SetInfiniteDuel(bool enable);
+  void SetInfiniteDebate(bool enable);
 } // namespace DX11Base
