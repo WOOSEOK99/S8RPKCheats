@@ -56,7 +56,8 @@ namespace DX11Base {
     namespace {
         uintptr_t g_autoAffinityLastDataCenter = 0;
         uintptr_t g_autoAffinityLastProtagonist = 0;
-        uint8_t g_autoAffinityLastRelevantGameState = 0;
+        unsigned short g_autoAffinityLastYear = 0;
+        uint8_t g_autoAffinityLastMonth = 0;
     }
 
     RosterStats SafeReadRosterStats(uintptr_t targetBase) {
@@ -424,136 +425,6 @@ namespace DX11Base {
             if (matchingActive >= 0 && matchingActive != firstActive)
                 logSlot("MATCH", matchingActive);
             return firstEmpty >= 0;
-        }
-
-        bool TryWriteSynergeticSlotPOD(
-            uintptr_t slot,
-            uintptr_t officer1,
-            uintptr_t officer2) {
-            if (slot <= 0x10000 ||
-                officer1 <= 0x10000 ||
-                officer2 <= 0x10000)
-                return false;
-
-            // +0x00의 공통 객체/VT 포인터는 절대 건드리지 않는다.
-            // 빈 슬롯에서 실제 관계 데이터 영역(+0x08~+0x1F)만 백업 후 기록한다.
-            uint8_t backup[0x18]{};
-            DWORD oldProtect = 0;
-            if (!VirtualProtect(
-                    (LPVOID)(slot + 0x08),
-                    sizeof(backup),
-                    PAGE_READWRITE,
-                    &oldProtect))
-                return false;
-
-            bool ok = false;
-            __try {
-                memcpy(backup, (const void*)(slot + 0x08), sizeof(backup));
-
-                // 포인터와 occurred를 먼저 기록하고 relation을 마지막에 활성화한다.
-                *(uintptr_t*)(slot + 0x08) = officer1;
-                *(uintptr_t*)(slot + 0x10) = officer2;
-                *(uint8_t*)(slot + 0x19) = 0;
-                for (int i = 0x1A; i < 0x20; ++i)
-                    *(uint8_t*)(slot + i) = 0;
-                *(uint8_t*)(slot + 0x18) = 2;
-
-                ok =
-                    *(uintptr_t*)(slot + 0x08) == officer1 &&
-                    *(uintptr_t*)(slot + 0x10) == officer2 &&
-                    *(uint8_t*)(slot + 0x18) == 2 &&
-                    *(uint8_t*)(slot + 0x19) == 0;
-
-                if (!ok)
-                    memcpy((void*)(slot + 0x08), backup, sizeof(backup));
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
-                __try {
-                    memcpy((void*)(slot + 0x08), backup, sizeof(backup));
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER) {
-                }
-                ok = false;
-            }
-
-            DWORD dummyProtect = 0;
-            VirtualProtect(
-                (LPVOID)(slot + 0x08),
-                sizeof(backup),
-                oldProtect,
-                &dummyProtect);
-            return ok;
-        }
-
-        bool TryCreateSynergeticRelation(
-            uintptr_t synerBase,
-            uintptr_t rosterBase,
-            uintptr_t officer1,
-            uintptr_t officer2,
-            int* outSlotIndex) {
-            if (outSlotIndex)
-                *outSlotIndex = -1;
-            if (synerBase <= 0x10000 ||
-                rosterBase <= 0x10000 ||
-                !IsRosterOfficerPtr(officer1, rosterBase) ||
-                !IsRosterOfficerPtr(officer2, rosterBase) ||
-                officer1 == officer2)
-                return false;
-
-            uint16_t id1 = 0, id2 = 0;
-            if (!ReadOfficerIdFromRosterPtr(officer1, rosterBase, &id1) ||
-                !ReadOfficerIdFromRosterPtr(officer2, rosterBase, &id2) ||
-                id1 == id2)
-                return false;
-
-            int firstEmpty = -1;
-            for (int i = 0; i < 5000; ++i) {
-                const uintptr_t slot = synerBase + (uintptr_t)i * 0x20;
-                uintptr_t p1 = 0, p2 = 0;
-                uint8_t relation = 0, occurred = 0;
-                if (!SafeRelReadPtr(slot + 0x08, &p1) ||
-                    !SafeRelReadPtr(slot + 0x10, &p2) ||
-                    !SafeRelRead8(slot + 0x18, &relation) ||
-                    !SafeRelRead8(slot + 0x19, &occurred))
-                    break;
-
-                if (relation == 1 || relation == 2) {
-                    uint16_t existing1 = 0, existing2 = 0;
-                    if (ReadOfficerIdFromRosterPtr(p1, rosterBase, &existing1) &&
-                        ReadOfficerIdFromRosterPtr(p2, rosterBase, &existing2) &&
-                        ((existing1 == id1 && existing2 == id2) ||
-                         (existing1 == id2 && existing2 == id1))) {
-                        // 이미 관계가 있으면 성공으로 취급하되 새 슬롯은 만들지 않는다.
-                        if (outSlotIndex)
-                            *outSlotIndex = i;
-                        return true;
-                    }
-                    continue;
-                }
-
-                // 실측된 빈 슬롯 규칙: relation=0, occurred=0, 두 장수 포인터=0.
-                if (firstEmpty < 0 &&
-                    relation == 0 &&
-                    occurred == 0 &&
-                    p1 == 0 &&
-                    p2 == 0) {
-                    firstEmpty = i;
-                    break;
-                }
-            }
-
-            if (firstEmpty < 0)
-                return false;
-
-            const uintptr_t emptySlot =
-                synerBase + (uintptr_t)firstEmpty * 0x20;
-            if (!TryWriteSynergeticSlotPOD(
-                    emptySlot, officer1, officer2))
-                return false;
-
-            if (outSlotIndex)
-                *outSlotIndex = firstEmpty;
-            return true;
         }
 
         void AddUniqueRelationshipId(std::vector<uint16_t>& values, uint16_t id) {
@@ -1335,12 +1206,11 @@ namespace DX11Base {
     void ResetAutoAffinityGrowthState() {
         g_autoAffinityLastDataCenter = 0;
         g_autoAffinityLastProtagonist = 0;
-        g_autoAffinityLastRelevantGameState = 0;
+        g_autoAffinityLastYear = 0;
+        g_autoAffinityLastMonth = 0;
     }
 
     namespace {
-        constexpr uint8_t kAutoAffinityCouncilState = 0x05;
-        constexpr uint8_t kAutoAffinityDomesticState = 0x07;
         constexpr uintptr_t kOfficerCompatibilityOffset = 0x5D;
         constexpr uintptr_t kOfficerInterestOffset = 0x83;
         constexpr uintptr_t kOfficerFavoredReputationOffset = 0xA4;
@@ -1393,10 +1263,15 @@ namespace DX11Base {
             uint8_t a, uint8_t b) {
             const int distance =
                 CalcCompatibilityDistance(a, b);
-            // 0~75를 5 간격 15~0으로 환산.
-            // 0~4 => 15, 5~9 => 14, ... , 70~74 => 1, 75 => 0.
+
+            // 참고 DLL(AffinityM) 실측:
+            // 거리 0 => +15
+            // 1~5 => +14, 6~10 => +13, ... , 66~70 => +1, 71~75 => +0
+            if (distance == 0)
+                return 15;
+
             const int bonus =
-                15 - (distance / 5);
+                15 - ((distance + 4) / 5);
             return (std::max)(0, bonus);
         }
 
@@ -1405,36 +1280,31 @@ namespace DX11Base {
             uint8_t interestB,
             uint8_t reputationA,
             uint8_t reputationB) {
-            int matches = 0;
-            for (int bit = 0; bit < 4; ++bit) {
-                const bool a =
-                    (interestA & (1u << bit)) != 0;
-                const bool b =
-                    (interestB & (1u << bit)) != 0;
-                if (a == b)
-                    ++matches;
+            int bonus = 0;
+
+            // 참고 DLL(AffinityM) 실측:
+            // +0x83을 2비트 x 4필드로 비교한다.
+            // 같은 값이어도 0(없음)이면 보너스 없음.
+            for (int shift = 0; shift <= 6; shift += 2) {
+                const uint8_t a =
+                    (uint8_t)((interestA >> shift) & 0x03);
+                const uint8_t b =
+                    (uint8_t)((interestB >> shift) & 0x03);
+                if (a != 0 && a == b)
+                    bonus += 3;
             }
-            if (reputationA == reputationB)
-                ++matches;
-            return matches * 3;
+
+            // +0xA4 중시 유형도 같은 비영(非0) 값일 때 +3.
+            if (reputationA != 0 &&
+                reputationA == reputationB)
+                bonus += 3;
+
+            return bonus;
         }
 
-        uint8_t ReadAutoAffinityRelevantGameState() {
-            const uintptr_t gameBase =
-                GetGameBase();
-            if (gameBase <= 0x10000)
-                return 0;
-
-            uint8_t state = 0;
-            if (!SafeRelRead8(
-                    gameBase + 0xD0,
-                    &state))
-                return 0;
-
-            return (state == kAutoAffinityCouncilState ||
-                    state == kAutoAffinityDomesticState)
-                       ? state
-                       : 0;
+        bool IsAutoAffinityCouncilMonth(uint8_t month) {
+            return month == 1 || month == 4 ||
+                   month == 7 || month == 10;
         }
 
         // SEH는 std::vector/string 등의 소멸자가 있는 TickAutoAffinityGrowth
@@ -1479,7 +1349,8 @@ namespace DX11Base {
             g_autoAffinityLastProtagonist != protagonistBase) {
             g_autoAffinityLastDataCenter = dataCenter;
             g_autoAffinityLastProtagonist = protagonistBase;
-            g_autoAffinityLastRelevantGameState = 0;
+            g_autoAffinityLastYear = 0;
+            g_autoAffinityLastMonth = 0;
         }
 
         uint16_t protagonistId = 0;
@@ -1490,29 +1361,49 @@ namespace DX11Base {
             protagonistId > 5102)
             return;
 
-        const uint8_t state =
-            ReadAutoAffinityRelevantGameState();
-        if (state == 0)
+        unsigned short currentYear = 0;
+        uint8_t currentMonth = 0;
+        if (!ReadScenarioDate(
+                &currentYear, &currentMonth) ||
+            currentYear == 0 ||
+            currentMonth < 1 ||
+            currentMonth > 12)
             return;
 
-        if (g_autoAffinityLastRelevantGameState == 0) {
-            g_autoAffinityLastRelevantGameState =
-                state;
+        // 참고 DLL(AffinityM)과 동일하게 "분기 평정월로 넘어가는 순간" 1회 실행.
+        // 활성화 시 이미 해당 월이면 기준만 잡고 소급 실행하지 않는다.
+        if (g_autoAffinityLastYear == 0 ||
+            g_autoAffinityLastMonth == 0) {
+            g_autoAffinityLastYear = currentYear;
+            g_autoAffinityLastMonth = currentMonth;
             return;
         }
 
-        if (state ==
-            g_autoAffinityLastRelevantGameState)
+        if (g_autoAffinityLastYear == currentYear &&
+            g_autoAffinityLastMonth == currentMonth)
             return;
 
-        const uint8_t previous =
-            g_autoAffinityLastRelevantGameState;
-        g_autoAffinityLastRelevantGameState =
-            state;
+        const unsigned int previousSerial =
+            (unsigned int)g_autoAffinityLastYear * 12u +
+            (unsigned int)g_autoAffinityLastMonth;
+        const unsigned int currentSerial =
+            (unsigned int)currentYear * 12u +
+            (unsigned int)currentMonth;
 
-        if (previous != kAutoAffinityDomesticState ||
-            state != kAutoAffinityCouncilState)
+        g_autoAffinityLastYear = currentYear;
+        g_autoAffinityLastMonth = currentMonth;
+
+        // 저장 불러오기 등으로 날짜가 뒤로 간 경우에는 실행하지 않는다.
+        if (currentSerial <= previousSerial)
             return;
+
+        if (!IsAutoAffinityCouncilMonth(currentMonth))
+            return;
+
+        AddLog(
+            u8"[친밀자동] %u년 %u월 평정 시작 감지 -> AI 친밀도 가속 실행",
+            (unsigned int)currentYear,
+            (unsigned int)currentMonth);
 
         const uintptr_t exe =
             (uintptr_t)GetModuleHandle(nullptr);
@@ -1600,8 +1491,7 @@ namespace DX11Base {
             officer.city = city;
             officer.id = id;
             officer.compatibility = compatibility;
-            officer.interest =
-                (uint8_t)(interest & 0x0F);
+            officer.interest = interest;
             officer.favoredReputation =
                 favoredReputation;
             officer.relationIndex =
@@ -1664,15 +1554,6 @@ namespace DX11Base {
 
         const ULONGLONG affinityStartMs =
             GetTickCount64();
-
-        uintptr_t synerProbeBase = 0;
-        const uintptr_t gameBase =
-            GetGameBase();
-        const bool hasSynerProbeTable =
-            gameBase > 0x10000 &&
-            TryResolveSynergeticTable(
-                gameBase, rosterBase, &synerProbeBase);
-        bool dumpedSynerProbeThisCouncil = false;
 
         size_t groupBegin = 0;
         while (groupBegin < officers.size()) {
@@ -1774,7 +1655,7 @@ namespace DX11Base {
                         next == 100) {
                         ++reachedHundredCount;
                         AddLog(
-                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 / 상성 +%d / 흥미·명성 +%d (상생 후보)",
+                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 / 상성 +%d / 흥미·중시 +%d (게임 상생 판정 대기)",
                             AutoAffinityName(left.id).c_str(),
                             (unsigned int)left.id,
                             AutoAffinityName(right.id).c_str(),
@@ -1783,43 +1664,8 @@ namespace DX11Base {
                             compatibilityBonus,
                             interestBonus);
 
-                        if (hasSynerProbeTable) {
-                            int synerSlotIndex = -1;
-                            if (TryCreateSynergeticRelation(
-                                    synerProbeBase,
-                                    rosterBase,
-                                    left.base,
-                                    right.base,
-                                    &synerSlotIndex)) {
-                                AddLog(
-                                    u8"[친밀자동] 상생 생성 성공: %s(ID %u) <-> %s(ID %u) / 슬롯 #%d",
-                                    AutoAffinityName(left.id).c_str(),
-                                    (unsigned int)left.id,
-                                    AutoAffinityName(right.id).c_str(),
-                                    (unsigned int)right.id,
-                                    synerSlotIndex);
-                            } else {
-                                AddLog(
-                                    u8"[친밀자동] 상생 생성 실패: %s(ID %u) <-> %s(ID %u)",
-                                    AutoAffinityName(left.id).c_str(),
-                                    (unsigned int)left.id,
-                                    AutoAffinityName(right.id).c_str(),
-                                    (unsigned int)right.id);
-                            }
-
-                            if (!dumpedSynerProbeThisCouncil) {
-                                DumpSynergeticSlotBytes(
-                                    synerProbeBase,
-                                    rosterBase,
-                                    left.id,
-                                    right.id);
-                                dumpedSynerProbeThisCouncil = true;
-                            }
-                        } else if (!dumpedSynerProbeThisCouncil) {
-                            AddLog(
-                                u8"[상생슬롯DBG] 상생 테이블 해석 실패");
-                            dumpedSynerProbeThisCouncil = true;
-                        }
+                        // 참고 DLL의 AffinityM은 관계 테이블을 직접 쓰지 않는다.
+                        // 친밀도만 100까지 올리고 이후 상생 성립은 게임 원래 판정에 맡긴다.
                     }
                 }
             }
