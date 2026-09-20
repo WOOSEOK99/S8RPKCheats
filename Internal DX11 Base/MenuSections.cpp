@@ -757,18 +757,29 @@ namespace DX11Base {
       if (::DX11Base::bShowDebug) {
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::TextDisabled(u8"[교류 무제한 진단 / 읽기 전용]");
-        if (ImGui::Button(u8"기증 기준 대련/토론 코드 확인##DuelDebateNearGift",
+        ImGui::TextDisabled(u8"[교류 무제한 진단]");
+        if (ImGui::Button(u8"1. 교류 상태 객체 캡처##InteractionStateCapture",
                           ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::LogDuelDebateNearGiftCandidates();
+          ::DX11Base::StartInteractionStateCaptureFromGift();
+        }
+        if (ImGui::Button(u8"2. 현재 플래그 확인##InteractionStateRead",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::LogCapturedInteractionState();
+        }
+        if (ImGui::Button(u8"캡처 취소/초기화##InteractionStateCancel",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::CancelInteractionStateCapture();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
-              u8"현재 기증 +0x320 코드 위치를 기준으로 옛 CT의 대련/토론 상대거리 주변만 확인합니다.");
+              u8"선물 기증 무제한을 OFF한 상태에서 1번 → 기증 1회 → 2번 순서로 사용하세요.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+              u8"첫 확인 후 캡처 훅은 자동 원복되고, 같은 +0x320 상태값만 계속 읽습니다.");
           ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 실행 훅이나 게임 데이터 쓰기는 하지 않습니다.");
+              u8"그 뒤 대련/토론을 각각 실행하고 2번을 다시 눌러 bit8/bit9 변화를 확인하세요.");
           ImGui::EndTooltip();
         }
       }
