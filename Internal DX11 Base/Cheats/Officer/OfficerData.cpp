@@ -1294,6 +1294,7 @@ namespace DX11Base {
         officerBases.reserve(1600);
 
         int invalidMetaCount = 0;
+        int invalidMetaLogged = 0;
 
         for (int i = 0; i < 5102; ++i) {
             const uintptr_t base =
@@ -1318,19 +1319,33 @@ namespace DX11Base {
                 city <= 0x10000)
                 continue;
 
-            if (!SafeRelRead8(
+            const bool metaReadOk =
+                SafeRelRead8(
                     base + kOfficerCompatibilityOffset,
-                    &compatibility) ||
-                !SafeRelRead8(
+                    &compatibility) &&
+                SafeRelRead8(
                     base + kOfficerInterestOffset,
-                    &interest) ||
-                !SafeRelRead8(
+                    &interest) &&
+                SafeRelRead8(
                     base + kOfficerFavoredReputationOffset,
-                    &favoredReputation) ||
+                    &favoredReputation);
+
+            if (!metaReadOk ||
                 compatibility > 149 ||
                 favoredReputation < 1 ||
                 favoredReputation > 6) {
                 ++invalidMetaCount;
+                if (invalidMetaLogged < 30) {
+                    AddLog(
+                        u8"[친밀자동DBG] 메타 제외: %s(ID %u) / 상성=%u / 흥미Raw=0x%02X / 중시명성=%u / read=%s",
+                        AutoAffinityName(id).c_str(),
+                        (unsigned int)id,
+                        (unsigned int)compatibility,
+                        (unsigned int)interest,
+                        (unsigned int)favoredReputation,
+                        metaReadOk ? "OK" : "FAIL");
+                    ++invalidMetaLogged;
+                }
                 continue;
             }
 
