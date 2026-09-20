@@ -790,6 +790,11 @@ namespace DX11Base {
           ::DX11Base::CompareJewelMediationSnapshot();
         }
         if (ImGui::Button(
+                u8"4. 중개 사용 bit6 해제 테스트##MediationBit6Clear",
+                ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::ClearMediationUsedBitForTest();
+        }
+        if (ImGui::Button(
                 u8"중개 스냅샷 초기화##MediationSnapshotReset",
                 ImVec2(-FLT_MIN, 0))) {
           ::DX11Base::ResetJewelMediationSnapshot();
@@ -802,8 +807,11 @@ namespace DX11Base {
               ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
               u8"GameBase/ScenarioDataCenter +0x0000~+0xFFFF의 중개 전/후 변경을 비교합니다.");
           ImGui::TextColored(
+              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+              u8"확인된 유일 후보: ScenarioDataCenter +0x71E5 bit6 (0x40).");
+          ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 비교만 하며 게임 데이터 값은 수정하지 않습니다.");
+              u8"※ 4번만 후보 bit를 1회 해제하며, 다른 비트는 보존합니다.");
           ImGui::EndTooltip();
         }
       }
