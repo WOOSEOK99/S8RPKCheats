@@ -81,6 +81,32 @@ namespace DX11Base {
         return true;
     }
 
+    bool TickInfiniteBanquet() {
+        const uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter)
+            return false;
+
+        constexpr uintptr_t kVerifiedBanquetFlagOffset = 0x71E4;
+        const uintptr_t addr = dataCenter + kVerifiedBanquetFlagOffset;
+        if (!IsValidPtr(addr, 1))
+            return false;
+
+        const uint8_t before = *(const uint8_t*)addr;
+        if ((before & 0x02u) == 0)
+            return true;
+
+        DWORD oldProt = 0;
+        if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &oldProt))
+            return false;
+
+        *(uint8_t*)addr = (uint8_t)(before & (uint8_t)~0x02u);
+
+        DWORD tmp = 0;
+        VirtualProtect((LPVOID)addr, 1, oldProt, &tmp);
+
+        return ((*(const uint8_t*)addr & 0x02u) == 0);
+    }
+
     bool ClearBanquetUsedBitForTest() {
         const uintptr_t dataCenter = ResolveScenarioDataCenter();
         if (!dataCenter) {
