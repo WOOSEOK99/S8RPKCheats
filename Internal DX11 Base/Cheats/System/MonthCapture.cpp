@@ -42,6 +42,102 @@ namespace DX11Base {
         return ResolveScenarioDataCenter();
     }
 
+    namespace {
+        constexpr uintptr_t kBanquetDiffStart = 0x6000;
+        constexpr uintptr_t kBanquetDiffEnd   = 0x8000;
+        constexpr size_t kBanquetDiffSize =
+            (size_t)(kBanquetDiffEnd - kBanquetDiffStart);
+
+        static uint8_t s_banquetBefore[kBanquetDiffSize] = {};
+        static uintptr_t s_banquetBeforeBase = 0;
+        static bool s_banquetBeforeCaptured = false;
+    }
+
+    bool CaptureBanquetDiffBaseline() {
+        const uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter) {
+            AddLog(u8"[연회DIFF] 시나리오 데이터 베이스를 찾지 못했습니다.");
+            return false;
+        }
+
+        const uintptr_t start = dataCenter + kBanquetDiffStart;
+        if (!IsValidPtr(start, kBanquetDiffSize)) {
+            AddLog(u8"[연회DIFF] 비교 범위가 유효하지 않습니다. base=%p range=+0x%llX~+0x%llX",
+                   (void*)dataCenter,
+                   (unsigned long long)kBanquetDiffStart,
+                   (unsigned long long)kBanquetDiffEnd);
+            return false;
+        }
+
+        memcpy(s_banquetBefore, (const void*)start, kBanquetDiffSize);
+        s_banquetBeforeBase = dataCenter;
+        s_banquetBeforeCaptured = true;
+
+        AddLog(u8"[연회DIFF] 연회 전 저장 완료. base=%p range=+0x%llX~+0x%llX size=0x%llX",
+               (void*)dataCenter,
+               (unsigned long long)kBanquetDiffStart,
+               (unsigned long long)kBanquetDiffEnd,
+               (unsigned long long)kBanquetDiffSize);
+        return true;
+    }
+
+    bool CompareBanquetDiffAfter() {
+        if (!s_banquetBeforeCaptured) {
+            AddLog(u8"[연회DIFF] 먼저 '연회 전 저장'을 눌러주세요.");
+            return false;
+        }
+
+        const uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter) {
+            AddLog(u8"[연회DIFF] 시나리오 데이터 베이스를 찾지 못했습니다.");
+            return false;
+        }
+        if (dataCenter != s_banquetBeforeBase) {
+            AddLog(u8"[연회DIFF] 베이스가 바뀌었습니다. 전=%p 후=%p. 다시 저장해주세요.",
+                   (void*)s_banquetBeforeBase, (void*)dataCenter);
+            return false;
+        }
+
+        const uintptr_t start = dataCenter + kBanquetDiffStart;
+        if (!IsValidPtr(start, kBanquetDiffSize)) {
+            AddLog(u8"[연회DIFF] 비교 범위가 유효하지 않습니다.");
+            return false;
+        }
+
+        const uint8_t* now = (const uint8_t*)start;
+        unsigned int changed = 0;
+        unsigned int bit1Candidates = 0;
+        unsigned int loggedChanged = 0;
+
+        for (size_t i = 0; i < kBanquetDiffSize; ++i) {
+            const uint8_t before = s_banquetBefore[i];
+            const uint8_t after = now[i];
+            if (before == after)
+                continue;
+
+            ++changed;
+            const uintptr_t off = kBanquetDiffStart + i;
+
+            if ((before & 0x02u) == 0 && (after & 0x02u) != 0) {
+                ++bit1Candidates;
+                AddLog(u8"[연회DIFF] bit1 후보 +0x%llX : %02X -> %02X",
+                       (unsigned long long)off,
+                       (unsigned int)before,
+                       (unsigned int)after);
+            } else if (loggedChanged < 40) {
+                AddLog(u8"[연회DIFF] 변경 +0x%llX : %02X -> %02X",
+                       (unsigned long long)off,
+                       (unsigned int)before,
+                       (unsigned int)after);
+                ++loggedChanged;
+            }
+        }
+
+        AddLog(u8"[연회DIFF] 비교 완료. 변경 바이트=%u / bit1 0->1 후보=%u",
+               changed, bit1Candidates);
+        return true;
+    }
+
     bool ScanBanquetCodeCandidates() {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase) {
