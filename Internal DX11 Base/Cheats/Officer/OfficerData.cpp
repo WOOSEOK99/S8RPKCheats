@@ -1095,12 +1095,9 @@ namespace DX11Base {
     namespace {
         constexpr uint8_t kAutoAffinityCouncilState = 0x05;
         constexpr uint8_t kAutoAffinityDomesticState = 0x07;
-        // 구 0x3C0 무장 구조 대비 현재 PK 0x3D0 구조에서 +0x10 이동 후보.
-        // 선택 무장 실측 검증이 끝날 때까지 자동 쓰기는 아래 verified 플래그로 차단한다.
-        constexpr uintptr_t kOfficerCompatibilityOffset = 0x6D;
-        constexpr uintptr_t kOfficerInterestOffset = 0x93;
-        constexpr uintptr_t kOfficerFavoredReputationOffset = 0xB4;
-        constexpr bool kAutoAffinityMetadataVerified = false;
+        constexpr uintptr_t kOfficerCompatibilityOffset = 0x5D;
+        constexpr uintptr_t kOfficerInterestOffset = 0x83;
+        constexpr uintptr_t kOfficerFavoredReputationOffset = 0xA4;
 
         bool IsAutoAffinityOfficerStatus(uint8_t status) {
             return status == 0x18 || status == 0x28 ||
@@ -1226,16 +1223,6 @@ namespace DX11Base {
             return;
         }
 
-        if (!kAutoAffinityMetadataVerified) {
-            static bool s_loggedMetadataHold = false;
-            if (!s_loggedMetadataHold) {
-                AddLog(
-                    u8"[친밀자동] 상성/흥미/중시 현재 PK 오프셋 검증 전이라 자동 상승을 일시 중지합니다.");
-                s_loggedMetadataHold = true;
-            }
-            return;
-        }
-
         const uintptr_t dataCenter =
             GetScenarioDataCenterAddress();
         if (dataCenter <= 0x10000 ||
@@ -1307,13 +1294,25 @@ namespace DX11Base {
         officerBases.reserve(1600);
 
         int invalidMetaCount = 0;
-        int invalidMetaLogged = 0;
+        bool seenOfficerIds[5103] = {};
 
         for (int i = 0; i < 5102; ++i) {
             const uintptr_t base =
                 rosterBase + (uintptr_t)i * 0x3D0;
 
-            uint16_t id = 0;
+            const RosterStats rosterStats =
+                SafeReadRosterStats(base);
+            if (!rosterStats.valid ||
+                rosterStats.id_08 < 1 ||
+                rosterStats.id_08 > 5102)
+                continue;
+
+            const uint16_t id =
+                rosterStats.id_08;
+            if (seenOfficerIds[id])
+                continue;
+            seenOfficerIds[id] = true;
+
             uint8_t status = 0;
             uintptr_t force = 0;
             uintptr_t city = 0;
@@ -1321,9 +1320,7 @@ namespace DX11Base {
             uint8_t interest = 0;
             uint8_t favoredReputation = 0;
 
-            if (!SafeRelRead16(base + 0x08, &id) ||
-                id < 1 || id > 5102 ||
-                id == protagonistId ||
+            if (id == protagonistId ||
                 !SafeRelRead8(base + 0x10, &status) ||
                 !IsAutoAffinityOfficerStatus(status) ||
                 !SafeRelReadPtr(base + 0x18, &force) ||
