@@ -35,6 +35,8 @@ namespace DX11Base {
   bool bResonance = false;
   bool bInfiniteGift = false;
   bool bInfiniteTalk = false;
+  bool bInfiniteDuel = false;
+  bool bInfiniteDebate = false;
   bool bFastRelationship = false;
   bool bShowChildManagerWin = false;
 
