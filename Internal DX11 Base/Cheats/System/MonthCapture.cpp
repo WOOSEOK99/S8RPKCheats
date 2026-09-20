@@ -81,6 +81,50 @@ namespace DX11Base {
         return true;
     }
 
+    bool ClearBanquetUsedBitForTest() {
+        const uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter) {
+            AddLog(u8"[연회TEST] 시나리오 데이터 베이스를 찾지 못했습니다.");
+            return false;
+        }
+
+        constexpr uintptr_t kVerifiedBanquetFlagOffset = 0x71E4;
+        const uintptr_t addr = dataCenter + kVerifiedBanquetFlagOffset;
+        if (!IsValidPtr(addr, 1)) {
+            AddLog(u8"[연회TEST] 연회 플래그 주소가 유효하지 않습니다. addr=%p",
+                   (void*)addr);
+            return false;
+        }
+
+        const uint8_t before = *(const uint8_t*)addr;
+        const uint8_t after = (uint8_t)(before & (uint8_t)~0x02u);
+
+        DWORD oldProt = 0;
+        if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &oldProt)) {
+            AddLog(u8"[연회TEST] VirtualProtect 실패. addr=%p", (void*)addr);
+            return false;
+        }
+
+        *(uint8_t*)addr = after;
+
+        DWORD tmp = 0;
+        VirtualProtect((LPVOID)addr, 1, oldProt, &tmp);
+
+        const uint8_t readback = *(const uint8_t*)addr;
+        if (readback != after) {
+            AddLog(u8"[연회TEST] 쓰기 검증 실패. +0x71E4 %02X -> 목표 %02X / 실제 %02X",
+                   (unsigned int)before,
+                   (unsigned int)after,
+                   (unsigned int)readback);
+            return false;
+        }
+
+        AddLog(u8"[연회TEST] +0x71E4 bit1 해제 완료: %02X -> %02X (다른 비트 유지)",
+               (unsigned int)before,
+               (unsigned int)readback);
+        return true;
+    }
+
     bool CompareBanquetDiffAfter() {
         if (!s_banquetBeforeCaptured) {
             AddLog(u8"[연회DIFF] 먼저 '연회 전 저장'을 눌러주세요.");
