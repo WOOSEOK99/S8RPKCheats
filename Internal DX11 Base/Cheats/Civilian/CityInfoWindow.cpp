@@ -6606,6 +6606,354 @@ namespace DX11Base {
     }
 
 
+
+    struct AffinityPairTraceSnapshot {
+      bool valid = false;
+      uintptr_t dataCenter = 0;
+      uint16_t heroId = 0;
+      uint16_t targetId = 0;
+      static constexpr uintptr_t kBaseSearchBegin = 0x0000;
+      static constexpr uintptr_t kBaseSearchEnd = 0x40000;
+
+      struct HypothesisSnapshot {
+        const char *name = nullptr;
+        int officerCount = 0;
+        bool legacyCompressed = false;
+        uintptr_t pairOffset = 0;
+        uintptr_t memoryBegin = 0;
+        std::vector<uint8_t> bytes;
+        std::vector<uint8_t> readable;
+      };
+
+      std::vector<HypothesisSnapshot> hypotheses;
+    };
+
+    static AffinityPairTraceSnapshot s_affinityPairTrace;
+
+    static bool CaptureReadableRange(
+        uintptr_t begin, size_t size,
+        std::vector<uint8_t> &bytes,
+        std::vector<uint8_t> &readable) {
+      bytes.assign(size, 0);
+      readable.assign(size, 0);
+      if (begin <= 0x10000 || size == 0)
+        return false;
+
+      const uintptr_t endAddr = begin + size;
+      uintptr_t cursor = begin;
+      size_t copied = 0;
+
+      while (cursor < endAddr) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(
+                (LPCVOID)cursor, &mbi,
+                sizeof(mbi)) != sizeof(mbi))
+          break;
+
+        uintptr_t regionBegin =
+            (std::max)(cursor,
+                       (uintptr_t)mbi.BaseAddress);
+        uintptr_t regionEnd =
+            (std::min)(
+                endAddr,
+                (uintptr_t)mbi.BaseAddress +
+                    mbi.RegionSize);
+        if (regionEnd <= regionBegin)
+          break;
+
+        if (IsReadableRelationshipScanRegion(mbi)) {
+          const size_t dstOffset =
+              (size_t)(regionBegin - begin);
+          const size_t chunkSize =
+              (size_t)(regionEnd - regionBegin);
+
+          bool ok = false;
+          __try {
+            memcpy(
+                bytes.data() + dstOffset,
+                (const void *)regionBegin,
+                chunkSize);
+            ok = true;
+          }
+          __except (EXCEPTION_EXECUTE_HANDLER) {
+            ok = false;
+          }
+
+          if (ok) {
+            memset(
+                readable.data() + dstOffset,
+                1, chunkSize);
+            copied += chunkSize;
+          }
+        }
+
+        cursor = regionEnd;
+      }
+
+      return copied > 0;
+    }
+
+    static int GetAffinityHypothesisIndex(
+        uint16_t id, bool legacyCompressed) {
+      if (legacyCompressed)
+        return LegacyAffinityIndexFromOfficerId(id);
+      return (id >= 1 && id <= 5102)
+                 ? (int)id
+                 : -1;
+    }
+
+    static void CaptureAffinityPairTrace(
+        uintptr_t heroBase,
+        const CityOfficerRow &target) {
+      s_affinityPairTrace =
+          AffinityPairTraceSnapshot{};
+
+      uint16_t heroId = 0;
+      if (heroBase <= 0x10000 ||
+          !SafeRead16(heroBase + 0x08, &heroId) ||
+          heroId < 1 || heroId > 5102 ||
+          target.id < 1 || target.id > 5102 ||
+          heroId == target.id) {
+        AddLog(u8"[친밀추적] 주인공/대상 무장 ID를 확인하지 못했습니다.");
+        return;
+      }
+
+      const uintptr_t dataCenter =
+          GetScenarioDataCenterAddress();
+      if (dataCenter <= 0x10000) {
+        AddLog(u8"[친밀추적] 현재 PK 시나리오 데이터 인스턴스를 찾지 못했습니다.");
+        return;
+      }
+
+      struct Hypothesis {
+        const char *name;
+        int officerCount;
+        bool legacyCompressed;
+      };
+      const Hypothesis hypotheses[] = {
+          {u8"1650 압축", 1650, true},
+          {u8"5102 ID직결", 5102, false}};
+
+      for (const auto &hyp : hypotheses) {
+        const int heroIndex =
+            GetAffinityHypothesisIndex(
+                heroId, hyp.legacyCompressed);
+        const int targetIndex =
+            GetAffinityHypothesisIndex(
+                target.id, hyp.legacyCompressed);
+        uintptr_t pairOffset = 0;
+        if (heroIndex < 1 || targetIndex < 1 ||
+            heroIndex > hyp.officerCount ||
+            targetIndex > hyp.officerCount ||
+            !CalcAffinityTriangularOffset(
+                heroIndex, targetIndex,
+                hyp.officerCount, &pairOffset))
+          continue;
+
+        AffinityPairTraceSnapshot::HypothesisSnapshot snap;
+        snap.name = hyp.name;
+        snap.officerCount = hyp.officerCount;
+        snap.legacyCompressed = hyp.legacyCompressed;
+        snap.pairOffset = pairOffset;
+        snap.memoryBegin =
+            dataCenter +
+            AffinityPairTraceSnapshot::kBaseSearchBegin +
+            pairOffset;
+
+        const size_t scanSize =
+            (size_t)(
+                AffinityPairTraceSnapshot::kBaseSearchEnd -
+                AffinityPairTraceSnapshot::kBaseSearchBegin +
+                1);
+
+        if (!CaptureReadableRange(
+                snap.memoryBegin, scanSize,
+                snap.bytes, snap.readable))
+          continue;
+
+        s_affinityPairTrace.hypotheses.push_back(
+            std::move(snap));
+      }
+
+      if (s_affinityPairTrace.hypotheses.empty()) {
+        AddLog(u8"[친밀추적] 두 인덱스 가설 모두 스냅샷 범위를 읽지 못했습니다.");
+        return;
+      }
+
+      s_affinityPairTrace.valid = true;
+      s_affinityPairTrace.dataCenter = dataCenter;
+      s_affinityPairTrace.heroId = heroId;
+      s_affinityPairTrace.targetId = target.id;
+
+      AddLog(
+          u8"[친밀추적] 스냅샷 저장: %s(ID %u) <-> %s(ID %u), dataCenter=0x%llX",
+          BuildOfficerName(heroId).c_str(),
+          (unsigned int)heroId,
+          BuildOfficerName(target.id).c_str(),
+          (unsigned int)target.id,
+          (unsigned long long)dataCenter);
+      for (const auto &snap :
+           s_affinityPairTrace.hypotheses) {
+        AddLog(
+            u8"[친밀추적] %s pairOffset=0x%llX / 친밀 베이스 후보 범위 dataCenter+0x%llX~+0x%llX",
+            snap.name,
+            (unsigned long long)snap.pairOffset,
+            (unsigned long long)
+                AffinityPairTraceSnapshot::kBaseSearchBegin,
+            (unsigned long long)
+                AffinityPairTraceSnapshot::kBaseSearchEnd);
+      }
+      AddLog(u8"[친밀추적] 이제 게임에서 이 두 무장의 친밀도를 실제로 한 번 변화시킨 뒤 '친밀 변화 비교'를 누르세요.");
+    }
+
+    static void CompareAffinityPairTrace(
+        uintptr_t heroBase,
+        const CityOfficerRow &target) {
+      if (!s_affinityPairTrace.valid) {
+        AddLog(u8"[친밀추적] 먼저 '친밀 스냅샷'을 저장하세요.");
+        return;
+      }
+
+      uint16_t heroId = 0;
+      if (heroBase <= 0x10000 ||
+          !SafeRead16(heroBase + 0x08, &heroId) ||
+          heroId != s_affinityPairTrace.heroId ||
+          target.id != s_affinityPairTrace.targetId) {
+        AddLog(u8"[친밀추적] 스냅샷 때와 주인공/선택 무장이 달라졌습니다. 다시 스냅샷을 저장하세요.");
+        return;
+      }
+
+      const uintptr_t dataCenter =
+          GetScenarioDataCenterAddress();
+      if (dataCenter !=
+          s_affinityPairTrace.dataCenter) {
+        AddLog(u8"[친밀추적] 시나리오 데이터 인스턴스가 바뀌었습니다. 다시 스냅샷을 저장하세요.");
+        return;
+      }
+
+      AddLog(
+          u8"[친밀추적] ===== %s <-> %s 변화 비교 =====",
+          BuildOfficerName(heroId).c_str(),
+          BuildOfficerName(target.id).c_str());
+
+      for (const auto &snap :
+           s_affinityPairTrace.hypotheses) {
+        std::vector<uint8_t> nowBytes;
+        std::vector<uint8_t> nowReadable;
+        if (!CaptureReadableRange(
+                snap.memoryBegin,
+                snap.bytes.size(),
+                nowBytes, nowReadable)) {
+          AddLog(u8"[친밀추적] %s 현재 범위를 읽지 못했습니다.",
+                 snap.name);
+          continue;
+        }
+
+        struct Change {
+          uintptr_t baseRel = 0;
+          uint8_t before = 0;
+          uint8_t after = 0;
+          int delta = 0;
+          int score = 0;
+        };
+        std::vector<Change> changes;
+
+        const size_t count =
+            (std::min)(
+                snap.bytes.size(),
+                nowBytes.size());
+        for (size_t i = 0; i < count; ++i) {
+          if (!snap.readable[i] ||
+              !nowReadable[i] ||
+              snap.bytes[i] == nowBytes[i])
+            continue;
+
+          const uint8_t before =
+              snap.bytes[i];
+          const uint8_t after =
+              nowBytes[i];
+
+          // 친밀도는 1바이트 0~100 값이라는 검증 단서만 사용한다.
+          if (before > 100 || after > 100)
+            continue;
+
+          const int delta =
+              (int)after - (int)before;
+          if (delta == 0)
+            continue;
+
+          Change change;
+          change.baseRel =
+              AffinityPairTraceSnapshot::kBaseSearchBegin +
+              (uintptr_t)i;
+          change.before = before;
+          change.after = after;
+          change.delta = delta;
+
+          // 친밀 증가를 찾는 테스트이므로 증가값을 우선한다.
+          if (delta > 0)
+            change.score += 20;
+          if (delta > 0 && delta <= 20)
+            change.score += 10;
+          if (after >= 1 && after <= 100)
+            change.score += 5;
+          if ((change.baseRel & 7) == 0)
+            change.score += 1;
+
+          changes.push_back(change);
+        }
+
+        std::sort(
+            changes.begin(), changes.end(),
+            [](const Change &a, const Change &b) {
+              if (a.score != b.score)
+                return a.score > b.score;
+              const int absA =
+                  a.delta < 0 ? -a.delta : a.delta;
+              const int absB =
+                  b.delta < 0 ? -b.delta : b.delta;
+              if (absA != absB)
+                return absA < absB;
+              return a.baseRel < b.baseRel;
+            });
+
+        AddLog(
+            u8"[친밀추적] -- %s / 0~100 범위 변화 후보 %d건 --",
+            snap.name, (int)changes.size());
+
+        const size_t logCount =
+            (std::min)(
+                changes.size(), (size_t)40);
+        for (size_t i = 0;
+             i < logCount; ++i) {
+          const auto &change = changes[i];
+          const uintptr_t affinityBase =
+              dataCenter + change.baseRel;
+          const uintptr_t valueAddr =
+              affinityBase + snap.pairOffset;
+          AddLog(
+              u8"[친밀추적] 후보%u 친밀Base=dataCenter+0x%llX (0x%llX), 값주소=0x%llX, %u -> %u (%+d)",
+              (unsigned int)(i + 1),
+              (unsigned long long)
+                  change.baseRel,
+              (unsigned long long)
+                  affinityBase,
+              (unsigned long long)
+                  valueAddr,
+              (unsigned int)change.before,
+              (unsigned int)change.after,
+              change.delta);
+        }
+
+        if (changes.empty())
+          AddLog(u8"[친밀추적] %s: 해당 범위에서 친밀도 후보 변화가 없습니다.",
+                 snap.name);
+      }
+
+      AddLog(u8"[친밀추적] ===== 변화 비교 종료 =====");
+    }
+
+
     static bool MoveSelectedOfficerToCity(uintptr_t p1,
                                           uintptr_t shiftedCityBase) {
       const CityOfficerRow *selected = FindSelectedCityOfficer();
@@ -7001,6 +7349,25 @@ namespace DX11Base {
               u8"구 CT의 고정 주소는 사용하지 않고 1650 압축/5102 ID직결 두 구조를 비교합니다.");
           ImGui::TextUnformatted(
               u8"배우자·의형제·상생 관계가 있는 무장을 선택한 뒤 실행하세요.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(0.f, 6.f * sc);
+        if (ImGui::SmallButton(
+                u8"친밀 스냅샷##OfficerAffinityTraceCapture")) {
+          CaptureAffinityPairTrace(p1, *selected);
+        }
+        ImGui::SameLine(0.f, 6.f * sc);
+        if (ImGui::SmallButton(
+                u8"친밀 변화 비교##OfficerAffinityTraceCompare")) {
+          CompareAffinityPairTrace(p1, *selected);
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"스냅샷 저장 후 게임에서 주인공과 선택 무장의 친밀도를 실제로 변화시키고 비교하세요.");
+          ImGui::TextUnformatted(
+              u8"변화한 1바이트 위치에서 친밀도 배열 베이스 후보를 역산합니다. 메모리 쓰기는 하지 않습니다.");
           ImGui::EndTooltip();
         }
       }
