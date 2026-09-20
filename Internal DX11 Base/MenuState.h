@@ -56,6 +56,8 @@ namespace DX11Base {
   extern bool bAllAggressive;
   extern bool bBattleUnit;
   extern bool bBattleMapShuffle;
+  extern bool bShortBattleCooldownEnabled;
+  extern int iShortBattleCooldownDays;
 
   // 전투 환경 / 조건 설정
   extern bool bWeatherSkillSimple;
