@@ -8,7 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
-#include <limits>
+#include <climits>
 #include <vector>
 
 namespace DX11Base {
@@ -124,8 +124,8 @@ namespace DX11Base {
         return false;
       const int64_t rel = static_cast<int64_t>(target) -
                           static_cast<int64_t>(field + sizeof(int32_t));
-      if (rel < std::numeric_limits<int32_t>::min() ||
-          rel > std::numeric_limits<int32_t>::max())
+      if (rel < INT32_MIN ||
+          rel > INT32_MAX)
         return false;
       const int32_t rel32 = static_cast<int32_t>(rel);
       memcpy(blob.data() + field, &rel32, sizeof(rel32));
@@ -187,8 +187,8 @@ namespace DX11Base {
         return false;
       const int64_t rel = static_cast<int64_t>(to) -
                           static_cast<int64_t>(from + 5);
-      if (rel < std::numeric_limits<int32_t>::min() ||
-          rel > std::numeric_limits<int32_t>::max())
+      if (rel < INT32_MIN ||
+          rel > INT32_MAX)
         return false;
 
       memset(out, 0x90, size);
