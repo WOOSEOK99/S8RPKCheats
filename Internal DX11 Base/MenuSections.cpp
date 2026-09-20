@@ -753,6 +753,26 @@ namespace DX11Base {
         ImGui::EndTable();
       }
 
+      if (::DX11Base::bShowDebug) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextDisabled(u8"[대련/토론 쓰기 진단 · 읽기 전용]");
+        if (ImGui::Button(
+                u8"대련/토론 실제 쓰기 후보 검색##ExactDuelDebateWrites",
+                ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::ScanExactDuelDebateWriteCandidates();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"+0x320 bit8/bit9 및 +0x321 byte bit0/bit1을 직접 세우는 명령만 검색합니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 게임 메모리와 실행 코드는 수정하지 않습니다.");
+          ImGui::EndTooltip();
+        }
+      }
+
       EndSection(); // 결혼/인연
     }
 
