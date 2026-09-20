@@ -678,28 +678,27 @@ namespace DX11Base {
           NotifyFeatureToggle(
               u8"AI 친밀도 가속",
               g_autoAffinityGrowthEnabled);
+          SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(
               ImVec4(1, 1, 0, 1),
-              u8"매 평정(07→05)마다 주인공을 제외한 AI 무장끼리 친밀도를 추가 상승시킵니다.");
+              u8"매 분기 평정월(1·4·7·10월) 시작 시 AI 무장끼리 친밀도를 추가 상승시킵니다.");
           ImGui::TextUnformatted(
-              u8"같은 세력·같은 도시에 있는 AI 쌍만 대상이며 친밀도 -1 이하는 제외합니다.");
+              u8"같은 세력·같은 도시에 있는 AI 쌍만 대상이며 주인공과 친밀도 -1 이하인 쌍은 제외합니다.");
           ImGui::TextUnformatted(
-              u8"상성차 0~75에 따라 +15~0, 흥미 4종의 유/무 일치와 중시명성 일치마다 +3을 더합니다.");
+              u8"상성과 흥미·중시의 일치 정도를 반영하며 최대 친밀도는 100입니다.");
           ImGui::TextUnformatted(
-              u8"상성 점수는 현재 5 차이당 1 감소 방식(0~4:+15 ... 70~74:+1, 75:+0)입니다.");
-          ImGui::TextUnformatted(
-              u8"친밀도 100 도달 시 현재는 로그에 상생 후보로만 기록하며 관계 생성은 다음 단계에서 연결합니다.");
+              u8"친밀도만 가속하며 부부·의형제·상생 관계를 직접 생성하지 않습니다.");
           ImGui::TextDisabled(
-              u8"※ 설정은 현재 실행 세션에만 유지됩니다.");
+              u8"※ 체크 상태는 설정 파일에 저장됩니다.");
           ImGui::EndTooltip();
         }
 
         ImGui::TableSetColumnIndex(1);
         ImGui::TextDisabled(
-            u8"평정마다 자동 계산");
+            u8"분기 평정월 자동 계산");
 
         // 5행: 결혼 / 자녀 관리
 
