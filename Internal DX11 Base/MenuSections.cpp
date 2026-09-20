@@ -685,23 +685,7 @@ namespace DX11Base {
         if (::DX11Base::g_loyaltyThreadRunning.load())
           ImGui::EndDisabled();
 
-        // 4행: 대련 / 토론
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        if (ImGui::Checkbox(u8"대련 실행 무제한", &bInfiniteDuel)) {
-          DX11Base::SetInfiniteDuel(bInfiniteDuel);
-          NotifyFeatureToggle(u8"대련 실행 무제한", bInfiniteDuel);
-          SaveConfig();
-        }
-
-        ImGui::TableSetColumnIndex(1);
-        if (ImGui::Checkbox(u8"토론 실행 무제한", &bInfiniteDebate)) {
-          DX11Base::SetInfiniteDebate(bInfiniteDebate);
-          NotifyFeatureToggle(u8"토론 실행 무제한", bInfiniteDebate);
-          SaveConfig();
-        }
-
-        // 5행: AI 친밀도 가속
+        // 4행: AI 친밀도 가속
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(
@@ -731,7 +715,7 @@ namespace DX11Base {
 
         ImGui::TableSetColumnIndex(1);
 
-        // 6행: 결혼 / 자녀 관리
+        // 5행: 결혼 / 자녀 관리
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
