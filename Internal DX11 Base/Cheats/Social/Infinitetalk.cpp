@@ -173,6 +173,188 @@ namespace DX11Base {
                (raw & 0x00000400u) ? 1u : 0u);
     }
 
+    namespace {
+        struct InteractionCaptureSlot {
+            uintptr_t hookAddr = 0;
+            uintptr_t caveAddr = 0;
+            uint8_t original[7] = {};
+            uintptr_t capturedRcx = 0;
+            uint8_t capturedDl = 0;
+        };
+
+        static InteractionCaptureSlot s_interactionCapture[4];
+        static bool s_interactionCaptureInstalled = false;
+
+        static bool InstallInteractionCaptureSlot(
+            int index, uintptr_t exeBase, uintptr_t functionRva) {
+            if (index < 0 || index >= 4)
+                return false;
+
+            auto& slot = s_interactionCapture[index];
+            slot.hookAddr = exeBase + functionRva;
+
+            const uint8_t expected[7] = {0x44, 0x8B, 0x81, 0x20, 0x03, 0x00, 0x00};
+            if (memcmp((const void*)slot.hookAddr, expected, sizeof(expected)) != 0) {
+                AddLog(u8"[교류캡처DBG] 후보%d 원본 바이트 불일치. RVA:+0x%llX",
+                       index, (unsigned long long)functionRva);
+                slot.hookAddr = 0;
+                return false;
+            }
+
+            memcpy(slot.original, (const void*)slot.hookAddr, 7);
+
+            slot.caveAddr = AllocNear(slot.hookAddr, 128);
+            if (!slot.caveAddr) {
+                AddLog(u8"[교류캡처DBG] 후보%d cave 할당 실패.", index);
+                slot.hookAddr = 0;
+                return false;
+            }
+
+            uint8_t* cave = (uint8_t*)slot.caveAddr;
+            int p = 0;
+
+            // push rax
+            cave[p++] = 0x50;
+
+            // mov rax, &slot.capturedRcx
+            cave[p++] = 0x48;
+            cave[p++] = 0xB8;
+            *(uintptr_t*)&cave[p] = (uintptr_t)&slot.capturedRcx;
+            p += 8;
+
+            // mov [rax], rcx
+            cave[p++] = 0x48;
+            cave[p++] = 0x89;
+            cave[p++] = 0x08;
+
+            // mov rax, &slot.capturedDl
+            cave[p++] = 0x48;
+            cave[p++] = 0xB8;
+            *(uintptr_t*)&cave[p] = (uintptr_t)&slot.capturedDl;
+            p += 8;
+
+            // mov [rax], dl
+            cave[p++] = 0x88;
+            cave[p++] = 0x10;
+
+            // pop rax
+            cave[p++] = 0x58;
+
+            // 원본 첫 명령: mov r8d,[rcx+0x320]
+            memcpy(&cave[p], slot.original, 7);
+            p += 7;
+
+            // 절대 복귀 점프
+            const uintptr_t retAddr = slot.hookAddr + 7;
+            cave[p++] = 0xFF;
+            cave[p++] = 0x25;
+            cave[p++] = 0x00;
+            cave[p++] = 0x00;
+            cave[p++] = 0x00;
+            cave[p++] = 0x00;
+            *(uintptr_t*)&cave[p] = retAddr;
+            p += 8;
+
+            if (!ApplyJmp(slot.hookAddr, slot.caveAddr, 7)) {
+                VirtualFree((LPVOID)slot.caveAddr, 0, MEM_RELEASE);
+                slot.caveAddr = 0;
+                slot.hookAddr = 0;
+                return false;
+            }
+            return true;
+        }
+
+        static void RemoveInteractionCaptureHooks() {
+            for (auto& slot : s_interactionCapture) {
+                if (slot.hookAddr && slot.caveAddr) {
+                    RestoreBytes(slot.hookAddr, slot.original, 7);
+                    VirtualFree((LPVOID)slot.caveAddr, 0, MEM_RELEASE);
+                }
+                slot.hookAddr = 0;
+                slot.caveAddr = 0;
+                slot.capturedRcx = 0;
+                slot.capturedDl = 0;
+            }
+            s_interactionCaptureInstalled = false;
+        }
+    }
+
+    bool StartDuelDebateCapture() {
+        for (auto& slot : s_interactionCapture) {
+            slot.capturedRcx = 0;
+            slot.capturedDl = 0;
+        }
+
+        if (s_interactionCaptureInstalled) {
+            AddLog(u8"[교류캡처DBG] 캡처값 초기화 완료. 이제 대련 또는 토론을 실행하세요.");
+            return true;
+        }
+
+        const uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        if (!exeBase)
+            return false;
+
+        // 앞선 바이트 검증으로 확인된 setter 함수 시작 RVA.
+        const uintptr_t rvas[4] = {
+            0x16F5840, // 토론 A
+            0x16F5870, // 대련 A
+            0x16F5F00, // 토론 B
+            0x16F5F50  // 대련 B
+        };
+
+        for (int i = 0; i < 4; ++i) {
+            if (!InstallInteractionCaptureSlot(i, exeBase, rvas[i])) {
+                RemoveInteractionCaptureHooks();
+                AddLog(u8"[교류캡처DBG] 캡처 훅 설치 실패. 원상 복구했습니다.");
+                return false;
+            }
+        }
+
+        s_interactionCaptureInstalled = true;
+        AddLog(u8"[교류캡처DBG] 캡처 시작. 대련 또는 토론을 1회 실행한 뒤 결과 확인을 누르세요.");
+        return true;
+    }
+
+    void LogDuelDebateCaptureResult() {
+        static const char* names[4] = {
+            u8"토론A", u8"대련A", u8"토론B", u8"대련B"
+        };
+
+        if (!s_interactionCaptureInstalled) {
+            AddLog(u8"[교류캡처DBG] 먼저 캡처 시작/초기화를 눌러주세요.");
+            return;
+        }
+
+        for (int i = 0; i < 4; ++i) {
+            const auto& slot = s_interactionCapture[i];
+            if (!slot.capturedRcx) {
+                AddLog(u8"[교류캡처DBG] %s 호출없음", names[i]);
+                continue;
+            }
+
+            uint32_t raw = 0;
+            bool valid = IsValidPtr(slot.capturedRcx + 0x320, sizeof(uint32_t));
+            if (valid)
+                raw = *(const uint32_t*)(slot.capturedRcx + 0x320);
+
+            AddLog(u8"[교류캡처DBG] %s rcx=%p dl=%u +0x320=%s0x%08X / bit8=%u bit9=%u",
+                   names[i],
+                   (void*)slot.capturedRcx,
+                   (unsigned int)slot.capturedDl,
+                   valid ? "" : "INVALID ",
+                   raw,
+                   (raw & 0x00000100u) ? 1u : 0u,
+                   (raw & 0x00000200u) ? 1u : 0u);
+        }
+    }
+
+    void StopDuelDebateCapture() {
+        if (!s_interactionCaptureInstalled)
+            return;
+        RemoveInteractionCaptureHooks();
+        AddLog(u8"[교류캡처DBG] 캡처 훅 해제 완료.");
+    }
+
     void SetInfiniteTalk(bool enable) {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase)
