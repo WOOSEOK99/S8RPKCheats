@@ -757,29 +757,18 @@ namespace DX11Base {
       if (::DX11Base::bShowDebug) {
         ImGui::Spacing();
         ImGui::Separator();
-        ImGui::TextDisabled(u8"[교류 무제한 진단]");
-        if (ImGui::Button(u8"1. 기증 상태 객체 캡처 시작·초기화##GiftInteractionCaptureStart",
+        ImGui::TextDisabled(u8"[교류 무제한 진단 / 읽기 전용]");
+        if (ImGui::Button(u8"기증 기준 대련/토론 코드 확인##DuelDebateNearGift",
                           ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::StartGiftInteractionCapture();
-        }
-        if (ImGui::Button(u8"2. 현재 교류 플래그 확인##GiftInteractionCaptureResult",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::LogGiftInteractionCaptureResult();
-        }
-        if (ImGui::Button(u8"캡처 훅 해제##GiftInteractionCaptureStop",
-                          ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::StopGiftInteractionCapture();
+          ::DX11Base::LogDuelDebateNearGiftCandidates();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
-              u8"1번 후 기증을 1회 실행하면 실제 [RSI+0x320] 상태 객체 주소를 캡처합니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-              u8"캡처 후 대련/토론을 실행하고 2번을 다시 눌러 bit8/bit9 변화를 확인할 수 있습니다.");
+              u8"현재 기증 +0x320 코드 위치를 기준으로 옛 CT의 대련/토론 상대거리 주변만 확인합니다.");
           ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 기증 코드의 기존 동작은 그대로 실행합니다.");
+              u8"※ 실행 훅이나 게임 데이터 쓰기는 하지 않습니다.");
           ImGui::EndTooltip();
         }
       }
