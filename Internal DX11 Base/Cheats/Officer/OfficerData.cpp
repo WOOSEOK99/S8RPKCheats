@@ -1345,17 +1345,6 @@ namespace DX11Base {
                 favoredReputation < 1 ||
                 favoredReputation > 6) {
                 ++invalidMetaCount;
-                if (invalidMetaLogged < 30) {
-                    AddLog(
-                        u8"[친밀자동DBG] 메타 제외: %s(ID %u) / 상성=%u / 흥미Raw=0x%02X / 중시명성=%u / read=%s",
-                        AutoAffinityName(id).c_str(),
-                        (unsigned int)id,
-                        (unsigned int)compatibility,
-                        (unsigned int)interest,
-                        (unsigned int)favoredReputation,
-                        metaReadOk ? "OK" : "FAIL");
-                    ++invalidMetaLogged;
-                }
                 continue;
             }
 
