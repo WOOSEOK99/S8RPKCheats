@@ -54,53 +54,137 @@ namespace DX11Base {
     }
   }
 
-  void LogDuelDebateNearGiftCandidates() {
+  static uintptr_t g_interactionCaptureCave = 0;
+  static uintptr_t g_interactionCapturedBase = 0;
+  static uint8_t g_interactionCaptureOriginal[10] = {};
+  static bool g_interactionCaptureApplied = false;
+
+  static void RestoreInteractionCaptureHook(bool clearCapturedBase) {
+    if (g_interactionCaptureApplied && g_giftHookAddr) {
+      RestoreBytes(g_giftHookAddr, g_interactionCaptureOriginal, 10);
+      FlushInstructionCache(GetCurrentProcess(), (LPCVOID)g_giftHookAddr, 10);
+    }
+
+    if (g_interactionCaptureCave) {
+      VirtualFree((LPVOID)g_interactionCaptureCave, 0, MEM_RELEASE);
+      g_interactionCaptureCave = 0;
+    }
+
+    g_interactionCaptureApplied = false;
+    if (clearCapturedBase)
+      g_interactionCapturedBase = 0;
+  }
+
+  bool StartInteractionStateCaptureFromGift() {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    if (!exeBase) {
-      AddLog(u8"[교류근처DBG] SAN8R.exe 베이스를 찾지 못했습니다.");
+    if (!exeBase)
+      return false;
+
+    // 기존 캡처가 남아 있으면 먼저 정상 원본으로 복구.
+    RestoreInteractionCaptureHook(true);
+
+    if (!g_giftHookAddr)
+      g_giftHookAddr = ResolveGiftFlagCode(exeBase);
+
+    if (!g_giftHookAddr) {
+      AddLog(u8"[교류상태DBG] 기증 +0x320 코드를 찾지 못했습니다.");
+      return false;
+    }
+
+    // 캡처는 반드시 정상 원본 OR 상태에서만 설치한다.
+    // 기증 무제한 패치가 켜진 상태면 백업/복구 충돌을 만들지 않고 거부.
+    if (memcmp((const void*)g_giftHookAddr, kGiftOriginalBytes, 10) != 0) {
+      AddLog(u8"[교류상태DBG] 선물 기증 무제한을 OFF한 뒤 다시 눌러주세요.");
+      return false;
+    }
+
+    memcpy(g_interactionCaptureOriginal, kGiftOriginalBytes, 10);
+
+    g_interactionCaptureCave = AllocNear(g_giftHookAddr, 128);
+    if (!g_interactionCaptureCave) {
+      AddLog(u8"[교류상태DBG] 캡처 cave 할당 실패.");
+      return false;
+    }
+
+    uint8_t* cave = (uint8_t*)g_interactionCaptureCave;
+    int p = 0;
+
+    // push rax
+    cave[p++] = 0x50;
+
+    // mov rax, &g_interactionCapturedBase
+    cave[p++] = 0x48;
+    cave[p++] = 0xB8;
+    *(uintptr_t*)&cave[p] = (uintptr_t)&g_interactionCapturedBase;
+    p += 8;
+
+    // mov [rax], rsi
+    cave[p++] = 0x48;
+    cave[p++] = 0x89;
+    cave[p++] = 0x30;
+
+    // pop rax
+    cave[p++] = 0x58;
+
+    // 정상 원본: or dword ptr [rsi+0x320], 0x400
+    memcpy(&cave[p], kGiftOriginalBytes, 10);
+    p += 10;
+
+    const uintptr_t retAddr = g_giftHookAddr + 10;
+    cave[p++] = 0xFF;
+    cave[p++] = 0x25;
+    cave[p++] = 0x00;
+    cave[p++] = 0x00;
+    cave[p++] = 0x00;
+    cave[p++] = 0x00;
+    *(uintptr_t*)&cave[p] = retAddr;
+    p += 8;
+
+    if (!ApplyJmp(g_giftHookAddr, g_interactionCaptureCave, 10)) {
+      VirtualFree((LPVOID)g_interactionCaptureCave, 0, MEM_RELEASE);
+      g_interactionCaptureCave = 0;
+      AddLog(u8"[교류상태DBG] 캡처 훅 설치 실패.");
+      return false;
+    }
+
+    g_interactionCaptureApplied = true;
+    AddLog(u8"[교류상태DBG] 캡처 시작. 기증을 1회 실행한 뒤 '현재 플래그 확인'을 누르세요.");
+    return true;
+  }
+
+  void LogCapturedInteractionState() {
+    if (!g_interactionCapturedBase) {
+      AddLog(u8"[교류상태DBG] 아직 상태 객체가 캡처되지 않았습니다.");
       return;
     }
 
-    uintptr_t gift = ResolveGiftFlagCode(exeBase);
-    if (!gift) {
-      AddLog(u8"[교류근처DBG] 현재 기증 +0x320 코드를 찾지 못했습니다.");
+    // 첫 결과 확인 시 실행 훅은 즉시 제거하지만 캡처 주소는 유지한다.
+    if (g_interactionCaptureApplied) {
+      RestoreInteractionCaptureHook(false);
+      AddLog(u8"[교류상태DBG] 기증 캡처 훅 원복 완료. 이후에는 저장된 상태 객체만 읽습니다.");
+    }
+
+    const uintptr_t flagAddr = g_interactionCapturedBase + 0x320;
+    if (!IsValidPtr(flagAddr, sizeof(uint32_t))) {
+      AddLog(u8"[교류상태DBG] 저장된 base가 더 이상 유효하지 않습니다: %p",
+             (void*)g_interactionCapturedBase);
       return;
     }
 
-    // 옛 CT에서 같은 +0x320 플래그 묶음:
-    // 토론 = 기증 - 0x210, 대련 = 기증 - 0x180
-    const uintptr_t debate = gift - 0x210;
-    const uintptr_t duel = gift - 0x180;
+    const uint32_t raw = *(const uint32_t*)flagAddr;
+    AddLog(u8"[교류상태DBG] base=%p +0x320 raw=0x%08X / 담화(bit2)=%u 대련(bit8)=%u 토론(bit9)=%u 기증(bit10)=%u 방문(bit11)=%u",
+           (void*)g_interactionCapturedBase,
+           raw,
+           (raw & 0x00000004u) ? 1u : 0u,
+           (raw & 0x00000100u) ? 1u : 0u,
+           (raw & 0x00000200u) ? 1u : 0u,
+           (raw & 0x00000400u) ? 1u : 0u,
+           (raw & 0x00000800u) ? 1u : 0u);
+  }
 
-    auto logWindow = [&](const char* name, uintptr_t center) {
-      constexpr size_t kBefore = 0x30;
-      constexpr size_t kSize = 0x70;
-      if (center <= exeBase + kBefore || !IsValidPtr(center - kBefore, kSize)) {
-        AddLog(u8"[교류근처DBG] %s 범위가 유효하지 않습니다.", name);
-        return;
-      }
-
-      const uint8_t* p = (const uint8_t*)(center - kBefore);
-      char bytes[kSize * 3 + 1] = {};
-      size_t out = 0;
-      for (size_t i = 0; i < kSize && out + 4 < sizeof(bytes); ++i) {
-        out += (size_t)snprintf(
-            bytes + out, sizeof(bytes) - out,
-            "%02X%s", p[i], (i + 1 < kSize) ? " " : "");
-      }
-
-      AddLog(u8"[교류근처DBG] %s 예상 RVA:+0x%llX range=+0x%llX~+0x%llX",
-             name,
-             (unsigned long long)(center - exeBase),
-             (unsigned long long)(center - kBefore - exeBase),
-             (unsigned long long)(center - kBefore + kSize - 1 - exeBase));
-      AddLog("[교류근처DBG] %s bytes=%s", name, bytes);
-    };
-
-    AddLog(u8"[교류근처DBG] 기증 기준 RVA:+0x%llX / 토론 예상=-0x210 / 대련 예상=-0x180",
-           (unsigned long long)(gift - exeBase));
-    logWindow(u8"토론", debate);
-    logWindow(u8"대련", duel);
+  void CancelInteractionStateCapture() {
+    RestoreInteractionCaptureHook(true);
+    AddLog(u8"[교류상태DBG] 캡처 취소/초기화 완료.");
   }
 
   void SetInfiniteGift(bool enable) {
