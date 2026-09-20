@@ -39,8 +39,6 @@ namespace DX11Base {
   extern bool bResonance;
   extern bool bInfiniteGift;
   extern bool bInfiniteTalk;
-  extern bool bInfiniteDuel;
-  extern bool bInfiniteDebate;
   extern bool bFastRelationship;
   extern bool bShowChildManagerWin;
 
