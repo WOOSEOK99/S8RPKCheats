@@ -1703,6 +1703,11 @@ namespace DX11Base {
     };
 
     static bool s_corpsAutoDeploymentEachCouncil = false;
+    // 자동배치에서 같은 도시로 묶을 관계 종류. 설정파일에는 저장하지 않는다.
+    // 기존 동작을 유지하도록 세션 시작 기본값은 모두 ON.
+    static bool s_corpsDeploymentGroupSwornBrothers = true;
+    static bool s_corpsDeploymentGroupSynergetic = true;
+    static bool s_corpsDeploymentGroupSpouses = true;
     static std::vector<CorpsAutoDeploymentTarget>
         s_corpsAutoDeploymentTargets;
     static uintptr_t s_corpsAutoContextP1 = 0;
@@ -1778,9 +1783,15 @@ namespace DX11Base {
         const char *reason, bool notifyUser = false) {
       const bool hadState =
           s_corpsAutoDeploymentEachCouncil ||
-          !s_corpsAutoDeploymentTargets.empty();
+          !s_corpsAutoDeploymentTargets.empty() ||
+          !s_corpsDeploymentGroupSwornBrothers ||
+          !s_corpsDeploymentGroupSynergetic ||
+          !s_corpsDeploymentGroupSpouses;
 
       s_corpsAutoDeploymentEachCouncil = false;
+      s_corpsDeploymentGroupSwornBrothers = true;
+      s_corpsDeploymentGroupSynergetic = true;
+      s_corpsDeploymentGroupSpouses = true;
       s_corpsAutoDeploymentTargets.clear();
       s_corpsAutoContextP1 = 0;
       s_corpsAutoContextForce = 0;
@@ -2796,8 +2807,9 @@ namespace DX11Base {
       }
 
       // ── 관계 그룹 배치 ──────────────────────────────────────────────────
-      // 같은 군단 안에서 배우자/상생/의형제로 연결된 장수는 하나의 연결 그룹으로
-      // 묶고 같은 도시에 배치한다. 관계는 전이적으로 합친다(A-B, B-C => A/B/C).
+      // 같은 군단 안에서 사용자가 체크한 배우자/상생/의형제 관계만 하나의 연결
+      // 그룹으로 묶고 같은 도시에 배치한다. 관계는 전이적으로 합친다
+      // (A-B, B-C => A/B/C). 체크 해제한 관계는 그룹 연결에 사용하지 않는다.
       //
       // 그룹의 전선/후방 판단:
       // 1) 충성<90이 한 명이라도 있으면 기존 절대 규칙에 따라 그룹 전체 후방.
@@ -2855,11 +2867,28 @@ namespace DX11Base {
 
       // 기존에는 장수 한 명마다 관계/숙명 테이블(최대 3000+5000칸)을
       // 다시 훑었다. 자동배치에서는 전체 군단을 한 번의 배치 조회로 읽는다.
+      // 세 관계가 모두 OFF면 관계 테이블 자체를 읽지 않는다.
+      const bool relationshipGroupingEnabled =
+          s_corpsDeploymentGroupSwornBrothers ||
+          s_corpsDeploymentGroupSynergetic ||
+          s_corpsDeploymentGroupSpouses;
+
       std::vector<OfficerRelationshipInfo> relationshipInfos;
-      const bool relationshipBatchValid =
-          GetOfficerRelationshipInfoBatch(
-              relationshipOfficerBases,
-              relationshipInfos);
+      bool relationshipBatchValid = false;
+      if (relationshipGroupingEnabled) {
+        relationshipBatchValid =
+            GetOfficerRelationshipInfoBatch(
+                relationshipOfficerBases,
+                relationshipInfos);
+      }
+
+      if (bShowDebug) {
+        AddLog(
+            u8"[군단 자동배치 관계] 묶기 설정: 의형제 %s / 상생 %s / 배우자 %s",
+            s_corpsDeploymentGroupSwornBrothers ? "ON" : "OFF",
+            s_corpsDeploymentGroupSynergetic ? "ON" : "OFF",
+            s_corpsDeploymentGroupSpouses ? "ON" : "OFF");
+      }
 
       for (int i = 0; i < relationshipOfficerCount; ++i) {
         if (!relationshipBatchValid ||
@@ -2869,26 +2898,35 @@ namespace DX11Base {
 
         const OfficerRelationshipInfo &relationInfo =
             relationshipInfos[i];
-        const std::vector<uint16_t> *sameCityRelations[] = {
-            &relationInfo.swornBrothers,
-            &relationInfo.spouses,
-            &relationInfo.synergetic};
 
-        for (const auto *ids : sameCityRelations) {
-          for (uint16_t relatedId : *ids) {
+        auto mergeEnabledRelations =
+            [&](const std::vector<uint16_t> &ids,
+                const char *relationLabel) {
+          for (uint16_t relatedId : ids) {
             const int relatedIndex =
                 findCorpsRowIndexById(relatedId);
             if (relatedIndex >= 0) {
               relationUnion(i, relatedIndex);
             } else if (bShowDebug) {
               AddLog(
-                  u8"[군단 자동배치 관계] %s - %s: 현재 선택 군단 밖 관계라 같은 도시 묶기에서 제외",
+                  u8"[군단 자동배치 관계] %s - %s: %s 관계지만 현재 선택 군단 밖이라 같은 도시 묶기에서 제외",
                   BuildOfficerName(
                       s_corpsOfficerRows[i].id).c_str(),
-                  BuildOfficerName(relatedId).c_str());
+                  BuildOfficerName(relatedId).c_str(),
+                  relationLabel);
             }
           }
-        }
+        };
+
+        if (s_corpsDeploymentGroupSwornBrothers)
+          mergeEnabledRelations(
+              relationInfo.swornBrothers, u8"의형제");
+        if (s_corpsDeploymentGroupSynergetic)
+          mergeEnabledRelations(
+              relationInfo.synergetic, u8"상생");
+        if (s_corpsDeploymentGroupSpouses)
+          mergeEnabledRelations(
+              relationInfo.spouses, u8"배우자");
       }
 
       // 루트 인덱스를 그대로 버킷으로 사용해 그룹 생성도 한 번의 순회로 끝낸다.
@@ -4823,6 +4861,42 @@ namespace DX11Base {
       ImGui::TextDisabled(
           u8"※ 세이브마다 군단 생성/해체 상태가 달라질 수 있어 게임 시작 후 직접 선택해야 합니다.");
 
+      ImGui::TextUnformatted(u8"같은 도시 관계");
+      ImGui::SameLine(0.f, 8.f * sc);
+
+      bool relationshipOptionChanged = false;
+      relationshipOptionChanged |= ImGui::Checkbox(
+          u8"의형제##CorpsDeployRelSworn",
+          &s_corpsDeploymentGroupSwornBrothers);
+      ImGui::SameLine(0.f, 10.f * sc);
+      relationshipOptionChanged |= ImGui::Checkbox(
+          u8"상생##CorpsDeployRelSynergetic",
+          &s_corpsDeploymentGroupSynergetic);
+      ImGui::SameLine(0.f, 10.f * sc);
+      relationshipOptionChanged |= ImGui::Checkbox(
+          u8"배우자##CorpsDeployRelSpouse",
+          &s_corpsDeploymentGroupSpouses);
+
+      if (relationshipOptionChanged) {
+        // 이미 만든 추천안은 이전 관계 옵션 기준이므로 즉시 폐기한다.
+        ResetCorpsDeploymentTargetBaseline();
+        AddLog(
+            u8"[군단 자동배치 관계] 같은 도시 묶기 변경: 의형제 %s / 상생 %s / 배우자 %s",
+            s_corpsDeploymentGroupSwornBrothers ? "ON" : "OFF",
+            s_corpsDeploymentGroupSynergetic ? "ON" : "OFF",
+            s_corpsDeploymentGroupSpouses ? "ON" : "OFF");
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"체크한 관계만 자동배치에서 같은 도시 그룹으로 묶습니다.");
+        ImGui::TextUnformatted(
+            u8"예: 배우자만 체크하면 배우자 관계만 같이 이동하고 의형제/상생은 일반 장수처럼 따로 배치됩니다.");
+        ImGui::TextUnformatted(
+            u8"관계 옵션을 바꾸면 기존 추천 계획은 취소되므로 다시 추천 계산을 눌러주세요.");
+        ImGui::EndTooltip();
+      }
+
       struct CorpsAutoUiOption {
         OfficerCityCorpsInfo info;
         int cityIndex = -1;
@@ -4923,7 +4997,7 @@ namespace DX11Base {
 
       ImGui::SameLine(0.f, 12.f * sc);
       ImGui::TextDisabled(
-          u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 전선 우선 | 배우자/상생/의형제 같은 도시(통솔/무력 우선)");
+          u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 전선 우선 | 체크한 관계만 같은 도시(통솔/무력 우선)");
       if (hasTargetBaseline) {
         ImGui::SameLine(0.f, 8.f * sc);
         ImGui::TextDisabled(u8"| 이번 평정 계획 고정");
