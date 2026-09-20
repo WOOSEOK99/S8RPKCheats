@@ -770,6 +770,44 @@ namespace DX11Base {
         ImGui::EndTable();
       }
 
+      if (::DX11Base::bShowDebug) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextDisabled(u8"[보주 하위 기능 추적]");
+        if (ImGui::Button(
+                u8"1. 보주 교류주소 캡처 시작##JewelSubCapture",
+                ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::StartJewelSubactionStateCapture();
+        }
+        if (ImGui::Button(
+                u8"2. +0x320 쓰기 감시 시작##JewelSubWatch",
+                ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::StartJewelSubactionWriteWatch();
+        }
+        if (ImGui::Button(
+                u8"3. 보주 하위기능 감시 결과##JewelSubResults",
+                ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::LogJewelSubactionWriteWatchResults();
+        }
+        if (ImGui::Button(
+                u8"보주 감시 종료/초기화##JewelSubStop",
+                ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::StopJewelSubactionWriteWatch();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"선물 기증 무제한 OFF → 1번 → 기증 1회 → 2번 → 보주 버튼을 열고 하위 기능을 하나씩 실행 → 3번.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+              u8"보주 하위 기능이 공통 교류 +0x320을 사용하면 실제 쓰기 RIP와 변경값이 기록됩니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 사용 비트 값 자체는 변경하지 않습니다.");
+          ImGui::EndTooltip();
+        }
+      }
+
       EndSection(); // 결혼/인연
     }
 
