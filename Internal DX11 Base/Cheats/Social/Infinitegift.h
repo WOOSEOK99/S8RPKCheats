@@ -9,4 +9,8 @@ namespace DX11Base {
   void LogCapturedInteractionState();
   void CancelInteractionStateCapture();
 
+  // 디버그: 캡처된 공통 +0x320 상태값에서 해당 사용 완료 비트만 1회 해제
+  bool ClearCapturedDuelUsedBitForTest();
+  bool ClearCapturedDebateUsedBitForTest();
+
 } // namespace DX11Base
