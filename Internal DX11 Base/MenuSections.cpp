@@ -1,5 +1,6 @@
 ﻿#include "MenuSections.h"
 #include "Cheats.h"
+#include "debug.h"
 #include "Cheats/Civilian/BangmokCity.h"
 #include "Cheats/Civilian/Bigcityconvert.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
