@@ -76,6 +76,21 @@ static std::mutex g_pregnancyDebugMutex;
 static std::vector<PregnancyDebugHit> g_pregnancyDebugResults;
 static size_t g_pregnancyDebugTotalHits = 0;
 
+struct PregnancySpouseDebugHit {
+  uint16_t spouseId = 0;
+  uintptr_t spouseAddr = 0;
+  uintptr_t recordBase = 0;
+  PregnancyDebugRecordDump record{};
+  int score = 0;
+};
+
+static std::atomic<bool> g_pregnancySpouseScanning{false};
+static std::atomic<float> g_pregnancySpouseProgress{0.0f};
+static std::atomic<bool> g_pregnancySpouseResultsReady{false};
+static std::mutex g_pregnancySpouseMutex;
+static std::vector<PregnancySpouseDebugHit> g_pregnancySpouseResults;
+static size_t g_pregnancySpouseTotalHits = 0;
+
 static bool ResolveHeroAndRoster(
     uintptr_t& rosterBase,
     uintptr_t& heroMaster,
@@ -171,6 +186,236 @@ static bool IsPregnancyDebugScanRegion(
          protection == PAGE_WRITECOPY ||
          protection == PAGE_EXECUTE_READWRITE ||
          protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+static bool PregnancyCapsLookPlausible(
+    const PregnancyDebugRecordDump& dump) {
+  bool any = false;
+  for (uint8_t v : dump.capRaw) {
+    if (v != 0)
+      any = true;
+    if (v > 100)
+      return false;
+  }
+  return any;
+}
+
+static void StartPregnancySpouseDebugScanAsync() {
+  if (g_pregnancySpouseScanning.load())
+    return;
+
+  uintptr_t rosterBase = 0;
+  uintptr_t heroMaster = 0;
+  uint16_t heroId = 0;
+  if (!ResolveHeroAndRoster(rosterBase, heroMaster, heroId)) {
+    AddLog(u8"[임신배우자DBG] 주인공/무장 배열 주소 해석 실패");
+    return;
+  }
+
+  OfficerRelationshipInfo relInfo;
+  if (!GetOfficerRelationshipInfo(heroMaster, relInfo) ||
+      !relInfo.valid || relInfo.spouses.empty()) {
+    AddLog(u8"[임신배우자DBG] 현재 배우자 관계를 읽지 못했습니다.");
+    return;
+  }
+
+  std::unordered_set<uint16_t> spouseIds;
+  for (uint16_t id : relInfo.spouses)
+    spouseIds.insert(id);
+
+  std::unordered_map<uintptr_t, uint16_t> spouseTargets;
+  bool seenOfficerIds[5103] = {};
+  for (int i = 0; i < 5102; ++i) {
+    const uintptr_t officerBase =
+        rosterBase + (uintptr_t)i * 0x3D0;
+
+    uint16_t id = 0;
+    if (!SafeRead16(officerBase + 0x08, &id) ||
+        id < 1 || id > 5102 || seenOfficerIds[id]) {
+      continue;
+    }
+    seenOfficerIds[id] = true;
+
+    if (spouseIds.count(id) != 0)
+      spouseTargets[NormalizeOfficerPtr(officerBase)] = id;
+  }
+
+  if (spouseTargets.empty()) {
+    AddLog(u8"[임신배우자DBG] 배우자 무장 주소를 찾지 못했습니다.");
+    return;
+  }
+
+  AddLog(
+      u8"[임신배우자DBG] 검색 시작: Hero ID %u / 배우자 %zu명 / +00 배우자 포인터 기준",
+      heroId, spouseTargets.size());
+
+  g_pregnancySpouseScanning = true;
+  g_pregnancySpouseProgress = 0.0f;
+  g_pregnancySpouseResultsReady = false;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    g_pregnancySpouseResults.clear();
+    g_pregnancySpouseTotalHits = 0;
+  }
+
+  std::thread([spouseTargets = std::move(spouseTargets)]() {
+    MEMORY_BASIC_INFORMATION mbi{};
+    std::vector<MEMORY_BASIC_INFORMATION> regions;
+    unsigned long long totalSize = 0;
+    uintptr_t addr = 0;
+
+    while (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi))) {
+      if (IsPregnancyDebugScanRegion(mbi)) {
+        regions.push_back(mbi);
+        totalSize += mbi.RegionSize;
+      }
+
+      const uintptr_t next =
+          (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+      if (next <= addr)
+        break;
+      addr = next;
+    }
+
+    constexpr size_t kChunkSize = 256 * 1024;
+    constexpr size_t kMaxStoredHits = 256;
+    std::vector<uint8_t> buffer(kChunkSize);
+    std::vector<PregnancySpouseDebugHit> hits;
+    hits.reserve(32);
+    std::unordered_set<uintptr_t> seenBases;
+    unsigned long long processedSize = 0;
+    size_t totalHits = 0;
+
+    for (const auto& region : regions) {
+      const uintptr_t regionStart = (uintptr_t)region.BaseAddress;
+      const uintptr_t regionEnd = regionStart + region.RegionSize;
+
+      for (uintptr_t curr = regionStart; curr < regionEnd;) {
+        const size_t remaining = (size_t)(regionEnd - curr);
+        const size_t toRead = (std::min)(remaining, kChunkSize);
+
+        if (SafeReadMem(curr, buffer.data(), toRead)) {
+          size_t i = (size_t)((8 - (curr & 7)) & 7);
+          for (; i + sizeof(uintptr_t) <= toRead;
+               i += sizeof(uintptr_t)) {
+            uintptr_t rawPtr = 0;
+            memcpy(&rawPtr, buffer.data() + i, sizeof(rawPtr));
+
+            auto spouseIt =
+                spouseTargets.find(NormalizeOfficerPtr(rawPtr));
+            if (spouseIt == spouseTargets.end())
+              continue;
+
+            // 실측된 후보 #1에서 배우자 포인터는 record +0x00.
+            const uintptr_t recordBase = curr + i;
+            if (!seenBases.insert(recordBase).second)
+              continue;
+
+            PregnancyDebugRecordDump dump;
+            if (!ReadPregnancyDebugRecord(recordBase, &dump))
+              continue;
+            if (NormalizeOfficerPtr(dump.q00) != spouseIt->first)
+              continue;
+
+            totalHits++;
+            if (hits.size() >= kMaxStoredHits)
+              continue;
+
+            PregnancySpouseDebugHit hit;
+            hit.spouseId = spouseIt->second;
+            hit.spouseAddr = spouseIt->first;
+            hit.recordBase = recordBase;
+            hit.record = dump;
+
+            // 점수는 정렬용일 뿐 구조 확정 판정은 하지 않습니다.
+            if (dump.pregnancyFlag <= 1)
+              hit.score += 30;
+            if (dump.remainingMonths <= 12)
+              hit.score += 30;
+            if (dump.childPtr == 0 || dump.childOfficerId != 0)
+              hit.score += 20;
+            if (PregnancyCapsLookPlausible(dump))
+              hit.score += 40;
+
+            hits.push_back(hit);
+          }
+        }
+
+        processedSize += toRead;
+        if (totalSize > 0) {
+          g_pregnancySpouseProgress =
+              (float)((double)processedSize / (double)totalSize);
+        }
+        curr += toRead;
+      }
+    }
+
+    std::stable_sort(
+        hits.begin(), hits.end(),
+        [](const PregnancySpouseDebugHit& a,
+           const PregnancySpouseDebugHit& b) {
+          if (a.score != b.score)
+            return a.score > b.score;
+          if (a.spouseId != b.spouseId)
+            return a.spouseId < b.spouseId;
+          return a.recordBase < b.recordBase;
+        });
+
+    {
+      std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+      g_pregnancySpouseResults = std::move(hits);
+      g_pregnancySpouseTotalHits = totalHits;
+    }
+
+    g_pregnancySpouseProgress = 1.0f;
+    g_pregnancySpouseScanning = false;
+    g_pregnancySpouseResultsReady = true;
+  }).detach();
+}
+
+static void FlushPregnancySpouseDebugResults() {
+  if (!g_pregnancySpouseResultsReady.exchange(false))
+    return;
+
+  std::vector<PregnancySpouseDebugHit> hits;
+  size_t totalHits = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    hits = g_pregnancySpouseResults;
+    totalHits = g_pregnancySpouseTotalHits;
+  }
+
+  AddLog(
+      u8"[임신배우자DBG] 검색 완료: +00 배우자 포인터 후보 %zu개 / 저장 %zu개",
+      totalHits, hits.size());
+
+  constexpr size_t kMaxLogHits = 40;
+  const size_t logCount = (std::min)(hits.size(), kMaxLogHits);
+  for (size_t i = 0; i < logCount; ++i) {
+    const PregnancySpouseDebugHit& hit = hits[i];
+    const PregnancyDebugRecordDump& d = hit.record;
+    AddLog(
+        u8"[임신배우자DBG] 후보 #%zu | score=%d | 배우자 ID %u addr=%p | record=%p | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
+        i + 1, hit.score, hit.spouseId,
+        (void*)hit.spouseAddr, (void*)hit.recordBase,
+        (unsigned)d.pregnancyFlag,
+        (unsigned)d.remainingMonths,
+        (void*)d.childPtr, d.childOfficerId,
+        (unsigned)d.capRaw[0],
+        (unsigned)d.capRaw[1],
+        (unsigned)d.capRaw[2],
+        (unsigned)d.capRaw[3],
+        (unsigned)d.capRaw[4]);
+  }
+
+  if (hits.size() > kMaxLogHits) {
+    AddLog(
+        u8"[임신배우자DBG] 로그는 앞 %zu개 후보까지만 출력했습니다. (저장 후보 %zu개)",
+        kMaxLogHits, hits.size());
+  }
+
+  AddLog(
+      u8"[임신배우자DBG] read-only 진단입니다. +09/+0A 의미는 출산 전후 비교 후 확정합니다.");
 }
 
 static void StartPregnancyDebugScanAsync() {
@@ -720,6 +965,7 @@ void RunChildManagerUpdate() {
     RefreshChild(kv.second);
 
   FlushPregnancyDebugResults();
+  FlushPregnancySpouseDebugResults();
 }
 
 void DrawChildManagerWindow(float scale) {
@@ -845,24 +1091,39 @@ void DrawChildManagerWindow(float scale) {
   ImGui::TextDisabled(u8"임신 구조 DBG (읽기 전용)");
 
   if (g_pregnancyDebugScanning.load()) {
-    ImGui::TextUnformatted(u8"자녀 포인터 역참조로 임신 레코드 후보를 검색 중...");
+    ImGui::TextUnformatted(u8"최근 출생 자녀 기준 구조를 검색 중...");
     ImGui::ProgressBar(
         g_pregnancyDebugProgress.load(),
-        ImVec2(280.0f * scale, 0));
+        ImVec2(260.0f * scale, 0));
   } else {
     if (ImGui::Button(
-            u8"임신 구조 DBG 검색",
-            ImVec2(150.0f * scale, 0))) {
+            u8"출산 후 구조 DBG",
+            ImVec2(145.0f * scale, 0))) {
       StartPregnancyDebugScanAsync();
+    }
+  }
+
+  ImGui::SameLine();
+
+  if (g_pregnancySpouseScanning.load()) {
+    ImGui::TextUnformatted(u8"배우자 기준 임신 구조 검색 중...");
+    ImGui::ProgressBar(
+        g_pregnancySpouseProgress.load(),
+        ImVec2(220.0f * scale, 0));
+  } else {
+    if (ImGui::Button(
+            u8"임신중 배우자 DBG",
+            ImVec2(150.0f * scale, 0))) {
+      StartPregnancySpouseDebugScanAsync();
     }
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
       ImGui::TextUnformatted(
-          u8"현재 자녀의 무장 포인터가 메모리에서 참조되는 위치를 찾습니다.");
+          u8"배우자 포인터가 record +0x00에 있는 후보를 직접 찾습니다.");
       ImGui::TextUnformatted(
-          u8"각 참조를 +0x10 자녀 pointer 후보로 보고 stride 0x28 주변 레코드를 로그로 출력합니다.");
+          u8"아직 자녀 목록에 없는 태아도 +0x10 포인터와 능력 상한 raw 값을 확인할 수 있습니다.");
       ImGui::TextUnformatted(
-          u8"+0x09 flag / +0x0A 남은 개월 / +0x1E~+0x22 raw 값만 읽으며 메모리는 수정하지 않습니다.");
+          u8"읽기 전용이며 메모리는 수정하지 않습니다.");
       ImGui::EndTooltip();
     }
   }
