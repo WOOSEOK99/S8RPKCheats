@@ -56,6 +56,10 @@ namespace DX11Base {
     // 현재 PK에서 확인된 관계/숙명 테이블을 읽어 선택 무장의 관계를 정리합니다.
     // 읽기 전용이며, 숙명의 비활성(+0x19 != 0) 및 직접 관계 중복은 제외합니다.
     bool GetOfficerRelationshipInfo(uintptr_t officerBase, OfficerRelationshipInfo& outInfo);
+    // 현재 PK에서 실측 확인된 친밀도 삼각 배열을 읽습니다.
+    // 2026-09-20 추적: 1650 압축 인덱스 + ScenarioDataCenter+0x24206.
+    // 읽기 전용이며 0~100 범위만 유효값으로 반환합니다.
+    bool GetOfficerAffinity(uint16_t officerId1, uint16_t officerId2, uint8_t& outAffinity);
     // 여러 무장의 관계를 한 번의 테이블 스캔으로 읽습니다.
     // 자동배치처럼 다수 무장을 동시에 검사할 때 개별 반복 스캔으로 인한 프리징을 줄입니다.
     bool GetOfficerRelationshipInfoBatch(
