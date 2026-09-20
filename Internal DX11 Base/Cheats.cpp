@@ -337,13 +337,25 @@ namespace DX11Base {
         // CT "Remove Marriage Restrictions"와 동일한 AOB.
         // 첫 바이트가 기존 배우자 제한 분기의 JNE(75 xx)이며,
         // 활성화 시 opcode만 JMP(EB xx)로 바꿉니다.
-        const char* marriagePattern =
+        const char* marriagePatternNormal =
             "75 ?? 48 8B ?? ?? 4C ?? ?? ?? 74 ?? 4C ?? ?? ?? ?? 75";
+        const char* marriagePatternPatched =
+            "EB ?? 48 8B ?? ?? 4C ?? ?? ?? 74 ?? 4C ?? ?? ?? ?? 75";
 
-        const uintptr_t found =
-            FindPattern(exeBase, exeBase + mi.SizeOfImage, marriagePattern);
+        uintptr_t found =
+            FindPattern(exeBase, exeBase + mi.SizeOfImage,
+                        marriagePatternNormal);
+        if (!found) {
+            found =
+                FindPattern(exeBase, exeBase + mi.SizeOfImage,
+                            marriagePatternPatched);
+        }
 
-        if (!found || !IsValidPtr(found, 2) || *(uint8_t*)found != 0x75)
+        if (!found || !IsValidPtr(found, 2))
+            return 0;
+
+        const uint8_t op = *(uint8_t*)found;
+        if (op != 0x75 && op != 0xEB)
             return 0;
 
         return found;
@@ -395,53 +407,96 @@ namespace DX11Base {
 
     void SetMarriageCondition(bool enable) {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-        if (!exeBase)
+        if (!exeBase) {
+            marriageApplied = false;
             return;
+        }
 
-        // 1. CT "Remove Marriage Restrictions"의 AOB로 JNE 지점을 직접 검색.
+        // CT "Remove Marriage Restrictions" AOB로 실제 분기 주소를 해석합니다.
         if (!marriageAddr) {
             marriageAddr = FindMarriageConditionAddress();
             if (marriageAddr) {
                 AddLog(
-                    "[Marriage] AOB found: %p / original=%02X %02X",
+                    "[Marriage] AOB found: %p / current=%02X %02X",
                     (void*)marriageAddr,
                     *(uint8_t*)(marriageAddr + 0),
                     *(uint8_t*)(marriageAddr + 1));
             } else {
                 AddLog("[Marriage] Remove Marriage Restrictions AOB not found");
+                marriageApplied = false;
+                return;
             }
         }
 
-        if (!marriageAddr)
+        if (!IsValidPtr(marriageAddr, 2)) {
+            AddLog("[Marriage] patch address invalid: %p",
+                   (void*)marriageAddr);
+            marriageAddr = 0;
+            marriageSaved = false;
+            marriageApplied = false;
             return;
+        }
 
-        // 2. 원본 데이터 백업 (최초 1회 실행)
+        const BYTE currentOp = *(BYTE*)marriageAddr;
+        const bool actualApplied = (currentOp == 0xEB);
+
+        // 설정 로드 시 marriageApplied bool이 먼저 true가 될 수 있으므로
+        // bool이 아니라 실제 명령어 바이트를 기준으로 판단합니다.
+        if (actualApplied == enable) {
+            marriageApplied = actualApplied;
+            AddLog(
+                "[Marriage] already %s / bytes=%02X %02X",
+                actualApplied ? "ON" : "OFF",
+                *(uint8_t*)(marriageAddr + 0),
+                *(uint8_t*)(marriageAddr + 1));
+            return;
+        }
+
+        // 원본은 실제 JNE 상태에서만 백업합니다.
         if (!marriageSaved) {
-            memcpy(marriageOriginal, (void *)marriageAddr, 2);
+            if (currentOp != 0x75) {
+                AddLog(
+                    "[Marriage] original backup blocked: unexpected opcode=%02X",
+                    currentOp);
+                marriageApplied = actualApplied;
+                return;
+            }
+            memcpy(marriageOriginal, (void*)marriageAddr, 2);
             marriageSaved = true;
         }
 
-        // 3. 현재 상태가 이미 원하는 상태(enable)와 같다면 작업 건너뛰기
-        if (marriageApplied == enable)
+        DWORD old = 0;
+        if (!VirtualProtect((LPVOID)marriageAddr, 2,
+                            PAGE_EXECUTE_READWRITE, &old)) {
+            AddLog("[Marriage] VirtualProtect failed: %p",
+                   (void*)marriageAddr);
+            marriageApplied = actualApplied;
             return;
-
-        // 4. 메모리 보호 해제 및 패치 적용
-        DWORD old;
-        if (VirtualProtect((LPVOID)marriageAddr, 2, PAGE_EXECUTE_READWRITE, &old)) {
-            if (enable) {
-                // CT와 동일하게 JNE(75 xx) -> JMP(EB xx), 분기 변위는 유지.
-                *(BYTE *)marriageAddr = 0xEB;
-            } else {
-                // 원본 데이터(75 21) 복구
-                memcpy((void *)marriageAddr, marriageOriginal, 2);
-            }
-
-            // 상태 업데이트
-            marriageApplied = enable;
-
-            // 메모리 보호 복구
-            VirtualProtect((LPVOID)marriageAddr, 2, old, &old);
         }
+
+        if (enable) {
+            // JNE(75 xx) -> JMP(EB xx), 분기 변위는 그대로 유지.
+            *(BYTE*)marriageAddr = 0xEB;
+        } else {
+            memcpy((void*)marriageAddr, marriageOriginal, 2);
+        }
+
+        FlushInstructionCache(
+            GetCurrentProcess(), (LPCVOID)marriageAddr, 2);
+
+        DWORD tmp = 0;
+        VirtualProtect((LPVOID)marriageAddr, 2, old, &tmp);
+
+        const BYTE verifyOp = *(BYTE*)marriageAddr;
+        marriageApplied = (verifyOp == 0xEB);
+
+        AddLog(
+            "[Marriage] request=%s / actual=%s / bytes=%02X %02X / addr=%p",
+            enable ? "ON" : "OFF",
+            marriageApplied ? "ON" : "OFF",
+            *(uint8_t*)(marriageAddr + 0),
+            *(uint8_t*)(marriageAddr + 1),
+            (void*)marriageAddr);
     }
 
     bool g_isHeroHookInstalled = false; // 후킹 상태 플래그
