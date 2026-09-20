@@ -93,6 +93,15 @@ static std::mutex g_pregnancySpouseMutex;
 static std::vector<PregnancySpouseDebugHit> g_pregnancySpouseResults;
 static size_t g_pregnancySpouseTotalHits = 0;
 
+struct PregnancyCanonicalTable {
+  bool valid = false;
+  uintptr_t base = 0;
+  std::array<PregnancyDebugRecordDump, 3> slots{};
+  std::array<uint16_t, 3> spouseIds{};
+};
+
+static PregnancyCanonicalTable g_pregnancyCanonicalTable;
+
 static bool ResolveHeroAndRoster(
     uintptr_t& rosterBase,
     uintptr_t& heroMaster,
@@ -200,6 +209,90 @@ static bool PregnancyCapsLookPlausible(
       return false;
   }
   return any;
+}
+
+static bool TryBuildCanonicalPregnancyTable(
+    const std::vector<PregnancySpouseDebugHit>& hits,
+    PregnancyCanonicalTable* out) {
+  if (!out)
+    return false;
+
+  PregnancyCanonicalTable best;
+  int bestScore = -1;
+
+  for (const PregnancySpouseDebugHit& hit : hits) {
+    // 실측 canonical 후보는 3개의 현재 배우자가 정확히 0x28 stride로 연속.
+    // 현재 hit가 세 슬롯 중 어느 위치일 수 있으므로 -2..0 시작점을 모두 시험합니다.
+    for (int startRel = -2; startRel <= 0; ++startRel) {
+      const intptr_t baseSigned =
+          (intptr_t)hit.recordBase + (intptr_t)startRel * 0x28;
+      if (baseSigned <= 0x10000)
+        continue;
+
+      PregnancyCanonicalTable table;
+      table.base = (uintptr_t)baseSigned;
+
+      std::unordered_set<uint16_t> uniqueSpouses;
+      bool ok = true;
+      int score = 0;
+
+      for (int slot = 0; slot < 3; ++slot) {
+        PregnancyDebugRecordDump d;
+        if (!ReadPregnancyDebugRecord(
+                table.base + (uintptr_t)slot * 0x28, &d)) {
+          ok = false;
+          break;
+        }
+
+        // canonical 슬롯의 +00은 현재 배우자 무장 포인터여야 합니다.
+        const uint16_t spouseId = d.q00OfficerId;
+        if (spouseId == 0) {
+          ok = false;
+          break;
+        }
+
+        table.slots[(size_t)slot] = d;
+        table.spouseIds[(size_t)slot] = spouseId;
+        uniqueSpouses.insert(spouseId);
+
+        if (d.pregnancyFlag <= 1)
+          score += 20;
+        if (d.remainingMonths <= 12)
+          score += 20;
+        if (d.childPtr == 0 || d.childOfficerId != 0)
+          score += 10;
+      }
+
+      if (!ok || uniqueSpouses.size() != 3)
+        continue;
+
+      // 이 세 ID가 실제 현재 배우자 검색 결과에 등장한 ID인지 확인.
+      int currentSpouseMatches = 0;
+      for (uint16_t id : table.spouseIds) {
+        for (const PregnancySpouseDebugHit& h : hits) {
+          if (h.spouseId == id) {
+            currentSpouseMatches++;
+            break;
+          }
+        }
+      }
+      if (currentSpouseMatches != 3)
+        continue;
+
+      score += 300;
+      if (score > bestScore) {
+        bestScore = score;
+        table.valid = true;
+        best = table;
+      }
+    }
+  }
+
+  if (!best.valid)
+    return false;
+
+  *out = best;
+  return true;
 }
 
 static void StartPregnancySpouseDebugScanAsync() {
@@ -400,10 +493,14 @@ static void StartPregnancySpouseDebugScanAsync() {
           return a.recordBase < b.recordBase;
         });
 
+    PregnancyCanonicalTable canonical;
+    TryBuildCanonicalPregnancyTable(hits, &canonical);
+
     {
       std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
       g_pregnancySpouseResults = std::move(hits);
       g_pregnancySpouseTotalHits = totalHits;
+      g_pregnancyCanonicalTable = canonical;
     }
 
     g_pregnancySpouseProgress = 1.0f;
@@ -418,15 +515,44 @@ static void FlushPregnancySpouseDebugResults() {
 
   std::vector<PregnancySpouseDebugHit> hits;
   size_t totalHits = 0;
+  PregnancyCanonicalTable canonical;
   {
     std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
     hits = g_pregnancySpouseResults;
     totalHits = g_pregnancySpouseTotalHits;
+    canonical = g_pregnancyCanonicalTable;
   }
 
   AddLog(
       u8"[임신배우자DBG] 검색 완료: +00 배우자 포인터 후보 %zu개 / 저장 %zu개",
       totalHits, hits.size());
+
+  if (canonical.valid) {
+    AddLog(
+        u8"[임신배우자DBG] canonical 3-slot table 발견: base=%p / stride=0x28",
+        (void*)canonical.base);
+
+    for (int slot = 0; slot < 3; ++slot) {
+      const PregnancyDebugRecordDump& d =
+          canonical.slots[(size_t)slot];
+      AddLog(
+          u8"[임신배우자DBG]   slot%d record=%p 배우자 ID=%u | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
+          slot,
+          (void*)(canonical.base + (uintptr_t)slot * 0x28),
+          canonical.spouseIds[(size_t)slot],
+          (unsigned)d.pregnancyFlag,
+          (unsigned)d.remainingMonths,
+          (void*)d.childPtr, d.childOfficerId,
+          (unsigned)d.capRaw[0],
+          (unsigned)d.capRaw[1],
+          (unsigned)d.capRaw[2],
+          (unsigned)d.capRaw[3],
+          (unsigned)d.capRaw[4]);
+    }
+  } else {
+    AddLog(
+        u8"[임신배우자DBG] canonical 3-slot table 자동 식별 실패");
+  }
 
   constexpr size_t kMaxLogHits = 40;
   const size_t logCount = (std::min)(hits.size(), kMaxLogHits);
