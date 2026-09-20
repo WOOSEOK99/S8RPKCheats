@@ -66,6 +66,7 @@ struct PregnancyCanonicalTable {
 };
 
 static PregnancyCanonicalTable g_pregnancyCanonicalTable;
+static std::mutex g_pregnancySpouseMutex;
 
 struct PregnancySpouseOption {
   uint16_t id = 0;
