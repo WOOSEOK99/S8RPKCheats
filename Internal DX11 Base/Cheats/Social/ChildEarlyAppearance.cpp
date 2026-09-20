@@ -117,6 +117,8 @@ static bool ResolveHeroAndRoster(
     uintptr_t& heroMaster,
     uint16_t& heroId);
 
+static PregnancyCanonicalTable GetCanonicalPregnancySnapshot();
+
 static uintptr_t NormalizeOfficerPtr(uintptr_t p) {
   return p & 0x0000FFFFFFFFFFFFULL;
 }
@@ -1010,6 +1012,76 @@ GetPregnancyOutsideSpouseOptions(
   return outside;
 }
 
+static bool TryWritePregnancySlotRaw(
+    uintptr_t slotAddr,
+    uintptr_t newSpouseAddr) {
+  DWORD oldProt = 0;
+  DWORD tmpProt = 0;
+  bool wrote = false;
+
+  __try {
+    if (!VirtualProtect(
+            (LPVOID)slotAddr, 0x28,
+            PAGE_READWRITE, &oldProt)) {
+      return false;
+    }
+
+    *(uintptr_t*)(slotAddr + 0x00) = newSpouseAddr;
+    *(uint8_t*)(slotAddr + 0x08) = 100;
+    *(uint8_t*)(slotAddr + 0x09) = 0;
+    *(uint8_t*)(slotAddr + 0x0A) = 0;
+    *(uintptr_t*)(slotAddr + 0x10) = 0;
+    memset((void*)(slotAddr + 0x1E), 0, 5);
+    wrote = true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    wrote = false;
+  }
+
+  if (oldProt != 0) {
+    VirtualProtect(
+        (LPVOID)slotAddr, 0x28,
+        oldProt, &tmpProt);
+  }
+
+  return wrote;
+}
+
+static bool TryRestorePregnancySlotRaw(
+    uintptr_t slotAddr,
+    const uint8_t* backup,
+    size_t backupSize) {
+  if (!backup || backupSize != 0x28)
+    return false;
+
+  DWORD oldProt = 0;
+  DWORD tmpProt = 0;
+  bool restored = false;
+
+  __try {
+    if (!VirtualProtect(
+            (LPVOID)slotAddr, 0x28,
+            PAGE_READWRITE, &oldProt)) {
+      return false;
+    }
+
+    memcpy(
+        (void*)slotAddr,
+        backup,
+        backupSize);
+    restored = true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    restored = false;
+  }
+
+  if (oldProt != 0) {
+    VirtualProtect(
+        (LPVOID)slotAddr, 0x28,
+        oldProt, &tmpProt);
+  }
+
+  return restored;
+}
+
 static bool ApplyPregnancySpouseSlotSwap(
     int slotIndex,
     uint16_t newSpouseId) {
@@ -1084,37 +1156,17 @@ static bool ApplyPregnancySpouseSlotSwap(
     return false;
   }
 
-  DWORD oldProt = 0;
-  DWORD tmpProt = 0;
-  bool wrote = false;
+  // CETRAINER spouseSlotRelocation()의 슬롯 초기화/재배치와
+  // 동일한 필드만 선택 슬롯 하나에 적용합니다.
+  // __try는 C++ 객체를 가진 함수에서 쓸 수 없으므로 POD 전용 헬퍼로 분리합니다.
+  const bool wrote =
+      TryWritePregnancySlotRaw(
+          slotAddr, newSpouseAddr);
 
-  __try {
-    if (!VirtualProtect(
-            (LPVOID)slotAddr, 0x28,
-            PAGE_READWRITE, &oldProt)) {
-      AddLog(
-          u8"[임신슬롯교체] slot%d 쓰기 권한 설정 실패",
-          slotIndex + 1);
-      return false;
-    }
-
-    // CETRAINER spouseSlotRelocation()의 슬롯 초기화/재배치와
-    // 동일한 필드만 선택 슬롯 하나에 적용합니다.
-    *(uintptr_t*)(slotAddr + 0x00) = newSpouseAddr;
-    *(uint8_t*)(slotAddr + 0x08) = 100;
-    *(uint8_t*)(slotAddr + 0x09) = 0;
-    *(uint8_t*)(slotAddr + 0x0A) = 0;
-    *(uintptr_t*)(slotAddr + 0x10) = 0;
-    memset((void*)(slotAddr + 0x1E), 0, 5);
-    wrote = true;
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
-    wrote = false;
-  }
-
-  if (oldProt != 0) {
-    VirtualProtect(
-        (LPVOID)slotAddr, 0x28,
-        oldProt, &tmpProt);
+  if (!wrote) {
+    AddLog(
+        u8"[임신슬롯교체] slot%d 쓰기 실패",
+        slotIndex + 1);
   }
 
   PregnancyDebugRecordDump verify;
@@ -1131,25 +1183,11 @@ static bool ApplyPregnancySpouseSlotSwap(
           [](uint8_t v) { return v == 0; });
 
   if (!verified) {
-    DWORD restoreProt = 0;
-    DWORD restoreTmp = 0;
-    bool restored = false;
-
-    __try {
-      if (VirtualProtect(
-              (LPVOID)slotAddr, 0x28,
-              PAGE_READWRITE, &restoreProt)) {
-        memcpy(
-            (void*)slotAddr,
-            backup.data(), backup.size());
-        restored = true;
-        VirtualProtect(
-            (LPVOID)slotAddr, 0x28,
-            restoreProt, &restoreTmp);
-      }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-      restored = false;
-    }
+    const bool restored =
+        TryRestorePregnancySlotRaw(
+            slotAddr,
+            backup.data(),
+            backup.size());
 
     AddLog(
         u8"[임신슬롯교체] slot%d 적용 검증 실패 -> 원복 %s",
