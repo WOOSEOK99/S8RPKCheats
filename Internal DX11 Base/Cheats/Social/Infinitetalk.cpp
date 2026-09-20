@@ -2,6 +2,7 @@
 #include "Infinitetalk.h"
 #include "../../Cheats.h"
 #include "../../MemoryUtils.h"
+#include "../System/MonthCapture.h"
 #include "InstantLoveCave.h"
 #include "Loyaltycave.h"
 #include "Resonancecave.h"
@@ -35,9 +36,35 @@ namespace DX11Base {
         static uintptr_t g_interactionBase = 0;
         static uintptr_t g_interactionWatchAddr = 0;
 
-        static constexpr size_t kMediationSnapshotSize = 0x800;
-        static uint8_t g_mediationSnapshot[kMediationSnapshotSize] = {};
-        static bool g_mediationSnapshotValid = false;
+        static constexpr size_t kMediationRootSnapshotSize = 0x10000;
+        static uint8_t g_mediationGameSnapshot[kMediationRootSnapshotSize] = {};
+        static uint8_t g_mediationScenarioSnapshot[kMediationRootSnapshotSize] = {};
+        static uintptr_t g_mediationGameBase = 0;
+        static uintptr_t g_mediationScenarioBase = 0;
+        static bool g_mediationGameSnapshotValid = false;
+        static bool g_mediationScenarioSnapshotValid = false;
+
+        static bool CopySnapshotRange(
+            uintptr_t base,
+            uint8_t* out,
+            size_t size) {
+            if (!base || !out || !size)
+                return false;
+
+            __try {
+                if (!IsValidPtr(base, size))
+                    return false;
+                memcpy(out, (const void*)base, size);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+        }
+
+        static bool IsSingleBit(uint8_t v) {
+            return v != 0 && (v & (uint8_t)(v - 1)) == 0;
+        }
 
         static uintptr_t g_captureHookAddr = 0;
         static uintptr_t g_captureCaveAddr = 0;
@@ -333,108 +360,166 @@ namespace DX11Base {
     }
 
     bool CaptureJewelMediationSnapshot() {
-        if (!g_interactionBase) {
-            AddLog(
-                u8"[중개DBG] 먼저 '1. 보주 교류주소 캡처 시작' 후 기증을 1회 실행해주세요.");
-            return false;
-        }
+        // 중개 제한은 교류 객체 +0x000~+0x7FF에 없다는 것이 실게임에서 확인됨.
+        // 다음 후보는 이미 프로젝트에서 검증된 전역 루트 두 곳만 비교:
+        //   1) GetGameBase()
+        //   2) ScenarioDataCenter
+        g_mediationGameBase = GetGameBase();
+        g_mediationScenarioBase = GetScenarioDataCenterAddress();
 
-        // 기증 캡처 훅은 스냅샷 시점에 정상 원본으로 즉시 복구.
-        RestoreInteractionCapture(false);
+        ZeroMemory(
+            g_mediationGameSnapshot,
+            sizeof(g_mediationGameSnapshot));
+        ZeroMemory(
+            g_mediationScenarioSnapshot,
+            sizeof(g_mediationScenarioSnapshot));
 
-        if (!IsValidPtr(g_interactionBase, kMediationSnapshotSize)) {
-            AddLog(
-                u8"[중개DBG] 교류 객체 범위가 유효하지 않습니다: base=%p",
-                (void*)g_interactionBase);
-            return false;
-        }
+        g_mediationGameSnapshotValid =
+            CopySnapshotRange(
+                g_mediationGameBase,
+                g_mediationGameSnapshot,
+                kMediationRootSnapshotSize);
 
-        memcpy(
-            g_mediationSnapshot,
-            (const void*)g_interactionBase,
-            kMediationSnapshotSize);
-        g_mediationSnapshotValid = true;
+        g_mediationScenarioSnapshotValid =
+            CopySnapshotRange(
+                g_mediationScenarioBase,
+                g_mediationScenarioSnapshot,
+                kMediationRootSnapshotSize);
 
         AddLog(
-            u8"[중개DBG] 중개 전 스냅샷 저장 완료: base=%p / 범위 +0x000~+0x7FF",
-            (void*)g_interactionBase);
+            u8"[중개DBG] 중개 전 전역 스냅샷: GameBase=%p (%s) / Scenario=%p (%s)",
+            (void*)g_mediationGameBase,
+            g_mediationGameSnapshotValid ? u8"OK" : u8"실패",
+            (void*)g_mediationScenarioBase,
+            g_mediationScenarioSnapshotValid ? u8"OK" : u8"실패");
+
+        if (g_mediationGameBase &&
+            g_mediationGameBase == g_mediationScenarioBase) {
+            AddLog(
+                u8"[중개DBG] GameBase와 ScenarioDataCenter가 같은 주소입니다.");
+        }
+
+        if (!g_mediationGameSnapshotValid &&
+            !g_mediationScenarioSnapshotValid) {
+            AddLog(
+                u8"[중개DBG] 비교 가능한 전역 루트 스냅샷을 만들지 못했습니다.");
+            return false;
+        }
+
         AddLog(
             u8"[중개DBG] 이제 보주 → 중개를 정확히 1회 실행한 뒤 '중개 후 변경 비교'를 누르세요.");
         return true;
     }
 
-    void CompareJewelMediationSnapshot() {
-        if (!g_mediationSnapshotValid || !g_interactionBase) {
-            AddLog(u8"[중개DBG] 먼저 중개 전 스냅샷을 저장해주세요.");
+    static void CompareOneMediationRoot(
+        const char* label,
+        uintptr_t base,
+        const uint8_t* before,
+        bool valid) {
+        if (!valid || !base || !before)
             return;
-        }
 
-        if (!IsValidPtr(g_interactionBase, kMediationSnapshotSize)) {
+        uint8_t now[kMediationRootSnapshotSize] = {};
+        if (!CopySnapshotRange(
+                base,
+                now,
+                kMediationRootSnapshotSize)) {
             AddLog(
-                u8"[중개DBG] 현재 교류 객체 범위가 더 이상 유효하지 않습니다: base=%p",
-                (void*)g_interactionBase);
+                u8"[중개DBG] %s 현재 범위 읽기 실패: base=%p",
+                label,
+                (void*)base);
             return;
         }
 
-        const uint8_t* now = (const uint8_t*)g_interactionBase;
-        unsigned int changedBytes = 0;
+        unsigned int changed = 0;
         unsigned int logged = 0;
+        unsigned int singleBitCandidates = 0;
 
-        AddLog(
-            u8"[중개DBG] 중개 전/후 비교 시작: base=%p",
-            (void*)g_interactionBase);
+        for (size_t off = 0;
+             off < kMediationRootSnapshotSize;
+             ++off) {
+            const uint8_t b = before[off];
+            const uint8_t a = now[off];
 
-        for (size_t off = 0; off < kMediationSnapshotSize; ++off) {
-            const uint8_t before = g_mediationSnapshot[off];
-            const uint8_t after = now[off];
-            if (before == after)
+            if (b == a)
                 continue;
 
-            ++changedBytes;
+            ++changed;
 
-            if (logged < 96) {
+            const uint8_t turnedOn =
+                (uint8_t)((uint8_t)~b & a);
+            const uint8_t turnedOff =
+                (uint8_t)(b & (uint8_t)~a);
+
+            // 1회 사용 완료 플래그에서 가장 기대하는 형태:
+            // 다른 비트는 그대로이고 정확히 한 비트만 0 -> 1.
+            if (turnedOff == 0 && IsSingleBit(turnedOn)) {
+                ++singleBitCandidates;
+
                 AddLog(
-                    u8"[중개DBG] +0x%03llX : %02X -> %02X / XOR=%02X",
+                    u8"[중개후보] %s +0x%04llX : %02X -> %02X / 새 bit=0x%02X",
+                    label,
                     (unsigned long long)off,
-                    (unsigned int)before,
-                    (unsigned int)after,
-                    (unsigned int)(before ^ after));
+                    (unsigned int)b,
+                    (unsigned int)a,
+                    (unsigned int)turnedOn);
+            }
+
+            if (logged < 80) {
+                AddLog(
+                    u8"[중개DBG] %s +0x%04llX : %02X -> %02X / XOR=%02X",
+                    label,
+                    (unsigned long long)off,
+                    (unsigned int)b,
+                    (unsigned int)a,
+                    (unsigned int)(b ^ a));
                 ++logged;
             }
         }
 
-        // DWORD 단위로도 핵심 후보를 보기 쉽게 출력.
-        unsigned int dwordLogged = 0;
-        for (size_t off = 0; off + 4 <= kMediationSnapshotSize; off += 4) {
-            const uint32_t before =
-                *(const uint32_t*)&g_mediationSnapshot[off];
-            const uint32_t after =
-                *(const uint32_t*)&now[off];
-
-            if (before == after)
-                continue;
-
-            if (dwordLogged < 32) {
-                AddLog(
-                    u8"[중개DBG] DWORD +0x%03llX : 0x%08X -> 0x%08X / XOR=0x%08X",
-                    (unsigned long long)off,
-                    before,
-                    after,
-                    before ^ after);
-                ++dwordLogged;
-            }
-        }
-
         AddLog(
-            u8"[중개DBG] 비교 완료: 변경 바이트=%u%s",
-            changedBytes,
-            changedBytes > 96 ? u8" (로그는 앞 96개만 표시)" : u8"");
+            u8"[중개DBG] %s 비교 완료: 변경 바이트=%u / 단일 0→1 bit 후보=%u%s",
+            label,
+            changed,
+            singleBitCandidates,
+            changed > 80 ? u8" (일반 변경 로그는 앞 80개만 표시)" : u8"");
+    }
+
+    void CompareJewelMediationSnapshot() {
+        AddLog(u8"[중개DBG] 중개 전/후 전역 루트 비교 시작");
+
+        CompareOneMediationRoot(
+            "GameBase",
+            g_mediationGameBase,
+            g_mediationGameSnapshot,
+            g_mediationGameSnapshotValid);
+
+        if (g_mediationScenarioBase != g_mediationGameBase) {
+            CompareOneMediationRoot(
+                "Scenario",
+                g_mediationScenarioBase,
+                g_mediationScenarioSnapshot,
+                g_mediationScenarioSnapshotValid);
+        } else if (g_mediationScenarioSnapshotValid) {
+            AddLog(
+                u8"[중개DBG] Scenario는 GameBase와 동일하여 중복 비교를 생략합니다.");
+        }
     }
 
     void ResetJewelMediationSnapshot() {
-        g_mediationSnapshotValid = false;
-        ZeroMemory(g_mediationSnapshot, sizeof(g_mediationSnapshot));
-        AddLog(u8"[중개DBG] 중개 스냅샷 초기화 완료.");
+        g_mediationGameBase = 0;
+        g_mediationScenarioBase = 0;
+        g_mediationGameSnapshotValid = false;
+        g_mediationScenarioSnapshotValid = false;
+
+        ZeroMemory(
+            g_mediationGameSnapshot,
+            sizeof(g_mediationGameSnapshot));
+        ZeroMemory(
+            g_mediationScenarioSnapshot,
+            sizeof(g_mediationScenarioSnapshot));
+
+        AddLog(u8"[중개DBG] 중개 전역 스냅샷 초기화 완료.");
     }
 
     bool StartJewelSubactionWriteWatch() {
