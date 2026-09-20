@@ -7463,6 +7463,51 @@ namespace DX11Base {
           ImGui::TextUnformatted(
               u8"예상 친밀 주소와 정확히 일치하는 write만 한 번 캡처하며 게임 값은 변경하지 않습니다.");
           ImGui::EndTooltip();
+
+        ImGui::SameLine(0.f, 6.f * sc);
+        if (ImGui::SmallButton(
+                u8"친밀 직접쓰기 테스트##OfficerAffinityDirectWriteTest")) {
+          uint16_t heroId = 0;
+          uintptr_t affinityAddr = 0;
+          uint8_t original = 0;
+          uint8_t testValue = 0;
+          uint8_t restored = 0;
+
+          const bool idOk =
+              p1 > 0x10000 &&
+              SafeRead16(p1 + 0x08, &heroId) &&
+              heroId >= 1 && heroId <= 5102;
+
+          const bool testOk =
+              idOk &&
+              TestOfficerAffinityWriteRoundTrip(
+                  heroId, selected->id,
+                  affinityAddr,
+                  original,
+                  testValue,
+                  restored);
+
+          AddLog(
+              u8"[친밀직접DBG] %s: %s(ID %u) <-> %s(ID %u) / 주소=0x%llX / 원래=%u / 테스트읽기=%u / 복원읽기=%u",
+              testOk ? "성공" : "실패",
+              idOk ? BuildOfficerName(heroId).c_str() : u8"주인공?",
+              (unsigned int)heroId,
+              BuildOfficerName(selected->id).c_str(),
+              (unsigned int)selected->id,
+              (unsigned long long)affinityAddr,
+              (unsigned int)original,
+              (unsigned int)testValue,
+              (unsigned int)restored);
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"현재 계산된 친밀 주소에 +1을 쓴 뒤 즉시 원래 값으로 복원합니다.");
+          ImGui::TextUnformatted(
+              u8"쓰기/재읽기/복원/재읽기까지 모두 성공해야 성공으로 기록되며 최종 값은 바뀌지 않습니다.");
+          ImGui::EndTooltip();
+        }
+
         }
       }
 
