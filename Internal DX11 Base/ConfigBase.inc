@@ -44,6 +44,7 @@
 #include "Cheats/War/Terrainignore.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/Civilian/DomesticsMult.h"
+#include "Cheats/Officer/OfficerData.h"
 #include "Cheats/System/SpeedHack.h"
 
 namespace DX11Base {
@@ -117,6 +118,7 @@ namespace DX11Base {
       {"bInfiniteGift", u8"증정 무한", &bInfiniteGift, &s_appGift, SetInfiniteGift, false, true},
       {"bInfiniteTalk", u8"담화 무한", &bInfiniteTalk, &s_appTalk, SetInfiniteTalk, false, true},
       {"bFastRelationship", u8"즉시 경애 맺기", &bFastRelationship, &s_appRelation, SetFastRelationship, false, true},
+      {"bAutoAffinityGrowth", u8"AI 친밀도 가속", &g_autoAffinityGrowthEnabled, nullptr, nullptr, false, true},
       {"marriageApplied", u8"결혼 무제한", &marriageApplied, &s_appMarriage, SetMarriageCondition, false, true},
       {"bSelfHeal", u8"전쟁: 자가 회복", &bSelfHeal, &s_appSelfHeal, SetSelfHeal, true, true},
       {"bDongto", u8"전쟁: 동토(금/군량 무한)", &bDongto, &s_appDongto, SetDongto, true, true},

@@ -10,6 +10,7 @@
 #include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/Civilian/Techzero.h"
 #include "Cheats/Officer/OfficerRosterResolve.h"
+#include "Cheats/Officer/OfficerData.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Social/Fastrelationship.h"
 #include "Cheats/Social/ChildEarlyAppearance.h"
@@ -667,7 +668,38 @@ namespace DX11Base {
         if (::DX11Base::g_loyaltyThreadRunning.load())
           ImGui::EndDisabled();
 
-        // 4행: 결혼 / 자녀 관리
+        // 4행: AI 친밀도 가속
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(
+                u8"AI 친밀도 가속",
+                &g_autoAffinityGrowthEnabled)) {
+          ResetAutoAffinityGrowthState();
+          NotifyFeatureToggle(
+              u8"AI 친밀도 가속",
+              g_autoAffinityGrowthEnabled);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"매 분기 평정월(1·4·7·10월) 시작 시 AI 무장끼리 친밀도를 추가 상승시킵니다.");
+          ImGui::TextUnformatted(
+              u8"같은 세력·같은 도시에 있는 AI 쌍만 대상이며 주인공과 친밀도 -1 이하인 쌍은 제외합니다.");
+          ImGui::TextUnformatted(
+              u8"상성과 흥미·중시의 일치 정도를 반영하며 최대 친밀도는 100입니다.");
+          ImGui::TextUnformatted(
+              u8"친밀도만 가속하며 부부·의형제·상생 관계를 직접 생성하지 않습니다.");
+          ImGui::TextDisabled(
+              u8"※ 체크 상태는 설정 파일에 저장됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+
+        // 5행: 결혼 / 자녀 관리
+
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         bool tempMarriage = ::DX11Base::marriageApplied;

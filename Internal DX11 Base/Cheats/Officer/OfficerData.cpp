@@ -1,6 +1,9 @@
 #include "OfficerData.h"
 #include "OfficerRosterResolve.h"
+#include "../System/MonthCapture.h"
 #include "../../Cheats.h"
+#include "../../MemoryUtils.h"
+#include "../../showlog.h"
 #include "pch.h"
 #include <filesystem>
 #include <fstream>
@@ -47,6 +50,15 @@ namespace DX11Base {
     bool g_namesLoaded = false;
     std::unordered_map<int, EffectDef> g_effectDefs;
     bool g_effectsLoaded = false;
+
+    bool g_autoAffinityGrowthEnabled = false;
+
+    namespace {
+        uintptr_t g_autoAffinityLastDataCenter = 0;
+        uintptr_t g_autoAffinityLastProtagonist = 0;
+        unsigned short g_autoAffinityLastYear = 0;
+        uint8_t g_autoAffinityLastMonth = 0;
+    }
 
     RosterStats SafeReadRosterStats(uintptr_t targetBase) {
         RosterStats stats = { false };
@@ -319,7 +331,566 @@ namespace DX11Base {
             }
             return false;
         }
+
+        constexpr uintptr_t kCurrentAffinityBaseOffset = 0x24206;
+        constexpr int kAffinityOfficerCount = 1650;
+
+        static uintptr_t g_affinityWriteHookAddr = 0;
+        static uintptr_t g_affinityWriteCaveAddr = 0;
+        static uint8_t g_affinityWriteOriginal[8] = {};
+        static bool g_affinityWriteHookInstalled = false;
+        static volatile uintptr_t g_affinityExpectedWriteAddr = 0;
+        static volatile uintptr_t g_affinityCapturedWriteAddr = 0;
+        static volatile uint8_t g_affinityCapturedWriteValue = 0;
+        static volatile uint8_t g_affinityWriteCaptured = 0;
+
+        void EmitAffinityAbsoluteReturn(
+            uint8_t* cave, int& cur,
+            uintptr_t returnAddr) {
+            cave[cur++] = 0xFF;
+            cave[cur++] = 0x25;
+            *(uint32_t*)&cave[cur] = 0;
+            cur += 4;
+            *(uintptr_t*)&cave[cur] = returnAddr;
+            cur += 8;
+        }
+
+        bool InstallAffinityWriteProbeHook() {
+            if (g_affinityWriteHookInstalled)
+                return true;
+
+            const uintptr_t moduleBase =
+                (uintptr_t)GetModuleHandle(nullptr);
+            if (!moduleBase) {
+                AddLog(u8"[친밀쓰기DBG] 모듈 베이스 확인 실패");
+                return false;
+            }
+
+            MODULEINFO mi{};
+            if (!GetModuleInformation(
+                    GetCurrentProcess(),
+                    (HMODULE)moduleBase,
+                    &mi, sizeof(mi))) {
+                AddLog(u8"[친밀쓰기DBG] 모듈 범위 확인 실패");
+                return false;
+            }
+
+            const uintptr_t moduleEnd =
+                moduleBase + mi.SizeOfImage;
+
+            // 현재 SAN8RPK.CT ID 300이 실제로 사용하는 AOB를 기준점으로 잡는다.
+            // CT 하단의 디스어셈블리 주석은 빌드에 따라 달라질 수 있으므로
+            // 전체 주변 바이트를 고정 패턴으로 사용하지 않는다.
+            const uintptr_t ct300Anchor =
+                FindPattern(
+                    moduleBase, moduleEnd,
+                    "41 03 C0 41 3B C6 41");
+
+            uintptr_t hookAddr = 0;
+            uint32_t affinityWriteDisp = 0;
+
+            // ID300 기준점에서 가까운 범위의
+            // mov [rdx+r9+disp32],cl (42 88 8C 0A xx xx xx xx)를 찾는다.
+            if (ct300Anchor) {
+                const uintptr_t localEnd =
+                    (std::min)(
+                        moduleEnd,
+                        ct300Anchor + (uintptr_t)0x100);
+                for (uintptr_t p = ct300Anchor;
+                     p + 8 <= localEnd; ++p) {
+                    const uint8_t* code =
+                        (const uint8_t*)p;
+                    if (code[0] == 0x42 &&
+                        code[1] == 0x88 &&
+                        code[2] == 0x8C &&
+                        code[3] == 0x0A) {
+                        hookAddr = p;
+                        memcpy(
+                            &affinityWriteDisp,
+                            code + 4,
+                            sizeof(affinityWriteDisp));
+                        break;
+                    }
+                }
+            }
+
+            // CT ID300이 외부에서 이미 활성화되어 기준 AOB가 JMP로 바뀐 경우나
+            // 함수 주변 명령 배치가 달라진 경우를 위한 폴백.
+            if (!hookAddr) {
+                const uintptr_t fallback =
+                    FindPattern(
+                        moduleBase, moduleEnd,
+                        "42 88 8C 0A ? ? ? ?");
+                if (fallback) {
+                    hookAddr = fallback;
+                    memcpy(
+                        &affinityWriteDisp,
+                        (const void*)(fallback + 4),
+                        sizeof(affinityWriteDisp));
+                }
+            }
+
+            if (!hookAddr) {
+                AddLog(
+                    u8"[친밀쓰기DBG] 현재 CT ID300 친밀 저장 명령을 찾지 못했습니다. anchor=%s",
+                    ct300Anchor ? "FOUND" : "NOT_FOUND");
+                return false;
+            }
+
+            static const uint8_t kWritePrefix[4] = {
+                0x42, 0x88, 0x8C, 0x0A
+            };
+            if (memcmp(
+                    (const void*)hookAddr,
+                    kWritePrefix,
+                    sizeof(kWritePrefix)) != 0) {
+                AddLog(
+                    u8"[친밀쓰기DBG] 저장 명령 검증 실패: hook=0x%llX",
+                    (unsigned long long)hookAddr);
+                return false;
+            }
+
+            AddLog(
+                u8"[친밀쓰기DBG] CT300 저장 명령 확인: anchor=0x%llX / hook=0x%llX / disp=0x%X",
+                (unsigned long long)ct300Anchor,
+                (unsigned long long)hookAddr,
+                (unsigned int)affinityWriteDisp);
+
+            g_affinityWriteCaveAddr =
+                AllocNear(hookAddr, 256);
+            if (!g_affinityWriteCaveAddr) {
+                AddLog(u8"[친밀쓰기DBG] 저장 명령 cave 할당 실패");
+                return false;
+            }
+
+            memcpy(
+                g_affinityWriteOriginal,
+                (const void*)hookAddr,
+                sizeof(g_affinityWriteOriginal));
+
+            uint8_t* cave =
+                (uint8_t*)g_affinityWriteCaveAddr;
+            int cur = 0;
+
+            // 원본 mov는 flags를 건드리지 않으므로 비교용 flags와
+            // 임시 레지스터를 모두 보존한다.
+            cave[cur++] = 0x9C;                         // pushfq
+            cave[cur++] = 0x50;                         // push rax
+            cave[cur++] = 0x41; cave[cur++] = 0x53;   // push r11
+
+            // lea rax,[rdx+r9+disp32]
+            cave[cur++] = 0x4A;
+            cave[cur++] = 0x8D;
+            cave[cur++] = 0x84;
+            cave[cur++] = 0x0A;
+            *(uint32_t*)&cave[cur] =
+                affinityWriteDisp;
+            cur += 4;
+
+            // r11 = &g_affinityExpectedWriteAddr
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xBB;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityExpectedWriteAddr;
+            cur += 8;
+
+            // cmp rax,[r11]
+            cave[cur++] = 0x49;
+            cave[cur++] = 0x3B;
+            cave[cur++] = 0x03;
+
+            // jne skipCapture
+            cave[cur++] = 0x0F;
+            cave[cur++] = 0x85;
+            const int jneSkipPos = cur;
+            cur += 4;
+
+            // capturedAddress = rax
+            cave[cur++] = 0x48;
+            cave[cur++] = 0xA3;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityCapturedWriteAddr;
+            cur += 8;
+
+            // capturedValue = cl
+            cave[cur++] = 0x8A;
+            cave[cur++] = 0xC1; // mov al,cl
+            cave[cur++] = 0xA2;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityCapturedWriteValue;
+            cur += 8;
+
+            // captured flag = 1
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xBB;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityWriteCaptured;
+            cur += 8;
+            cave[cur++] = 0x41;
+            cave[cur++] = 0xC6;
+            cave[cur++] = 0x03;
+            cave[cur++] = 0x01;
+
+            // 한 번 잡으면 자동 disarm.
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xBB;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityExpectedWriteAddr;
+            cur += 8;
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xC7;
+            cave[cur++] = 0x03;
+            *(uint32_t*)&cave[cur] = 0;
+            cur += 4;
+
+            const int skipCapture = cur;
+            *(int32_t*)&cave[jneSkipPos] =
+                (int32_t)(
+                    skipCapture -
+                    (jneSkipPos + 4));
+
+            cave[cur++] = 0x41; cave[cur++] = 0x5B;   // pop r11
+            cave[cur++] = 0x58;                         // pop rax
+            cave[cur++] = 0x9D;                         // popfq
+
+            // 원본 mov [rdx+r9+disp32],cl 8바이트를 그대로 실행한다.
+            memcpy(
+                &cave[cur],
+                g_affinityWriteOriginal,
+                sizeof(g_affinityWriteOriginal));
+            cur += (int)sizeof(g_affinityWriteOriginal);
+
+            EmitAffinityAbsoluteReturn(
+                cave, cur,
+                hookAddr +
+                    sizeof(g_affinityWriteOriginal));
+
+            FlushInstructionCache(
+                GetCurrentProcess(),
+                (LPCVOID)g_affinityWriteCaveAddr,
+                cur);
+
+            if (!ApplyJmp(
+                    hookAddr,
+                    g_affinityWriteCaveAddr,
+                    sizeof(g_affinityWriteOriginal))) {
+                AddLog(
+                    u8"[친밀쓰기DBG] 저장 명령 후킹 설치 실패: hook=0x%llX",
+                    (unsigned long long)hookAddr);
+                VirtualFree(
+                    (LPVOID)g_affinityWriteCaveAddr,
+                    0, MEM_RELEASE);
+                g_affinityWriteCaveAddr = 0;
+                memset(
+                    g_affinityWriteOriginal, 0,
+                    sizeof(g_affinityWriteOriginal));
+                return false;
+            }
+
+            g_affinityWriteHookAddr = hookAddr;
+            g_affinityWriteHookInstalled = true;
+            AddLog(
+                u8"[친밀쓰기DBG] 저장 명령 후킹 설치 완료: hook=0x%llX",
+                (unsigned long long)hookAddr);
+            return true;
+        }
+
+        int GetAffinityCompressedIndex(uint16_t id) {
+            if (id >= 1 && id <= 1000)
+                return (int)id;
+            if (id >= 2001 && id <= 2100)
+                return (int)id - 1000;
+            if (id >= 4001 && id <= 4200)
+                return (int)id - 2900;
+            if (id >= 5001 && id <= 5100)
+                return (int)id - 3700;
+            if (id >= 3001 && id <= 3150)
+                return (int)id - 1600;
+            if (id >= 5101 && id <= 5200)
+                return (int)id - 3550;
+            return -1;
+        }
+
+        bool CalcAffinityPairOffset(
+            int index1, int index2, uintptr_t* outOffset) {
+            if (!outOffset ||
+                index1 < 1 || index2 < 1 ||
+                index1 > kAffinityOfficerCount ||
+                index2 > kAffinityOfficerCount ||
+                index1 == index2)
+                return false;
+
+            const int leftIndex = (std::min)(index1, index2);
+            const int rightIndex = (std::max)(index1, index2);
+            const uint64_t left = (uint64_t)(leftIndex - 1);
+            const uint64_t width =
+                (uint64_t)(kAffinityOfficerCount - 1);
+            const uint64_t rowStart =
+                left * (2ull * width - (left - 1ull)) / 2ull;
+            *outOffset =
+                (uintptr_t)(rowStart +
+                (uint64_t)(rightIndex - leftIndex - 1));
+            return true;
+        }
     } // namespace
+
+
+    bool GetOfficerAffinityAddress(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uintptr_t& outAddress,
+        uint8_t* outCurrentValue) {
+        outAddress = 0;
+        if (outCurrentValue)
+            *outCurrentValue = 0;
+
+        if (officerId1 == 0 || officerId2 == 0 ||
+            officerId1 == officerId2)
+            return false;
+
+        const int index1 =
+            GetAffinityCompressedIndex(officerId1);
+        const int index2 =
+            GetAffinityCompressedIndex(officerId2);
+        uintptr_t pairOffset = 0;
+        if (!CalcAffinityPairOffset(
+                index1, index2, &pairOffset))
+            return false;
+
+        const uintptr_t dataCenter =
+            GetScenarioDataCenterAddress();
+        if (dataCenter <= 0x10000)
+            return false;
+
+        const uintptr_t address =
+            dataCenter +
+            kCurrentAffinityBaseOffset +
+            pairOffset;
+
+        uint8_t value = 0;
+        if (!SafeRelRead8(address, &value) ||
+            value > 100)
+            return false;
+
+        outAddress = address;
+        if (outCurrentValue)
+            *outCurrentValue = value;
+        return true;
+    }
+
+
+    bool TestOfficerAffinityWriteRoundTrip(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uintptr_t& outAddress,
+        uint8_t& outOriginal,
+        uint8_t& outTestValue,
+        uint8_t& outRestored) {
+        outAddress = 0;
+        outOriginal = 0;
+        outTestValue = 0;
+        outRestored = 0;
+
+        uint8_t current = 0;
+        uintptr_t address = 0;
+        if (!GetOfficerAffinityAddress(
+                officerId1, officerId2,
+                address, &current))
+            return false;
+
+        // 100이면 +1이 불가능하므로 99로 내리지 않고 테스트하지 않는다.
+        if (current >= 100)
+            return false;
+
+        const uint8_t testValue =
+            (uint8_t)(current + 1);
+
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                (LPVOID)address, 1,
+                PAGE_READWRITE, &oldProtect))
+            return false;
+
+        bool writeTestOk = false;
+        bool restoreOk = false;
+        uint8_t verifyTest = 0;
+        uint8_t verifyRestore = 0;
+
+        __try {
+            *(volatile uint8_t*)address =
+                testValue;
+            verifyTest =
+                *(volatile uint8_t*)address;
+            writeTestOk =
+                (verifyTest == testValue);
+
+            // 테스트 성공 여부와 관계없이 원래 값으로 되돌린다.
+            *(volatile uint8_t*)address =
+                current;
+            verifyRestore =
+                *(volatile uint8_t*)address;
+            restoreOk =
+                (verifyRestore == current);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            writeTestOk = false;
+            restoreOk = false;
+        }
+
+        DWORD dummy = 0;
+        VirtualProtect(
+            (LPVOID)address, 1,
+            oldProtect, &dummy);
+
+        outAddress = address;
+        outOriginal = current;
+        outTestValue = verifyTest;
+        outRestored = verifyRestore;
+
+        return writeTestOk && restoreOk;
+    }
+
+    bool GetOfficerAffinity(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uint8_t& outAffinity) {
+        uintptr_t address = 0;
+        return GetOfficerAffinityAddress(
+            officerId1, officerId2,
+            address, &outAffinity);
+    }
+
+
+    bool SetOfficerAffinity(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uint8_t value,
+        uint8_t* outPreviousValue) {
+        if (value > 100)
+            value = 100;
+
+        uintptr_t address = 0;
+        uint8_t previous = 0;
+        if (!GetOfficerAffinityAddress(
+                officerId1, officerId2,
+                address, &previous))
+            return false;
+
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                (LPVOID)address, 1,
+                PAGE_READWRITE, &oldProtect))
+            return false;
+
+        bool ok = false;
+        __try {
+            *(volatile uint8_t*)address = value;
+            ok = (*(volatile uint8_t*)address == value);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            ok = false;
+        }
+
+        DWORD dummy = 0;
+        VirtualProtect(
+            (LPVOID)address, 1,
+            oldProtect, &dummy);
+
+        if (ok && outPreviousValue)
+            *outPreviousValue = previous;
+        return ok;
+    }
+
+    bool IncreaseOfficerAffinity(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uint8_t amount,
+        uint8_t* outPreviousValue,
+        uint8_t* outNewValue) {
+        uint8_t current = 0;
+        if (!GetOfficerAffinity(
+                officerId1, officerId2, current))
+            return false;
+
+        const int increased =
+            (std::min)(100, (int)current + (int)amount);
+        const uint8_t next =
+            (uint8_t)increased;
+
+        if (current == next) {
+            if (outPreviousValue)
+                *outPreviousValue = current;
+            if (outNewValue)
+                *outNewValue = current;
+            return true;
+        }
+
+        uint8_t previous = 0;
+        if (!SetOfficerAffinity(
+                officerId1, officerId2,
+                next, &previous))
+            return false;
+
+        if (outPreviousValue)
+            *outPreviousValue = previous;
+        if (outNewValue)
+            *outNewValue = next;
+        return true;
+    }
+
+    bool ArmOfficerAffinityWriteProbe(
+        uint16_t officerId1,
+        uint16_t officerId2) {
+        uintptr_t expectedAddress = 0;
+        uint8_t currentValue = 0;
+        if (!GetOfficerAffinityAddress(
+                officerId1, officerId2,
+                expectedAddress, &currentValue))
+            return false;
+
+        if (!InstallAffinityWriteProbeHook())
+            return false;
+
+        g_affinityCapturedWriteAddr = 0;
+        g_affinityCapturedWriteValue = 0;
+        g_affinityWriteCaptured = 0;
+        g_affinityExpectedWriteAddr =
+            expectedAddress;
+
+        return true;
+    }
+
+    bool ConsumeOfficerAffinityWriteProbe(
+        uintptr_t& outExpectedAddress,
+        uintptr_t& outCapturedAddress,
+        uint8_t& outWrittenValue) {
+        outExpectedAddress =
+            g_affinityExpectedWriteAddr;
+        outCapturedAddress = 0;
+        outWrittenValue = 0;
+
+        if (!g_affinityWriteCaptured)
+            return false;
+
+        outCapturedAddress =
+            g_affinityCapturedWriteAddr;
+        outWrittenValue =
+            g_affinityCapturedWriteValue;
+
+        // 캡처 시 cave에서 expected는 0으로 자동 disarm되므로,
+        // 결과 반환 시에는 captured 주소를 expected로 사용한다.
+        outExpectedAddress =
+            g_affinityCapturedWriteAddr;
+        g_affinityWriteCaptured = 0;
+        return true;
+    }
+
+    void DisarmOfficerAffinityWriteProbe() {
+        g_affinityExpectedWriteAddr = 0;
+        g_affinityWriteCaptured = 0;
+        g_affinityCapturedWriteAddr = 0;
+        g_affinityCapturedWriteValue = 0;
+    }
 
     bool GetOfficerRelationshipInfoBatch(
         const std::vector<uintptr_t>& officerBases,
@@ -512,6 +1083,502 @@ namespace DX11Base {
 
         outInfo = infos[0];
         return true;
+    }
+
+
+
+    void ResetAutoAffinityGrowthState() {
+        g_autoAffinityLastDataCenter = 0;
+        g_autoAffinityLastProtagonist = 0;
+        g_autoAffinityLastYear = 0;
+        g_autoAffinityLastMonth = 0;
+    }
+
+    namespace {
+        constexpr uintptr_t kOfficerCompatibilityOffset = 0x5D;
+        constexpr uintptr_t kOfficerInterestOffset = 0x83;
+        constexpr uintptr_t kOfficerFavoredReputationOffset = 0xA4;
+
+        bool IsAutoAffinityOfficerStatus(uint8_t status) {
+            return status == 0x18 || status == 0x28 ||
+                   status == 0x38 || status == 0x48 ||
+                   status == 0xC8 || status == 0xD8 ||
+                   status == 0xE8;
+        }
+
+        bool HasId(
+            const std::vector<uint16_t>& values,
+            uint16_t id) {
+            return std::find(
+                       values.begin(),
+                       values.end(),
+                       id) != values.end();
+        }
+
+        bool ShouldSkipAutoAffinityPair(
+            const OfficerRelationshipInfo& info,
+            uint16_t otherId) {
+            if (HasId(info.swornBrothers, otherId) ||
+                HasId(info.spouses, otherId) ||
+                HasId(info.synergetic, otherId))
+                return true;
+
+            return HasId(info.antipathetic, otherId) ||
+                   HasId(info.enemies, otherId) ||
+                   HasId(info.rivals, otherId);
+        }
+
+        std::string AutoAffinityName(uint16_t id) {
+            auto it = g_officerNames.find((int)id);
+            if (it != g_officerNames.end() &&
+                !it->second.empty())
+                return it->second;
+            return u8"ID " + std::to_string((int)id);
+        }
+
+        int CalcCompatibilityDistance(
+            uint8_t a, uint8_t b) {
+            const int diff =
+                std::abs((int)a - (int)b);
+            return (std::min)(diff, 150 - diff);
+        }
+
+        int CalcCompatibilityBonus(
+            uint8_t a, uint8_t b) {
+            const int distance =
+                CalcCompatibilityDistance(a, b);
+
+            // 참고 DLL(AffinityM) 실측:
+            // 거리 0 => +15
+            // 1~5 => +14, 6~10 => +13, ... , 66~70 => +1, 71~75 => +0
+            if (distance == 0)
+                return 15;
+
+            const int bonus =
+                15 - ((distance + 4) / 5);
+            return (std::max)(0, bonus);
+        }
+
+        int CalcInterestAndReputationBonus(
+            uint8_t interestA,
+            uint8_t interestB,
+            uint8_t reputationA,
+            uint8_t reputationB) {
+            int bonus = 0;
+
+            // 참고 DLL(AffinityM) 실측:
+            // +0x83을 2비트 x 4필드로 비교한다.
+            // 같은 값이어도 0(없음)이면 보너스 없음.
+            for (int shift = 0; shift <= 6; shift += 2) {
+                const uint8_t a =
+                    (uint8_t)((interestA >> shift) & 0x03);
+                const uint8_t b =
+                    (uint8_t)((interestB >> shift) & 0x03);
+                if (a != 0 && a == b)
+                    bonus += 3;
+            }
+
+            // +0xA4 중시 유형도 같은 비영(非0) 값일 때 +3.
+            if (reputationA != 0 &&
+                reputationA == reputationB)
+                bonus += 3;
+
+            return bonus;
+        }
+
+        bool IsAutoAffinityCouncilMonth(uint8_t month) {
+            return month == 1 || month == 4 ||
+                   month == 7 || month == 10;
+        }
+
+        // SEH는 std::vector/string 등의 소멸자가 있는 TickAutoAffinityGrowth
+        // 본문에서 사용할 수 없으므로 POD 전용 헬퍼로 분리한다.
+        bool TryWriteAffinityByte(
+            uintptr_t address,
+            uint8_t value) {
+            __try {
+                *(volatile uint8_t*)address =
+                    value;
+                return
+                    *(volatile uint8_t*)address ==
+                    value;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+        }
+    }
+
+    void TickAutoAffinityGrowth(
+        uintptr_t protagonistBase) {
+        static ULONGLONG s_lastPollMs = 0;
+        const ULONGLONG now =
+            GetTickCount64();
+        if (now - s_lastPollMs < 250)
+            return;
+        s_lastPollMs = now;
+
+        if (!g_autoAffinityGrowthEnabled) {
+            ResetAutoAffinityGrowthState();
+            return;
+        }
+
+        const uintptr_t dataCenter =
+            GetScenarioDataCenterAddress();
+        if (dataCenter <= 0x10000 ||
+            protagonistBase <= 0x10000)
+            return;
+
+        if (g_autoAffinityLastDataCenter != dataCenter ||
+            g_autoAffinityLastProtagonist != protagonistBase) {
+            g_autoAffinityLastDataCenter = dataCenter;
+            g_autoAffinityLastProtagonist = protagonistBase;
+            g_autoAffinityLastYear = 0;
+            g_autoAffinityLastMonth = 0;
+        }
+
+        uint16_t protagonistId = 0;
+        if (!SafeRelRead16(
+                protagonistBase + 0x08,
+                &protagonistId) ||
+            protagonistId < 1 ||
+            protagonistId > 5102)
+            return;
+
+        unsigned short currentYear = 0;
+        uint8_t currentMonth = 0;
+        if (!ReadScenarioDate(
+                &currentYear, &currentMonth) ||
+            currentYear == 0 ||
+            currentMonth < 1 ||
+            currentMonth > 12)
+            return;
+
+        // 참고 DLL(AffinityM)과 동일하게 "분기 평정월로 넘어가는 순간" 1회 실행.
+        // 활성화 시 이미 해당 월이면 기준만 잡고 소급 실행하지 않는다.
+        if (g_autoAffinityLastYear == 0 ||
+            g_autoAffinityLastMonth == 0) {
+            g_autoAffinityLastYear = currentYear;
+            g_autoAffinityLastMonth = currentMonth;
+            return;
+        }
+
+        if (g_autoAffinityLastYear == currentYear &&
+            g_autoAffinityLastMonth == currentMonth)
+            return;
+
+        const unsigned int previousSerial =
+            (unsigned int)g_autoAffinityLastYear * 12u +
+            (unsigned int)g_autoAffinityLastMonth;
+        const unsigned int currentSerial =
+            (unsigned int)currentYear * 12u +
+            (unsigned int)currentMonth;
+
+        g_autoAffinityLastYear = currentYear;
+        g_autoAffinityLastMonth = currentMonth;
+
+        // 저장 불러오기 등으로 날짜가 뒤로 간 경우에는 실행하지 않는다.
+        if (currentSerial <= previousSerial)
+            return;
+
+        if (!IsAutoAffinityCouncilMonth(currentMonth))
+            return;
+
+        AddLog(
+            u8"[친밀자동] %u년 %u월 평정 시작 감지 -> AI 친밀도 가속 실행",
+            (unsigned int)currentYear,
+            (unsigned int)currentMonth);
+
+        const uintptr_t exe =
+            (uintptr_t)GetModuleHandle(nullptr);
+        uintptr_t rosterBase = 0;
+        if (!exe ||
+            !TryResolveOfficerRosterArrayBase(
+                exe, &rosterBase) ||
+            rosterBase <= 0x10000)
+            return;
+
+        struct AutoAffinityOfficer {
+            uintptr_t base = 0;
+            uintptr_t force = 0;
+            uintptr_t city = 0;
+            uint16_t id = 0;
+            uint8_t compatibility = 0;
+            uint8_t interest = 0;
+            uint8_t favoredReputation = 0;
+            size_t relationIndex = 0;
+        };
+
+        std::vector<AutoAffinityOfficer> officers;
+        std::vector<uintptr_t> officerBases;
+        officers.reserve(1600);
+        officerBases.reserve(1600);
+
+        int invalidMetaCount = 0;
+        bool seenOfficerIds[5103] = {};
+
+        for (int i = 0; i < 5102; ++i) {
+            const uintptr_t base =
+                rosterBase + (uintptr_t)i * 0x3D0;
+
+            const RosterStats rosterStats =
+                SafeReadRosterStats(base);
+            if (!rosterStats.valid ||
+                rosterStats.id_08 < 1 ||
+                rosterStats.id_08 > 5102)
+                continue;
+
+            const uint16_t id =
+                rosterStats.id_08;
+            if (seenOfficerIds[id])
+                continue;
+            seenOfficerIds[id] = true;
+
+            uint8_t status = 0;
+            uintptr_t force = 0;
+            uintptr_t city = 0;
+            uint8_t compatibility = 0;
+            uint8_t interest = 0;
+            uint8_t favoredReputation = 0;
+
+            if (id == protagonistId ||
+                !SafeRelRead8(base + 0x10, &status) ||
+                !IsAutoAffinityOfficerStatus(status) ||
+                !SafeRelReadPtr(base + 0x18, &force) ||
+                !SafeRelReadPtr(base + 0x20, &city) ||
+                force <= 0x10000 ||
+                city <= 0x10000)
+                continue;
+
+            const bool metaReadOk =
+                SafeRelRead8(
+                    base + kOfficerCompatibilityOffset,
+                    &compatibility) &&
+                SafeRelRead8(
+                    base + kOfficerInterestOffset,
+                    &interest) &&
+                SafeRelRead8(
+                    base + kOfficerFavoredReputationOffset,
+                    &favoredReputation);
+
+            if (!metaReadOk ||
+                compatibility > 149 ||
+                favoredReputation < 1 ||
+                favoredReputation > 6) {
+                ++invalidMetaCount;
+                continue;
+            }
+
+            AutoAffinityOfficer officer;
+            officer.base = base;
+            officer.force = force;
+            officer.city = city;
+            officer.id = id;
+            officer.compatibility = compatibility;
+            officer.interest = interest;
+            officer.favoredReputation =
+                favoredReputation;
+            officer.relationIndex =
+                officerBases.size();
+            officers.push_back(officer);
+            officerBases.push_back(base);
+        }
+
+        if (officers.size() < 2) {
+            AddLog(
+                u8"[친밀자동] 분기 평정 시작: 유효 AI 무장 부족 / 메타데이터 제외 %d명",
+                invalidMetaCount);
+            return;
+        }
+
+        std::vector<OfficerRelationshipInfo>
+            relationships;
+        if (!GetOfficerRelationshipInfoBatch(
+                officerBases, relationships) ||
+            relationships.size() != officerBases.size()) {
+            AddLog(
+                u8"[친밀자동] 분기 평정 시작: 관계 테이블 읽기 실패");
+            return;
+        }
+
+        std::sort(
+            officers.begin(), officers.end(),
+            [](const AutoAffinityOfficer& a,
+               const AutoAffinityOfficer& b) {
+                if (a.force != b.force)
+                    return a.force < b.force;
+                if (a.city != b.city)
+                    return a.city < b.city;
+                return a.id < b.id;
+            });
+
+        int candidateCount = 0;
+        int increasedCount = 0;
+        int zeroGainCount = 0;
+        int reachedHundredCount = 0;
+        int failedCount = 0;
+        int negativeAffinityCount = 0;
+
+        const uintptr_t affinityArrayBase =
+            dataCenter + kCurrentAffinityBaseOffset;
+        const size_t affinityArraySize =
+            (size_t)kAffinityOfficerCount *
+            (size_t)(kAffinityOfficerCount - 1) / 2u;
+
+        DWORD affinityOldProtect = 0;
+        if (!VirtualProtect(
+                (LPVOID)affinityArrayBase,
+                affinityArraySize,
+                PAGE_READWRITE,
+                &affinityOldProtect)) {
+            AddLog(
+                u8"[친밀자동] 분기 평정 시작: 친밀도 배열 쓰기 권한 확보 실패");
+            return;
+        }
+
+        const ULONGLONG affinityStartMs =
+            GetTickCount64();
+
+        size_t groupBegin = 0;
+        while (groupBegin < officers.size()) {
+            size_t groupEnd =
+                groupBegin + 1;
+            while (groupEnd < officers.size() &&
+                   officers[groupEnd].force ==
+                       officers[groupBegin].force &&
+                   officers[groupEnd].city ==
+                       officers[groupBegin].city) {
+                ++groupEnd;
+            }
+
+            for (size_t a = groupBegin;
+                 a < groupEnd; ++a) {
+                const AutoAffinityOfficer& left =
+                    officers[a];
+                const OfficerRelationshipInfo& leftRel =
+                    relationships[left.relationIndex];
+
+                for (size_t b = a + 1;
+                     b < groupEnd; ++b) {
+                    const AutoAffinityOfficer& right =
+                        officers[b];
+
+                    if (ShouldSkipAutoAffinityPair(
+                            leftRel, right.id))
+                        continue;
+
+                    const int leftAffinityIndex =
+                        GetAffinityCompressedIndex(left.id);
+                    const int rightAffinityIndex =
+                        GetAffinityCompressedIndex(right.id);
+                    uintptr_t pairOffset = 0;
+                    if (!CalcAffinityPairOffset(
+                            leftAffinityIndex,
+                            rightAffinityIndex,
+                            &pairOffset))
+                        continue;
+
+                    const uintptr_t affinityAddress =
+                        dataCenter +
+                        kCurrentAffinityBaseOffset +
+                        pairOffset;
+
+                    uint8_t rawAffinity = 0;
+                    if (!SafeRelRead8(
+                            affinityAddress,
+                            &rawAffinity))
+                        continue;
+
+                    const int8_t signedAffinity =
+                        (int8_t)rawAffinity;
+                    if (signedAffinity <= -1) {
+                        ++negativeAffinityCount;
+                        continue;
+                    }
+                    if (rawAffinity >= 100)
+                        continue;
+
+                    const int compatibilityBonus =
+                        CalcCompatibilityBonus(
+                            left.compatibility,
+                            right.compatibility);
+                    const int interestBonus =
+                        CalcInterestAndReputationBonus(
+                            left.interest,
+                            right.interest,
+                            left.favoredReputation,
+                            right.favoredReputation);
+                    const int gain =
+                        compatibilityBonus +
+                        interestBonus;
+
+                    ++candidateCount;
+
+                    if (gain <= 0) {
+                        ++zeroGainCount;
+                        continue;
+                    }
+
+                    const int nextInt =
+                        (std::min)(
+                            100,
+                            (int)rawAffinity + gain);
+                    const uint8_t next =
+                        (uint8_t)nextInt;
+
+                    if (!TryWriteAffinityByte(
+                            affinityAddress,
+                            next)) {
+                        ++failedCount;
+                        continue;
+                    }
+
+                    ++increasedCount;
+
+                    if (rawAffinity < 100 &&
+                        next == 100) {
+                        ++reachedHundredCount;
+                        AddLog(
+                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 / 상성 +%d / 흥미·중시 +%d",
+                            AutoAffinityName(left.id).c_str(),
+                            (unsigned int)left.id,
+                            AutoAffinityName(right.id).c_str(),
+                            (unsigned int)right.id,
+                            (unsigned int)rawAffinity,
+                            compatibilityBonus,
+                            interestBonus);
+
+                        // 이 기능은 친밀도만 가속하며 관계 테이블은 직접 수정하지 않는다.
+                    }
+                }
+            }
+
+            groupBegin = groupEnd;
+        }
+
+        DWORD affinityDummyProtect = 0;
+        VirtualProtect(
+            (LPVOID)affinityArrayBase,
+            affinityArraySize,
+            affinityOldProtect,
+            &affinityDummyProtect);
+
+        const ULONGLONG affinityElapsedMs =
+            GetTickCount64() - affinityStartMs;
+
+        AddLog(
+            u8"[친밀자동] 분기 평정 처리 완료: AI %d명 / 같은 세력·도시 후보 %d쌍 / 증가 %d / 증가0 %d / 음수친밀 제외 %d / 100 도달 %d / 실패 %d / 메타데이터 제외 %d명",
+            (int)officers.size(),
+            candidateCount,
+            increasedCount,
+            zeroGainCount,
+            negativeAffinityCount,
+            reachedHundredCount,
+            failedCount,
+            invalidMetaCount);
+        AddLog(
+            u8"[친밀자동] 처리시간 %llums (친밀 배열 쓰기 권한 1회 설정)",
+            (unsigned long long)affinityElapsedMs);
     }
 
     bool GetOfficerTalentDetailed(uintptr_t officerBase, int slot, TalentInfo& outInfo) {

@@ -757,6 +757,92 @@ namespace DX11Base {
         ImGui::PopStyleColor(1);
       }
 
+      // ── 친밀/인연 성향 정보 ─────────────────────────────────────────────
+      // 현재 PK 무장 구조에서 CT와 대조:
+      // +0x82 물욕(1 무욕 / 2 보통 / 3 탐욕)
+      // +0x83 흥미 비트(술/무구/서적/보물)
+      // +0xA4 중시(1~6)
+      const uint8_t interestRaw = *(uint8_t *)(pR + 0x83);
+      const uint8_t priorityRaw = *(uint8_t *)(pR + 0xA4);
+      const uint8_t greedRaw = *(uint8_t *)(pR + 0x82);
+
+      std::string interestText;
+      const uint8_t interestBits = (uint8_t)(interestRaw & 0x0F);
+      auto appendInterest = [&](const char *name) {
+        if (!interestText.empty())
+          interestText += " / ";
+        interestText += name;
+      };
+      if (interestBits & 0x01) appendInterest(u8"술");
+      if (interestBits & 0x02) appendInterest(u8"무구");
+      if (interestBits & 0x04) appendInterest(u8"서적");
+      if (interestBits & 0x08) appendInterest(u8"보물");
+      if (interestText.empty())
+        interestText = u8"없음";
+
+      const char *priorityText = u8"알 수 없음";
+      switch (priorityRaw) {
+      case 1: priorityText = u8"무명"; break;
+      case 2: priorityText = u8"문명"; break;
+      case 3: priorityText = u8"문무불문"; break;
+      case 4: priorityText = u8"악명"; break;
+      case 5: priorityText = u8"무관심"; break;
+      case 6: priorityText = u8"고명"; break;
+      default: break;
+      }
+
+      const char *greedText = u8"알 수 없음";
+      switch (greedRaw) {
+      case 1: greedText = u8"무욕"; break;
+      case 2: greedText = u8"보통"; break;
+      case 3: greedText = u8"탐욕"; break;
+      default: break;
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(u8"흥미");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(interestText.c_str());
+      if (bShowDebug) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"(0x83=0x%02X)", (unsigned int)interestRaw);
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(u8"중시");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      if (priorityRaw >= 1 && priorityRaw <= 6)
+        ImGui::Text(u8"%s", priorityText);
+      else
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.25f, 1.0f),
+                           u8"알 수 없음 (%u)", (unsigned int)priorityRaw);
+      if (bShowDebug && priorityRaw >= 1 && priorityRaw <= 6) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"(%u / +0xA4)", (unsigned int)priorityRaw);
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(u8"물욕");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      if (greedRaw >= 1 && greedRaw <= 3)
+        ImGui::Text(u8"%s", greedText);
+      else
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.25f, 1.0f),
+                           u8"알 수 없음 (%u)", (unsigned int)greedRaw);
+      if (bShowDebug && greedRaw >= 1 && greedRaw <= 3) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"(%u / +0x82)", (unsigned int)greedRaw);
+      }
+
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.1f, 0.6f, 0.1f, 0.25f));
@@ -1549,6 +1635,7 @@ namespace DX11Base {
 
 
   static std::string BuildRelationshipNameList(
+      uint16_t sourceOfficerId,
       const std::vector<uint16_t>& ids) {
     if (ids.empty())
       return u8"없음";
@@ -1563,6 +1650,14 @@ namespace DX11Base {
         result += it->second;
       else
         result += u8"ID " + std::to_string((int)ids[i]);
+
+      uint8_t affinity = 0;
+      if (GetOfficerAffinity(
+              sourceOfficerId, ids[i], affinity)) {
+        result += u8" [친밀 ";
+        result += std::to_string((int)affinity);
+        result += "]";
+      }
     }
     return result;
   }
@@ -1605,23 +1700,33 @@ namespace DX11Base {
       return;
     }
 
+    uint16_t relationshipSourceId = 0;
+    if (officerBase > 0x10000)
+      UnsafeRead16(officerBase + 0x08, &relationshipSourceId);
+
     const std::string sworn =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.swornBrothers);
     const std::string spouses =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.spouses);
     const std::string synergetic =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.synergetic);
     const std::string antipathetic =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.antipathetic);
     const std::string enemies =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.enemies);
     const std::string rivals =
         BuildRelationshipNameList(
+            relationshipSourceId,
             s_cachedRelationshipInfo.rivals);
 
     if (ImGui::BeginTable(
@@ -1746,6 +1851,66 @@ namespace DX11Base {
         sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)pBase);
         ImGui::SetClipboardText(buf);
       }
+
+      // 자룡모드 친밀 가속 조건 검증용:
+      // 구 CT 구조의 상성(+0x5D), 흥미(+0x83), 중시(+0xA4)를
+      // 현재 PK 선택 무장에서 직접 읽어 실제 게임 표시와 대조한다.
+      uint8_t dbgCompatibility = 0;
+      uint8_t dbgInterest = 0;
+      uint8_t dbgPriority = 0;
+      bool dbgMetaOk =
+          UnsafeRead8(pBase + 0x5D, &dbgCompatibility) &&
+          UnsafeRead8(pBase + 0x83, &dbgInterest) &&
+          UnsafeRead8(pBase + 0xA4, &dbgPriority);
+
+      if (dbgMetaOk) {
+        const char* priorityName = u8"범위외";
+        switch (dbgPriority) {
+        case 1: priorityName = u8"무명"; break;
+        case 2: priorityName = u8"문명"; break;
+        case 3: priorityName = u8"문무불문"; break;
+        case 4: priorityName = u8"악명"; break;
+        case 5: priorityName = u8"무관심"; break;
+        case 6: priorityName = u8"고명"; break;
+        default: break;
+        }
+
+        const uint8_t interest4 =
+            (uint8_t)(dbgInterest & 0x0F);
+
+        ImGui::Text(
+            u8"상성: %u  |  중시: %u:%s  |  흥미Raw: 0x%02X",
+            (unsigned int)dbgCompatibility,
+            (unsigned int)dbgPriority,
+            priorityName,
+            (unsigned int)dbgInterest);
+
+        ImGui::Text(
+            u8"흥미: 술 %s / 무구 %s / 서적 %s / 보물 %s",
+            (interest4 & 0x01) ? "O" : "X",
+            (interest4 & 0x02) ? "O" : "X",
+            (interest4 & 0x04) ? "O" : "X",
+            (interest4 & 0x08) ? "O" : "X");
+
+        if ((dbgInterest & 0xF0) != 0) {
+          ImGui::TextDisabled(
+              u8"흥미 상위비트 감지: 0x%02X (현재 자동 계산은 하위 4비트만 사용)",
+              (unsigned int)(dbgInterest & 0xF0));
+        }
+
+        if (dbgCompatibility > 149 ||
+            dbgPriority < 1 ||
+            dbgPriority > 6) {
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.45f, 0.25f, 1.0f),
+              u8"※ 현재 가정 범위 밖 값입니다. 이 장수 정보와 게임 화면을 비교해 주세요.");
+        }
+      } else {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.4f, 0.3f, 1.0f),
+            u8"상성/흥미/중시 디버그 읽기 실패");
+      }
+
       ImGui::Separator();
     }
 
