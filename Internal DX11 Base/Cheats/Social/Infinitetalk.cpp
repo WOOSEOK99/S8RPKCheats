@@ -35,6 +35,10 @@ namespace DX11Base {
         static uintptr_t g_interactionBase = 0;
         static uintptr_t g_interactionWatchAddr = 0;
 
+        static constexpr size_t kMediationSnapshotSize = 0x800;
+        static uint8_t g_mediationSnapshot[kMediationSnapshotSize] = {};
+        static bool g_mediationSnapshotValid = false;
+
         static uintptr_t g_captureHookAddr = 0;
         static uintptr_t g_captureCaveAddr = 0;
         static uint8_t g_captureOriginal[10] = {};
@@ -326,6 +330,111 @@ namespace DX11Base {
         AddLog(
             u8"[보주감시DBG] 1단계 시작: 기증을 1회 실행한 뒤 '2. +0x320 쓰기 감시 시작'을 누르세요.");
         return true;
+    }
+
+    bool CaptureJewelMediationSnapshot() {
+        if (!g_interactionBase) {
+            AddLog(
+                u8"[중개DBG] 먼저 '1. 보주 교류주소 캡처 시작' 후 기증을 1회 실행해주세요.");
+            return false;
+        }
+
+        // 기증 캡처 훅은 스냅샷 시점에 정상 원본으로 즉시 복구.
+        RestoreInteractionCapture(false);
+
+        if (!IsValidPtr(g_interactionBase, kMediationSnapshotSize)) {
+            AddLog(
+                u8"[중개DBG] 교류 객체 범위가 유효하지 않습니다: base=%p",
+                (void*)g_interactionBase);
+            return false;
+        }
+
+        memcpy(
+            g_mediationSnapshot,
+            (const void*)g_interactionBase,
+            kMediationSnapshotSize);
+        g_mediationSnapshotValid = true;
+
+        AddLog(
+            u8"[중개DBG] 중개 전 스냅샷 저장 완료: base=%p / 범위 +0x000~+0x7FF",
+            (void*)g_interactionBase);
+        AddLog(
+            u8"[중개DBG] 이제 보주 → 중개를 정확히 1회 실행한 뒤 '중개 후 변경 비교'를 누르세요.");
+        return true;
+    }
+
+    void CompareJewelMediationSnapshot() {
+        if (!g_mediationSnapshotValid || !g_interactionBase) {
+            AddLog(u8"[중개DBG] 먼저 중개 전 스냅샷을 저장해주세요.");
+            return;
+        }
+
+        if (!IsValidPtr(g_interactionBase, kMediationSnapshotSize)) {
+            AddLog(
+                u8"[중개DBG] 현재 교류 객체 범위가 더 이상 유효하지 않습니다: base=%p",
+                (void*)g_interactionBase);
+            return;
+        }
+
+        const uint8_t* now = (const uint8_t*)g_interactionBase;
+        unsigned int changedBytes = 0;
+        unsigned int logged = 0;
+
+        AddLog(
+            u8"[중개DBG] 중개 전/후 비교 시작: base=%p",
+            (void*)g_interactionBase);
+
+        for (size_t off = 0; off < kMediationSnapshotSize; ++off) {
+            const uint8_t before = g_mediationSnapshot[off];
+            const uint8_t after = now[off];
+            if (before == after)
+                continue;
+
+            ++changedBytes;
+
+            if (logged < 96) {
+                AddLog(
+                    u8"[중개DBG] +0x%03llX : %02X -> %02X / XOR=%02X",
+                    (unsigned long long)off,
+                    (unsigned int)before,
+                    (unsigned int)after,
+                    (unsigned int)(before ^ after));
+                ++logged;
+            }
+        }
+
+        // DWORD 단위로도 핵심 후보를 보기 쉽게 출력.
+        unsigned int dwordLogged = 0;
+        for (size_t off = 0; off + 4 <= kMediationSnapshotSize; off += 4) {
+            const uint32_t before =
+                *(const uint32_t*)&g_mediationSnapshot[off];
+            const uint32_t after =
+                *(const uint32_t*)&now[off];
+
+            if (before == after)
+                continue;
+
+            if (dwordLogged < 32) {
+                AddLog(
+                    u8"[중개DBG] DWORD +0x%03llX : 0x%08X -> 0x%08X / XOR=0x%08X",
+                    (unsigned long long)off,
+                    before,
+                    after,
+                    before ^ after);
+                ++dwordLogged;
+            }
+        }
+
+        AddLog(
+            u8"[중개DBG] 비교 완료: 변경 바이트=%u%s",
+            changedBytes,
+            changedBytes > 96 ? u8" (로그는 앞 96개만 표시)" : u8"");
+    }
+
+    void ResetJewelMediationSnapshot() {
+        g_mediationSnapshotValid = false;
+        ZeroMemory(g_mediationSnapshot, sizeof(g_mediationSnapshot));
+        AddLog(u8"[중개DBG] 중개 스냅샷 초기화 완료.");
     }
 
     bool StartJewelSubactionWriteWatch() {
