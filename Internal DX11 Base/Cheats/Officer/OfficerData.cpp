@@ -51,6 +51,16 @@ namespace DX11Base {
     std::unordered_map<int, EffectDef> g_effectDefs;
     bool g_effectsLoaded = false;
 
+    bool g_autoAffinityGrowthEnabled = false;
+    int g_autoAffinityMonthlyGain = 1;
+
+    namespace {
+        uint16_t g_autoAffinityLastYear = 0;
+        uint8_t g_autoAffinityLastMonth = 0;
+        uintptr_t g_autoAffinityLastDataCenter = 0;
+        uintptr_t g_autoAffinityLastProtagonist = 0;
+    }
+
     RosterStats SafeReadRosterStats(uintptr_t targetBase) {
         RosterStats stats = { false };
         __try {
@@ -751,6 +761,84 @@ namespace DX11Base {
             address, &outAffinity);
     }
 
+
+    bool SetOfficerAffinity(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uint8_t value,
+        uint8_t* outPreviousValue) {
+        if (value > 100)
+            value = 100;
+
+        uintptr_t address = 0;
+        uint8_t previous = 0;
+        if (!GetOfficerAffinityAddress(
+                officerId1, officerId2,
+                address, &previous))
+            return false;
+
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(
+                (LPVOID)address, 1,
+                PAGE_READWRITE, &oldProtect))
+            return false;
+
+        bool ok = false;
+        __try {
+            *(volatile uint8_t*)address = value;
+            ok = (*(volatile uint8_t*)address == value);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            ok = false;
+        }
+
+        DWORD dummy = 0;
+        VirtualProtect(
+            (LPVOID)address, 1,
+            oldProtect, &dummy);
+
+        if (ok && outPreviousValue)
+            *outPreviousValue = previous;
+        return ok;
+    }
+
+    bool IncreaseOfficerAffinity(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uint8_t amount,
+        uint8_t* outPreviousValue,
+        uint8_t* outNewValue) {
+        uint8_t current = 0;
+        if (!GetOfficerAffinity(
+                officerId1, officerId2, current))
+            return false;
+
+        const int increased =
+            (std::min)(100, (int)current + (int)amount);
+        const uint8_t next =
+            (uint8_t)increased;
+
+        if (current == next) {
+            if (outPreviousValue)
+                *outPreviousValue = current;
+            if (outNewValue)
+                *outNewValue = current;
+            return true;
+        }
+
+        uint8_t previous = 0;
+        if (!SetOfficerAffinity(
+                officerId1, officerId2,
+                next, &previous))
+            return false;
+
+        if (outPreviousValue)
+            *outPreviousValue = previous;
+        if (outNewValue)
+            *outNewValue = next;
+        return true;
+    }
+
     bool ArmOfficerAffinityWriteProbe(
         uint16_t officerId1,
         uint16_t officerId2) {
@@ -996,6 +1084,282 @@ namespace DX11Base {
 
         outInfo = infos[0];
         return true;
+    }
+
+
+    void ResetAutoAffinityGrowthState() {
+        g_autoAffinityLastYear = 0;
+        g_autoAffinityLastMonth = 0;
+        g_autoAffinityLastDataCenter = 0;
+        g_autoAffinityLastProtagonist = 0;
+    }
+
+    namespace {
+        bool IsAutoAffinityOfficerStatus(uint8_t status) {
+            return status == 0x18 || status == 0x28 ||
+                   status == 0x38 || status == 0x48 ||
+                   status == 0xC8 || status == 0xD8 ||
+                   status == 0xE8;
+        }
+
+        bool HasId(
+            const std::vector<uint16_t>& values,
+            uint16_t id) {
+            return std::find(
+                       values.begin(),
+                       values.end(),
+                       id) != values.end();
+        }
+
+        bool ShouldSkipAutoAffinityPair(
+            const OfficerRelationshipInfo& info,
+            uint16_t otherId) {
+            // 이미 완성된 긍정 관계는 추가 성장 대상에서 제외한다.
+            if (HasId(info.swornBrothers, otherId) ||
+                HasId(info.spouses, otherId) ||
+                HasId(info.synergetic, otherId))
+                return true;
+
+            // 명시적인 부정 관계도 자연 성장시키지 않는다.
+            return HasId(info.antipathetic, otherId) ||
+                   HasId(info.enemies, otherId) ||
+                   HasId(info.rivals, otherId);
+        }
+
+        std::string AutoAffinityName(uint16_t id) {
+            auto it = g_officerNames.find((int)id);
+            if (it != g_officerNames.end() &&
+                !it->second.empty())
+                return it->second;
+            return u8"ID " + std::to_string((int)id);
+        }
+    }
+
+    void TickAutoAffinityGrowth(
+        uintptr_t protagonistBase) {
+        static ULONGLONG s_lastPollMs = 0;
+        const ULONGLONG now =
+            GetTickCount64();
+        if (now - s_lastPollMs < 500)
+            return;
+        s_lastPollMs = now;
+
+        if (!g_autoAffinityGrowthEnabled) {
+            ResetAutoAffinityGrowthState();
+            return;
+        }
+
+        const uintptr_t dataCenter =
+            GetScenarioDataCenterAddress();
+        uint16_t year = 0;
+        uint8_t month = 0;
+        if (dataCenter <= 0x10000 ||
+            protagonistBase <= 0x10000 ||
+            !ReadScenarioDate(&year, &month) ||
+            month < 1 || month > 12)
+            return;
+
+        // 게임/주인공 컨텍스트 변경 시 소급 적용하지 않고 새 기준만 잡는다.
+        if (g_autoAffinityLastDataCenter != dataCenter ||
+            g_autoAffinityLastProtagonist != protagonistBase) {
+            g_autoAffinityLastDataCenter = dataCenter;
+            g_autoAffinityLastProtagonist = protagonistBase;
+            g_autoAffinityLastYear = year;
+            g_autoAffinityLastMonth = month;
+            return;
+        }
+
+        if (g_autoAffinityLastYear == 0 ||
+            g_autoAffinityLastMonth == 0) {
+            g_autoAffinityLastYear = year;
+            g_autoAffinityLastMonth = month;
+            return;
+        }
+
+        const int previousSerial =
+            (int)g_autoAffinityLastYear * 12 +
+            (int)g_autoAffinityLastMonth;
+        const int currentSerial =
+            (int)year * 12 + (int)month;
+
+        if (currentSerial == previousSerial)
+            return;
+
+        g_autoAffinityLastYear = year;
+        g_autoAffinityLastMonth = month;
+
+        // 정확히 한 달 진행이 아닌 경우는 세이브 로드/날짜 편집 가능성이 있으므로 건너뛴다.
+        if (currentSerial != previousSerial + 1) {
+            AddLog(
+                u8"[친밀자동] 날짜 점프 감지: %u년 %u월 -> %u년 %u월. 이번 증가는 건너뜁니다.",
+                (unsigned int)(previousSerial / 12),
+                (unsigned int)(previousSerial % 12),
+                (unsigned int)year,
+                (unsigned int)month);
+            return;
+        }
+
+        const uintptr_t exe =
+            (uintptr_t)GetModuleHandle(nullptr);
+        uintptr_t rosterBase = 0;
+        if (!exe ||
+            !TryResolveOfficerRosterArrayBase(
+                exe, &rosterBase) ||
+            rosterBase <= 0x10000)
+            return;
+
+        struct AutoAffinityOfficer {
+            uintptr_t base = 0;
+            uintptr_t force = 0;
+            uintptr_t city = 0;
+            uint16_t id = 0;
+            size_t relationIndex = 0;
+        };
+
+        std::vector<AutoAffinityOfficer> officers;
+        std::vector<uintptr_t> officerBases;
+        officers.reserve(1600);
+        officerBases.reserve(1600);
+
+        for (int i = 0; i < 5102; ++i) {
+            const uintptr_t base =
+                rosterBase + (uintptr_t)i * 0x3D0;
+
+            uint16_t id = 0;
+            uint8_t status = 0;
+            uintptr_t force = 0;
+            uintptr_t city = 0;
+
+            if (!SafeRelRead16(base + 0x08, &id) ||
+                id < 1 || id > 5102 ||
+                !SafeRelRead8(base + 0x10, &status) ||
+                !IsAutoAffinityOfficerStatus(status) ||
+                !SafeRelReadPtr(base + 0x18, &force) ||
+                !SafeRelReadPtr(base + 0x20, &city) ||
+                force <= 0x10000 ||
+                city <= 0x10000)
+                continue;
+
+            AutoAffinityOfficer officer;
+            officer.base = base;
+            officer.force = force;
+            officer.city = city;
+            officer.id = id;
+            officer.relationIndex = officerBases.size();
+            officers.push_back(officer);
+            officerBases.push_back(base);
+        }
+
+        if (officers.size() < 2)
+            return;
+
+        std::vector<OfficerRelationshipInfo>
+            relationships;
+        if (!GetOfficerRelationshipInfoBatch(
+                officerBases, relationships) ||
+            relationships.size() != officerBases.size())
+            return;
+
+        std::sort(
+            officers.begin(), officers.end(),
+            [](const AutoAffinityOfficer& a,
+               const AutoAffinityOfficer& b) {
+                if (a.force != b.force)
+                    return a.force < b.force;
+                if (a.city != b.city)
+                    return a.city < b.city;
+                return a.id < b.id;
+            });
+
+        const int gain =
+            (std::max)(1,
+                (std::min)(10,
+                    g_autoAffinityMonthlyGain));
+
+        int pairCount = 0;
+        int increasedCount = 0;
+        int reachedHundredCount = 0;
+        int failedCount = 0;
+
+        size_t groupBegin = 0;
+        while (groupBegin < officers.size()) {
+            size_t groupEnd = groupBegin + 1;
+            while (groupEnd < officers.size() &&
+                   officers[groupEnd].force ==
+                       officers[groupBegin].force &&
+                   officers[groupEnd].city ==
+                       officers[groupBegin].city) {
+                ++groupEnd;
+            }
+
+            for (size_t a = groupBegin;
+                 a < groupEnd; ++a) {
+                const AutoAffinityOfficer& left =
+                    officers[a];
+                const OfficerRelationshipInfo& leftRel =
+                    relationships[left.relationIndex];
+
+                for (size_t b = a + 1;
+                     b < groupEnd; ++b) {
+                    const AutoAffinityOfficer& right =
+                        officers[b];
+
+                    if (ShouldSkipAutoAffinityPair(
+                            leftRel, right.id))
+                        continue;
+
+                    uint8_t current = 0;
+                    if (!GetOfficerAffinity(
+                            left.id, right.id,
+                            current))
+                        continue;
+
+                    // 0은 아직 친밀 관계가 형성되지 않은 쌍으로 보고 새로 시작시키지 않는다.
+                    if (current == 0 ||
+                        current >= 100)
+                        continue;
+
+                    ++pairCount;
+
+                    uint8_t previous = 0;
+                    uint8_t next = 0;
+                    if (!IncreaseOfficerAffinity(
+                            left.id, right.id,
+                            (uint8_t)gain,
+                            &previous, &next)) {
+                        ++failedCount;
+                        continue;
+                    }
+
+                    if (next > previous)
+                        ++increasedCount;
+
+                    if (previous < 100 &&
+                        next == 100) {
+                        ++reachedHundredCount;
+                        AddLog(
+                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 (관계 생성 후보)",
+                            AutoAffinityName(left.id).c_str(),
+                            (unsigned int)left.id,
+                            AutoAffinityName(right.id).c_str(),
+                            (unsigned int)right.id,
+                            (unsigned int)previous);
+                    }
+                }
+            }
+
+            groupBegin = groupEnd;
+        }
+
+        AddLog(
+            u8"[친밀자동] %u년 %u월 성장 완료: 같은 세력/도시 대상쌍 %d / 증가 %d / 100 도달 %d / 실패 %d / 월 +%d",
+            (unsigned int)year,
+            (unsigned int)month,
+            pairCount,
+            increasedCount,
+            reachedHundredCount,
+            failedCount,
+            gain);
     }
 
     bool GetOfficerTalentDetailed(uintptr_t officerBase, int slot, TalentInfo& outInfo) {
