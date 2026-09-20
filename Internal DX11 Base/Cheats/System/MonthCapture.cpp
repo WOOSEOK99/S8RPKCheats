@@ -66,6 +66,51 @@ namespace DX11Base {
         return ((*(const uint8_t*)addr & 0x02u) == 0);
     }
 
+    bool ClearMediationUsedBitForTest() {
+        const uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter) {
+            AddLog(u8"[중개TEST] ScenarioDataCenter를 찾지 못했습니다.");
+            return false;
+        }
+
+        // 실게임 진단:
+        // 중개 전/후 GameBase(=ScenarioDataCenter) +0x71E5가
+        // 0x00 -> 0x40으로 변함. 단일 0->1 bit 후보는 bit6 하나뿐.
+        constexpr uintptr_t kMediationUsedFlagOffset = 0x71E5;
+        constexpr uint8_t kMediationUsedBit = 0x40u;
+
+        const uintptr_t addr = dataCenter + kMediationUsedFlagOffset;
+        if (!IsValidPtr(addr, 1)) {
+            AddLog(u8"[중개TEST] +0x71E5 주소가 유효하지 않습니다: %p",
+                   (void*)addr);
+            return false;
+        }
+
+        const uint8_t before = *(const uint8_t*)addr;
+        const uint8_t after =
+            (uint8_t)(before & (uint8_t)~kMediationUsedBit);
+
+        DWORD oldProt = 0;
+        if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &oldProt)) {
+            AddLog(u8"[중개TEST] +0x71E5 쓰기 보호 해제 실패.");
+            return false;
+        }
+
+        *(uint8_t*)addr = after;
+
+        DWORD tmp = 0;
+        VirtualProtect((LPVOID)addr, 1, oldProt, &tmp);
+
+        const uint8_t readback = *(const uint8_t*)addr;
+        AddLog(
+            u8"[중개TEST] +0x71E5 bit6 해제: 0x%02X -> 0x%02X / readback=0x%02X",
+            (unsigned int)before,
+            (unsigned int)after,
+            (unsigned int)readback);
+
+        return readback == after;
+    }
+
     void UpdateYear(unsigned short targetYear) {
         uintptr_t dataCenter = ResolveScenarioDataCenter();
         if (!dataCenter)
