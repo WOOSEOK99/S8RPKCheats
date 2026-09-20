@@ -757,6 +757,92 @@ namespace DX11Base {
         ImGui::PopStyleColor(1);
       }
 
+      // ── 친밀/인연 성향 정보 ─────────────────────────────────────────────
+      // 현재 PK 무장 구조에서 CT와 대조:
+      // +0x82 물욕(1 무욕 / 2 보통 / 3 탐욕)
+      // +0x83 흥미 비트(술/무구/서적/보물)
+      // +0xA4 중시(1~6)
+      const uint8_t interestRaw = *(uint8_t *)(pR + 0x83);
+      const uint8_t priorityRaw = *(uint8_t *)(pR + 0xA4);
+      const uint8_t greedRaw = *(uint8_t *)(pR + 0x82);
+
+      std::string interestText;
+      const uint8_t interestBits = (uint8_t)(interestRaw & 0x0F);
+      auto appendInterest = [&](const char *name) {
+        if (!interestText.empty())
+          interestText += " / ";
+        interestText += name;
+      };
+      if (interestBits & 0x01) appendInterest(u8"술");
+      if (interestBits & 0x02) appendInterest(u8"무구");
+      if (interestBits & 0x04) appendInterest(u8"서적");
+      if (interestBits & 0x08) appendInterest(u8"보물");
+      if (interestText.empty())
+        interestText = u8"없음";
+
+      const char *priorityText = u8"알 수 없음";
+      switch (priorityRaw) {
+      case 1: priorityText = u8"무명"; break;
+      case 2: priorityText = u8"문명"; break;
+      case 3: priorityText = u8"문무불문"; break;
+      case 4: priorityText = u8"악명"; break;
+      case 5: priorityText = u8"무관심"; break;
+      case 6: priorityText = u8"고명"; break;
+      default: break;
+      }
+
+      const char *greedText = u8"알 수 없음";
+      switch (greedRaw) {
+      case 1: greedText = u8"무욕"; break;
+      case 2: greedText = u8"보통"; break;
+      case 3: greedText = u8"탐욕"; break;
+      default: break;
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(u8"흥미");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(interestText.c_str());
+      if (bShowDebug) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"(0x83=0x%02X)", (unsigned int)interestRaw);
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(u8"중시");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      if (priorityRaw >= 1 && priorityRaw <= 6)
+        ImGui::Text(u8"%s", priorityText);
+      else
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.25f, 1.0f),
+                           u8"알 수 없음 (%u)", (unsigned int)priorityRaw);
+      if (bShowDebug && priorityRaw >= 1 && priorityRaw <= 6) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"(%u / +0xA4)", (unsigned int)priorityRaw);
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(u8"물욕");
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      if (greedRaw >= 1 && greedRaw <= 3)
+        ImGui::Text(u8"%s", greedText);
+      else
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.25f, 1.0f),
+                           u8"알 수 없음 (%u)", (unsigned int)greedRaw);
+      if (bShowDebug && greedRaw >= 1 && greedRaw <= 3) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"(%u / +0x82)", (unsigned int)greedRaw);
+      }
+
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.1f, 0.6f, 0.1f, 0.25f));
@@ -1781,7 +1867,7 @@ namespace DX11Base {
         const char* priorityName = u8"범위외";
         switch (dbgPriority) {
         case 1: priorityName = u8"무명"; break;
-        case 2: priorityName = u8"물욕"; break;
+        case 2: priorityName = u8"문명"; break;
         case 3: priorityName = u8"문무불문"; break;
         case 4: priorityName = u8"악명"; break;
         case 5: priorityName = u8"무관심"; break;
