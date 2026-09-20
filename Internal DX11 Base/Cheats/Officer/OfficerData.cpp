@@ -193,9 +193,28 @@ namespace DX11Base {
             return valid;
         }
 
+        bool IsReadableRelationshipScanRegion(const MEMORY_BASIC_INFORMATION& mbi) {
+            if (mbi.State != MEM_COMMIT)
+                return false;
+            if (mbi.Protect & PAGE_GUARD)
+                return false;
+            return (mbi.Protect & 0xFF) != PAGE_NOACCESS;
+        }
+
         bool TryResolveSynergeticTable(uintptr_t gameBase, uintptr_t rosterBase, uintptr_t* outBase) {
             if (!outBase) return false;
             *outBase = 0;
+
+            static uintptr_t s_cachedGameBase = 0;
+            static uintptr_t s_cachedRosterBase = 0;
+            static uintptr_t s_cachedTableBase = 0;
+            if (s_cachedGameBase == gameBase &&
+                s_cachedRosterBase == rosterBase &&
+                s_cachedTableBase > 0x10000 &&
+                ScoreSynergeticTable(s_cachedTableBase, rosterBase) >= 1) {
+                *outBase = s_cachedTableBase;
+                return true;
+            }
 
             const uintptr_t offsets[] = {
                 kCurrentSynergeticPtrOffset,
@@ -207,9 +226,50 @@ namespace DX11Base {
                     continue;
                 const uintptr_t candidate = ptr + 0xA0;
                 if (ScoreSynergeticTable(candidate, rosterBase) >= 1) {
+                    s_cachedGameBase = gameBase;
+                    s_cachedRosterBase = rosterBase;
+                    s_cachedTableBase = candidate;
                     *outBase = candidate;
                     return true;
                 }
+            }
+
+            // 고정 오프셋이 바뀐 빌드/상태에서는 디버그에서 검증된 구조 스캔 방식으로 찾는다.
+            const uintptr_t scanEnd = gameBase + 0x800000;
+            uintptr_t cursor = gameBase;
+            while (cursor < scanEnd) {
+                MEMORY_BASIC_INFORMATION mbi{};
+                if (VirtualQuery((LPCVOID)cursor, &mbi, sizeof(mbi)) != sizeof(mbi))
+                    break;
+
+                uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+                uintptr_t regionEnd = regionStart + mbi.RegionSize;
+                if (regionEnd <= cursor)
+                    break;
+                if (regionStart < gameBase)
+                    regionStart = gameBase;
+                if (regionEnd > scanEnd)
+                    regionEnd = scanEnd;
+
+                if (IsReadableRelationshipScanRegion(mbi)) {
+                    uintptr_t addr = (regionStart + 7) & ~(uintptr_t)7;
+                    for (; addr + 8 <= regionEnd; addr += 8) {
+                        uintptr_t ptr = 0;
+                        if (!SafeRelReadPtr(addr, &ptr) || ptr <= 0x10000)
+                            continue;
+
+                        const uintptr_t candidate = ptr + 0xA0;
+                        if (ScoreSynergeticTable(candidate, rosterBase) < 1)
+                            continue;
+
+                        s_cachedGameBase = gameBase;
+                        s_cachedRosterBase = rosterBase;
+                        s_cachedTableBase = candidate;
+                        *outBase = candidate;
+                        return true;
+                    }
+                }
+                cursor = regionEnd;
             }
             return false;
         }
@@ -270,10 +330,12 @@ namespace DX11Base {
         const uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
         const uintptr_t gameBase = GetGameBase();
         uintptr_t rosterBase = 0;
+        uint16_t selectedId = 0;
         if (!exe || gameBase <= 0x10000 ||
             !TryResolveOfficerRosterArrayBase(exe, &rosterBase) ||
             rosterBase <= 0x10000 ||
-            !IsRosterOfficerPtr(officerBase, rosterBase))
+            !SafeRelRead16(officerBase + 0x08, &selectedId) ||
+            selectedId < 1 || selectedId > 5102)
             return false;
 
         uintptr_t synerBase = 0;
@@ -296,27 +358,37 @@ namespace DX11Base {
                     continue;
 
                 uintptr_t members[5]{};
+                uint16_t memberIds[5]{};
                 bool readOk = true;
                 bool containsSelected = false;
+
                 for (int j = 0; j < 5; ++j) {
-                    if (!SafeRelReadPtr(slot + 0x10 + (uintptr_t)j * 8, &members[j])) {
+                    if (!SafeRelReadPtr(
+                            slot + 0x10 + (uintptr_t)j * 8,
+                            &members[j])) {
                         readOk = false;
                         break;
                     }
-                    if (members[j] == officerBase)
+                    if (members[j] == 0)
+                        continue;
+
+                    uint16_t id = 0;
+                    if (!ReadOfficerIdFromRosterPtr(
+                            members[j], rosterBase, &id))
+                        continue;
+                    memberIds[j] = id;
+                    if (id == selectedId)
                         containsSelected = true;
                 }
+
                 if (!readOk)
                     break;
                 if (!containsSelected)
                     continue;
 
-                for (uintptr_t member : members) {
-                    if (!member || member == officerBase)
-                        continue;
-
-                    uint16_t memberId = 0;
-                    if (!ReadOfficerIdFromRosterPtr(member, rosterBase, &memberId))
+                for (int j = 0; j < 5; ++j) {
+                    const uint16_t memberId = memberIds[j];
+                    if (memberId == 0 || memberId == selectedId)
                         continue;
 
                     switch (relation) {
@@ -349,14 +421,26 @@ namespace DX11Base {
                     break;
 
                 if ((relation != 1 && relation != 2) ||
-                    occurred != 0 ||
-                    (p1 != officerBase && p2 != officerBase))
+                    occurred != 0)
                     continue;
 
-                const uintptr_t other =
-                    (p1 == officerBase) ? p2 : p1;
+                uint16_t id1 = 0, id2 = 0;
+                const bool valid1 =
+                    ReadOfficerIdFromRosterPtr(p1, rosterBase, &id1);
+                const bool valid2 =
+                    ReadOfficerIdFromRosterPtr(p2, rosterBase, &id2);
+                if (!valid1 || !valid2)
+                    continue;
+
                 uint16_t otherId = 0;
-                if (!ReadOfficerIdFromRosterPtr(other, rosterBase, &otherId))
+                if (id1 == selectedId)
+                    otherId = id2;
+                else if (id2 == selectedId)
+                    otherId = id1;
+                else
+                    continue;
+
+                if (otherId == 0 || otherId == selectedId)
                     continue;
 
                 // 실제 게임 UI 대조 결과, 배우자/의형제 같은 직접 관계도 숙명 relation=2에
