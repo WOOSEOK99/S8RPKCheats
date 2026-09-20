@@ -27,9 +27,9 @@ namespace DX11Base {
     // 상시 루프에서 호출하며 다른 비트는 보존합니다.
     bool TickInfiniteBanquet();
 
-    // 디버그: 중개 사용 후보 +0x71E5 bit6만 1회 해제.
-    // 실게임에서 재사용 가능 여부를 확인하기 전까지 정식 기능으로 취급하지 않습니다.
-    bool ClearMediationUsedBitForTest();
+    // 실게임에서 확인된 +0x71E5 bit6 중개 사용 완료 플래그를 지속 해제합니다.
+    // 다른 비트는 보존합니다.
+    bool TickInfiniteMediation();
 
     // ───────────────────────────────────────────────
     //  설정 및 상태 플래그
