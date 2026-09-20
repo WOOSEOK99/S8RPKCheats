@@ -1678,6 +1678,9 @@ namespace DX11Base {
         s_corpsDeploymentOfficers;
     static uintptr_t s_corpsDeploymentCorpsPtr = 0;
     static bool s_corpsDeploymentValid = false;
+    // 관계 그룹(배우자/상생/의형제)으로 같은 도시에 묶인 무장 ID.
+    // 태수 후보 재분배/순환 버퍼가 이들을 다시 갈라놓지 않도록 사용한다.
+    static std::vector<uint16_t> s_corpsDeploymentRelationshipGroupedIds;
 
     struct CorpsDeploymentTargetBaseline {
       int cityIndex = -1;
@@ -1700,6 +1703,11 @@ namespace DX11Base {
     };
 
     static bool s_corpsAutoDeploymentEachCouncil = false;
+    // 자동배치에서 같은 도시로 묶을 관계 종류. 설정파일에는 저장하지 않는다.
+    // 기존 동작을 유지하도록 세션 시작 기본값은 모두 ON.
+    static bool s_corpsDeploymentGroupSwornBrothers = true;
+    static bool s_corpsDeploymentGroupSynergetic = true;
+    static bool s_corpsDeploymentGroupSpouses = true;
     static std::vector<CorpsAutoDeploymentTarget>
         s_corpsAutoDeploymentTargets;
     static uintptr_t s_corpsAutoContextP1 = 0;
@@ -1775,9 +1783,15 @@ namespace DX11Base {
         const char *reason, bool notifyUser = false) {
       const bool hadState =
           s_corpsAutoDeploymentEachCouncil ||
-          !s_corpsAutoDeploymentTargets.empty();
+          !s_corpsAutoDeploymentTargets.empty() ||
+          !s_corpsDeploymentGroupSwornBrothers ||
+          !s_corpsDeploymentGroupSynergetic ||
+          !s_corpsDeploymentGroupSpouses;
 
       s_corpsAutoDeploymentEachCouncil = false;
+      s_corpsDeploymentGroupSwornBrothers = true;
+      s_corpsDeploymentGroupSynergetic = true;
+      s_corpsDeploymentGroupSpouses = true;
       s_corpsAutoDeploymentTargets.clear();
       s_corpsAutoContextP1 = 0;
       s_corpsAutoContextForce = 0;
@@ -2306,6 +2320,19 @@ namespace DX11Base {
       return nullptr;
     }
 
+    static bool IsDeploymentRelationshipGrouped(uint16_t officerId) {
+      return std::find(
+                 s_corpsDeploymentRelationshipGroupedIds.begin(),
+                 s_corpsDeploymentRelationshipGroupedIds.end(),
+                 officerId) !=
+             s_corpsDeploymentRelationshipGroupedIds.end();
+    }
+
+    static void AddDeploymentRelationshipGroupedId(uint16_t officerId) {
+      if (!IsDeploymentRelationshipGrouped(officerId))
+        s_corpsDeploymentRelationshipGroupedIds.push_back(officerId);
+    }
+
     static int GetFrontDeploymentScore(const CityOfficerRow &row) {
       // 전선은 통솔+무력형과 고지력형 모두 우대한다.
       const int combat = (int)row.lead + (int)row.war;
@@ -2384,6 +2411,7 @@ namespace DX11Base {
       s_corpsDeploymentCities.clear();
       s_corpsDeploymentOfficers.clear();
       s_corpsDeploymentCorpsPtr = 0;
+      s_corpsDeploymentRelationshipGroupedIds.clear();
     }
 
     static bool HasValidCorpsDeploymentTargetBaseline(
@@ -2649,6 +2677,7 @@ namespace DX11Base {
       s_corpsDeploymentCities.clear();
       s_corpsDeploymentOfficers.clear();
       s_corpsDeploymentCorpsPtr = 0;
+      s_corpsDeploymentRelationshipGroupedIds.clear();
 
       if (s_officerSelectedCorpsPtr <= 0x10000 ||
           s_officerPlayerForce <= 0x10000) {
@@ -2777,6 +2806,398 @@ namespace DX11Base {
         }
       }
 
+      // ── 관계 그룹 배치 ──────────────────────────────────────────────────
+      // 같은 군단 안에서 사용자가 체크한 배우자/상생/의형제 관계만 하나의 연결
+      // 그룹으로 묶고 같은 도시에 배치한다. 관계는 전이적으로 합친다
+      // (A-B, B-C => A/B/C). 체크 해제한 관계는 그룹 연결에 사용하지 않는다.
+      //
+      // 그룹의 전선/후방 판단:
+      // 1) 충성<90이 한 명이라도 있으면 기존 절대 규칙에 따라 그룹 전체 후방.
+      // 2) 군주/도독/기타 고정 신분이 있으면 그 고정 도시를 따른다.
+      // 3) 그 외에는 구성원 중 한 명이라도 통솔+무력 >= 정치+매력이면
+      //    정치/매력형 구성원이 더 강하더라도 그룹 전체를 전선으로 보낸다.
+      //    (군사는 기존 지력 전선 우선도 유지)
+      const int relationshipOfficerCount =
+          (int)s_corpsOfficerRows.size();
+      std::vector<int> relationshipParent(
+          relationshipOfficerCount);
+      for (int i = 0; i < relationshipOfficerCount; ++i)
+        relationshipParent[i] = i;
+
+      const ULONGLONG relationshipBuildStartMs =
+          GetTickCount64();
+
+      auto relationFind = [&](int index) {
+        int root = index;
+        while (relationshipParent[root] != root)
+          root = relationshipParent[root];
+        while (relationshipParent[index] != index) {
+          const int next = relationshipParent[index];
+          relationshipParent[index] = root;
+          index = next;
+        }
+        return root;
+      };
+
+      auto relationUnion = [&](int a, int b) {
+        int ra = relationFind(a);
+        int rb = relationFind(b);
+        if (ra != rb)
+          relationshipParent[rb] = ra;
+      };
+
+      // ID -> 군단 행 인덱스를 한 번 만들어 관계마다 전체 장수 목록을
+      // 다시 선형 탐색하지 않도록 한다.
+      std::vector<int> relationshipIndexById(5103, -1);
+      std::vector<uintptr_t> relationshipOfficerBases;
+      relationshipOfficerBases.reserve(relationshipOfficerCount);
+      for (int i = 0; i < relationshipOfficerCount; ++i) {
+        const uint16_t id = s_corpsOfficerRows[i].id;
+        if (id < relationshipIndexById.size())
+          relationshipIndexById[id] = i;
+        relationshipOfficerBases.push_back(
+            s_corpsOfficerRows[i].officerBase);
+      }
+
+      auto findCorpsRowIndexById = [&](uint16_t id) {
+        if (id >= relationshipIndexById.size())
+          return -1;
+        return relationshipIndexById[id];
+      };
+
+      // 기존에는 장수 한 명마다 관계/숙명 테이블(최대 3000+5000칸)을
+      // 다시 훑었다. 자동배치에서는 전체 군단을 한 번의 배치 조회로 읽는다.
+      // 세 관계가 모두 OFF면 관계 테이블 자체를 읽지 않는다.
+      const bool relationshipGroupingEnabled =
+          s_corpsDeploymentGroupSwornBrothers ||
+          s_corpsDeploymentGroupSynergetic ||
+          s_corpsDeploymentGroupSpouses;
+
+      std::vector<OfficerRelationshipInfo> relationshipInfos;
+      bool relationshipBatchValid = false;
+      if (relationshipGroupingEnabled) {
+        relationshipBatchValid =
+            GetOfficerRelationshipInfoBatch(
+                relationshipOfficerBases,
+                relationshipInfos);
+      }
+
+      if (bShowDebug) {
+        AddLog(
+            u8"[군단 자동배치 관계] 묶기 설정: 의형제 %s / 상생 %s / 배우자 %s",
+            s_corpsDeploymentGroupSwornBrothers ? "ON" : "OFF",
+            s_corpsDeploymentGroupSynergetic ? "ON" : "OFF",
+            s_corpsDeploymentGroupSpouses ? "ON" : "OFF");
+      }
+
+      for (int i = 0; i < relationshipOfficerCount; ++i) {
+        if (!relationshipBatchValid ||
+            i >= (int)relationshipInfos.size() ||
+            !relationshipInfos[i].valid)
+          continue;
+
+        const OfficerRelationshipInfo &relationInfo =
+            relationshipInfos[i];
+
+        auto mergeEnabledRelations =
+            [&](const std::vector<uint16_t> &ids,
+                const char *relationLabel) {
+          for (uint16_t relatedId : ids) {
+            const int relatedIndex =
+                findCorpsRowIndexById(relatedId);
+            if (relatedIndex >= 0) {
+              relationUnion(i, relatedIndex);
+            } else if (bShowDebug) {
+              AddLog(
+                  u8"[군단 자동배치 관계] %s - %s: %s 관계지만 현재 선택 군단 밖이라 같은 도시 묶기에서 제외",
+                  BuildOfficerName(
+                      s_corpsOfficerRows[i].id).c_str(),
+                  BuildOfficerName(relatedId).c_str(),
+                  relationLabel);
+            }
+          }
+        };
+
+        if (s_corpsDeploymentGroupSwornBrothers)
+          mergeEnabledRelations(
+              relationInfo.swornBrothers, u8"의형제");
+        if (s_corpsDeploymentGroupSynergetic)
+          mergeEnabledRelations(
+              relationInfo.synergetic, u8"상생");
+        if (s_corpsDeploymentGroupSpouses)
+          mergeEnabledRelations(
+              relationInfo.spouses, u8"배우자");
+      }
+
+      // 루트 인덱스를 그대로 버킷으로 사용해 그룹 생성도 한 번의 순회로 끝낸다.
+      std::vector<std::vector<int>> relationshipGroups(
+          relationshipOfficerCount);
+      for (int i = 0; i < relationshipOfficerCount; ++i)
+        relationshipGroups[relationFind(i)].push_back(i);
+
+      auto ensureRelationshipGroupCapacity =
+          [&](int targetCityIndex, int memberCount) {
+        CorpsDeploymentCityRecommendation *target =
+            FindDeploymentCity(targetCityIndex);
+        if (!target || memberCount <= 0)
+          return;
+
+        const int assigned =
+            (int)target->recommendedOfficerIds.size();
+        const int required = assigned + memberCount;
+        if (target->targetCount >= required)
+          return;
+
+        int shiftNeeded = required - target->targetCount;
+        target->targetCount = required;
+
+        // 먼저 다른 도시의 아직 배정되지 않은 여유 인원수를 옮겨 온다.
+        // 관계 그룹을 쪼개지 않는 것이 도시별 기존 목표 인원보다 우선한다.
+        for (int pass = 0; pass < 2 && shiftNeeded > 0; ++pass) {
+          for (auto &donor : s_corpsDeploymentCities) {
+            if (donor.cityIndex == targetCityIndex ||
+                shiftNeeded <= 0)
+              continue;
+
+            const int donorAssigned =
+                (int)donor.recommendedOfficerIds.size();
+            const int floorCount =
+                pass == 0
+                    ? (std::max)(donorAssigned, 1)
+                    : donorAssigned;
+            const int reducible =
+                donor.targetCount - floorCount;
+            if (reducible <= 0)
+              continue;
+
+            const int take =
+                (std::min)(reducible, shiftNeeded);
+            donor.targetCount -= take;
+            shiftNeeded -= take;
+          }
+        }
+
+        if (shiftNeeded > 0 && bShowDebug) {
+          AddLog(
+              u8"[군단 자동배치 관계] %s: 관계 그룹 수용을 위해 목표 인원 %d명을 추가 확보(다른 도시에서 전부 회수하지 못함)",
+              g_CityList[targetCityIndex].cityname,
+              shiftNeeded);
+        }
+      };
+
+      auto pickRelationshipGroupCity =
+          [&](const std::vector<int> &group,
+              bool frontline) {
+        CorpsDeploymentCityRecommendation *best = nullptr;
+        int bestTogether = -1;
+        int bestRemain = -1000000;
+
+        // 관계 그룹을 빈 도시에 새로 꽂아 최초 태수 흐름을 복잡하게 만들지 않는다.
+        // 현재 사람이 있는 도시 중에서 같은 전선/후방을 우선한다.
+        for (auto &city : s_corpsDeploymentCities) {
+          if (city.frontline != frontline ||
+              city.currentCount <= 0)
+            continue;
+
+          int together = 0;
+          for (int memberIndex : group) {
+            const CityOfficerRow &member =
+                s_corpsOfficerRows[memberIndex];
+            if (GetOfficerCurrentCityIndex(
+                    shiftedCityBase, member) ==
+                city.cityIndex)
+              ++together;
+          }
+
+          const int remain =
+              city.targetCount -
+              (int)city.recommendedOfficerIds.size();
+          if (!best || together > bestTogether ||
+              (together == bestTogether &&
+               remain > bestRemain) ||
+              (together == bestTogether &&
+               remain == bestRemain &&
+               city.cityIndex < best->cityIndex)) {
+            best = &city;
+            bestTogether = together;
+            bestRemain = remain;
+          }
+        }
+
+        return best ? best->cityIndex : -1;
+      };
+
+      int relationshipGroupCount = 0;
+      for (const auto &group : relationshipGroups) {
+        if (group.size() < 2)
+          continue;
+        ++relationshipGroupCount;
+
+        int anchorCity = -1;
+        bool anchorConflict = false;
+        bool hasLowLoyalty = false;
+        bool hasCombatPriority = false;
+        bool hasAdviserFrontPriority = false;
+        int movableMemberCount = 0;
+
+        for (int memberIndex : group) {
+          const CityOfficerRow &member =
+              s_corpsOfficerRows[memberIndex];
+
+          if (member.loyalty < 90)
+            hasLowLoyalty = true;
+
+          // 정치/매력형 배우자·상생 장수가 있어도, 그룹 안에 전투형 장수가
+          // 한 명이라도 있으면 통솔/무력을 우선하여 전선 그룹으로 본다.
+          const int combat =
+              (int)member.lead + (int)member.war;
+          const int rear =
+              GetRearDeploymentScore(member);
+          if (combat >= rear)
+            hasCombatPriority = true;
+          if (member.status == 0x18 &&
+              member.loyalty >= 90)
+            hasAdviserFrontPriority = true;
+
+          if (isUsed(member.id)) {
+            for (const auto &rec :
+                 s_corpsDeploymentOfficers) {
+              if (rec.id != member.id)
+                continue;
+              if (anchorCity < 0)
+                anchorCity = rec.recommendedCityIndex;
+              else if (anchorCity !=
+                       rec.recommendedCityIndex)
+                anchorConflict = true;
+              break;
+            }
+          } else if (member.status == 0x18 ||
+                     member.status == 0x28 ||
+                     member.status == 0xE8) {
+            ++movableMemberCount;
+          }
+        }
+
+        if (movableMemberCount <= 0)
+          continue;
+
+        if (anchorConflict) {
+          AddLog(
+              u8"[군단 자동배치 관계] 관계 그룹에 서로 다른 도시의 고정 장수가 있어 그룹 배치를 건너뜀");
+          continue;
+        }
+
+        if (anchorCity >= 0) {
+          CorpsDeploymentCityRecommendation *anchor =
+              FindDeploymentCity(anchorCity);
+          if (hasLowLoyalty && anchor &&
+              anchor->frontline) {
+            // 충성<90 후방 고정과 이동 불가 고정 장수가 충돌하면
+            // 안전 규칙을 깨지 않고 기존 개별 배치로 넘긴다.
+            AddLog(
+                u8"[군단 자동배치 관계] %s 관계 그룹: 고정 장수 전선 도시와 충성<90 후방 규칙 충돌 - 그룹 자동이동 제외",
+                g_CityList[anchorCity].cityname);
+            continue;
+          }
+        }
+
+        bool toFront =
+            !hasLowLoyalty &&
+            (hasCombatPriority ||
+             hasAdviserFrontPriority);
+
+        int targetCity = anchorCity;
+        if (targetCity < 0) {
+          targetCity =
+              pickRelationshipGroupCity(group, toFront);
+
+          // 원하는 방향에 사람이 있는 도시가 없으면 반대쪽의 기존 도시를 사용한다.
+          // 빈 도시 최초 태수 문제보다 같은 도시 유지와 안전한 기존 도시 사용을 우선한다.
+          if (targetCity < 0) {
+            targetCity =
+                pickRelationshipGroupCity(
+                    group, !toFront);
+            if (targetCity >= 0)
+              toFront = !toFront;
+          }
+        }
+
+        if (targetCity < 0)
+          continue;
+
+        ensureRelationshipGroupCapacity(
+            targetCity, movableMemberCount);
+
+        for (int memberIndex : group) {
+          const CityOfficerRow &member =
+              s_corpsOfficerRows[memberIndex];
+
+          AddDeploymentRelationshipGroupedId(
+              member.id);
+
+          if (isUsed(member.id))
+            continue;
+          if (member.status != 0x18 &&
+              member.status != 0x28 &&
+              member.status != 0xE8)
+            continue;
+
+          const int currentCity =
+              GetOfficerCurrentCityIndex(
+                  shiftedCityBase, member);
+
+          const char *reason = nullptr;
+          if (anchorCity >= 0) {
+            reason = u8"관계 그룹 · 고정 장수와 같은 도시";
+          } else if (hasLowLoyalty) {
+            reason = u8"관계 그룹 · 충성<90 포함 · 후방 보호";
+          } else if (toFront) {
+            reason = hasCombatPriority
+                         ? u8"관계 그룹 · 통솔/무력 우선 전선"
+                         : u8"관계 그룹 · 군사/지력 우선 전선";
+          } else {
+            reason = u8"관계 그룹 · 후방";
+          }
+
+          AddOfficerDeploymentRecommendation(
+              member, currentCity, targetCity,
+              false, reason);
+        }
+
+        if (bShowDebug) {
+          std::string groupMemberNames;
+          for (int memberIndex : group) {
+            if (!groupMemberNames.empty())
+              groupMemberNames += u8", ";
+            groupMemberNames += BuildOfficerName(
+                s_corpsOfficerRows[memberIndex].id);
+          }
+
+          AddLog(
+              u8"[군단 자동배치 관계] %d명 그룹 [%s] -> %s (%s%s)",
+              (int)group.size(),
+              groupMemberNames.c_str(),
+              g_CityList[targetCity].cityname,
+              FindDeploymentCity(targetCity) &&
+                      FindDeploymentCity(targetCity)->frontline
+                  ? u8"전선"
+                  : u8"후방",
+              hasCombatPriority
+                  ? u8", 통솔/무력 우선"
+                  : "");
+        }
+      }
+
+      if (bShowDebug) {
+        AddLog(
+            u8"[군단 자동배치 관계] 관계 조회/그룹 계산 %llums (군단 %d명 / 관계 그룹 %d개)",
+            (unsigned long long)(
+                GetTickCount64() -
+                relationshipBuildStartMs),
+            relationshipOfficerCount,
+            relationshipGroupCount);
+      }
+
       // 완전히 빈 도시는 기존 태수(E8)를 끌어오지 않는다.
       // 정상 게임에서 두 번 확인한 28/D3 + 충성100 일반장수만 먼저 배정하고,
       // 그런 안전한 후보가 없으면 이번 계획에서는 도시를 비운 채 그대로 둔다.
@@ -2784,7 +3205,8 @@ namespace DX11Base {
         if (city.currentCount != 0 ||
             city.currentGovernorId != 0 ||
             city.targetCount <= 0 ||
-            city.recommendedGovernorId != 0)
+            city.recommendedGovernorId != 0 ||
+            !city.recommendedOfficerIds.empty())
           continue;
 
         const CityOfficerRow *chosen = nullptr;
@@ -3097,7 +3519,8 @@ namespace DX11Base {
         for (uint16_t id : city.recommendedOfficerIds) {
           const CityOfficerRow *row =
               FindCorpsOfficerByRecId(id);
-          if (!row)
+          if (!row ||
+              IsDeploymentRelationshipGrouped(id))
             continue;
           if (row->status == 0x18 ||
               row->status == 0x28 ||
@@ -3130,7 +3553,8 @@ namespace DX11Base {
 
           for (uint16_t id :
                candidateCity.recommendedOfficerIds) {
-            if (!isGovernorEligible(id))
+            if (!isGovernorEligible(id) ||
+                IsDeploymentRelationshipGrouped(id))
               continue;
 
             const CityOfficerRow *row =
@@ -4277,7 +4701,8 @@ namespace DX11Base {
         const CityOfficerRow *buffer = nullptr;
         int bufferCity = -1;
         for (const auto &rec : s_corpsDeploymentOfficers) {
-          if (rec.recommendedGovernor || rec.loyalty != 100)
+          if (rec.recommendedGovernor || rec.loyalty != 100 ||
+              IsDeploymentRelationshipGrouped(rec.id))
             continue;
 
           const CityOfficerRow *row =
@@ -4332,8 +4757,26 @@ namespace DX11Base {
         RefreshCityOfficerRoster(p1, shiftedCityBase);
         RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
 
+        // 관계 그룹도 최종적으로 추천 도시에서 갈라지지 않았는지 검증한다.
+        for (const auto &rec : s_corpsDeploymentOfficers) {
+          if (!IsDeploymentRelationshipGrouped(rec.id))
+            continue;
+          const CityOfficerRow *row =
+              FindCorpsOfficerByRecId(rec.id);
+          if (!row ||
+              GetOfficerCityIndexByBase(
+                  shiftedCityBase, row->officerBase) !=
+                  rec.recommendedCityIndex) {
+            failed = true;
+            failReason =
+                u8"관계 그룹 장수의 최종 도시 일치 검증에 실패했습니다.";
+            break;
+          }
+        }
+
         // 최종 태수/충성도 검증. 보류 도시는 원상 유지 대상으로 제외한다.
-        for (const auto &city : s_corpsDeploymentCities) {
+        if (!failed)
+          for (const auto &city : s_corpsDeploymentCities) {
           if (HasDeploymentCityIndex(
                   deferredCities, city.cityIndex))
             continue;
@@ -4417,6 +4860,42 @@ namespace DX11Base {
       ImGui::SameLine(0.f, 12.f * sc);
       ImGui::TextDisabled(
           u8"※ 세이브마다 군단 생성/해체 상태가 달라질 수 있어 게임 시작 후 직접 선택해야 합니다.");
+
+      ImGui::TextUnformatted(u8"같은 도시 관계");
+      ImGui::SameLine(0.f, 8.f * sc);
+
+      bool relationshipOptionChanged = false;
+      relationshipOptionChanged |= ImGui::Checkbox(
+          u8"의형제##CorpsDeployRelSworn",
+          &s_corpsDeploymentGroupSwornBrothers);
+      ImGui::SameLine(0.f, 10.f * sc);
+      relationshipOptionChanged |= ImGui::Checkbox(
+          u8"상생##CorpsDeployRelSynergetic",
+          &s_corpsDeploymentGroupSynergetic);
+      ImGui::SameLine(0.f, 10.f * sc);
+      relationshipOptionChanged |= ImGui::Checkbox(
+          u8"배우자##CorpsDeployRelSpouse",
+          &s_corpsDeploymentGroupSpouses);
+
+      if (relationshipOptionChanged) {
+        // 이미 만든 추천안은 이전 관계 옵션 기준이므로 즉시 폐기한다.
+        ResetCorpsDeploymentTargetBaseline();
+        AddLog(
+            u8"[군단 자동배치 관계] 같은 도시 묶기 변경: 의형제 %s / 상생 %s / 배우자 %s",
+            s_corpsDeploymentGroupSwornBrothers ? "ON" : "OFF",
+            s_corpsDeploymentGroupSynergetic ? "ON" : "OFF",
+            s_corpsDeploymentGroupSpouses ? "ON" : "OFF");
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"체크한 관계만 자동배치에서 같은 도시 그룹으로 묶습니다.");
+        ImGui::TextUnformatted(
+            u8"예: 배우자만 체크하면 배우자 관계만 같이 이동하고 의형제/상생은 일반 장수처럼 따로 배치됩니다.");
+        ImGui::TextUnformatted(
+            u8"관계 옵션을 바꾸면 기존 추천 계획은 취소되므로 다시 추천 계산을 눌러주세요.");
+        ImGui::EndTooltip();
+      }
 
       struct CorpsAutoUiOption {
         OfficerCityCorpsInfo info;
@@ -4518,7 +4997,7 @@ namespace DX11Base {
 
       ImGui::SameLine(0.f, 12.f * sc);
       ImGui::TextDisabled(
-          u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 신분 유지/전선 우선");
+          u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 전선 우선 | 체크한 관계만 같은 도시(통솔/무력 우선)");
       if (hasTargetBaseline) {
         ImGui::SameLine(0.f, 8.f * sc);
         ImGui::TextDisabled(u8"| 이번 평정 계획 고정");
@@ -4542,65 +5021,59 @@ namespace DX11Base {
           ++movableAdviser;
       }
 
-      ImGui::SameLine(0.f, 12.f * sc);
-      const bool hasMovable = movableNormal > 0 || movableAdviser > 0;
-      if (!hasMovable)
-        ImGui::BeginDisabled();
-      if (ImGui::Button(u8"1단계 배치 적용##CorpsDeploymentMoveApply",
-                        ImVec2(145.f * sc, 0.f))) {
-        ApplyCorpsDeploymentMovements(p1, shiftedCityBase);
-      }
-      if (!hasMovable)
-        ImGui::EndDisabled();
-
-      ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::TextDisabled(u8"일반 %d / 군사 %d 이동 예정",
-                          movableNormal, movableAdviser);
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(
-            u8"1단계는 같은 군단 안에서 일반/군사의 도시만 이동합니다.");
-        ImGui::TextUnformatted(
-            u8"군주·도독·태수의 신분과 태수 포인터는 아직 변경하지 않습니다.");
-        ImGui::EndTooltip();
-      }
-
+      const bool hasMovable =
+          movableNormal > 0 || movableAdviser > 0;
       int deferredGovernorChanges = 0;
       const int pendingGovernorChanges =
           CountPendingDeploymentGovernorChanges(
               shiftedCityBase, &deferredGovernorChanges);
+      const bool canApplyDeployment =
+          hasMovable || pendingGovernorChanges > 0;
+
       ImGui::SameLine(0.f, 12.f * sc);
-      const bool canApplyGovernorStage =
-          !hasMovable && pendingGovernorChanges > 0;
-      if (!canApplyGovernorStage)
+      if (!canApplyDeployment)
         ImGui::BeginDisabled();
-      if (ImGui::Button(u8"2단계 태수 적용##CorpsDeploymentGovernorApply",
-                        ImVec2(145.f * sc, 0.f))) {
-        ApplyCorpsDeploymentGovernorStage(p1, shiftedCityBase);
+      if (ImGui::Button(u8"배치 적용##CorpsDeploymentApply",
+                        ImVec2(120.f * sc, 0.f))) {
+        bool applied = true;
+
+        // 내부 안전 절차는 유지한다.
+        // 먼저 일반/군사 이동을 끝낸 뒤, 갱신된 현재 상태에서 태수/E8 단계를 처리한다.
+        if (hasMovable)
+          applied =
+              ApplyCorpsDeploymentMovements(
+                  p1, shiftedCityBase);
+
+        if (applied) {
+          int deferredAfterMove = 0;
+          const int pendingAfterMove =
+              CountPendingDeploymentGovernorChanges(
+                  shiftedCityBase, &deferredAfterMove);
+          if (pendingAfterMove > 0)
+            ApplyCorpsDeploymentGovernorStage(
+                p1, shiftedCityBase);
+        }
       }
-      if (!canApplyGovernorStage)
+      if (!canApplyDeployment)
         ImGui::EndDisabled();
 
       ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::TextDisabled(u8"태수 변경 %d / 보류 %d 도시",
-                          pendingGovernorChanges,
-                          deferredGovernorChanges);
+      ImGui::TextDisabled(
+          u8"일반 %d / 군사 %d 이동 · 태수 변경 %d / 보류 %d 도시",
+          movableNormal, movableAdviser,
+          pendingGovernorChanges,
+          deferredGovernorChanges);
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(
-            u8"기존 태수를 현지에서 일반 신분으로 해제한 뒤 필요한 경우 이동합니다.");
+            u8"한 번에 적용합니다: 일반/군사 이동 후 태수/E8 처리를 순서대로 실행합니다.");
         ImGui::TextUnformatted(
-            u8"태수끼리 순환하는 경우 충성 100 일반 장수를 임시 태수로 사용합니다.");
+            u8"각 단계의 기존 검증·안전장치·롤백 규칙은 그대로 유지됩니다.");
         ImGui::TextUnformatted(
-            u8"빈 도시는 충성100 28/D3 일반장수를 먼저 배치한 경우에만 최초 태수(E8/D2)로 임명합니다.");
+            u8"태수 순환 시 충성 100 일반 장수를 임시 태수로 사용하며, 관계 그룹원은 버퍼에서 제외됩니다.");
         ImGui::TextUnformatted(
-            u8"안전한 일반장수가 없으면 빈 도시는 이번 계획에서 그대로 두고 AI 처리를 기다립니다.");
-        ImGui::TextUnformatted(
-            u8"0이 아닌 City+0x98이 E8이 아닌 특수 상태만 진단 후 보류합니다.");
-        ImGui::TextUnformatted(
-            u8"중간 실패 시 적용 대상 도시는 2단계 시작 직전 상태로 전체 원복합니다.");
+            u8"안전한 최초 태수 후보가 없는 빈 도시와 특수 책임자 상태는 기존 규칙대로 보류합니다.");
         ImGui::EndTooltip();
       }
 
