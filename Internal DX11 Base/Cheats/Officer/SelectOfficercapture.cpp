@@ -1773,9 +1773,9 @@ namespace DX11Base {
       uint8_t dbgInterest = 0;
       uint8_t dbgPriority = 0;
       bool dbgMetaOk =
-          SafeRead8(pBase + 0x5D, &dbgCompatibility) &&
-          SafeRead8(pBase + 0x83, &dbgInterest) &&
-          SafeRead8(pBase + 0xA4, &dbgPriority);
+          UnsafeRead8(pBase + 0x5D, &dbgCompatibility) &&
+          UnsafeRead8(pBase + 0x83, &dbgInterest) &&
+          UnsafeRead8(pBase + 0xA4, &dbgPriority);
 
       if (dbgMetaOk) {
         const char* priorityName = u8"범위외";
