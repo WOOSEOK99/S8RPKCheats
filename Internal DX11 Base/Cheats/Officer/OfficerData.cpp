@@ -311,122 +311,6 @@ namespace DX11Base {
             return false;
         }
 
-        bool DumpSynergeticSlotBytes(
-            uintptr_t synerBase,
-            uintptr_t rosterBase,
-            uint16_t candidateId1,
-            uint16_t candidateId2) {
-            if (synerBase <= 0x10000 || rosterBase <= 0x10000)
-                return false;
-
-            int firstEmpty = -1;
-            int firstActive = -1;
-            int matchingActive = -1;
-
-            for (int i = 0; i < 5000; ++i) {
-                const uintptr_t slot = synerBase + (uintptr_t)i * 0x20;
-                uint8_t relation = 0;
-                if (!SafeRelRead8(slot + 0x18, &relation))
-                    break;
-
-                if (relation == 0 && firstEmpty < 0) {
-                    firstEmpty = i;
-                    if (firstActive >= 0)
-                        break;
-                    continue;
-                }
-
-                if ((relation == 1 || relation == 2) && firstActive < 0)
-                    firstActive = i;
-
-                if (relation == 1 || relation == 2) {
-                    uintptr_t p1 = 0, p2 = 0;
-                    uint16_t id1 = 0, id2 = 0;
-                    if (SafeRelReadPtr(slot + 0x08, &p1) &&
-                        SafeRelReadPtr(slot + 0x10, &p2) &&
-                        ReadOfficerIdFromRosterPtr(p1, rosterBase, &id1) &&
-                        ReadOfficerIdFromRosterPtr(p2, rosterBase, &id2)) {
-                        if ((id1 == candidateId1 && id2 == candidateId2) ||
-                            (id1 == candidateId2 && id2 == candidateId1)) {
-                            matchingActive = i;
-                        }
-                    }
-                }
-
-                if (firstEmpty >= 0 && firstActive >= 0 && matchingActive >= 0)
-                    break;
-            }
-
-            auto logSlot = [&](const char* tag, int index) {
-                if (index < 0) {
-                    AddLog(u8"[상생슬롯DBG] %s: 없음", tag);
-                    return;
-                }
-
-                const uintptr_t slot =
-                    synerBase + (uintptr_t)index * 0x20;
-                uint8_t bytes[0x20]{};
-                bool ok = true;
-                for (int j = 0; j < 0x20; ++j) {
-                    if (!SafeRelRead8(slot + j, &bytes[j])) {
-                        ok = false;
-                        break;
-                    }
-                }
-                if (!ok) {
-                    AddLog(
-                        u8"[상생슬롯DBG] %s #%d 읽기 실패 / addr=%p",
-                        tag, index, (void*)slot);
-                    return;
-                }
-
-                uintptr_t p1 = 0, p2 = 0;
-                uint16_t id1 = 0, id2 = 0;
-                uint8_t relation = bytes[0x18];
-                uint8_t occurred = bytes[0x19];
-                SafeRelReadPtr(slot + 0x08, &p1);
-                SafeRelReadPtr(slot + 0x10, &p2);
-                ReadOfficerIdFromRosterPtr(p1, rosterBase, &id1);
-                ReadOfficerIdFromRosterPtr(p2, rosterBase, &id2);
-
-                AddLog(
-                    u8"[상생슬롯DBG] %s #%d addr=%p / id=%u,%u / rel=%u / occurred=%u / "
-                    "bytes=%02X %02X %02X %02X %02X %02X %02X %02X "
-                    "%02X %02X %02X %02X %02X %02X %02X %02X "
-                    "%02X %02X %02X %02X %02X %02X %02X %02X "
-                    "%02X %02X %02X %02X %02X %02X %02X %02X",
-                    tag,
-                    index,
-                    (void*)slot,
-                    (unsigned int)id1,
-                    (unsigned int)id2,
-                    (unsigned int)relation,
-                    (unsigned int)occurred,
-                    bytes[0], bytes[1], bytes[2], bytes[3],
-                    bytes[4], bytes[5], bytes[6], bytes[7],
-                    bytes[8], bytes[9], bytes[10], bytes[11],
-                    bytes[12], bytes[13], bytes[14], bytes[15],
-                    bytes[16], bytes[17], bytes[18], bytes[19],
-                    bytes[20], bytes[21], bytes[22], bytes[23],
-                    bytes[24], bytes[25], bytes[26], bytes[27],
-                    bytes[28], bytes[29], bytes[30], bytes[31]);
-            };
-
-            AddLog(
-                u8"[상생슬롯DBG] 테이블=%p / 후보 %u <-> %u / 첫활성=%d / 첫빈슬롯=%d / 기존동일쌍=%d",
-                (void*)synerBase,
-                (unsigned int)candidateId1,
-                (unsigned int)candidateId2,
-                firstActive,
-                firstEmpty,
-                matchingActive);
-            logSlot("ACTIVE", firstActive);
-            logSlot("EMPTY", firstEmpty);
-            if (matchingActive >= 0 && matchingActive != firstActive)
-                logSlot("MATCH", matchingActive);
-            return firstEmpty >= 0;
-        }
-
         void AddUniqueRelationshipId(std::vector<uint16_t>& values, uint16_t id) {
             if (id == 0)
                 return;
@@ -1502,7 +1386,7 @@ namespace DX11Base {
 
         if (officers.size() < 2) {
             AddLog(
-                u8"[친밀자동] 평정 진입(07->05): 유효 AI 무장 부족 / 메타데이터 제외 %d명",
+                u8"[친밀자동] 분기 평정 시작: 유효 AI 무장 부족 / 메타데이터 제외 %d명",
                 invalidMetaCount);
             return;
         }
@@ -1513,7 +1397,7 @@ namespace DX11Base {
                 officerBases, relationships) ||
             relationships.size() != officerBases.size()) {
             AddLog(
-                u8"[친밀자동] 평정 진입(07->05): 관계 테이블 읽기 실패");
+                u8"[친밀자동] 분기 평정 시작: 관계 테이블 읽기 실패");
             return;
         }
 
@@ -1548,7 +1432,7 @@ namespace DX11Base {
                 PAGE_READWRITE,
                 &affinityOldProtect)) {
             AddLog(
-                u8"[친밀자동] 평정 진입(07->05): 친밀도 배열 쓰기 권한 확보 실패");
+                u8"[친밀자동] 분기 평정 시작: 친밀도 배열 쓰기 권한 확보 실패");
             return;
         }
 
@@ -1655,7 +1539,7 @@ namespace DX11Base {
                         next == 100) {
                         ++reachedHundredCount;
                         AddLog(
-                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 / 상성 +%d / 흥미·중시 +%d (게임 상생 판정 대기)",
+                            u8"[친밀자동] 100 도달: %s(ID %u) <-> %s(ID %u), %u -> 100 / 상성 +%d / 흥미·중시 +%d",
                             AutoAffinityName(left.id).c_str(),
                             (unsigned int)left.id,
                             AutoAffinityName(right.id).c_str(),
@@ -1664,8 +1548,7 @@ namespace DX11Base {
                             compatibilityBonus,
                             interestBonus);
 
-                        // 참고 DLL의 AffinityM은 관계 테이블을 직접 쓰지 않는다.
-                        // 친밀도만 100까지 올리고 이후 상생 성립은 게임 원래 판정에 맡긴다.
+                        // 이 기능은 친밀도만 가속하며 관계 테이블은 직접 수정하지 않는다.
                     }
                 }
             }
@@ -1684,7 +1567,7 @@ namespace DX11Base {
             GetTickCount64() - affinityStartMs;
 
         AddLog(
-            u8"[친밀자동] 평정 진입(07->05) 완료: AI %d명 / 같은 세력·도시 후보 %d쌍 / 증가 %d / 증가0 %d / 음수친밀 제외 %d / 100 도달 %d / 실패 %d / 메타데이터 제외 %d명",
+            u8"[친밀자동] 분기 평정 처리 완료: AI %d명 / 같은 세력·도시 후보 %d쌍 / 증가 %d / 증가0 %d / 음수친밀 제외 %d / 100 도달 %d / 실패 %d / 메타데이터 제외 %d명",
             (int)officers.size(),
             candidateCount,
             increasedCount,
