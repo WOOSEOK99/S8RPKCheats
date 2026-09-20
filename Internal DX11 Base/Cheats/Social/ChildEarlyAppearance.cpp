@@ -112,6 +112,10 @@ static std::vector<PregnancySpouseOption> g_pregnancyCurrentSpouses;
 static int g_pregnancySwapSlot = -1;
 static uint16_t g_pregnancySwapSpouseId = 0;
 
+// CETRAINER의 _childRearing(index) 직접 경로:
+// [gameBase+00] + g0_ChildOffset - 0x10, stride 0x28.
+static uint32_t g_childRearingOffset = 0;
+
 static bool ResolveHeroAndRoster(
     uintptr_t& rosterBase,
     uintptr_t& heroMaster,
@@ -194,6 +198,239 @@ static bool ReadPregnancyDebugRecord(
   dump.childOfficerId = TryReadOfficerIdFromPointer(dump.childPtr);
   dump.valid = true;
   *out = dump;
+  return true;
+}
+
+static bool RefreshCurrentPregnancySpousesFast() {
+  uintptr_t rosterBase = 0;
+  uintptr_t heroMaster = 0;
+  uint16_t heroId = 0;
+  if (!ResolveHeroAndRoster(rosterBase, heroMaster, heroId))
+    return false;
+
+  OfficerRelationshipInfo relInfo;
+  if (!GetOfficerRelationshipInfo(heroMaster, relInfo) ||
+      !relInfo.valid) {
+    return false;
+  }
+
+  std::vector<uint16_t> spouseIds = relInfo.spouses;
+  std::sort(spouseIds.begin(), spouseIds.end());
+  spouseIds.erase(
+      std::unique(spouseIds.begin(), spouseIds.end()),
+      spouseIds.end());
+
+  std::vector<PregnancySpouseOption> options;
+  options.reserve(spouseIds.size());
+
+  for (uint16_t id : spouseIds) {
+    if (id < 1 || id > 5102)
+      continue;
+
+    // 일반적으로 ID와 roster 인덱스가 대응하므로 먼저 O(1)로 확인합니다.
+    uintptr_t officerAddr =
+        rosterBase + (uintptr_t)(id - 1) * 0x3D0;
+    uint16_t verifyId = 0;
+    if (!SafeRead16(officerAddr + 0x08, &verifyId) ||
+        verifyId != id) {
+      // 예외적인 배열 배치만 전체 roster에서 한 번 찾아봅니다.
+      officerAddr = 0;
+      for (int i = 0; i < 5102; ++i) {
+        const uintptr_t candidate =
+            rosterBase + (uintptr_t)i * 0x3D0;
+        if (SafeRead16(candidate + 0x08, &verifyId) &&
+            verifyId == id) {
+          officerAddr = candidate;
+          break;
+        }
+      }
+    }
+
+    if (officerAddr <= 0x10000)
+      continue;
+
+    PregnancySpouseOption option;
+    option.id = id;
+    option.addr = NormalizeOfficerPtr(officerAddr);
+    options.push_back(option);
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    g_pregnancyCurrentSpouses = std::move(options);
+  }
+
+  AddLog(
+      u8"[임신슬롯] 배우자 목록 즉시 갱신: Hero ID %u / %zu명",
+      heroId, spouseIds.size());
+  return true;
+}
+
+static bool TryReadDirectPregnancyTableAt(
+    uintptr_t base,
+    PregnancyCanonicalTable* out) {
+  if (!out || base <= 0x10000 ||
+      !IsValidPtr(base, 0x28 * 3)) {
+    return false;
+  }
+
+  std::unordered_set<uint16_t> currentSpouseIds;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    for (const PregnancySpouseOption& option :
+         g_pregnancyCurrentSpouses) {
+      if (option.id != 0)
+        currentSpouseIds.insert(option.id);
+    }
+  }
+
+  PregnancyCanonicalTable table;
+  table.base = base;
+  std::unordered_set<uint16_t> uniqueSlotSpouses;
+  int matchedCurrentSpouses = 0;
+
+  for (int slot = 0; slot < 3; ++slot) {
+    PregnancyDebugRecordDump d;
+    if (!ReadPregnancyDebugRecord(
+            base + (uintptr_t)slot * 0x28, &d)) {
+      return false;
+    }
+
+    if (d.pregnancyCooldown > 100 ||
+        d.pregnancyFlag > 1 ||
+        d.remainingMonths > 12) {
+      return false;
+    }
+
+    const uintptr_t spousePtr = NormalizeOfficerPtr(d.q00);
+    const uint16_t spouseId = d.q00OfficerId;
+
+    // 빈 슬롯은 +00이 NULL이어야 하고, 사용 슬롯은 정상 무장 포인터여야 합니다.
+    if (spousePtr == 0) {
+      if (spouseId != 0)
+        return false;
+    } else {
+      if (spouseId == 0 ||
+          !uniqueSlotSpouses.insert(spouseId).second) {
+        return false;
+      }
+
+      if (currentSpouseIds.count(spouseId) != 0)
+        matchedCurrentSpouses++;
+    }
+
+    if (d.childPtr != 0 && d.childOfficerId == 0)
+      return false;
+
+    table.slots[(size_t)slot] = d;
+    table.spouseIds[(size_t)slot] = spouseId;
+  }
+
+  // 배우자가 있는 세이브라면 최소 하나의 슬롯이 현재 배우자와 일치해야
+  // g0_ChildOffset 후보를 정상 테이블로 인정합니다.
+  if (!currentSpouseIds.empty() && matchedCurrentSpouses == 0)
+    return false;
+
+  table.valid = true;
+  *out = table;
+  return true;
+}
+
+static bool ResolvePregnancyTableDirect(
+    PregnancyCanonicalTable* out) {
+  if (!out)
+    return false;
+
+  const uintptr_t gameBase = GetGameBase();
+  const uintptr_t exeBase =
+      (uintptr_t)GetModuleHandle(nullptr);
+  if (!gameBase || !exeBase)
+    return false;
+
+  if (g_childRearingOffset == 0) {
+    // CETRAINER getGameDataOffset()의 g0_ChildOffsetCheck(bytes12).
+    // 첫 LEA의 disp32가 +3에 있으며 이것이 g0_ChildOffset입니다.
+    const char* childOffsetPattern =
+        "49 8D ?? ?? ?? ?? ?? "
+        "41 B8 ?? ?? ?? ?? "
+        "48 8B ?? E8 ?? ?? ?? ?? "
+        "49 8D ?? ?? ?? ?? ?? "
+        "41 B8 ?? ?? ?? ?? "
+        "48 8B ?? E8 ?? ?? ?? ?? "
+        "8B ?? ?? ?? ?? ?? "
+        "8B ?? 83 ?? ?? 7C ?? 48 8B ?? 66";
+
+    const uintptr_t found =
+        FindPattern(
+            exeBase, exeBase + 0x3000000,
+            childOffsetPattern);
+
+    uint32_t offset = 0;
+    if (found &&
+        SafeReadMem(
+            found + 3, &offset, sizeof(offset)) &&
+        offset >= 0x1000 &&
+        offset <= 0x100000) {
+      g_childRearingOffset = offset;
+      AddLog(
+          u8"[임신슬롯] g0_ChildOffset 동적 해석: 0x%X",
+          g_childRearingOffset);
+    }
+  }
+
+  auto tryOffset = [&](uint32_t offset) -> bool {
+    if (offset < 0x10)
+      return false;
+
+    PregnancyCanonicalTable table;
+    const uintptr_t base =
+        gameBase + (uintptr_t)offset - 0x10;
+
+    if (!TryReadDirectPregnancyTableAt(base, &table))
+      return false;
+
+    g_childRearingOffset = offset;
+    *out = table;
+    return true;
+  };
+
+  if (g_childRearingOffset != 0 &&
+      tryOffset(g_childRearingOffset)) {
+    return true;
+  }
+
+  // 구 트레이너의 알려진 값. 반드시 현재 배우자/슬롯 구조 검증을 통과할 때만 사용합니다.
+  constexpr uint32_t kLegacyChildOffset = 0x5B30;
+  if (g_childRearingOffset != kLegacyChildOffset &&
+      tryOffset(kLegacyChildOffset)) {
+    AddLog(
+        u8"[임신슬롯] 동적 AOB 대신 검증된 legacy g0_ChildOffset 사용: 0x%X",
+        kLegacyChildOffset);
+    return true;
+  }
+
+  return false;
+}
+
+static bool RefreshPregnancyTableDirect() {
+  PregnancyCanonicalTable table;
+  if (!ResolvePregnancyTableDirect(&table)) {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    g_pregnancyCanonicalTable.valid = false;
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    g_pregnancyCanonicalTable = table;
+  }
+
+  AddLog(
+      u8"[임신슬롯] 직접 경로 갱신 성공: base=%p / stride=0x28 / IDs=%u,%u,%u",
+      (void*)table.base,
+      table.spouseIds[0],
+      table.spouseIds[1],
+      table.spouseIds[2]);
   return true;
 }
 
@@ -1248,9 +1485,19 @@ static bool RefreshCanonicalPregnancyTableCached() {
     const uintptr_t slotAddr =
         refreshed.base + (uintptr_t)slot * 0x28;
 
-    if (!ReadPregnancyDebugRecord(slotAddr, &d) ||
-        d.q00OfficerId == 0 ||
-        d.q00OfficerId != refreshed.spouseIds[(size_t)slot]) {
+    if (!ReadPregnancyDebugRecord(slotAddr, &d)) {
+      g_pregnancyCanonicalTable.valid = false;
+      return false;
+    }
+
+    const uint16_t expectedId =
+        refreshed.spouseIds[(size_t)slot];
+    if (expectedId != 0) {
+      if (d.q00OfficerId != expectedId) {
+        g_pregnancyCanonicalTable.valid = false;
+        return false;
+      }
+    } else if (NormalizeOfficerPtr(d.q00) != 0) {
       g_pregnancyCanonicalTable.valid = false;
       return false;
     }
@@ -1518,8 +1765,23 @@ void RunChildManagerUpdate() {
 }
 
 void DrawChildManagerWindow(float scale) {
-  if (!bShowChildManagerWin)
+  static bool s_childManagerWasOpen = false;
+
+  if (!bShowChildManagerWin) {
+    s_childManagerWasOpen = false;
     return;
+  }
+
+  // 창을 여는 순간에만 배우자 목록과 임신 3슬롯을 즉시 갱신합니다.
+  // 전체 메모리 스캔은 사용하지 않습니다.
+  if (!s_childManagerWasOpen) {
+    s_childManagerWasOpen = true;
+    RefreshCurrentPregnancySpousesFast();
+    if (!RefreshPregnancyTableDirect()) {
+      AddLog(
+          u8"[임신슬롯] 직접 경로 갱신 실패 - 전체 메모리 검색은 실행하지 않음");
+    }
+  }
 
   RunChildManagerUpdate();
 
@@ -1914,33 +2176,9 @@ void DrawChildManagerWindow(float scale) {
         (void*)pregnancy.base);
   } else {
     ImGui::TextDisabled(
-        u8"임신 슬롯 주소를 아직 찾지 못했습니다. 아래 검색을 한 번 실행하세요.");
+        u8"임신 3슬롯 직접 경로를 확인하지 못했습니다. 창을 닫았다가 다시 열면 다시 확인합니다.");
   }
 
-  if (g_pregnancySpouseScanning.load()) {
-    ImGui::TextUnformatted(u8"임신 슬롯 검색 중...");
-    ImGui::ProgressBar(
-        g_pregnancySpouseProgress.load(),
-        ImVec2(220.0f * scale, 0));
-  } else {
-    if (ImGui::Button(
-            u8"임신 슬롯 검색",
-            ImVec2(130.0f * scale, 0))) {
-      StartPregnancySpouseDebugScanAsync();
-    }
-    if (ImGui::IsItemHovered()) {
-      ImGui::BeginTooltip();
-      ImGui::TextUnformatted(
-          u8"현재 배우자 포인터를 기준으로 게임 기본 3개 임신 슬롯을 찾습니다.");
-      ImGui::TextUnformatted(
-          u8"한 번 찾으면 현재 세션에서는 해당 3슬롯을 직접 다시 읽습니다.");
-      ImGui::TextUnformatted(
-          u8"현재 단계는 읽기 전용이며 메모리는 수정하지 않습니다.");
-      ImGui::EndTooltip();
-    }
-  }
-
-  ImGui::SameLine();
 
   if (g_pregnancyDebugScanning.load()) {
     ImGui::TextUnformatted(u8"출산 후 구조 확인 중...");
