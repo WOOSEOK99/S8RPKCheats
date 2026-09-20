@@ -4838,9 +4838,9 @@ namespace DX11Base {
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::TextColored(ImVec4(0.45f, 0.85f, 1.0f, 1.f),
-                         u8"[ 군단 자동배치 추천 ]");
+                         u8"[ 군단 자동배치 ]");
       ImGui::SameLine(0.f, 12.f * sc);
-      ImGui::TextDisabled(u8"계획 / 단계 적용");
+      ImGui::TextDisabled(u8"자동 설정 / 수동 추천");
 
       if (ImGui::Checkbox(
               u8"매 평정 자동 배치 사용##CorpsAutoEachCouncil",
@@ -4861,7 +4861,8 @@ namespace DX11Base {
       ImGui::TextDisabled(
           u8"※ 세이브마다 군단 생성/해체 상태가 달라질 수 있어 게임 시작 후 직접 선택해야 합니다.");
 
-      ImGui::TextUnformatted(u8"같은 도시 관계");
+      ImGui::TextUnformatted(
+          u8"자동 배치 시 체크한 관계의 무장들은 항상 같은 도시에 머뭅니다.");
       ImGui::SameLine(0.f, 8.f * sc);
 
       bool relationshipOptionChanged = false;
@@ -4889,7 +4890,7 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(
-            u8"체크한 관계만 자동배치에서 같은 도시 그룹으로 묶습니다.");
+            u8"체크한 관계의 무장들은 자동 배치 시 같은 도시 그룹으로 묶습니다.");
         ImGui::TextUnformatted(
             u8"예: 배우자만 체크하면 배우자 관계만 같이 이동하고 의형제/상생은 일반 장수처럼 따로 배치됩니다.");
         ImGui::TextUnformatted(
@@ -4968,73 +4969,89 @@ namespace DX11Base {
       }
 
       ImGui::TextDisabled(
-          u8"군단이 해체되면 자동 대상에서 제거됩니다. 새 군단은 목록에 나타나며 필요하면 직접 체크하세요.");
+          u8"군단 해체 시 자동 대상에서 제외되며, 새 군단은 목록에서 직접 체크하면 됩니다.");
       ImGui::TextDisabled(
-          u8"다른 세이브를 불러오거나 게임 컨텍스트가 바뀌면 오적용 방지를 위해 자동 설정/대상을 모두 초기화합니다.");
+          u8"다른 세이브나 게임 컨텍스트로 바뀌면 오적용 방지를 위해 자동 설정과 대상이 초기화됩니다.");
 
-      const bool canBuild = s_officerSelectedCorpsPtr > 0x10000;
+      // ── 수동 추천 / 적용 ───────────────────────────────────────────────
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::TextColored(
+          ImVec4(0.85f, 0.85f, 0.85f, 1.f),
+          u8"[ 수동 추천 / 적용 ]");
+      ImGui::SameLine(0.f, 10.f * sc);
+      ImGui::TextDisabled(
+          u8"현재 선택한 군단을 기준으로 즉시 계산하며 위 자동 배치 설정과는 별개입니다.");
+
+      const bool canBuild =
+          s_officerSelectedCorpsPtr > 0x10000;
+      const bool hasTargetBaseline =
+          s_corpsDeploymentTargetCorpsPtr ==
+              s_officerSelectedCorpsPtr &&
+          !s_corpsDeploymentTargetBaseline.empty();
+      const bool recommendationReady =
+          s_corpsDeploymentValid &&
+          s_corpsDeploymentCorpsPtr ==
+              s_officerSelectedCorpsPtr;
+
+      int movableNormal = 0;
+      int movableAdviser = 0;
+      int deferredGovernorChanges = 0;
+      int pendingGovernorChanges = 0;
+
+      if (recommendationReady) {
+        for (const auto &rec :
+             s_corpsDeploymentOfficers) {
+          if (rec.currentCityIndex ==
+              rec.recommendedCityIndex)
+            continue;
+          if (rec.status == 0x28)
+            ++movableNormal;
+          else if (rec.status == 0x18)
+            ++movableAdviser;
+        }
+
+        pendingGovernorChanges =
+            CountPendingDeploymentGovernorChanges(
+                shiftedCityBase,
+                &deferredGovernorChanges);
+      }
+
+      const bool hasMovable =
+          movableNormal > 0 || movableAdviser > 0;
+      const bool canApplyDeployment =
+          recommendationReady &&
+          (hasMovable || pendingGovernorChanges > 0);
+
       if (!canBuild)
         ImGui::BeginDisabled();
-      if (ImGui::Button(u8"추천 계산##CorpsDeploymentBuild",
-                        ImVec2(120.f * sc, 0.f))) {
+      if (ImGui::Button(
+              u8"추천 계산##CorpsDeploymentBuild",
+              ImVec2(120.f * sc, 0.f))) {
         ResetCorpsDeploymentTargetBaseline();
-        BuildCorpsDeploymentRecommendation(shiftedCityBase);
+        BuildCorpsDeploymentRecommendation(
+            shiftedCityBase);
       }
       if (!canBuild)
         ImGui::EndDisabled();
 
       ImGui::SameLine(0.f, 6.f * sc);
-      const bool hasTargetBaseline =
-          s_corpsDeploymentTargetCorpsPtr == s_officerSelectedCorpsPtr &&
-          !s_corpsDeploymentTargetBaseline.empty();
       if (!hasTargetBaseline)
         ImGui::BeginDisabled();
-      if (ImGui::SmallButton(u8"현재 계획 취소##CorpsDeploymentReset")) {
+      if (ImGui::Button(
+              u8"현재 계획 취소##CorpsDeploymentReset",
+              ImVec2(120.f * sc, 0.f))) {
         ResetCorpsDeploymentTargetBaseline();
       }
       if (!hasTargetBaseline)
         ImGui::EndDisabled();
 
-      ImGui::SameLine(0.f, 12.f * sc);
-      ImGui::TextDisabled(
-          u8"태수=충성100 필수 | 충성<90 후방 고정 | 군사 전선 우선 | 체크한 관계만 같은 도시(통솔/무력 우선)");
-      if (hasTargetBaseline) {
-        ImGui::SameLine(0.f, 8.f * sc);
-        ImGui::TextDisabled(u8"| 이번 평정 계획 고정");
-      }
-
-      if (!s_corpsDeploymentValid ||
-          s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
-        ImGui::TextDisabled(
-            u8"군단 도시를 선택한 뒤 '추천 계산'을 눌러주세요.");
-        return;
-      }
-
-      int movableNormal = 0;
-      int movableAdviser = 0;
-      for (const auto &rec : s_corpsDeploymentOfficers) {
-        if (rec.currentCityIndex == rec.recommendedCityIndex)
-          continue;
-        if (rec.status == 0x28)
-          ++movableNormal;
-        else if (rec.status == 0x18)
-          ++movableAdviser;
-      }
-
-      const bool hasMovable =
-          movableNormal > 0 || movableAdviser > 0;
-      int deferredGovernorChanges = 0;
-      const int pendingGovernorChanges =
-          CountPendingDeploymentGovernorChanges(
-              shiftedCityBase, &deferredGovernorChanges);
-      const bool canApplyDeployment =
-          hasMovable || pendingGovernorChanges > 0;
-
-      ImGui::SameLine(0.f, 12.f * sc);
+      ImGui::SameLine(0.f, 6.f * sc);
       if (!canApplyDeployment)
         ImGui::BeginDisabled();
-      if (ImGui::Button(u8"배치 적용##CorpsDeploymentApply",
-                        ImVec2(120.f * sc, 0.f))) {
+      if (ImGui::Button(
+              u8"배치 적용##CorpsDeploymentApply",
+              ImVec2(120.f * sc, 0.f))) {
         bool applied = true;
 
         // 내부 안전 절차는 유지한다.
@@ -5048,7 +5065,8 @@ namespace DX11Base {
           int deferredAfterMove = 0;
           const int pendingAfterMove =
               CountPendingDeploymentGovernorChanges(
-                  shiftedCityBase, &deferredAfterMove);
+                  shiftedCityBase,
+                  &deferredAfterMove);
           if (pendingAfterMove > 0)
             ApplyCorpsDeploymentGovernorStage(
                 p1, shiftedCityBase);
@@ -5056,13 +5074,6 @@ namespace DX11Base {
       }
       if (!canApplyDeployment)
         ImGui::EndDisabled();
-
-      ImGui::SameLine(0.f, 8.f * sc);
-      ImGui::TextDisabled(
-          u8"일반 %d / 군사 %d 이동 · 태수 변경 %d / 보류 %d 도시",
-          movableNormal, movableAdviser,
-          pendingGovernorChanges,
-          deferredGovernorChanges);
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
@@ -5076,6 +5087,27 @@ namespace DX11Base {
             u8"안전한 최초 태수 후보가 없는 빈 도시와 특수 책임자 상태는 기존 규칙대로 보류합니다.");
         ImGui::EndTooltip();
       }
+
+      // 버튼과 분리해서 한 줄 아래에 추천 규칙/현재 계획 상태를 표시한다.
+      ImGui::TextDisabled(
+          u8"추천 기준: 태수는 충성 100 필수 · 충성 90 미만은 후방 고정 · 군사는 전선 우선 · 체크한 관계는 같은 도시");
+      if (hasTargetBaseline) {
+        ImGui::SameLine(0.f, 8.f * sc);
+        ImGui::TextDisabled(
+            u8"| 이번 평정 계획 고정");
+      }
+
+      if (!recommendationReady) {
+        ImGui::TextDisabled(
+            u8"군단 도시를 선택한 뒤 '추천 계산'을 눌러주세요.");
+        return;
+      }
+
+      ImGui::TextDisabled(
+          u8"적용 예정: 일반 %d / 군사 %d 이동 · 태수 변경 %d / 보류 %d 도시",
+          movableNormal, movableAdviser,
+          pendingGovernorChanges,
+          deferredGovernorChanges);
 
       static ImGuiTableFlags deployFlags =
           ImGuiTableFlags_BordersInner |

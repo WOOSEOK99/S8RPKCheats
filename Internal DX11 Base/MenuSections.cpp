@@ -714,7 +714,7 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1, 1, 0, 1),
                              u8"배우자가 있어도 무조건 결혼이 됩니다.");
           ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 공명 4개 + 경애 상태에서만 무제한 결혼이 가능합니다.");
+                             u8"※ 상대가 경애 상태일 때 기존 배우자 제한을 우회합니다.");
           ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                              u8"※ 대신 타 세력의 경우 등용은 안되네요.");
           ImGui::EndTooltip();
