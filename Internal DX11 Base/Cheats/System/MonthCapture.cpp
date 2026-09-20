@@ -12,6 +12,9 @@ namespace DX11Base {
         // 게임 모듈 내 인스턴스 포인터(고정) → 실제 데이터 블록
         constexpr uintptr_t kScenarioInstanceStaticOffset = 0x2E98BC8;
         constexpr uintptr_t kScenarioYearOffset = 0x72D0;
+        // 옛 CT의 "연회 = 현재년도 - 0x1C, bit 1" 관계를 현재 구조에 대입한
+        // 읽기 전용 진단 후보입니다. 실제 연회 필드로 확정된 값은 아닙니다.
+        constexpr uintptr_t kBanquetFlagCandidateOffset = kScenarioYearOffset - 0x1C; // 0x72B4
         // 월 후킹 패턴 mov [rsi+0x72D2], al 과 동일 오프셋
         constexpr uintptr_t kScenarioMonthOffset = 0x72D2;
 
@@ -36,6 +39,35 @@ namespace DX11Base {
 
     uintptr_t GetScenarioDataCenterAddress() {
         return ResolveScenarioDataCenter();
+    }
+
+    bool LogBanquetFlagCandidate() {
+        uintptr_t dataCenter = ResolveScenarioDataCenter();
+        if (!dataCenter) {
+            AddLog(u8"[연회DBG] 시나리오 데이터 베이스를 찾지 못했습니다.");
+            return false;
+        }
+
+        const uintptr_t candidateAddr = dataCenter + kBanquetFlagCandidateOffset;
+        if (!IsValidPtr(candidateAddr, sizeof(uint32_t))) {
+            AddLog(u8"[연회DBG] 후보 주소가 유효하지 않습니다. base=%p offset=+0x%llX addr=%p",
+                   (void*)dataCenter,
+                   (unsigned long long)kBanquetFlagCandidateOffset,
+                   (void*)candidateAddr);
+            return false;
+        }
+
+        const uint32_t raw = *(const uint32_t*)candidateAddr;
+        const unsigned int banquetBit = (raw & 0x02u) ? 1u : 0u;
+
+        AddLog(u8"[연회DBG] base=%p year=+0x%llX candidate=+0x%llX addr=%p raw=0x%08X bit1=%u",
+               (void*)dataCenter,
+               (unsigned long long)kScenarioYearOffset,
+               (unsigned long long)kBanquetFlagCandidateOffset,
+               (void*)candidateAddr,
+               raw,
+               banquetBit);
+        return true;
     }
 
     void UpdateYear(unsigned short targetYear) {
