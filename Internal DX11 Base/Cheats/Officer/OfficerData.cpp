@@ -3,6 +3,7 @@
 #include "../System/MonthCapture.h"
 #include "../../Cheats.h"
 #include "../../MemoryUtils.h"
+#include "../../showlog.h"
 #include "pch.h"
 #include <filesystem>
 #include <fstream>
@@ -351,46 +352,107 @@ namespace DX11Base {
 
             const uintptr_t moduleBase =
                 (uintptr_t)GetModuleHandle(nullptr);
-            if (!moduleBase)
+            if (!moduleBase) {
+                AddLog(u8"[친밀쓰기DBG] 모듈 베이스 확인 실패");
                 return false;
+            }
 
             MODULEINFO mi{};
             if (!GetModuleInformation(
                     GetCurrentProcess(),
                     (HMODULE)moduleBase,
-                    &mi, sizeof(mi)))
+                    &mi, sizeof(mi))) {
+                AddLog(u8"[친밀쓰기DBG] 모듈 범위 확인 실패");
                 return false;
+            }
 
             const uintptr_t moduleEnd =
                 moduleBase + mi.SizeOfImage;
 
-            // 현재 SAN8RPK.CT ID 300의 최종 친밀도 저장 경로:
-            // 0F B6 C8 / 41 3A CE / 41 0F 47 CE /
-            // 42 88 8C 0A C0 6A 00 00
-            // 앞 10바이트까지 포함해 찾은 뒤 마지막 8바이트 write만 후킹한다.
-            const uintptr_t pattern =
+            // 현재 SAN8RPK.CT ID 300이 실제로 사용하는 AOB를 기준점으로 잡는다.
+            // CT 하단의 디스어셈블리 주석은 빌드에 따라 달라질 수 있으므로
+            // 전체 주변 바이트를 고정 패턴으로 사용하지 않는다.
+            const uintptr_t ct300Anchor =
                 FindPattern(
                     moduleBase, moduleEnd,
-                    "0F B6 C8 41 3A CE 41 0F 47 CE 42 88 8C 0A C0 6A 00 00");
-            if (!pattern)
-                return false;
+                    "41 03 C0 41 3B C6 41");
 
-            const uintptr_t hookAddr =
-                pattern + 10;
-            static const uint8_t kExpectedOriginal[8] = {
-                0x42, 0x88, 0x8C, 0x0A,
-                0xC0, 0x6A, 0x00, 0x00
+            uintptr_t hookAddr = 0;
+            uint32_t affinityWriteDisp = 0;
+
+            // ID300 기준점에서 가까운 범위의
+            // mov [rdx+r9+disp32],cl (42 88 8C 0A xx xx xx xx)를 찾는다.
+            if (ct300Anchor) {
+                const uintptr_t localEnd =
+                    (std::min)(
+                        moduleEnd,
+                        ct300Anchor + (uintptr_t)0x100);
+                for (uintptr_t p = ct300Anchor;
+                     p + 8 <= localEnd; ++p) {
+                    const uint8_t* code =
+                        (const uint8_t*)p;
+                    if (code[0] == 0x42 &&
+                        code[1] == 0x88 &&
+                        code[2] == 0x8C &&
+                        code[3] == 0x0A) {
+                        hookAddr = p;
+                        memcpy(
+                            &affinityWriteDisp,
+                            code + 4,
+                            sizeof(affinityWriteDisp));
+                        break;
+                    }
+                }
+            }
+
+            // CT ID300이 외부에서 이미 활성화되어 기준 AOB가 JMP로 바뀐 경우나
+            // 함수 주변 명령 배치가 달라진 경우를 위한 폴백.
+            if (!hookAddr) {
+                const uintptr_t fallback =
+                    FindPattern(
+                        moduleBase, moduleEnd,
+                        "42 88 8C 0A ? ? ? ?");
+                if (fallback) {
+                    hookAddr = fallback;
+                    memcpy(
+                        &affinityWriteDisp,
+                        (const void*)(fallback + 4),
+                        sizeof(affinityWriteDisp));
+                }
+            }
+
+            if (!hookAddr) {
+                AddLog(
+                    u8"[친밀쓰기DBG] 현재 CT ID300 친밀 저장 명령을 찾지 못했습니다. anchor=%s",
+                    ct300Anchor ? "FOUND" : "NOT_FOUND");
+                return false;
+            }
+
+            static const uint8_t kWritePrefix[4] = {
+                0x42, 0x88, 0x8C, 0x0A
             };
             if (memcmp(
                     (const void*)hookAddr,
-                    kExpectedOriginal,
-                    sizeof(kExpectedOriginal)) != 0)
+                    kWritePrefix,
+                    sizeof(kWritePrefix)) != 0) {
+                AddLog(
+                    u8"[친밀쓰기DBG] 저장 명령 검증 실패: hook=0x%llX",
+                    (unsigned long long)hookAddr);
                 return false;
+            }
+
+            AddLog(
+                u8"[친밀쓰기DBG] CT300 저장 명령 확인: anchor=0x%llX / hook=0x%llX / disp=0x%X",
+                (unsigned long long)ct300Anchor,
+                (unsigned long long)hookAddr,
+                (unsigned int)affinityWriteDisp);
 
             g_affinityWriteCaveAddr =
                 AllocNear(hookAddr, 256);
-            if (!g_affinityWriteCaveAddr)
+            if (!g_affinityWriteCaveAddr) {
+                AddLog(u8"[친밀쓰기DBG] 저장 명령 cave 할당 실패");
                 return false;
+            }
 
             memcpy(
                 g_affinityWriteOriginal,
@@ -407,12 +469,13 @@ namespace DX11Base {
             cave[cur++] = 0x50;                         // push rax
             cave[cur++] = 0x41; cave[cur++] = 0x53;   // push r11
 
-            // lea rax,[rdx+r9+00006AC0]
+            // lea rax,[rdx+r9+disp32]
             cave[cur++] = 0x4A;
             cave[cur++] = 0x8D;
             cave[cur++] = 0x84;
             cave[cur++] = 0x0A;
-            *(uint32_t*)&cave[cur] = 0x00006AC0;
+            *(uint32_t*)&cave[cur] =
+                affinityWriteDisp;
             cur += 4;
 
             // r11 = &g_affinityExpectedWriteAddr
@@ -431,15 +494,6 @@ namespace DX11Base {
             cave[cur++] = 0x0F;
             cave[cur++] = 0x85;
             const int jneSkipPos = cur;
-            cur += 4;
-
-            // expected==0이면 비무장 상태이므로 캡처하지 않는다.
-            cave[cur++] = 0x48;
-            cave[cur++] = 0x85;
-            cave[cur++] = 0xC0; // test rax,rax
-            cave[cur++] = 0x0F;
-            cave[cur++] = 0x84;
-            const int jeSkipPos = cur;
             cur += 4;
 
             // capturedAddress = rax
@@ -485,16 +539,12 @@ namespace DX11Base {
                 (int32_t)(
                     skipCapture -
                     (jneSkipPos + 4));
-            *(int32_t*)&cave[jeSkipPos] =
-                (int32_t)(
-                    skipCapture -
-                    (jeSkipPos + 4));
 
             cave[cur++] = 0x41; cave[cur++] = 0x5B;   // pop r11
             cave[cur++] = 0x58;                         // pop rax
             cave[cur++] = 0x9D;                         // popfq
 
-            // 원본: mov [rdx+r9+00006AC0],cl
+            // 원본 mov [rdx+r9+disp32],cl 8바이트를 그대로 실행한다.
             memcpy(
                 &cave[cur],
                 g_affinityWriteOriginal,
@@ -515,6 +565,9 @@ namespace DX11Base {
                     hookAddr,
                     g_affinityWriteCaveAddr,
                     sizeof(g_affinityWriteOriginal))) {
+                AddLog(
+                    u8"[친밀쓰기DBG] 저장 명령 후킹 설치 실패: hook=0x%llX",
+                    (unsigned long long)hookAddr);
                 VirtualFree(
                     (LPVOID)g_affinityWriteCaveAddr,
                     0, MEM_RELEASE);
@@ -527,6 +580,9 @@ namespace DX11Base {
 
             g_affinityWriteHookAddr = hookAddr;
             g_affinityWriteHookInstalled = true;
+            AddLog(
+                u8"[친밀쓰기DBG] 저장 명령 후킹 설치 완료: hook=0x%llX",
+                (unsigned long long)hookAddr);
             return true;
         }
 
