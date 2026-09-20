@@ -39,6 +39,7 @@
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
+#include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"
 #include "Framework/imgui.h"
@@ -869,6 +870,42 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
                            u8"매 분기 평정 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
+        ImGui::EndTooltip();
+      }
+
+      if (ImGui::Checkbox(u8"단기접전 쿨타임 적용", &bShortBattleCooldownEnabled)) {
+        const bool requested = bShortBattleCooldownEnabled;
+        if (!DX11Base::SetShortBattleCooldown(requested, iShortBattleCooldownDays))
+          bShortBattleCooldownEnabled = DX11Base::IsShortBattleCooldownApplied();
+        NotifyFeatureToggle(u8"단기접전 쿨타임 적용", bShortBattleCooldownEnabled);
+        SaveConfig();
+      }
+      const bool shortCooldownHovered = ImGui::IsItemHovered();
+
+      ImGui::SameLine(210.0f * scale);
+      ImGui::SetNextItemWidth(55.0f * scale);
+      const int previousShortCooldownDays = iShortBattleCooldownDays;
+      if (ImGui::InputInt("##ShortBattleCooldownDays", &iShortBattleCooldownDays, 0, 0,
+                          ImGuiInputTextFlags_CharsDecimal)) {
+        if (bShortBattleCooldownEnabled &&
+            !DX11Base::SetShortBattleCooldown(true, iShortBattleCooldownDays)) {
+          iShortBattleCooldownDays = previousShortCooldownDays;
+        }
+        SaveConfig();
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled(u8"기본값 : 10");
+
+      if (shortCooldownHovered) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"단기접전(일기토)이 다시 발생하기까지의 대기 날짜를 설정합니다.");
+        ImGui::TextUnformatted(u8"- 예: 3으로 설정하면 단기접전 발생 후 3일 동안은 다시 단기접전이 발생하지 않습니다.");
+        ImGui::TextUnformatted(u8"- 장수별 개별 대기시간이 아니라 전쟁에 출전한 부대 전체에 공통으로 적용됩니다.");
+        ImGui::TextUnformatted(u8"- 기본값은 10일입니다.");
+        ImGui::TextUnformatted(u8"- 체크 상태와 적용값은 설정 파일에 저장되어 다음 실행 시 다시 불러옵니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 체크 해제 시 활성화 전에 읽어둔 원래 값으로 복구합니다.");
         ImGui::EndTooltip();
       }
 

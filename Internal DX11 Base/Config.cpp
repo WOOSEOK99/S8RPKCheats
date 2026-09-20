@@ -6,6 +6,7 @@
 
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Civilian/JewelSettings.h"
+#include "Cheats/War/ShortBattleCooldown.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -64,9 +65,76 @@ namespace DX11Base {
     return false;
   }
 
+  static void UpsertIntConfigValue(const char *name, int value) {
+    std::ifstream in(GetConfigPath(), std::ios::binary);
+    if (!in.is_open())
+      return;
+
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    in.close();
+    std::string data = ss.str();
+
+    const std::string key = std::string("\"") + name + "\"";
+    size_t existing = data.find(key);
+    if (existing != std::string::npos) {
+      size_t lineStart = data.rfind('\n', existing);
+      lineStart = (lineStart == std::string::npos) ? 0 : lineStart + 1;
+      size_t lineEnd = data.find('\n', existing);
+      if (lineEnd == std::string::npos)
+        lineEnd = data.size();
+      else
+        ++lineEnd;
+      data.erase(lineStart, lineEnd - lineStart);
+    }
+
+    const size_t configEnd = data.find("\"config_end\"");
+    if (configEnd == std::string::npos)
+      return;
+
+    size_t insertPos = data.rfind('\n', configEnd);
+    insertPos = (insertPos == std::string::npos) ? configEnd : insertPos + 1;
+
+    const std::string line =
+        std::string("  \"") + name + "\": " + std::to_string(value) + ",\n";
+    data.insert(insertPos, line);
+
+    std::ofstream out(GetConfigPath(), std::ios::binary | std::ios::trunc);
+    if (!out.is_open())
+      return;
+    out << data;
+  }
+
+  static bool LoadIntConfigValue(const char *name, int &value) {
+    std::ifstream file(GetConfigPath());
+    if (!file.is_open())
+      return false;
+
+    const std::string key = std::string("\"") + name + "\"";
+    std::string line;
+    while (std::getline(file, line)) {
+      if (line.find(key) == std::string::npos)
+        continue;
+
+      const size_t colonPos = line.find(':');
+      if (colonPos == std::string::npos)
+        return false;
+
+      try {
+        value = std::stoi(line.substr(colonPos + 1));
+        return true;
+      } catch (...) {
+        return false;
+      }
+    }
+    return false;
+  }
+
   void SaveConfig() {
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
+    UpsertBoolConfigValue("bShortBattleCooldownEnabled", bShortBattleCooldownEnabled);
+    UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
     UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
@@ -80,6 +148,21 @@ namespace DX11Base {
       bAIWarImprove = savedAIWarImprove;
       SetAIWarImprove(savedAIWarImprove);
       AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
+    }
+
+    int savedShortBattleCooldownDays = 3;
+    if (LoadIntConfigValue("iShortBattleCooldownDays", savedShortBattleCooldownDays))
+      iShortBattleCooldownDays = savedShortBattleCooldownDays;
+
+    bool savedShortBattleCooldownEnabled = false;
+    if (LoadBoolConfigValue("bShortBattleCooldownEnabled", savedShortBattleCooldownEnabled)) {
+      bShortBattleCooldownEnabled = savedShortBattleCooldownEnabled;
+      if (!SetShortBattleCooldown(savedShortBattleCooldownEnabled, iShortBattleCooldownDays))
+        bShortBattleCooldownEnabled = IsShortBattleCooldownApplied();
+
+      AddLog(u8"[Config] 단기접전 쿨타임 설정 로드: %s / %d일",
+             bShortBattleCooldownEnabled ? "ON" : "OFF",
+             iShortBattleCooldownDays);
     }
 
     // 이전 설정 파일에 키가 없으면 기본값(true)으로 실제 패치까지 적용합니다.
