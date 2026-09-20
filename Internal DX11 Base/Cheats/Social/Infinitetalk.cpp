@@ -1,6 +1,7 @@
 #include "../../pch.h"
 #include "Infinitetalk.h"
 #include "../../Cheats.h"
+#include "../../MemoryUtils.h"
 #include "../../showlog.h"
 
 #include <psapi.h>
