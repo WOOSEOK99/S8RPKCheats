@@ -2,6 +2,7 @@
 #include "OfficerRosterResolve.h"
 #include "../System/MonthCapture.h"
 #include "../../Cheats.h"
+#include "../../MemoryUtils.h"
 #include "pch.h"
 #include <filesystem>
 #include <fstream>
@@ -324,6 +325,211 @@ namespace DX11Base {
         constexpr uintptr_t kCurrentAffinityBaseOffset = 0x24206;
         constexpr int kAffinityOfficerCount = 1650;
 
+        static uintptr_t g_affinityWriteHookAddr = 0;
+        static uintptr_t g_affinityWriteCaveAddr = 0;
+        static uint8_t g_affinityWriteOriginal[8] = {};
+        static bool g_affinityWriteHookInstalled = false;
+        static volatile uintptr_t g_affinityExpectedWriteAddr = 0;
+        static volatile uintptr_t g_affinityCapturedWriteAddr = 0;
+        static volatile uint8_t g_affinityCapturedWriteValue = 0;
+        static volatile uint8_t g_affinityWriteCaptured = 0;
+
+        void EmitAffinityAbsoluteReturn(
+            uint8_t* cave, int& cur,
+            uintptr_t returnAddr) {
+            cave[cur++] = 0xFF;
+            cave[cur++] = 0x25;
+            *(uint32_t*)&cave[cur] = 0;
+            cur += 4;
+            *(uintptr_t*)&cave[cur] = returnAddr;
+            cur += 8;
+        }
+
+        bool InstallAffinityWriteProbeHook() {
+            if (g_affinityWriteHookInstalled)
+                return true;
+
+            const uintptr_t moduleBase =
+                (uintptr_t)GetModuleHandle(nullptr);
+            if (!moduleBase)
+                return false;
+
+            MODULEINFO mi{};
+            if (!GetModuleInformation(
+                    GetCurrentProcess(),
+                    (HMODULE)moduleBase,
+                    &mi, sizeof(mi)))
+                return false;
+
+            const uintptr_t moduleEnd =
+                moduleBase + mi.SizeOfImage;
+
+            // 현재 SAN8RPK.CT ID 300의 최종 친밀도 저장 경로:
+            // 0F B6 C8 / 41 3A CE / 41 0F 47 CE /
+            // 42 88 8C 0A C0 6A 00 00
+            // 앞 10바이트까지 포함해 찾은 뒤 마지막 8바이트 write만 후킹한다.
+            const uintptr_t pattern =
+                FindPattern(
+                    moduleBase, moduleEnd,
+                    "0F B6 C8 41 3A CE 41 0F 47 CE 42 88 8C 0A C0 6A 00 00");
+            if (!pattern)
+                return false;
+
+            const uintptr_t hookAddr =
+                pattern + 10;
+            static const uint8_t kExpectedOriginal[8] = {
+                0x42, 0x88, 0x8C, 0x0A,
+                0xC0, 0x6A, 0x00, 0x00
+            };
+            if (memcmp(
+                    (const void*)hookAddr,
+                    kExpectedOriginal,
+                    sizeof(kExpectedOriginal)) != 0)
+                return false;
+
+            g_affinityWriteCaveAddr =
+                AllocNear(hookAddr, 256);
+            if (!g_affinityWriteCaveAddr)
+                return false;
+
+            memcpy(
+                g_affinityWriteOriginal,
+                (const void*)hookAddr,
+                sizeof(g_affinityWriteOriginal));
+
+            uint8_t* cave =
+                (uint8_t*)g_affinityWriteCaveAddr;
+            int cur = 0;
+
+            // 원본 mov는 flags를 건드리지 않으므로 비교용 flags와
+            // 임시 레지스터를 모두 보존한다.
+            cave[cur++] = 0x9C;                         // pushfq
+            cave[cur++] = 0x50;                         // push rax
+            cave[cur++] = 0x41; cave[cur++] = 0x53;   // push r11
+
+            // lea rax,[rdx+r9+00006AC0]
+            cave[cur++] = 0x4A;
+            cave[cur++] = 0x8D;
+            cave[cur++] = 0x84;
+            cave[cur++] = 0x0A;
+            *(uint32_t*)&cave[cur] = 0x00006AC0;
+            cur += 4;
+
+            // r11 = &g_affinityExpectedWriteAddr
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xBB;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityExpectedWriteAddr;
+            cur += 8;
+
+            // cmp rax,[r11]
+            cave[cur++] = 0x49;
+            cave[cur++] = 0x3B;
+            cave[cur++] = 0x03;
+
+            // jne skipCapture
+            cave[cur++] = 0x0F;
+            cave[cur++] = 0x85;
+            const int jneSkipPos = cur;
+            cur += 4;
+
+            // expected==0이면 비무장 상태이므로 캡처하지 않는다.
+            cave[cur++] = 0x48;
+            cave[cur++] = 0x85;
+            cave[cur++] = 0xC0; // test rax,rax
+            cave[cur++] = 0x0F;
+            cave[cur++] = 0x84;
+            const int jeSkipPos = cur;
+            cur += 4;
+
+            // capturedAddress = rax
+            cave[cur++] = 0x48;
+            cave[cur++] = 0xA3;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityCapturedWriteAddr;
+            cur += 8;
+
+            // capturedValue = cl
+            cave[cur++] = 0x8A;
+            cave[cur++] = 0xC1; // mov al,cl
+            cave[cur++] = 0xA2;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityCapturedWriteValue;
+            cur += 8;
+
+            // captured flag = 1
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xBB;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityWriteCaptured;
+            cur += 8;
+            cave[cur++] = 0x41;
+            cave[cur++] = 0xC6;
+            cave[cur++] = 0x03;
+            cave[cur++] = 0x01;
+
+            // 한 번 잡으면 자동 disarm.
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xBB;
+            *(uintptr_t*)&cave[cur] =
+                (uintptr_t)&g_affinityExpectedWriteAddr;
+            cur += 8;
+            cave[cur++] = 0x49;
+            cave[cur++] = 0xC7;
+            cave[cur++] = 0x03;
+            *(uint32_t*)&cave[cur] = 0;
+            cur += 4;
+
+            const int skipCapture = cur;
+            *(int32_t*)&cave[jneSkipPos] =
+                (int32_t)(
+                    skipCapture -
+                    (jneSkipPos + 4));
+            *(int32_t*)&cave[jeSkipPos] =
+                (int32_t)(
+                    skipCapture -
+                    (jeSkipPos + 4));
+
+            cave[cur++] = 0x41; cave[cur++] = 0x5B;   // pop r11
+            cave[cur++] = 0x58;                         // pop rax
+            cave[cur++] = 0x9D;                         // popfq
+
+            // 원본: mov [rdx+r9+00006AC0],cl
+            memcpy(
+                &cave[cur],
+                g_affinityWriteOriginal,
+                sizeof(g_affinityWriteOriginal));
+            cur += (int)sizeof(g_affinityWriteOriginal);
+
+            EmitAffinityAbsoluteReturn(
+                cave, cur,
+                hookAddr +
+                    sizeof(g_affinityWriteOriginal));
+
+            FlushInstructionCache(
+                GetCurrentProcess(),
+                (LPCVOID)g_affinityWriteCaveAddr,
+                cur);
+
+            if (!ApplyJmp(
+                    hookAddr,
+                    g_affinityWriteCaveAddr,
+                    sizeof(g_affinityWriteOriginal))) {
+                VirtualFree(
+                    (LPVOID)g_affinityWriteCaveAddr,
+                    0, MEM_RELEASE);
+                g_affinityWriteCaveAddr = 0;
+                memset(
+                    g_affinityWriteOriginal, 0,
+                    sizeof(g_affinityWriteOriginal));
+                return false;
+            }
+
+            g_affinityWriteHookAddr = hookAddr;
+            g_affinityWriteHookInstalled = true;
+            return true;
+        }
+
         int GetAffinityCompressedIndex(uint16_t id) {
             if (id >= 1 && id <= 1000)
                 return (int)id;
@@ -364,11 +570,15 @@ namespace DX11Base {
     } // namespace
 
 
-    bool GetOfficerAffinity(
+    bool GetOfficerAffinityAddress(
         uint16_t officerId1,
         uint16_t officerId2,
-        uint8_t& outAffinity) {
-        outAffinity = 0;
+        uintptr_t& outAddress,
+        uint8_t* outCurrentValue) {
+        outAddress = 0;
+        if (outCurrentValue)
+            *outCurrentValue = 0;
+
         if (officerId1 == 0 || officerId2 == 0 ||
             officerId1 == officerId2)
             return false;
@@ -387,19 +597,84 @@ namespace DX11Base {
         if (dataCenter <= 0x10000)
             return false;
 
+        const uintptr_t address =
+            dataCenter +
+            kCurrentAffinityBaseOffset +
+            pairOffset;
+
         uint8_t value = 0;
-        if (!SafeRelRead8(
-                dataCenter +
-                    kCurrentAffinityBaseOffset +
-                    pairOffset,
-                &value))
+        if (!SafeRelRead8(address, &value) ||
+            value > 100)
             return false;
 
-        if (value > 100)
-            return false;
-
-        outAffinity = value;
+        outAddress = address;
+        if (outCurrentValue)
+            *outCurrentValue = value;
         return true;
+    }
+
+    bool GetOfficerAffinity(
+        uint16_t officerId1,
+        uint16_t officerId2,
+        uint8_t& outAffinity) {
+        uintptr_t address = 0;
+        return GetOfficerAffinityAddress(
+            officerId1, officerId2,
+            address, &outAffinity);
+    }
+
+    bool ArmOfficerAffinityWriteProbe(
+        uint16_t officerId1,
+        uint16_t officerId2) {
+        uintptr_t expectedAddress = 0;
+        uint8_t currentValue = 0;
+        if (!GetOfficerAffinityAddress(
+                officerId1, officerId2,
+                expectedAddress, &currentValue))
+            return false;
+
+        if (!InstallAffinityWriteProbeHook())
+            return false;
+
+        g_affinityCapturedWriteAddr = 0;
+        g_affinityCapturedWriteValue = 0;
+        g_affinityWriteCaptured = 0;
+        g_affinityExpectedWriteAddr =
+            expectedAddress;
+
+        return true;
+    }
+
+    bool ConsumeOfficerAffinityWriteProbe(
+        uintptr_t& outExpectedAddress,
+        uintptr_t& outCapturedAddress,
+        uint8_t& outWrittenValue) {
+        outExpectedAddress =
+            g_affinityExpectedWriteAddr;
+        outCapturedAddress = 0;
+        outWrittenValue = 0;
+
+        if (!g_affinityWriteCaptured)
+            return false;
+
+        outCapturedAddress =
+            g_affinityCapturedWriteAddr;
+        outWrittenValue =
+            g_affinityCapturedWriteValue;
+
+        // 캡처 시 cave에서 expected는 0으로 자동 disarm되므로,
+        // 결과 반환 시에는 captured 주소를 expected로 사용한다.
+        outExpectedAddress =
+            g_affinityCapturedWriteAddr;
+        g_affinityWriteCaptured = 0;
+        return true;
+    }
+
+    void DisarmOfficerAffinityWriteProbe() {
+        g_affinityExpectedWriteAddr = 0;
+        g_affinityWriteCaptured = 0;
+        g_affinityCapturedWriteAddr = 0;
+        g_affinityCapturedWriteValue = 0;
     }
 
     bool GetOfficerRelationshipInfoBatch(
