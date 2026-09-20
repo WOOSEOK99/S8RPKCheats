@@ -34,6 +34,10 @@ namespace DX11Base {
         }
     } // namespace
 
+    uintptr_t GetScenarioDataCenterAddress() {
+        return ResolveScenarioDataCenter();
+    }
+
     void UpdateYear(unsigned short targetYear) {
         uintptr_t dataCenter = ResolveScenarioDataCenter();
         if (!dataCenter)
