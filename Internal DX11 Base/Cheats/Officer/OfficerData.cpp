@@ -321,21 +321,37 @@ namespace DX11Base {
         }
     } // namespace
 
-    bool GetOfficerRelationshipInfo(uintptr_t officerBase, OfficerRelationshipInfo& outInfo) {
-        outInfo = OfficerRelationshipInfo{};
+    bool GetOfficerRelationshipInfoBatch(
+        const std::vector<uintptr_t>& officerBases,
+        std::vector<OfficerRelationshipInfo>& outInfos) {
+        outInfos.assign(officerBases.size(), OfficerRelationshipInfo{});
 
-        if (officerBase <= 0x10000)
+        if (officerBases.empty())
             return false;
 
         const uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
         const uintptr_t gameBase = GetGameBase();
         uintptr_t rosterBase = 0;
-        uint16_t selectedId = 0;
         if (!exe || gameBase <= 0x10000 ||
             !TryResolveOfficerRosterArrayBase(exe, &rosterBase) ||
-            rosterBase <= 0x10000 ||
-            !SafeRelRead16(officerBase + 0x08, &selectedId) ||
-            selectedId < 1 || selectedId > 5102)
+            rosterBase <= 0x10000)
+            return false;
+
+        // 요청된 무장 ID -> 결과 인덱스. 관계 테이블은 한 번만 훑고,
+        // 슬롯에 요청 무장이 들어 있을 때 해당 결과에 바로 누적한다.
+        std::unordered_map<uint16_t, size_t> selectedById;
+        selectedById.reserve(officerBases.size());
+        for (size_t i = 0; i < officerBases.size(); ++i) {
+            const uintptr_t officerBase = officerBases[i];
+            uint16_t id = 0;
+            if (officerBase <= 0x10000 ||
+                !SafeRelRead16(officerBase + 0x08, &id) ||
+                id < 1 || id > 5102)
+                continue;
+            selectedById[id] = i;
+        }
+
+        if (selectedById.empty())
             return false;
 
         uintptr_t synerBase = 0;
@@ -348,6 +364,8 @@ namespace DX11Base {
         if (!hasSyner && !hasRelation)
             return false;
 
+        // 직접 관계(의형제/배우자/혐오/경쟁)를 테이블 전체에서 한 번 수집한다.
+        // 기존 단일 조회와 동일하게 한 슬롯의 최대 5명 관계를 서로 연결한다.
         if (hasRelation) {
             for (int i = 0; i < 3000; ++i) {
                 const uintptr_t slot = relationBase + (uintptr_t)i * 0x40;
@@ -357,58 +375,71 @@ namespace DX11Base {
                 if (relation < 1 || relation > 4)
                     continue;
 
-                uintptr_t members[5]{};
                 uint16_t memberIds[5]{};
                 bool readOk = true;
-                bool containsSelected = false;
-
                 for (int j = 0; j < 5; ++j) {
+                    uintptr_t memberPtr = 0;
                     if (!SafeRelReadPtr(
                             slot + 0x10 + (uintptr_t)j * 8,
-                            &members[j])) {
+                            &memberPtr)) {
                         readOk = false;
                         break;
                     }
-                    if (members[j] == 0)
+                    if (memberPtr == 0)
                         continue;
 
                     uint16_t id = 0;
-                    if (!ReadOfficerIdFromRosterPtr(
-                            members[j], rosterBase, &id))
-                        continue;
-                    memberIds[j] = id;
-                    if (id == selectedId)
-                        containsSelected = true;
+                    if (ReadOfficerIdFromRosterPtr(
+                            memberPtr, rosterBase, &id))
+                        memberIds[j] = id;
                 }
 
                 if (!readOk)
                     break;
-                if (!containsSelected)
-                    continue;
 
-                for (int j = 0; j < 5; ++j) {
-                    const uint16_t memberId = memberIds[j];
-                    if (memberId == 0 || memberId == selectedId)
+                for (int source = 0; source < 5; ++source) {
+                    const uint16_t selectedId = memberIds[source];
+                    if (selectedId == 0)
                         continue;
 
-                    switch (relation) {
-                    case 1:
-                        AddUniqueRelationshipId(outInfo.swornBrothers, memberId);
-                        break;
-                    case 2:
-                        AddUniqueRelationshipId(outInfo.spouses, memberId);
-                        break;
-                    case 3:
-                        AddUniqueRelationshipId(outInfo.enemies, memberId);
-                        break;
-                    case 4:
-                        AddUniqueRelationshipId(outInfo.rivals, memberId);
-                        break;
+                    const auto selectedIt =
+                        selectedById.find(selectedId);
+                    if (selectedIt == selectedById.end())
+                        continue;
+
+                    OfficerRelationshipInfo& info =
+                        outInfos[selectedIt->second];
+
+                    for (int target = 0; target < 5; ++target) {
+                        const uint16_t memberId = memberIds[target];
+                        if (memberId == 0 || memberId == selectedId)
+                            continue;
+
+                        switch (relation) {
+                        case 1:
+                            AddUniqueRelationshipId(
+                                info.swornBrothers, memberId);
+                            break;
+                        case 2:
+                            AddUniqueRelationshipId(
+                                info.spouses, memberId);
+                            break;
+                        case 3:
+                            AddUniqueRelationshipId(
+                                info.enemies, memberId);
+                            break;
+                        case 4:
+                            AddUniqueRelationshipId(
+                                info.rivals, memberId);
+                            break;
+                        }
                     }
                 }
             }
         }
 
+        // 숙명 관계도 전체 테이블을 한 번만 훑는다.
+        // 직접 관계와 중복되는 항목은 기존 단일 조회와 동일하게 제외한다.
         if (hasSyner) {
             for (int i = 0; i < 5000; ++i) {
                 const uintptr_t slot = synerBase + (uintptr_t)i * 0x20;
@@ -432,30 +463,54 @@ namespace DX11Base {
                 if (!valid1 || !valid2)
                     continue;
 
-                uint16_t otherId = 0;
-                if (id1 == selectedId)
-                    otherId = id2;
-                else if (id2 == selectedId)
-                    otherId = id1;
-                else
-                    continue;
+                auto addSynerRelationship =
+                    [&](uint16_t selectedId, uint16_t otherId) {
+                    if (selectedId == 0 || otherId == 0 ||
+                        selectedId == otherId)
+                        return;
 
-                if (otherId == 0 || otherId == selectedId)
-                    continue;
+                    const auto selectedIt =
+                        selectedById.find(selectedId);
+                    if (selectedIt == selectedById.end())
+                        return;
 
-                // 실제 게임 UI 대조 결과, 배우자/의형제 같은 직접 관계도 숙명 relation=2에
-                // 중복으로 나타나므로 직접 관계는 숙명 목록에서 제외한다.
-                if (ContainsRelationshipId(outInfo, otherId))
-                    continue;
+                    OfficerRelationshipInfo& info =
+                        outInfos[selectedIt->second];
+                    if (ContainsRelationshipId(info, otherId))
+                        return;
 
-                if (relation == 1)
-                    AddUniqueRelationshipId(outInfo.antipathetic, otherId);
-                else
-                    AddUniqueRelationshipId(outInfo.synergetic, otherId);
+                    if (relation == 1)
+                        AddUniqueRelationshipId(
+                            info.antipathetic, otherId);
+                    else
+                        AddUniqueRelationshipId(
+                            info.synergetic, otherId);
+                };
+
+                addSynerRelationship(id1, id2);
+                addSynerRelationship(id2, id1);
             }
         }
 
-        outInfo.valid = true;
+        for (const auto& entry : selectedById)
+            outInfos[entry.second].valid = true;
+
+        return true;
+    }
+
+    bool GetOfficerRelationshipInfo(
+        uintptr_t officerBase,
+        OfficerRelationshipInfo& outInfo) {
+        std::vector<uintptr_t> officerBases = { officerBase };
+        std::vector<OfficerRelationshipInfo> infos;
+        if (!GetOfficerRelationshipInfoBatch(
+                officerBases, infos) ||
+            infos.empty() || !infos[0].valid) {
+            outInfo = OfficerRelationshipInfo{};
+            return false;
+        }
+
+        outInfo = infos[0];
         return true;
     }
 
