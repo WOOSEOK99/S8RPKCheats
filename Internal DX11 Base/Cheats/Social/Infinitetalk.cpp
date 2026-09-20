@@ -107,6 +107,55 @@ namespace DX11Base {
                duelHits, debateHits, (unsigned long long)(exeEnd - exeBase));
     }
 
+    void LogDuelDebateFocusedCandidates() {
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        if (!exeBase) {
+            AddLog(u8"[교류집중DBG] SAN8R.exe 베이스를 찾지 못했습니다.");
+            return;
+        }
+
+        MODULEINFO mi{};
+        if (!GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi))) {
+            AddLog(u8"[교류집중DBG] 모듈 정보를 읽지 못했습니다.");
+            return;
+        }
+        const uintptr_t exeEnd = exeBase + mi.SizeOfImage;
+
+        struct Candidate {
+            const char* name;
+            uintptr_t rva;
+        };
+        const Candidate candidates[] = {
+            {"토론A", 0x16F584F},
+            {"대련A", 0x16F587F},
+            {"토론B", 0x16F5F0F},
+            {"대련B", 0x16F5F5F},
+        };
+
+        for (const auto& c : candidates) {
+            const uintptr_t center = exeBase + c.rva;
+            if (center < exeBase + 0x20 || center + 0x40 >= exeEnd)
+                continue;
+
+            const uintptr_t start = center - 0x20;
+            const uint8_t* p = (const uint8_t*)start;
+
+            char line[3 * 96 + 1] = {};
+            size_t out = 0;
+            for (size_t i = 0; i < 96 && out + 4 < sizeof(line); ++i) {
+                out += (size_t)snprintf(line + out, sizeof(line) - out,
+                                        "%02X%s", p[i], (i + 1 < 96) ? " " : "");
+            }
+
+            AddLog(u8"[교류집중DBG] %s center=RVA:+0x%llX range=+0x%llX~+0x%llX",
+                   c.name,
+                   (unsigned long long)c.rva,
+                   (unsigned long long)(c.rva - 0x20),
+                   (unsigned long long)(c.rva + 0x3F));
+            AddLog("[교류집중DBG] %s bytes=%s", c.name, line);
+        }
+    }
+
     void SetInfiniteTalk(bool enable) {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase)
