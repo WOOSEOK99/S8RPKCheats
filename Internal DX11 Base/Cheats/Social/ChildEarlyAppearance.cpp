@@ -82,6 +82,8 @@ struct PregnancySpouseDebugHit {
   uintptr_t recordBase = 0;
   PregnancyDebugRecordDump record{};
   int score = 0;
+  int neighborSpouseMatches = 0;
+  std::array<uint16_t, 7> neighborSpouseIds{};
 };
 
 static std::atomic<bool> g_pregnancySpouseScanning{false};
@@ -346,6 +348,34 @@ static void StartPregnancySpouseDebugScanAsync() {
             if (PregnancyCapsLookPlausible(dump))
               hit.score += 20;
 
+            // 실제 임신/배우자 테이블이라면 0x28 stride 주변 슬롯의 +00에도
+            // 현재 배우자 포인터가 연속해서 배치될 가능성이 높습니다.
+            // rel -3..+3을 읽어 현재 배우자 ID가 몇 개 잡히는지 기록합니다.
+            for (int rel = -3; rel <= 3; ++rel) {
+              const intptr_t slotSigned =
+                  (intptr_t)recordBase + (intptr_t)rel * 0x28;
+              if (slotSigned <= 0x10000)
+                continue;
+
+              uintptr_t neighborPtr = 0;
+              if (!SafeReadPtr((uintptr_t)slotSigned, &neighborPtr))
+                continue;
+
+              auto neighborIt =
+                  spouseTargets.find(NormalizeOfficerPtr(neighborPtr));
+              if (neighborIt == spouseTargets.end())
+                continue;
+
+              hit.neighborSpouseIds[(size_t)(rel + 3)] =
+                  neighborIt->second;
+              hit.neighborSpouseMatches++;
+            }
+
+            if (hit.neighborSpouseMatches >= 2)
+              hit.score += 200;
+            else if (hit.neighborSpouseMatches == 1)
+              hit.score += 20;
+
             hits.push_back(hit);
           }
         }
@@ -416,7 +446,7 @@ static void FlushPregnancySpouseDebugResults() {
                   : u8"기타";
 
     AddLog(
-        u8"[임신배우자DBG] 후보 #%zu | %s | score=%d | 배우자 ID %u addr=%p | record=%p | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
+        u8"[임신배우자DBG] 후보 #%zu | %s | score=%d | 배우자 ID %u addr=%p | record=%p | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u | 주변배우자=%d [%u,%u,%u,%u,%u,%u,%u]",
         i + 1, state, hit.score, hit.spouseId,
         (void*)hit.spouseAddr, (void*)hit.recordBase,
         (unsigned)d.pregnancyFlag,
@@ -426,7 +456,15 @@ static void FlushPregnancySpouseDebugResults() {
         (unsigned)d.capRaw[1],
         (unsigned)d.capRaw[2],
         (unsigned)d.capRaw[3],
-        (unsigned)d.capRaw[4]);
+        (unsigned)d.capRaw[4],
+        hit.neighborSpouseMatches,
+        hit.neighborSpouseIds[0],
+        hit.neighborSpouseIds[1],
+        hit.neighborSpouseIds[2],
+        hit.neighborSpouseIds[3],
+        hit.neighborSpouseIds[4],
+        hit.neighborSpouseIds[5],
+        hit.neighborSpouseIds[6]);
   }
 
   if (hits.size() > kMaxLogHits) {
