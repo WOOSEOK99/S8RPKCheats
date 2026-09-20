@@ -1358,7 +1358,7 @@ void DrawChildManagerWindow(float scale) {
 
   if (pregnancy.valid) {
     if (ImGui::BeginTable(
-            "PregnancyStatusTable", 6,
+            "PregnancyStatusTable", 5,
             ImGuiTableFlags_Borders |
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_SizingFixedFit)) {
@@ -1370,9 +1370,6 @@ void DrawChildManagerWindow(float scale) {
           135.0f * scale);
       ImGui::TableSetupColumn(
           u8"상태", ImGuiTableColumnFlags_WidthFixed,
-          85.0f * scale);
-      ImGui::TableSetupColumn(
-          u8"임신 진행(?)", ImGuiTableColumnFlags_WidthFixed,
           85.0f * scale);
       ImGui::TableSetupColumn(
           u8"출산까지", ImGuiTableColumnFlags_WidthFixed,
@@ -1406,9 +1403,6 @@ void DrawChildManagerWindow(float scale) {
 
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(GetPregnancySlotState(d));
-
-        ImGui::TableNextColumn();
-        ImGui::Text("%u", (unsigned)d.conceptionProgress);
 
         ImGui::TableNextColumn();
         if (d.pregnancyFlag == 1 &&
