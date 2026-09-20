@@ -758,14 +758,14 @@ namespace DX11Base {
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::TextDisabled(u8"[교류 무제한 진단 / 읽기 전용]");
-        if (ImGui::Button(u8"대련/토론 코드 후보 검색##DuelDebateDebug",
+        if (ImGui::Button(u8"대련/토론 집중 후보 확인##DuelDebateFocusedDebug",
                           ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::ScanDuelDebateFlagCandidates();
+          ::DX11Base::LogDuelDebateFocusedCandidates();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
-              u8"현재 EXE에서 대련 bit8(0x100), 토론 bit9(0x200) 코드 후보를 검색합니다.");
+              u8"+0x320에 실제 저장하는 대련/토론 후보 4곳의 주변 바이트만 확인합니다.");
           ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
               u8"※ 메모리 쓰기/패치는 하지 않습니다.");
