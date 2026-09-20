@@ -23,6 +23,10 @@ namespace DX11Base {
     // 다른 데이터 구조 진단 시 같은 베이스를 재사용하기 위한 읽기 전용 helper입니다.
     uintptr_t GetScenarioDataCenterAddress();
 
+    // 시나리오 데이터 +0x6000~+0x8000 영역을 연회 전/후 읽기 전용으로 비교합니다.
+    bool CaptureBanquetDiffBaseline();
+    bool CompareBanquetDiffAfter();
+
     // 옛 CT의 실제 무제한 연회 필드(+0x6EA4)와 현재년도(+0x6F78)의
     // 상대차이 0xD4를 현재 구조에 대입한 후보 값을 읽기 전용으로 출력합니다.
     bool LogBanquetFlagCandidate();
