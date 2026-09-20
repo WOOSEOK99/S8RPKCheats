@@ -220,8 +220,13 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+        if (ImGui::Checkbox(u8"명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
+          NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
+          SaveConfig();
+        }
+
         ImGui::SameLine(160.0f * scale);
+
         if (ImGui::Checkbox(u8"연회 무제한", &bInfiniteBanquet)) {
           if (bInfiniteBanquet)
             ::DX11Base::TickInfiniteBanquet();
@@ -235,11 +240,6 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                              u8"※ 다른 상태 비트는 그대로 유지합니다.");
           ImGui::EndTooltip();
-        }
-
-        if (ImGui::Checkbox(u8"명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
-          NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
-          SaveConfig();
         }
 
         if (ImGui::Checkbox(u8"청부 무한 유지 (주점)", &bInfiniteTavernRequests)) {
