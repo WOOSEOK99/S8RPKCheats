@@ -69,10 +69,10 @@ namespace DX11Base {
         uint8_t* outPreviousValue = nullptr,
         uint8_t* outNewValue = nullptr);
 
-    // 같은 세력·같은 도시에서 생활하는 무장들의 기존 친밀도를 월 1회 성장시킵니다.
+    // 평정(07->05)마다 주인공을 제외한 AI 무장끼리 친밀도를 자동 성장시킵니다.
+    // 같은 세력·같은 도시만 대상으로 하며, 상성/흥미/중시명성 일치도를 반영합니다.
     // 설정은 현재 실행 세션에만 유지합니다.
     extern bool g_autoAffinityGrowthEnabled;
-    extern int g_autoAffinityMonthlyGain;
     void ResetAutoAffinityGrowthState();
     void TickAutoAffinityGrowth(uintptr_t protagonistBase);
     // 친밀도 실제 저장 명령을 읽기 전용으로 추적하기 위한 디버그 검증 API.
