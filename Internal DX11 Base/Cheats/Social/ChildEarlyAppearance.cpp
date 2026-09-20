@@ -341,98 +341,133 @@ static bool ResolvePregnancyTableDirect(
   if (!out)
     return false;
 
-  const uintptr_t gameBase = GetGameBase();
+  const uintptr_t runtimeGameBase = GetGameBase();
   const uintptr_t exeBase =
       (uintptr_t)GetModuleHandle(nullptr);
-  if (!gameBase || !exeBase)
+  if (!runtimeGameBase || !exeBase)
     return false;
 
-  if (g_childRearingOffset == 0) {
-    // CETRAINER getGameDataOffset()의 g0_ChildOffsetCheck(bytes12).
-    // 첫 LEA의 disp32가 +3에 있으며 이것이 g0_ChildOffset입니다.
-    const char* childOffsetPattern =
-        "49 8D ?? ?? ?? ?? ?? "
-        "41 B8 ?? ?? ?? ?? "
-        "48 8B ?? E8 ?? ?? ?? ?? "
-        "49 8D ?? ?? ?? ?? ?? "
-        "41 B8 ?? ?? ?? ?? "
-        "48 8B ?? E8 ?? ?? ?? ?? "
-        "8B ?? ?? ?? ?? ?? "
-        "8B ?? 83 ?? ?? 7C ?? 48 8B ?? 66";
+  // 현재 CT(SAN8R v13.54'Δ.CT)의 정의:
+  //   gameBase = SAN8R.exe+0317F160
+  //   gameBaseAddress = [gameBase+00]
+  //   g0_ChildOffset = 0x5B30
+  //   childBaseAddress = [gameBase+00] + g0_ChildOffset - 0x10
+  uintptr_t ctGameBase = 0;
+  SafeReadPtr(exeBase + 0x0317F160, &ctGameBase);
 
-    // CETRAINER getGameDataOffset()와 동일한 검색 범위:
-    // SAN8R.exe + 0x14DA000 ~ +0x14FA000.
-    const uintptr_t scanStart =
-        exeBase + 0x14DA000;
-    const uintptr_t scanEnd =
-        exeBase + 0x14FA000;
+  AddLog(
+      u8"[임신슬롯] gameBase 비교: runtime=%p / CT[exe+317F160]=%p",
+      (void*)runtimeGameBase,
+      (void*)ctGameBase);
 
-    const uintptr_t found =
-        FindPattern(
-            scanStart, scanEnd,
-            childOffsetPattern);
-
-    uint32_t offset = 0;
-    if (found) {
-      AddLog(
-          u8"[임신슬롯] g0_ChildOffsetCheck 발견: %p (RVA=0x%llX)",
-          (void*)found,
-          (unsigned long long)(found - exeBase));
-    }
-
-    if (found &&
-        SafeReadMem(
-            found + 3, &offset, sizeof(offset))) {
-      AddLog(
-          u8"[임신슬롯] g0_ChildOffsetCheck+3 raw=0x%X",
-          offset);
-
-      if (offset >= 0x1000 &&
-          offset <= 0x100000) {
-        g_childRearingOffset = offset;
-        AddLog(
-            u8"[임신슬롯] g0_ChildOffset 동적 해석 성공: 0x%X",
-            g_childRearingOffset);
-      } else {
-        AddLog(
-            u8"[임신슬롯] g0_ChildOffset 범위 검증 실패: 0x%X",
-            offset);
-      }
-    } else if (!found) {
-      AddLog(
-          u8"[임신슬롯] g0_ChildOffsetCheck 패턴 없음 (RVA 0x14DA000~0x14FA000)");
-    }
-  }
-
-  auto tryOffset = [&](uint32_t offset) -> bool {
-    if (offset < 0x10)
+  auto tryBaseOffset =
+      [&](uintptr_t dataBase,
+          uint32_t offset,
+          const char* source) -> bool {
+    if (dataBase <= 0x10000 || offset < 0x10)
       return false;
 
     PregnancyCanonicalTable table;
     const uintptr_t base =
-        gameBase + (uintptr_t)offset - 0x10;
+        dataBase + (uintptr_t)offset - 0x10;
 
     if (!TryReadDirectPregnancyTableAt(base, &table))
       return false;
 
     g_childRearingOffset = offset;
     *out = table;
+
+    AddLog(
+        u8"[임신슬롯] 직접 경로 확인: %s / dataBase=%p / offset=0x%X / table=%p",
+        source,
+        (void*)dataBase,
+        offset,
+        (void*)base);
     return true;
   };
 
-  if (g_childRearingOffset != 0 &&
-      tryOffset(g_childRearingOffset)) {
+  constexpr uint32_t kCtChildOffset = 0x5B30;
+
+  // CT가 실제 사용 중인 고정 경로를 최우선으로 시험합니다.
+  if (ctGameBase > 0x10000 &&
+      tryBaseOffset(
+          ctGameBase,
+          kCtChildOffset,
+          "CT [exe+317F160]+5B30-10")) {
     return true;
   }
 
-  // 구 트레이너의 알려진 값. 반드시 현재 배우자/슬롯 구조 검증을 통과할 때만 사용합니다.
-  constexpr uint32_t kLegacyChildOffset = 0x5B30;
-  if (g_childRearingOffset != kLegacyChildOffset &&
-      tryOffset(kLegacyChildOffset)) {
-    AddLog(
-        u8"[임신슬롯] 동적 AOB 대신 검증된 legacy g0_ChildOffset 사용: 0x%X",
-        kLegacyChildOffset);
+  // 우리 GetGameBase()가 같은 데이터 베이스를 가리키는 빌드라면 이 경로가 맞습니다.
+  if (tryBaseOffset(
+          runtimeGameBase,
+          kCtChildOffset,
+          "GetGameBase()+5B30-10")) {
     return true;
+  }
+
+  // 과거 세션에서 동적으로 얻은 오프셋이 있다면 마지막으로 재검증합니다.
+  if (g_childRearingOffset != 0 &&
+      g_childRearingOffset != kCtChildOffset) {
+    if (ctGameBase > 0x10000 &&
+        tryBaseOffset(
+            ctGameBase,
+            g_childRearingOffset,
+            "CT cached offset")) {
+      return true;
+    }
+    if (tryBaseOffset(
+            runtimeGameBase,
+            g_childRearingOffset,
+            "runtime cached offset")) {
+      return true;
+    }
+  }
+
+  // 구 트레이너의 getGameDataOffset()는 현재 CT에서 호출이 주석 처리되어 있습니다.
+  // 그래도 빌드 차이 진단용으로만 기존 bytes12 범위를 마지막에 한 번 확인합니다.
+  const char* childOffsetPattern =
+      "49 8D ?? ?? ?? ?? ?? "
+      "41 B8 ?? ?? ?? ?? "
+      "48 8B ?? E8 ?? ?? ?? ?? "
+      "49 8D ?? ?? ?? ?? ?? "
+      "41 B8 ?? ?? ?? ?? "
+      "48 8B ?? E8 ?? ?? ?? ?? "
+      "8B ?? ?? ?? ?? ?? "
+      "8B ?? 83 ?? ?? 7C ?? 48 8B ?? 66";
+
+  const uintptr_t found =
+      FindPattern(
+          exeBase + 0x14DA000,
+          exeBase + 0x14FA000,
+          childOffsetPattern);
+
+  uint32_t dynamicOffset = 0;
+  if (found &&
+      SafeReadMem(
+          found + 3,
+          &dynamicOffset,
+          sizeof(dynamicOffset))) {
+    AddLog(
+        u8"[임신슬롯] legacy g0_ChildOffsetCheck: RVA=0x%llX / raw=0x%X",
+        (unsigned long long)(found - exeBase),
+        dynamicOffset);
+
+    if (dynamicOffset >= 0x10 &&
+        dynamicOffset <= 0x100000) {
+      if (ctGameBase > 0x10000 &&
+          tryBaseOffset(
+              ctGameBase,
+              dynamicOffset,
+              "CT dynamic offset")) {
+        return true;
+      }
+      if (tryBaseOffset(
+              runtimeGameBase,
+              dynamicOffset,
+              "runtime dynamic offset")) {
+        return true;
+      }
+    }
   }
 
   return false;
