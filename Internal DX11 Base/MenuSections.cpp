@@ -697,8 +697,6 @@ namespace DX11Base {
         }
 
         ImGui::TableSetColumnIndex(1);
-        ImGui::TextDisabled(
-            u8"분기 평정월 자동 계산");
 
         // 5행: 결혼 / 자녀 관리
 
