@@ -360,21 +360,47 @@ static bool ResolvePregnancyTableDirect(
         "8B ?? ?? ?? ?? ?? "
         "8B ?? 83 ?? ?? 7C ?? 48 8B ?? 66";
 
+    // CETRAINER getGameDataOffset()와 동일한 검색 범위:
+    // SAN8R.exe + 0x14DA000 ~ +0x14FA000.
+    const uintptr_t scanStart =
+        exeBase + 0x14DA000;
+    const uintptr_t scanEnd =
+        exeBase + 0x14FA000;
+
     const uintptr_t found =
         FindPattern(
-            exeBase, exeBase + 0x3000000,
+            scanStart, scanEnd,
             childOffsetPattern);
 
     uint32_t offset = 0;
+    if (found) {
+      AddLog(
+          u8"[임신슬롯] g0_ChildOffsetCheck 발견: %p (RVA=0x%llX)",
+          (void*)found,
+          (unsigned long long)(found - exeBase));
+    }
+
     if (found &&
         SafeReadMem(
-            found + 3, &offset, sizeof(offset)) &&
-        offset >= 0x1000 &&
-        offset <= 0x100000) {
-      g_childRearingOffset = offset;
+            found + 3, &offset, sizeof(offset))) {
       AddLog(
-          u8"[임신슬롯] g0_ChildOffset 동적 해석: 0x%X",
-          g_childRearingOffset);
+          u8"[임신슬롯] g0_ChildOffsetCheck+3 raw=0x%X",
+          offset);
+
+      if (offset >= 0x1000 &&
+          offset <= 0x100000) {
+        g_childRearingOffset = offset;
+        AddLog(
+            u8"[임신슬롯] g0_ChildOffset 동적 해석 성공: 0x%X",
+            g_childRearingOffset);
+      } else {
+        AddLog(
+            u8"[임신슬롯] g0_ChildOffset 범위 검증 실패: 0x%X",
+            offset);
+      }
+    } else if (!found) {
+      AddLog(
+          u8"[임신슬롯] g0_ChildOffsetCheck 패턴 없음 (RVA 0x14DA000~0x14FA000)");
     }
   }
 
