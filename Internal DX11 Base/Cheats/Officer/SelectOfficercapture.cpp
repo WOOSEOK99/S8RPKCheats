@@ -762,9 +762,9 @@ namespace DX11Base {
       // +0x82 물욕(1 무욕 / 2 보통 / 3 탐욕)
       // +0x83 흥미 비트(술/무구/서적/보물)
       // +0xA4 중시(1~6)
-      const uint8_t interestRaw = *(uint8_t *)(pR + 0x93);
-      const uint8_t priorityRaw = *(uint8_t *)(pR + 0xB4);
-      const uint8_t greedRaw = *(uint8_t *)(pR + 0x92);
+      const uint8_t interestRaw = *(uint8_t *)(pR + 0x83);
+      const uint8_t priorityRaw = *(uint8_t *)(pR + 0xA4);
+      const uint8_t greedRaw = *(uint8_t *)(pR + 0x82);
 
       std::string interestText;
       const uint8_t interestBits = (uint8_t)(interestRaw & 0x0F);
@@ -808,7 +808,7 @@ namespace DX11Base {
       ImGui::TextUnformatted(interestText.c_str());
       if (bShowDebug) {
         ImGui::SameLine();
-        ImGui::TextDisabled(u8"(0x93=0x%02X)", (unsigned int)interestRaw);
+        ImGui::TextDisabled(u8"(0x83=0x%02X)", (unsigned int)interestRaw);
       }
 
       ImGui::TableNextRow();
@@ -824,7 +824,7 @@ namespace DX11Base {
                            u8"알 수 없음 (%u)", (unsigned int)priorityRaw);
       if (bShowDebug && priorityRaw >= 1 && priorityRaw <= 6) {
         ImGui::SameLine();
-        ImGui::TextDisabled(u8"(%u / +0xB4)", (unsigned int)priorityRaw);
+        ImGui::TextDisabled(u8"(%u / +0xA4)", (unsigned int)priorityRaw);
       }
 
       ImGui::TableNextRow();
@@ -840,7 +840,7 @@ namespace DX11Base {
                            u8"알 수 없음 (%u)", (unsigned int)greedRaw);
       if (bShowDebug && greedRaw >= 1 && greedRaw <= 3) {
         ImGui::SameLine();
-        ImGui::TextDisabled(u8"(%u / +0x92)", (unsigned int)greedRaw);
+        ImGui::TextDisabled(u8"(%u / +0x82)", (unsigned int)greedRaw);
       }
 
       ImGui::TableNextRow();
@@ -1858,18 +1858,10 @@ namespace DX11Base {
       uint8_t dbgCompatibility = 0;
       uint8_t dbgInterest = 0;
       uint8_t dbgPriority = 0;
-      uint8_t dbgOldCompatibility = 0;
-      uint8_t dbgOldInterest = 0;
-      uint8_t dbgOldPriority = 0;
-      const bool dbgOldMetaOk =
-          UnsafeRead8(pBase + 0x5D, &dbgOldCompatibility) &&
-          UnsafeRead8(pBase + 0x83, &dbgOldInterest) &&
-          UnsafeRead8(pBase + 0xA4, &dbgOldPriority);
-
       bool dbgMetaOk =
-          UnsafeRead8(pBase + 0x6D, &dbgCompatibility) &&
-          UnsafeRead8(pBase + 0x93, &dbgInterest) &&
-          UnsafeRead8(pBase + 0xB4, &dbgPriority);
+          UnsafeRead8(pBase + 0x5D, &dbgCompatibility) &&
+          UnsafeRead8(pBase + 0x83, &dbgInterest) &&
+          UnsafeRead8(pBase + 0xA4, &dbgPriority);
 
       if (dbgMetaOk) {
         const char* priorityName = u8"범위외";
@@ -1919,15 +1911,6 @@ namespace DX11Base {
             u8"상성/흥미/중시 디버그 읽기 실패");
       }
 
-      if (dbgOldMetaOk) {
-        ImGui::TextDisabled(
-            u8"구 CT 후보 비교: +5D 상성=%u / +83 흥미=0x%02X / +A4 중시=%u",
-            (unsigned int)dbgOldCompatibility,
-            (unsigned int)dbgOldInterest,
-            (unsigned int)dbgOldPriority);
-      }
-      ImGui::TextDisabled(
-          u8"현재 PK +0x10 후보: +6D / +93 / +B4 (실제 게임 정보와 대조 필요)");
       ImGui::Separator();
     }
 
