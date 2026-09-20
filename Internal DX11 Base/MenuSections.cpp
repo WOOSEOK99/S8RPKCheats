@@ -686,7 +686,23 @@ namespace DX11Base {
         if (::DX11Base::g_loyaltyThreadRunning.load())
           ImGui::EndDisabled();
 
-        // 4행: AI 친밀도 가속
+        // 4행: 대련 / 토론
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"대련 실행 무제한", &bInfiniteDuel)) {
+          DX11Base::SetInfiniteDuel(bInfiniteDuel);
+          NotifyFeatureToggle(u8"대련 실행 무제한", bInfiniteDuel);
+          SaveConfig();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"토론 실행 무제한", &bInfiniteDebate)) {
+          DX11Base::SetInfiniteDebate(bInfiniteDebate);
+          NotifyFeatureToggle(u8"토론 실행 무제한", bInfiniteDebate);
+          SaveConfig();
+        }
+
+        // 5행: AI 친밀도 가속
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(
@@ -716,7 +732,7 @@ namespace DX11Base {
 
         ImGui::TableSetColumnIndex(1);
 
-        // 5행: 결혼 / 자녀 관리
+        // 6행: 결혼 / 자녀 관리
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -752,44 +768,6 @@ namespace DX11Base {
         }
 
         ImGui::EndTable();
-      }
-
-      if (::DX11Base::bShowDebug) {
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextDisabled(u8"[대련/토론 실제 +0x320 쓰기 추적]");
-        if (ImGui::Button(
-                u8"1. 교류 주소 캡처 시작##InteractionWriteCapture",
-                ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::StartInteractionStateCaptureForWatch();
-        }
-        if (ImGui::Button(
-                u8"2. +0x320 쓰기 감시 시작##InteractionWriteWatch",
-                ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::StartInteractionWriteWatch();
-        }
-        if (ImGui::Button(
-                u8"3. 감시 결과 확인##InteractionWriteResults",
-                ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::LogInteractionWriteWatchResults();
-        }
-        if (ImGui::Button(
-                u8"감시 종료/초기화##InteractionWriteStop",
-                ImVec2(-FLT_MIN, 0))) {
-          ::DX11Base::StopInteractionWriteWatch();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextUnformatted(
-              u8"선물 기증 무제한 OFF → 1번 → 기증 1회 → 2번 → 대련 1회 → 토론 1회 → 3번 순서입니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-              u8"실제 base+0x320에 쓰기를 수행한 CPU 명령 위치를 하드웨어 감시점으로 기록합니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 대련/토론 사용 비트나 게임 데이터 값은 변경하지 않습니다.");
-          ImGui::EndTooltip();
-        }
       }
 
       EndSection(); // 결혼/인연
