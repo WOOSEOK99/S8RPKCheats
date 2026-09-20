@@ -41,6 +41,150 @@ namespace DX11Base {
         return ResolveScenarioDataCenter();
     }
 
+    bool ScanBanquetCodeCandidates() {
+        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+        if (!exeBase) {
+            AddLog(u8"[연회코드DBG] SAN8R.exe 베이스를 찾지 못했습니다.");
+            return false;
+        }
+
+        MODULEINFO mi{};
+        if (!GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi))) {
+            AddLog(u8"[연회코드DBG] 모듈 정보를 읽지 못했습니다.");
+            return false;
+        }
+        const uintptr_t exeEnd = exeBase + mi.SizeOfImage;
+
+        // 현재 프로젝트에서 실제 사용하는 담화/기증 원본 패턴.
+        uintptr_t talk = FindPattern(exeBase, exeEnd, "83 8F 20 03 00 00 04");
+        uintptr_t gift = FindPattern(exeBase, exeEnd, "81 8E 20 03 00 00 00 04 00 00");
+        if (!gift)
+            gift = FindPattern(exeBase, exeEnd, "81 A6 20 03 00 00 FF FB FF FF");
+
+        // 옛 CT RVA:
+        // banquet 0x1BEE365 / talk 0x1BF6DD5 / gift 0x1BF76A6
+        // 따라서 banquet = talk - 0x8A70 = gift - 0x9341.
+        uintptr_t predTalk = 0;
+        uintptr_t predGift = 0;
+        if (talk >= exeBase + 0x8A70)
+            predTalk = talk - 0x8A70;
+        if (gift >= exeBase + 0x9341)
+            predGift = gift - 0x9341;
+
+        AddLog(u8"[연회코드DBG] exe=%p size=0x%llX talk=%p(RVA:+0x%llX) gift=%p(RVA:+0x%llX)",
+               (void*)exeBase,
+               (unsigned long long)mi.SizeOfImage,
+               (void*)talk,
+               (unsigned long long)(talk ? talk - exeBase : 0),
+               (void*)gift,
+               (unsigned long long)(gift ? gift - exeBase : 0));
+        AddLog(u8"[연회코드DBG] predicted talk기준=%p(RVA:+0x%llX) gift기준=%p(RVA:+0x%llX) 차이=0x%llX",
+               (void*)predTalk,
+               (unsigned long long)(predTalk ? predTalk - exeBase : 0),
+               (void*)predGift,
+               (unsigned long long)(predGift ? predGift - exeBase : 0),
+               (unsigned long long)((predTalk && predGift)
+                   ? (predTalk > predGift ? predTalk - predGift : predGift - predTalk)
+                   : 0));
+
+        if (!predTalk && !predGift) {
+            AddLog(u8"[연회코드DBG] 담화/기증 기준점을 찾지 못해 상대거리 검색을 중단합니다.");
+            return false;
+        }
+
+        uintptr_t centerLo = predTalk ? predTalk : predGift;
+        uintptr_t centerHi = predGift ? predGift : predTalk;
+        if (centerLo > centerHi) {
+            const uintptr_t t = centerLo;
+            centerLo = centerHi;
+            centerHi = t;
+        }
+
+        // 예측 지점 주변만 좁게 검사. 읽기 전용.
+        constexpr uintptr_t kWindow = 0x6000;
+        uintptr_t scanStart = (centerLo > exeBase + kWindow) ? centerLo - kWindow : exeBase;
+        uintptr_t scanEnd = centerHi + kWindow;
+        if (scanEnd > exeEnd)
+            scanEnd = exeEnd;
+
+        auto logBytes = [&](const char* label, uintptr_t addr) {
+            if (!addr || addr < exeBase || addr + 16 > exeEnd)
+                return;
+            const uint8_t* p = (const uint8_t*)addr;
+            AddLog("[연회코드DBG] %s RVA:+0x%llX bytes=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                   label,
+                   (unsigned long long)(addr - exeBase),
+                   p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7],
+                   p[8],p[9],p[10],p[11],p[12],p[13],p[14],p[15]);
+        };
+        logBytes("talk예측", predTalk);
+        if (predGift != predTalk)
+            logBytes("gift예측", predGift);
+
+        unsigned int hitCount = 0;
+        const uint8_t* b = (const uint8_t*)scanStart;
+        const size_t len = (size_t)(scanEnd - scanStart);
+
+        for (size_t i = 0; i + 10 <= len && hitCount < 40; ++i) {
+            uintptr_t a = scanStart + i;
+
+            // or dword ptr [reg+disp32], 02  : 83 /1 ... 02
+            if (b[i] == 0x83 &&
+                (b[i + 1] & 0xF8) == 0x88 &&
+                b[i + 6] == 0x02) {
+                const uint32_t disp = *(const uint32_t*)&b[i + 2];
+                AddLog(u8"[연회코드DBG] OR-mem02 후보 RVA:+0x%llX disp=0x%X",
+                       (unsigned long long)(a - exeBase), disp);
+                ++hitCount;
+                continue;
+            }
+
+            // or dword ptr [reg+disp32], 00000002 : 81 /1 ... 02 00 00 00
+            if (b[i] == 0x81 &&
+                (b[i + 1] & 0xF8) == 0x88 &&
+                b[i + 6] == 0x02 && b[i + 7] == 0x00 &&
+                b[i + 8] == 0x00 && b[i + 9] == 0x00) {
+                const uint32_t disp = *(const uint32_t*)&b[i + 2];
+                AddLog(u8"[연회코드DBG] OR-mem32-02 후보 RVA:+0x%llX disp=0x%X",
+                       (unsigned long long)(a - exeBase), disp);
+                ++hitCount;
+                continue;
+            }
+
+            // and dword ptr [reg+disp32], FD : 83 /4 ... FD
+            if (b[i] == 0x83 &&
+                (b[i + 1] & 0xF8) == 0xA0 &&
+                b[i + 6] == 0xFD) {
+                const uint32_t disp = *(const uint32_t*)&b[i + 2];
+                AddLog(u8"[연회코드DBG] AND-memFD 후보 RVA:+0x%llX disp=0x%X",
+                       (unsigned long long)(a - exeBase), disp);
+                ++hitCount;
+                continue;
+            }
+
+            // 옛 setter 형태의 핵심: or eax,02 / and eax,FD.
+            if (b[i] == 0x83 && b[i + 1] == 0xC8 && b[i + 2] == 0x02) {
+                bool paired = false;
+                const size_t pairEnd = (i + 0x100 < len) ? i + 0x100 : len - 2;
+                for (size_t j = i + 3; j < pairEnd; ++j) {
+                    if (b[j] == 0x83 && b[j + 1] == 0xE0 && b[j + 2] == 0xFD) {
+                        paired = true;
+                        break;
+                    }
+                }
+                AddLog(u8"[연회코드DBG] OR-eax02 후보 RVA:+0x%llX paired_AND_FD=%u",
+                       (unsigned long long)(a - exeBase), paired ? 1u : 0u);
+                ++hitCount;
+            }
+        }
+
+        AddLog(u8"[연회코드DBG] 검색범위 RVA:+0x%llX~+0x%llX / 후보 %u개",
+               (unsigned long long)(scanStart - exeBase),
+               (unsigned long long)(scanEnd - exeBase),
+               hitCount);
+        return true;
+    }
+
     bool LogBanquetFlagCandidate() {
         uintptr_t dataCenter = ResolveScenarioDataCenter();
         if (!dataCenter) {
