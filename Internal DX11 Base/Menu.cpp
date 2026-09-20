@@ -403,6 +403,12 @@ namespace DX11Base {
       DX11Base::TickInfiniteBanquet();
     }
 
+    // 중개 무제한: 확인된 시나리오 데이터 +0x71E5 bit6만 지속 해제.
+    // 이미 0이면 쓰지 않으므로 다른 상태 비트에는 영향이 없습니다.
+    if (bInfiniteMediation) {
+      DX11Base::TickInfiniteMediation();
+    }
+
     // 저장게임 로드 시 보주 개방 비트맵이 세이브 데이터로 덮이는 경우 자동 재적용.
     DX11Base::TickJewelSettings();
 
