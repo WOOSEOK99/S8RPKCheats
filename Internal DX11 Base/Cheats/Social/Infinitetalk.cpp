@@ -156,6 +156,23 @@ namespace DX11Base {
         }
     }
 
+    void LogInteractionUsageFlags(uintptr_t officerBase) {
+        if (!officerBase || !IsValidPtr(officerBase + 0x320, sizeof(uint32_t))) {
+            AddLog(u8"[교류상태DBG] 무장 주소 또는 +0x320이 유효하지 않습니다. base=%p",
+                   (void*)officerBase);
+            return;
+        }
+
+        const uint32_t raw = *(const uint32_t*)(officerBase + 0x320);
+        AddLog(u8"[교류상태DBG] base=%p +0x320 raw=0x%08X / 담화(bit2)=%u 대련(bit8)=%u 토론(bit9)=%u 기증(bit10)=%u",
+               (void*)officerBase,
+               raw,
+               (raw & 0x00000004u) ? 1u : 0u,
+               (raw & 0x00000100u) ? 1u : 0u,
+               (raw & 0x00000200u) ? 1u : 0u,
+               (raw & 0x00000400u) ? 1u : 0u);
+    }
+
     void SetInfiniteTalk(bool enable) {
         uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
         if (!exeBase)
