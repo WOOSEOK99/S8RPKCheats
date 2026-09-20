@@ -668,47 +668,41 @@ namespace DX11Base {
         if (::DX11Base::g_loyaltyThreadRunning.load())
           ImGui::EndDisabled();
 
-        // 4행: 친밀도 자연 성장
+        // 4행: AI 친밀도 가속
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(
-                u8"장수 친밀도 자연 성장",
+                u8"AI 친밀도 가속",
                 &g_autoAffinityGrowthEnabled)) {
           ResetAutoAffinityGrowthState();
           NotifyFeatureToggle(
-              u8"장수 친밀도 자연 성장",
+              u8"AI 친밀도 가속",
               g_autoAffinityGrowthEnabled);
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(
               ImVec4(1, 1, 0, 1),
-              u8"같은 세력·같은 도시에 함께 있는 장수 중 기존 친밀도가 1~99인 쌍을 월 1회 성장시킵니다.");
+              u8"매 평정(07→05)마다 주인공을 제외한 AI 무장끼리 친밀도를 추가 상승시킵니다.");
           ImGui::TextUnformatted(
-              u8"이미 의형제/배우자/상생이거나 상극/원수/호적수인 쌍, 친밀도 0인 쌍은 제외합니다.");
+              u8"같은 세력·같은 도시에 있는 AI 쌍만 대상이며 친밀도 -1 이하는 제외합니다.");
           ImGui::TextUnformatted(
-              u8"현재는 친밀도 100 도달까지만 처리하며 관계 생성은 다음 검증 단계에서 연결합니다.");
+              u8"상성차 0~75에 따라 +15~0, 흥미 4종의 유/무 일치와 중시명성 일치마다 +3을 더합니다.");
+          ImGui::TextUnformatted(
+              u8"상성 점수는 현재 5 차이당 1 감소 방식(0~4:+15 ... 70~74:+1, 75:+0)입니다.");
+          ImGui::TextUnformatted(
+              u8"친밀도 100 도달 시 현재는 로그에 상생 후보로만 기록하며 관계 생성은 다음 단계에서 연결합니다.");
           ImGui::TextDisabled(
               u8"※ 설정은 현재 실행 세션에만 유지됩니다.");
           ImGui::EndTooltip();
         }
 
         ImGui::TableSetColumnIndex(1);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(u8"월 증가량");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(55.0f * scale);
-        if (ImGui::InputInt(
-                "##AutoAffinityMonthlyGain",
-                &g_autoAffinityMonthlyGain,
-                0, 0)) {
-          if (g_autoAffinityMonthlyGain < 1)
-            g_autoAffinityMonthlyGain = 1;
-          if (g_autoAffinityMonthlyGain > 10)
-            g_autoAffinityMonthlyGain = 10;
-        }
+        ImGui::TextDisabled(
+            u8"평정마다 자동 계산");
 
         // 5행: 결혼 / 자녀 관리
+
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         bool tempMarriage = ::DX11Base::marriageApplied;
