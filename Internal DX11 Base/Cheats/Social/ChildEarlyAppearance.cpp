@@ -1189,10 +1189,106 @@ void DrawChildManagerWindow(float scale) {
                      u8"※ 자녀 출생/임관/주인공 변경은 혈연 데이터를 다시 읽어 목록에 자동 반영합니다.");
 
   ImGui::Separator();
-  ImGui::TextUnformatted(u8"임신 상태 (게임 기본 3슬롯)");
 
   const PregnancyCanonicalTable pregnancy =
       GetCanonicalPregnancySnapshot();
+
+  // 현재 배우자 전체 목록은 임신 3슬롯과 별도로 항상 표시합니다.
+  // 기존 슬롯/교체 드롭다운 로직은 그대로 두고, 어떤 배우자가
+  // 슬롯 안/밖에 있는지만 한눈에 확인할 수 있게 합니다.
+  std::vector<PregnancySpouseOption> currentSpouses;
+  {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    currentSpouses = g_pregnancyCurrentSpouses;
+  }
+
+  ImGui::Text(
+      u8"현재 배우자 목록 (%zu명)",
+      currentSpouses.size());
+
+  if (currentSpouses.empty()) {
+    ImGui::TextDisabled(u8"현재 확인된 배우자가 없습니다.");
+  } else {
+    const float rowHeight =
+        ImGui::GetTextLineHeightWithSpacing();
+    const float tableHeight =
+        (std::min)(180.0f * scale,
+                   (rowHeight * (float)(currentSpouses.size() + 1)) +
+                       8.0f * scale);
+
+    if (ImGui::BeginTable(
+            "CurrentPregnancySpouseList", 4,
+            ImGuiTableFlags_Borders |
+            ImGuiTableFlags_RowBg |
+            ImGuiTableFlags_ScrollY |
+            ImGuiTableFlags_SizingFixedFit |
+            ImGuiTableFlags_NoSavedSettings,
+            ImVec2(0, tableHeight))) {
+      ImGui::TableSetupScrollFreeze(0, 1);
+      ImGui::TableSetupColumn(
+          u8"번호", ImGuiTableColumnFlags_WidthFixed,
+          45.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"배우자", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn(
+          u8"ID", ImGuiTableColumnFlags_WidthFixed,
+          55.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"임신 슬롯", ImGuiTableColumnFlags_WidthFixed,
+          80.0f * scale);
+      ImGui::TableHeadersRow();
+
+      for (size_t i = 0; i < currentSpouses.size(); ++i) {
+        const PregnancySpouseOption& option =
+            currentSpouses[i];
+
+        ImGui::TableNextRow();
+
+        ImGui::TableNextColumn();
+        ImGui::Text("%zu", i + 1);
+
+        ImGui::TableNextColumn();
+        auto nameIt = g_officerNames.find(option.id);
+        if (nameIt != g_officerNames.end() &&
+            !nameIt->second.empty()) {
+          ImGui::TextUnformatted(nameIt->second.c_str());
+        } else {
+          ImGui::Text(u8"ID %u", option.id);
+        }
+
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", option.id);
+
+        ImGui::TableNextColumn();
+        if (pregnancy.valid) {
+          int pregnancySlot = -1;
+          for (int slot = 0; slot < 3; ++slot) {
+            if (pregnancy.spouseIds[(size_t)slot] ==
+                option.id) {
+              pregnancySlot = slot;
+              break;
+            }
+          }
+
+          if (pregnancySlot >= 0) {
+            ImGui::TextColored(
+                ImVec4(0.45f, 1.0f, 0.55f, 1.0f),
+                u8"슬롯 %d",
+                pregnancySlot + 1);
+          } else {
+            ImGui::TextDisabled(u8"슬롯 밖");
+          }
+        } else {
+          ImGui::TextDisabled(u8"확인 불가");
+        }
+      }
+
+      ImGui::EndTable();
+    }
+  }
+
+  ImGui::Spacing();
+  ImGui::TextUnformatted(u8"임신 상태 (게임 기본 3슬롯)");
 
   if (pregnancy.valid) {
     if (ImGui::BeginTable(
