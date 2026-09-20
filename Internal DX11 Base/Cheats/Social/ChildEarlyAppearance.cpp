@@ -52,6 +52,7 @@ struct PregnancyDebugRecordDump {
   uint16_t q00OfficerId = 0;
   uint16_t q08OfficerId = 0;
   uint16_t childOfficerId = 0;
+  uint8_t conceptionProgress = 0;
   uint8_t pregnancyFlag = 0;
   uint8_t remainingMonths = 0;
   std::array<uint8_t, 5> capRaw{};
@@ -169,6 +170,7 @@ static bool ReadPregnancyDebugRecord(
 
   if (!SafeReadPtr(base + 0x00, &dump.q00) ||
       !SafeReadPtr(base + 0x08, &dump.q08) ||
+      !SafeRead8(base + 0x08, &dump.conceptionProgress) ||
       !SafeRead8(base + 0x09, &dump.pregnancyFlag) ||
       !SafeRead8(base + 0x0A, &dump.remainingMonths) ||
       !SafeReadPtr(base + 0x10, &dump.childPtr) ||
@@ -536,10 +538,11 @@ static void FlushPregnancySpouseDebugResults() {
       const PregnancyDebugRecordDump& d =
           canonical.slots[(size_t)slot];
       AddLog(
-          u8"[임신배우자DBG]   slot%d record=%p 배우자 ID=%u | +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
+          u8"[임신배우자DBG]   slot%d record=%p 배우자 ID=%u | +08=%u +09=%u +0A=%u | +10=%p(ID:%u) | +1E..22=%u,%u,%u,%u,%u",
           slot,
           (void*)(canonical.base + (uintptr_t)slot * 0x28),
           canonical.spouseIds[(size_t)slot],
+          (unsigned)d.conceptionProgress,
           (unsigned)d.pregnancyFlag,
           (unsigned)d.remainingMonths,
           (void*)d.childPtr, d.childOfficerId,
@@ -1355,7 +1358,7 @@ void DrawChildManagerWindow(float scale) {
 
   if (pregnancy.valid) {
     if (ImGui::BeginTable(
-            "PregnancyStatusTable", 5,
+            "PregnancyStatusTable", 6,
             ImGuiTableFlags_Borders |
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_SizingFixedFit)) {
@@ -1369,7 +1372,10 @@ void DrawChildManagerWindow(float scale) {
           u8"상태", ImGuiTableColumnFlags_WidthFixed,
           85.0f * scale);
       ImGui::TableSetupColumn(
-          u8"남은 개월", ImGuiTableColumnFlags_WidthFixed,
+          u8"임신 진행(?)", ImGuiTableColumnFlags_WidthFixed,
+          85.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"출산까지", ImGuiTableColumnFlags_WidthFixed,
           75.0f * scale);
       ImGui::TableSetupColumn(
           u8"자녀", ImGuiTableColumnFlags_WidthFixed,
@@ -1400,6 +1406,9 @@ void DrawChildManagerWindow(float scale) {
 
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(GetPregnancySlotState(d));
+
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", (unsigned)d.conceptionProgress);
 
         ImGui::TableNextColumn();
         if (d.pregnancyFlag == 1 &&
