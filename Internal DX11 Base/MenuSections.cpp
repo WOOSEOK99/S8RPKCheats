@@ -749,6 +749,10 @@ namespace DX11Base {
                           ImVec2(-FLT_MIN, 0))) {
           ::DX11Base::CompareBanquetDiffAfter();
         }
+        if (ImGui::Button(u8"3. 연회 사용 플래그 해제 테스트##BanquetClearTest",
+                          ImVec2(-FLT_MIN, 0))) {
+          ::DX11Base::ClearBanquetUsedBitForTest();
+        }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextUnformatted(
