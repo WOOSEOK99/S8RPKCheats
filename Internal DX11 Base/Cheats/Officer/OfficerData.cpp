@@ -1536,7 +1536,10 @@ namespace DX11Base {
             GetTickCount64();
 
         uintptr_t synerProbeBase = 0;
+        const uintptr_t gameBase =
+            GetGameBase();
         const bool hasSynerProbeTable =
+            gameBase > 0x10000 &&
             TryResolveSynergeticTable(
                 gameBase, rosterBase, &synerProbeBase);
         bool dumpedSynerProbeThisCouncil = false;
