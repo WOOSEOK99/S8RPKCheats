@@ -1668,12 +1668,63 @@ namespace DX11Base {
     static OfficerRelationshipInfo s_cachedRelationshipInfo;
     static bool s_cachedRelationshipRead = false;
 
+    // 관계 표시 문자열도 선택 무장이 바뀔 때만 한 번 생성합니다.
+    // 기존 코드는 매 프레임 모든 관계 인원에 대해 이름/친밀도 조회와
+    // 긴 std::string 조립을 반복해서 관계가 많은 무장에서 프레임 저하가 컸습니다.
+    static std::string s_cachedSworn = u8"없음";
+    static std::string s_cachedSpouses = u8"없음";
+    static std::string s_cachedSynergetic = u8"없음";
+    static std::string s_cachedAntipathetic = u8"없음";
+    static std::string s_cachedEnemies = u8"없음";
+    static std::string s_cachedRivals = u8"없음";
+
     if (officerBase != s_cachedRelationshipOfficer) {
       s_cachedRelationshipOfficer = officerBase;
       s_cachedRelationshipInfo = OfficerRelationshipInfo{};
       s_cachedRelationshipRead =
           GetOfficerRelationshipInfo(
               officerBase, s_cachedRelationshipInfo);
+
+      s_cachedSworn = u8"없음";
+      s_cachedSpouses = u8"없음";
+      s_cachedSynergetic = u8"없음";
+      s_cachedAntipathetic = u8"없음";
+      s_cachedEnemies = u8"없음";
+      s_cachedRivals = u8"없음";
+
+      if (s_cachedRelationshipRead &&
+          s_cachedRelationshipInfo.valid) {
+        uint16_t relationshipSourceId = 0;
+        if (officerBase > 0x10000)
+          UnsafeRead16(
+              officerBase + 0x08,
+              &relationshipSourceId);
+
+        s_cachedSworn =
+            BuildRelationshipNameList(
+                relationshipSourceId,
+                s_cachedRelationshipInfo.swornBrothers);
+        s_cachedSpouses =
+            BuildRelationshipNameList(
+                relationshipSourceId,
+                s_cachedRelationshipInfo.spouses);
+        s_cachedSynergetic =
+            BuildRelationshipNameList(
+                relationshipSourceId,
+                s_cachedRelationshipInfo.synergetic);
+        s_cachedAntipathetic =
+            BuildRelationshipNameList(
+                relationshipSourceId,
+                s_cachedRelationshipInfo.antipathetic);
+        s_cachedEnemies =
+            BuildRelationshipNameList(
+                relationshipSourceId,
+                s_cachedRelationshipInfo.enemies);
+        s_cachedRivals =
+            BuildRelationshipNameList(
+                relationshipSourceId,
+                s_cachedRelationshipInfo.rivals);
+      }
     }
 
     if (ImGui::BeginTable("OfficerRelationshipHeader", 1)) {
@@ -1700,35 +1751,6 @@ namespace DX11Base {
       return;
     }
 
-    uint16_t relationshipSourceId = 0;
-    if (officerBase > 0x10000)
-      UnsafeRead16(officerBase + 0x08, &relationshipSourceId);
-
-    const std::string sworn =
-        BuildRelationshipNameList(
-            relationshipSourceId,
-            s_cachedRelationshipInfo.swornBrothers);
-    const std::string spouses =
-        BuildRelationshipNameList(
-            relationshipSourceId,
-            s_cachedRelationshipInfo.spouses);
-    const std::string synergetic =
-        BuildRelationshipNameList(
-            relationshipSourceId,
-            s_cachedRelationshipInfo.synergetic);
-    const std::string antipathetic =
-        BuildRelationshipNameList(
-            relationshipSourceId,
-            s_cachedRelationshipInfo.antipathetic);
-    const std::string enemies =
-        BuildRelationshipNameList(
-            relationshipSourceId,
-            s_cachedRelationshipInfo.enemies);
-    const std::string rivals =
-        BuildRelationshipNameList(
-            relationshipSourceId,
-            s_cachedRelationshipInfo.rivals);
-
     if (ImGui::BeginTable(
             "OfficerRelationshipTable", 2,
             ImGuiTableFlags_BordersInnerH |
@@ -1754,16 +1776,16 @@ namespace DX11Base {
               ImGui::TextWrapped("%s", value.c_str());
           };
 
-      drawRow(u8"의형제", sworn);
-      drawRow(u8"배우자", spouses);
-      drawRow(u8"상생", synergetic);
-      drawRow(u8"상극", antipathetic);
+      drawRow(u8"의형제", s_cachedSworn);
+      drawRow(u8"배우자", s_cachedSpouses);
+      drawRow(u8"상생", s_cachedSynergetic);
+      drawRow(u8"상극", s_cachedAntipathetic);
 
       // 현재 실제 데이터에서 발견되는 경우에만 추가 관계를 표시한다.
       if (!s_cachedRelationshipInfo.enemies.empty())
-        drawRow(u8"원수", enemies);
+        drawRow(u8"원수", s_cachedEnemies);
       if (!s_cachedRelationshipInfo.rivals.empty())
-        drawRow(u8"호적수", rivals);
+        drawRow(u8"호적수", s_cachedRivals);
 
       ImGui::EndTable();
     }
@@ -1794,9 +1816,9 @@ namespace DX11Base {
     if (standaloneJustOpened)
       s_capOfficerSnapGame = 0;
 
-    if (asChild) {
-      ImGui::BeginChild("SelectedOfficerChild", ImVec2(0, 0), true);
-    } else {
+    // asChild=true일 때는 호출측의 OfficerDetailPane이 이미 스크롤 가능한
+    // 고정 Child이므로 내부 Child를 한 겹 더 만들지 않습니다.
+    if (!asChild) {
       if (bForceCenterSelectedOfficer) {
         ImVec2 center(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
         ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -1814,9 +1836,7 @@ namespace DX11Base {
     if (g_capturedOfficerBase == 0) {
       ImGui::TextColored(ImVec4(1, 0.5f, 0.2f, 1), u8"캡처된 데이터가 없습니다.");
       ImGui::BulletText(u8"게임에서 상세 정보를 열거나, 리스트에서 선택하세요.");
-      if (asChild)
-        ImGui::EndChild();
-      else
+      if (!asChild)
         ImGui::End();
       return;
     }
@@ -1827,9 +1847,7 @@ namespace DX11Base {
                          (void *)pBase);
       ImGui::BulletText(
           u8"특정 세이브(등록무장/고대무장)에서 배열 기준점이 어긋나거나, 임시 객체를 가리키는 경우가 있습니다.");
-      if (asChild)
-        ImGui::EndChild();
-      else
+      if (!asChild)
         ImGui::End();
       return;
     }
@@ -2111,9 +2129,7 @@ namespace DX11Base {
       ImGui::EndTabBar();
     }
     g_officerInlineReadPtr = 0;
-    if (asChild)
-      ImGui::EndChild();
-    else
+    if (!asChild)
       ImGui::End();
   }
 
