@@ -1117,11 +1117,21 @@ namespace DX11Base {
     char titleBuf[128];
     sprintf_s(titleBuf, u8"주인공 무장 상세 편집%s###OffDetailWin", s_cachedTitleCity.c_str());
 
-    static ImGuiWindowFlags OffDetailFlags = 
-    ImGuiWindowFlags_AlwaysAutoResize |ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings;
+    // 관계 정보가 길어져도 내용에 따라 창 자체가 자동 확장되지 않도록
+    // 기본 크기를 고정하고 사용자가 직접 리사이즈할 수 있게 합니다.
+    static ImGuiWindowFlags OffDetailFlags =
+        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings;
 
-    // 기본 가로 크기 설정 (원하시는 대로 숫자를 키우시면 됩니다)
-    ImGui::SetNextWindowSize(ImVec2(800 * scale, 0), ImGuiCond_FirstUseEver);
+    // 최초 기본 크기. 이후에는 사용자가 창 모서리를 드래그해 자유롭게 조절할 수 있습니다.
+    ImGui::SetNextWindowSize(
+        ImVec2(800.0f * scale, 700.0f * scale),
+        ImGuiCond_FirstUseEver);
+
+    // 너무 작게 줄여 표/관계 정보 UI가 무너지지 않도록 최소 크기만 제한합니다.
+    // 최대 크기는 제한하지 않습니다.
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2(680.0f * scale, 500.0f * scale),
+        ImVec2(FLT_MAX, FLT_MAX));
 
     if (ImGui::Begin(titleBuf, &bShowOfficerDetail, OffDetailFlags)) {
       if (p1 == 0) {
