@@ -1765,6 +1765,66 @@ namespace DX11Base {
         sprintf_s(buf, sizeof(buf), "%016llX", (unsigned long long)pBase);
         ImGui::SetClipboardText(buf);
       }
+
+      // 자룡모드 친밀 가속 조건 검증용:
+      // 구 CT 구조의 상성(+0x5D), 흥미(+0x83), 중시(+0xA4)를
+      // 현재 PK 선택 무장에서 직접 읽어 실제 게임 표시와 대조한다.
+      uint8_t dbgCompatibility = 0;
+      uint8_t dbgInterest = 0;
+      uint8_t dbgPriority = 0;
+      bool dbgMetaOk =
+          SafeRead8(pBase + 0x5D, &dbgCompatibility) &&
+          SafeRead8(pBase + 0x83, &dbgInterest) &&
+          SafeRead8(pBase + 0xA4, &dbgPriority);
+
+      if (dbgMetaOk) {
+        const char* priorityName = u8"범위외";
+        switch (dbgPriority) {
+        case 1: priorityName = u8"무명"; break;
+        case 2: priorityName = u8"물욕"; break;
+        case 3: priorityName = u8"문무불문"; break;
+        case 4: priorityName = u8"악명"; break;
+        case 5: priorityName = u8"무관심"; break;
+        case 6: priorityName = u8"고명"; break;
+        default: break;
+        }
+
+        const uint8_t interest4 =
+            (uint8_t)(dbgInterest & 0x0F);
+
+        ImGui::Text(
+            u8"상성: %u  |  중시: %u:%s  |  흥미Raw: 0x%02X",
+            (unsigned int)dbgCompatibility,
+            (unsigned int)dbgPriority,
+            priorityName,
+            (unsigned int)dbgInterest);
+
+        ImGui::Text(
+            u8"흥미: 술 %s / 무구 %s / 서적 %s / 보물 %s",
+            (interest4 & 0x01) ? "O" : "X",
+            (interest4 & 0x02) ? "O" : "X",
+            (interest4 & 0x04) ? "O" : "X",
+            (interest4 & 0x08) ? "O" : "X");
+
+        if ((dbgInterest & 0xF0) != 0) {
+          ImGui::TextDisabled(
+              u8"흥미 상위비트 감지: 0x%02X (현재 자동 계산은 하위 4비트만 사용)",
+              (unsigned int)(dbgInterest & 0xF0));
+        }
+
+        if (dbgCompatibility > 149 ||
+            dbgPriority < 1 ||
+            dbgPriority > 6) {
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.45f, 0.25f, 1.0f),
+              u8"※ 현재 가정 범위 밖 값입니다. 이 장수 정보와 게임 화면을 비교해 주세요.");
+        }
+      } else {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.4f, 0.3f, 1.0f),
+            u8"상성/흥미/중시 디버그 읽기 실패");
+      }
+
       ImGui::Separator();
     }
 
