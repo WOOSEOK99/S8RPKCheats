@@ -7463,6 +7463,7 @@ namespace DX11Base {
           ImGui::TextUnformatted(
               u8"예상 친밀 주소와 정확히 일치하는 write만 한 번 캡처하며 게임 값은 변경하지 않습니다.");
           ImGui::EndTooltip();
+        }
 
         ImGui::SameLine(0.f, 6.f * sc);
         if (ImGui::SmallButton(
@@ -7508,7 +7509,6 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        }
       }
 
       ImGui::SameLine(0.f, 24.f * sc);
