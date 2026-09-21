@@ -319,7 +319,8 @@ namespace DX11Base {
         size_t colonPos = line.find(":");
         if (colonPos != std::string::npos) {
           try {
-            g_speedMultiplier = std::stof(line.substr(colonPos + 1));
+            g_speedMultiplier = SpeedHack_NormalizeMultiplier(
+                std::stof(line.substr(colonPos + 1)));
           } catch (...) {
           }
         }
