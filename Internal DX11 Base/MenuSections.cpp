@@ -433,6 +433,18 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
+        ImGui::SameLine();
+        if (ImGui::Button(u8"전기 수치 진단", ImVec2(120, 26))) {
+          DX11Base::DumpTengiParameterDiagnostics();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"15종 전기 객체의 +0x12 값을 읽기만 해서 로그에 출력합니다.");
+          ImGui::TextDisabled(u8"적음/보통/많음 비교용이며 메모리는 변경하지 않습니다.");
+          ImGui::EndTooltip();
+        }
+
         ImGui::Spacing(); // 위아래 여백
         ImGui::Separator();
         ImGui::Spacing(); // 위아래 여백
