@@ -107,6 +107,7 @@ namespace DX11Base {
   extern bool bUndiscoveredToRonin;
   extern bool bAutoStatUp99;        // 능력치 99 -> 100 자동 보정
   extern bool bInfTengi;            // 2026-04-05 무한 전기
+  extern bool bTotalWarCycleShortening; // 결전 재발생 대기 주기 단축 (기본 ON)
   extern bool bCancelCastleEvent;   // 2026-04-05 중지 성성 취소
   extern bool bSkillCondition;      // 만병 습득 조건 해제
   extern bool bYumokCondition;      // 유목기병 습득 조건 해제
