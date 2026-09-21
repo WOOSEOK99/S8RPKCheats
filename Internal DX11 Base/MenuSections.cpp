@@ -43,6 +43,7 @@
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/ShortBattleCooldown.h"
+#include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"
 #include "Framework/imgui.h"
@@ -978,6 +979,38 @@ namespace DX11Base {
                              u8"※ 다수의 원군이 동시에 도착할 경우 더 눈에 띌 수 있습니다.");
           ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                              u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
+          ImGui::EndTooltip();
+        }
+
+        // 4행: 병력수 공방 반영 / 빈칸
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"병력수 공방 반영", &bTroopCountCombatScaling)) {
+          const bool requested = bTroopCountCombatScaling;
+          if (!DX11Base::SetTroopCountCombatScaling(requested))
+            bTroopCountCombatScaling = DX11Base::IsTroopCountCombatScalingApplied();
+          NotifyFeatureToggle(u8"병력수 공방 반영", bTroopCountCombatScaling);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+              u8"오리지널 시절의 방식처럼 병력 수가 부대 공격/방어 계산에 더 직접적으로 반영되게 합니다.");
+          ImGui::TextUnformatted(
+              u8"- 공격/방어 공용 계산 함수에서 게임에 남아 있는 선형 병력 환산 경로를 사용합니다.");
+          ImGui::TextUnformatted(
+              u8"- 병력이 많을수록 공방 계산에서 더 유리하고, 병력이 적을수록 상대적으로 불리해지는 방향입니다.");
+          ImGui::TextUnformatted(
+              u8"- 공격력/방어력에 고정 보너스를 더하는 기능이 아니라 계산 분기 자체를 오리지널식 경로로 바꿉니다.");
+          ImGui::TextUnformatted(
+              u8"- 병력 몇 명당 공방이 몇 상승하는지 같은 정확한 수치 공식은 CT 스크립트에 기재되어 있지 않습니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 게임 버전의 해당 바이트가 예상값과 다르면 안전을 위해 적용하지 않습니다.");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+              u8"※ 체크 해제 시 원래 계산 분기로 복구합니다.");
           ImGui::EndTooltip();
         }
 
