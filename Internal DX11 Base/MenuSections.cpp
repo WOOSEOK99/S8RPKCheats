@@ -977,12 +977,16 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"수비측 원군이 도착할 때 총대장과 가장 가까운 이동 가능한 빈 타일에 배치합니다.");
-        ImGui::TextUnformatted(u8"- 맵 전체를 검색하며 거리 제한은 없습니다.");
+                           u8"수비측 원군이 도착할 때 총대장과 가까운 이동 가능한 빈 타일에 배치합니다.");
+        ImGui::TextUnformatted(u8"- 총대장 기준 최대 5칸 범위에서 가까운 순서로 배치 위치를 탐색합니다.");
         ImGui::TextUnformatted(u8"- 점유된 타일, 사용 불가 지형, 통행 불가 타일은 제외합니다.");
-        ImGui::TextUnformatted(u8"- 총대장을 찾지 못하거나 판별이 애매하면 게임의 원래 배치 방식을 사용합니다.");
-        ImGui::TextUnformatted(u8"- 총대장은 확인됐지만 배치 가능한 빈 타일이 전혀 없으면 원군 배치를 실패 처리합니다.");
+        ImGui::TextUnformatted(u8"- 5칸 범위 안에 적절한 위치가 없으면 게임의 원래 배치 방식을 사용합니다.");
+        ImGui::TextUnformatted(u8"- 총대장을 찾지 못하거나 판별이 애매해도 게임의 원래 배치 방식을 사용합니다.");
         ImGui::TextUnformatted(u8"- 공격측 원군의 배치 위치는 변경하지 않습니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 원군 도착 순간 일시적인 화면 끊김이 발생할 수 있습니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 다수의 원군이 동시에 도착할 경우 더 눈에 띌 수 있습니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                            u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
         ImGui::EndTooltip();
