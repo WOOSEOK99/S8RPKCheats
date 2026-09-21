@@ -8,6 +8,7 @@
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
+#include "Cheats/War/ReinforcementArrivalAction.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -138,6 +139,7 @@ namespace DX11Base {
     UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
     UpsertBoolConfigValue("bGovernorPrisonerDisposal", bGovernorPrisonerDisposal);
     UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
+    UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
     UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
@@ -169,6 +171,17 @@ namespace DX11Base {
       AddLog(u8"[Config] 도독 포로 직접 처분 설정 로드: %s / 특권소비=%s",
              bGovernorPrisonerDisposal ? "ON" : "OFF",
              bGovernorPrisonerConsumePrivilege ? "ON" : "OFF");
+    }
+
+    bool savedReinforcementArrivalAction = false;
+    if (LoadBoolConfigValue("bReinforcementArrivalAction",
+                            savedReinforcementArrivalAction)) {
+      bReinforcementArrivalAction = savedReinforcementArrivalAction;
+      if (!SetReinforcementArrivalAction(savedReinforcementArrivalAction))
+        bReinforcementArrivalAction = IsReinforcementArrivalActionApplied();
+
+      AddLog(u8"[Config] 원군 도착 턴 즉시 행동 설정 로드: %s",
+             bReinforcementArrivalAction ? "ON" : "OFF");
     }
 
     int savedShortBattleCooldownDays = 3;

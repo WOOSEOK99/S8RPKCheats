@@ -38,6 +38,7 @@
 #include "Cheats/War/FactionLordBonus.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
 #include "Cheats/War/Roadblock.h"
+#include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/ShortBattleCooldown.h"
@@ -943,6 +944,25 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"ON: 예를 선택하면 특권 1개를 소비한 뒤 직접 처분합니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                            u8"※ 특권이 0개이면 특권 소비 모드에서 직접 처분할 수 없습니다.");
+        ImGui::EndTooltip();
+      }
+
+      if (ImGui::Checkbox(u8"원군 도착 턴 즉시 행동", &bReinforcementArrivalAction)) {
+        const bool requested = bReinforcementArrivalAction;
+        if (!DX11Base::SetReinforcementArrivalAction(requested))
+          bReinforcementArrivalAction = DX11Base::IsReinforcementArrivalActionApplied();
+        NotifyFeatureToggle(u8"원군 도착 턴 즉시 행동", bReinforcementArrivalAction);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"전투에 도착한 원군이 도착한 그 턴부터 바로 행동할 수 있게 합니다.");
+        ImGui::TextUnformatted(u8"- 원군 도착 처리를 명령 처리보다 먼저 실행하도록 순서를 변경합니다.");
+        ImGui::TextUnformatted(u8"- 공격측/수비측 원군의 배치 위치는 이 옵션에서 변경하지 않습니다.");
+        ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장되어 다음 실행 시 다시 적용됩니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
         ImGui::EndTooltip();
       }
 

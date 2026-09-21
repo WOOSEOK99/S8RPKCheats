@@ -191,6 +191,9 @@
     <ClInclude Include="Cheats\War\GovernorPrisonerDisposal.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\ReinforcementArrivalAction.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\SiegeWarfare.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -401,6 +404,9 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\GovernorPrisonerDisposal.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\ReinforcementArrivalAction.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\SiegeWarfare.cpp">
