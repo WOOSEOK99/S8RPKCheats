@@ -96,6 +96,7 @@ namespace DX11Base {
   bool bUndiscoveredToRonin = false;
   bool bAutoStatUp99 = false;
   bool bInfTengi = false;            // 2026-04-05 무한 전기
+  bool bTotalWarCycleShortening = true; // 결전 재발생 대기 주기 단축 (기본 ON)
   bool bCancelCastleEvent = false;   // 2026-04-05 중지 성성 취소
   bool bSkillCondition = false;      // 만병 습득 조건 해제
   bool bYumokCondition = false;      // 유목기병 습득 조건 해제

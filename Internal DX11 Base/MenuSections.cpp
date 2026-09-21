@@ -43,6 +43,7 @@
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/ShortBattleCooldown.h"
+#include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"
@@ -419,6 +420,24 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"중지 성성이 발생하면 즉시 취소합니다.");
           ImGui::EndTooltip();
         }
+
+        if (ImGui::Checkbox(u8"결전 발생 주기 단축", &bTotalWarCycleShortening)) {
+          const bool requested = bTotalWarCycleShortening;
+          if (!DX11Base::SetTotalWarCycleShortening(requested))
+            bTotalWarCycleShortening = DX11Base::IsTotalWarCycleShorteningApplied();
+          NotifyFeatureToggle(u8"결전 발생 주기 단축", bTotalWarCycleShortening);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"결전 발생 후 다음 결전의 재발생 대기 주기를 1년으로 단축합니다.");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
+                             u8"다른 결전 발생 조건은 그대로 유지됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::SameLine(160.0f * scale);
 
         if (ImGui::Button(u8"전기발생 취소", ImVec2(120, 26))) {
           // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)

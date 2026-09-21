@@ -7,6 +7,7 @@
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/War/ShortBattleCooldown.h"
+#include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
@@ -166,6 +167,7 @@ namespace DX11Base {
 
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
+    UpsertBoolConfigValue("bTotalWarCycleShortening", bTotalWarCycleShortening);
     UpsertBoolConfigValue("bShortBattleCooldownEnabled", bShortBattleCooldownEnabled);
     UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
     UpsertBoolConfigValue("bTroopCountCombatScaling", bTroopCountCombatScaling);
@@ -187,6 +189,16 @@ namespace DX11Base {
       SetAIWarImprove(savedAIWarImprove);
       AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
     }
+
+    bool savedTotalWarCycleShortening = bTotalWarCycleShortening;
+    if (LoadBoolConfigValue("bTotalWarCycleShortening", savedTotalWarCycleShortening))
+      bTotalWarCycleShortening = savedTotalWarCycleShortening;
+
+    if (!SetTotalWarCycleShortening(bTotalWarCycleShortening))
+      bTotalWarCycleShortening = IsTotalWarCycleShorteningApplied();
+
+    AddLog(u8"[Config] 결전 발생 주기 단축 설정 로드: %s",
+           bTotalWarCycleShortening ? "ON" : "OFF");
 
     bool savedGovernorPrisonerConsumePrivilege = false;
     if (LoadBoolConfigValue("bGovernorPrisonerConsumePrivilege",
