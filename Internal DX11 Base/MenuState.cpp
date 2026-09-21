@@ -56,6 +56,7 @@ namespace DX11Base {
   int iShortBattleCooldownDays = 3;
   bool bGovernorPrisonerDisposal = false;
   bool bGovernorPrisonerConsumePrivilege = false;
+  bool bReinforcementArrivalAction = false;
 
   // 전투 환경 / 조건 설정
   bool bWeatherSkillSimple = false;
