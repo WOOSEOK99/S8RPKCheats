@@ -1129,12 +1129,30 @@ namespace DX11Base {
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 42.0f);
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
                            u8"모든 유효 무장의 실제 전법/특기/능력치를 분석하여 특수 능력을 자동으로 추가합니다.");
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
                            u8"기존에 수동으로 부여한 특수 능력은 삭제하지 않습니다.");
+        ImGui::Separator();
+
+        ImGui::TextColored(ImVec4(0.5f, 0.9f, 1.0f, 1.0f), u8"[ 자동 부여 조건 ]");
+        ImGui::TextUnformatted(u8"군악대 : 분기/고무 중 하나가 Lv2 이상 + 두 전법 레벨 합계 4 이상");
+        ImGui::TextUnformatted(u8"무쌍 보병 : 무력 80 이상 + 강격/맹돌 중 하나 Lv2 이상 + 보병 전법 합계 + 보장×2가 9 이상");
+        ImGui::TextUnformatted(u8"불꽃 기병 : 무력 80 이상 + 연격/기사 중 하나 Lv2 이상 + 기병 전법 합계 + 기장×2가 9 이상");
+        ImGui::TextUnformatted(u8"원격 궁병 : 무력 75 이상 + 궁병 전법 합계 + 궁장×2가 9 이상 + 원사/시람 Lv2 이상 또는 궁병 전법 합계 8 이상");
+        ImGui::TextUnformatted(u8"총사령관 : 통솔 90 이상 + 보병/기병/궁병 중 2계통 이상 전법합 6 이상 + 3병종 전법 합계 16 이상 + 군사 특기 합계 6 이상");
+        ImGui::TextUnformatted(u8"기습부대 : 교란/급습/요격 중 2종 이상 보유 + 세 전법 레벨 합계 5 이상");
+        ImGui::TextUnformatted(u8"대군사 : 지력 85 이상 + 열화/격류/낙석/요격 합계 7 이상 + 군사 특기 합계 5 이상 또는 신산 Lv2 이상");
+        ImGui::TextUnformatted(u8"무신 : 무력 95 이상 + 보병/기병/궁병 전법 합계가 각각 5 이상 + 세 병종 총합 18 이상 + 각 병종에 Lv2 이상 전법 1개 이상");
+        ImGui::TextUnformatted(u8"함선 병기화 : 함선 전법 레벨 합계 7 이상 + 수군 Lv2 이상");
         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                           u8"등갑군은 1차 자동 판정에서 제외됩니다.");
+                           u8"등갑군 : 현재 자동 판정 제외 (수동 지정만 가능)");
+
+        ImGui::Separator();
+        ImGui::TextDisabled(u8"※ 전법/특기의 '합계'는 해당 항목들의 레벨 합계입니다.");
+        ImGui::TextDisabled(u8"※ 기재 이름/ID는 자동 판정에 사용하지 않습니다.");
+        ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
       }
 
