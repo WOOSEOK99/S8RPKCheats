@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 namespace DX11Base {
 
 // 모든 유효 무장의 실제 전법/특기/능력치를 읽어
@@ -13,5 +15,7 @@ void CancelSpecialAbilityAutoAssign();
 bool IsSpecialAbilityAutoAssignRunning();
 float GetSpecialAbilityAutoAssignProgress();
 const char *GetSpecialAbilityAutoAssignStatus();
+std::size_t GetSpecialAbilityAutoAssignResultCount();
+const char *GetSpecialAbilityAutoAssignResultLine(std::size_t index);
 
 } // namespace DX11Base
