@@ -168,3 +168,15 @@ cmp al, 11
 
 주의:
 `REFUSAL_PRE`의 skip 목적지 `+1451ED9`가 `REFUSAL_POST`의 16-byte hook 범위 `+1451ECD~+1451EDC` 안에 들어갑니다. 정적 분석상 overlap 위험/버그 후보이므로 그대로 이식하지 않습니다.
+
+
+## E. 이식/충돌 종합
+
+Step 03~08의 결과를 현재 S8RPKCheats `main`과 대조한 종합표는 [Step 09](09_PORTING_AND_CONFLICT_MAP.md)에 정리했습니다.
+
+핵심:
+- Viewer 공격 후보 확장 `+144D248`은 현재 `+144D24C` 패치와 **직접 중첩**.
+- Viewer 플레이어 우선 가산 제거 `+144BB60/+144BC8B`는 현재 `+1464B91`과 주소는 다르지만 **기능 목적 중복 가능성**.
+- Viewer AI 포로 판정과 현재 `도독 포로 직접 처분`은 주소/목적이 분리됨.
+- 메시지 상세화와 결전 1년 gate는 현재 확인 범위에서 독립 이식 가능.
+- 항복권고 PRE/POST는 Viewer 자체 hook overlap 위험 때문에 그대로 복사하지 않고 재설계 필요.

@@ -1,0 +1,155 @@
+SAN8RPK Viewer -> S8RPKCheats port/conflict matrix
+====================================================
+
+BASELINE
+--------
+S8RPKCheats main:
+96dfc11508bb9bfdc429f656f15530b13cb56045
+
+Research branch before Step09:
+95b38fdea881a78d1a7cb53e5b3bf392656c0c23
+
+
+CURRENT AI WAR PATCHES
+----------------------
+Roadblock.cpp
+
++144D24C
+74 0A -> EB 0A
+multi-attack branch
+
++1464B91
+75 1E -> 90 90
+hero/player aggression branch
+
++145BDAB
+B8 01 00 00 00 -> B8 00 00 00 00
+empty-city restriction flag
+
+
+VIEWER ATTACK
+-------------
++144D248 .. +144D257
+16-byte trampoline
+
+OVERLAPS current +144D24C .. +144D24D
+=> DIRECT CONFLICT
+=> viewer attack must replace current first patch
+
+
+VIEWER PLAYER PRIORITY
+----------------------
++144BB60
++144BC8B
+
+No byte overlap with +1464B91.
+Potential semantic overlap.
+Requires A/B comparison.
+
+
+VIEWER PRISONER AI
+------------------
++1E52A8D
++1E54190
+
+CURRENT GOVERNOR PRISONER
+-------------------------
++1E53BB2 main
++1E53BBB allow
++1E540B7 deny
++1E5CE39 collect
++1E5DE47 relations
+
+No direct byte overlap.
+
+Shared read-only/global context:
++2E98BC8
+
+Shared global pointer use is NOT itself a hook collision.
+
+
+VIEWER MESSAGE
+--------------
++1E599BE
++1E5A82C
++1E5BA1F
++1E5BA4B
+
+No direct current patch overlap found.
+Display-only.
+Good low-risk first port candidate.
+
+
+VIEWER TOTALWAR
+---------------
++1335961
++132E4BD
+
+Current TengiCave:
+AOB hook "41 88 87 18 4B 1E 00"
+Captures event/tengi data address.
+
+No direct fixed-RVA overlap identified.
+Potential gameplay interaction only.
+
+
+VIEWER REFUSAL
+--------------
+PRE  +1451EAD
+POST +1451ECD
+
+No current S8RPKCheats hook overlap.
+
+BUT Viewer internal overlap:
+POST trampoline covers +1451ECD..+1451EDC
+PRE skip jumps +1451ED9
+=> destination lies inside POST trampoline
+=> DO NOT PORT LITERALLY
+
+
+VIEWER SURRENDER HONOR
+----------------------
++193C86E
+
+No current direct patch overlap found.
+Independent candidate.
+
+
+PORT CLASSIFICATION
+-------------------
+REPLACE:
+- Viewer attack +144D248 replaces current +144D24C
+
+A/B TEST SEMANTIC OVERLAP:
+- Viewer +144BB60/+144BC8B vs current +1464B91
+
+KEEP INITIALLY:
+- current +145BDAB empty-city patch
+
+INDEPENDENT:
+- prisoner AI
+- message detail
+- totalwar 1-year retry
+- high-honor ruler surrender suppression
+
+REDESIGN REQUIRED:
+- refusal PRE/POST + attack boost integration
+
+
+SUGGESTED TECHNICAL PORT ORDER
+------------------------------
+Phase 1:
+message detail
+totalwar
+honor surrender
+
+Phase 2:
+player-priority static NOPs
+attack target expansion
+compare old AI patches
+
+Phase 3:
+prisoner AI
+
+Phase 4:
+refusal/attack conversion with safe PRE/POST redesign
