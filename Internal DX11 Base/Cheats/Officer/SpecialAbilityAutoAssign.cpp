@@ -4,6 +4,7 @@
 #include "../../showlog.h"
 #include "../System/SkillCountManager.h"
 #include "OfficerRosterResolve.h"
+#include "OfficerData.h"
 #include "SpecialAbilityAutoAssign.h"
 
 #include <algorithm>
@@ -260,10 +261,14 @@ bool AutoAssignSpecialAbilities() {
     const uintptr_t base =
         rosterBase + static_cast<uintptr_t>(i) * kOfficerStride;
 
+    const RosterStats stats = SafeReadRosterStats(base);
+    if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerCount)
+      continue;
+
     OfficerProfile profile;
     if (!ReadOfficerProfile(base, profile))
       continue;
-    if (seenIds[profile.id])
+    if (profile.id != static_cast<int>(stats.id_08) || seenIds[profile.id])
       continue;
     seenIds[profile.id] = true;
     ++validOfficers;
