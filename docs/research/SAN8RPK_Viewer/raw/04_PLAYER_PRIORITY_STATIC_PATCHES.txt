@@ -1,0 +1,157 @@
+SAN8RPK_Viewer Step 04 raw static-patch evidence
+=====================================================
+
+Source EXE:
+SAN8RPK_Viewer.exe
+SHA-256:
+34abf52f9651d4313076b16042476e5646967aa55af65613f542d69883084c3d
+
+Viewer status string
+--------------------
+
+공격·포로 AI 켜짐 (플레이어 우선 가산 제거)
+· 추가 후보 %d / 갱신 %d
+· 석방 %d / 처형 %d
+· 권고 실패 %d / 전환 %d / 재권고 차단 %d
+
+ai_profile.py marshal reconstruction
+------------------------------------
+
+STATIC_PATCHES = {}
+
+HOOKS.append((
+    0x0144BB60,
+    bytes.fromhex("48b800889f2a030000004803f0"),
+    -1
+))
+STATIC_PATCHES[-1] = bytes.fromhex(
+    "90909090909090909090909090"
+)
+
+HOOKS.append((
+    0x0144BC8B,
+    bytes.fromhex("4881c600f15365"),
+    -2
+))
+STATIC_PATCHES[-2] = bytes.fromhex(
+    "90909090909090"
+)
+
+GUARDS.extend([
+    (
+        0x0144BA40,
+        736,
+        "60c495cf393e8a5a71f4e8c7357cf5979ba5d248d6c27f42778b078baa95fa8f"
+    )
+])
+
+Native disassembly
+------------------
+
+RVA +0x0144BB60
+
+48 B8 00 88 9F 2A 03 00 00 00
+    movabs rax,0x000000032A9F8800
+
+48 03 F0
+    add rsi,rax
+
+0x32A9F8800 = 13,600,000,000
+
+replacement:
+13 x NOP
+
+
+RVA +0x0144BC8B
+
+48 81 C6 00 F1 53 65
+    add rsi,0x6553F100
+
+0x6553F100 = 1,700,000,000
+
+replacement:
+7 x NOP
+
+
+Numeric relationship
+--------------------
+
+13,600,000,000 / 1,700,000,000 = 8
+
+ai_patch.AIController._patch_bytes()
+------------------------------------
+
+Equivalent behavior reconstructed from Python 3.10 bytecode:
+
+static = getattr(self.profile, "STATIC_PATCHES", {})
+if offset in static:
+    return static[offset]
+
+if hasattr(self.profile, "replacement"):
+    return self.profile.replacement(offset)
+
+return self.profile.make_jump(self.cave + offset)
+
+Therefore -1/-2 are static replacement keys, not cave offsets.
+
+AIController._exchange()
+------------------------
+
+Iterates profile.HOOKS:
+
+for rva, original, offset in profile.HOOKS:
+    jump = self._patch_bytes(offset)
+    if enabling:
+        before, after = original, jump
+    else:
+        before, after = jump, original
+
+Then:
+- verify current bytes == before
+- VirtualProtectEx
+- WriteProcessMemory
+- FlushInstructionCache
+- verify current bytes == after
+- rollback touched changes on failure
+- restore original bytes on disable
+
+Current S8RPKCheats comparison
+------------------------------
+
+Internal DX11 Base/Cheats/War/Roadblock.cpp
+
+RVA +0x01464B91
+
+original:
+75 1E
+
+enabled:
+90 90
+
+Project symbol:
+kAIWarHeroAggro
+
+Project UI meaning:
+주인공 대상 호전성 증가 분기 제거
+
+Viewer ai_profile does NOT contain RVA +0x01464B91.
+S8RPKCheats currently does NOT contain +0x0144BB60 / +0x0144BC8B.
+
+Confidence classification
+-------------------------
+
+CONFIRMED:
+- two Viewer static NOP patches
+- exact RVAs / bytes
+- both remove positive additions to RSI
+- Viewer UI says "플레이어 우선 가산 제거"
+- S8RPKCheats uses a different RVA/branch patch
+
+LIKELY:
+- two NOP patches correspond to the two aggressive-player-priority bonus paths
+  described as 호전 / 극호전.
+
+UNCONFIRMED:
+- which address maps to 호전 vs 극호전
+- exact semantic name of RSI accumulator
+- exact overlap in behavior with +0x01464B91
