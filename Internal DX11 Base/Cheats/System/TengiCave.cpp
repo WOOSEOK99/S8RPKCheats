@@ -277,6 +277,34 @@ namespace DX11Base {
              static_cast<unsigned int>(static_cast<uint16_t>(value)));
     }
 
+    // 의심암귀(ID 8) 객체 전체 0x40 bytes를 추가로 덤프합니다.
+    // 적음/보통/많음 시나리오로 각각 시작해 이 64 bytes 중 변하는 필드가 있는지 비교합니다.
+    {
+      constexpr int kDiagEventId = 8;
+      uintptr_t slot = manager + kEventTableOffset +
+                       static_cast<uintptr_t>(kDiagEventId) * sizeof(uintptr_t);
+      if (IsValidPtr(slot, sizeof(uintptr_t))) {
+        uintptr_t eventPtr = *reinterpret_cast<uintptr_t *>(slot);
+        if (eventPtr && IsValidPtr(eventPtr, 0x40)) {
+          const uint8_t *bytes = reinterpret_cast<const uint8_t *>(eventPtr);
+          AddLog(u8"[전기진단] ----- 의심암귀(ID:8) 객체 0x40 bytes -----");
+          for (int row = 0; row < 4; ++row) {
+            const int off = row * 0x10;
+            AddLog(
+                u8"[전기진단] +%02X: %02X %02X %02X %02X %02X %02X %02X %02X  %02X %02X %02X %02X %02X %02X %02X %02X",
+                off,
+                bytes[off + 0], bytes[off + 1], bytes[off + 2], bytes[off + 3],
+                bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7],
+                bytes[off + 8], bytes[off + 9], bytes[off + 10], bytes[off + 11],
+                bytes[off + 12], bytes[off + 13], bytes[off + 14], bytes[off + 15]);
+          }
+        } else {
+          AddLog(u8"[전기진단] 의심암귀 객체 0x40 bytes 읽기 불가: %p",
+                 reinterpret_cast<void *>(eventPtr));
+        }
+      }
+    }
+
     AddLog(u8"[전기진단] ===== 읽기 완료 / 메모리 변경 없음 =====");
   }
 
