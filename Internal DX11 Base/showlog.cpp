@@ -2,6 +2,7 @@
 #include "Framework/imgui.h"
 #include "MenuState.h"
 #include "debug.h"
+#include <Windows.h>
 #include <cstdarg>
 #include <string>
 #include <vector>
