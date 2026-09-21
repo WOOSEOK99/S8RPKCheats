@@ -281,8 +281,8 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   GetModuleFileNameA((HMODULE)dwModule, dllPath, MAX_PATH);
   std::string dllName = std::filesystem::path(dllPath).filename().string();
 
-  // [�߿�] �ʱ�ȭ �������� ���� 5�� ���
-  Sleep(5000);
+  // [�߿�] �ʱ�ȭ �������� ���� 10�� ���
+  Sleep(10000);
 
   DX11Base::AddLog(u8"========================================");
   DX11Base::AddLog(u8"[System] ġƮ �ε� ���� (DLL: %s)", dllName.c_str());
