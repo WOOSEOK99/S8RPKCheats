@@ -52,34 +52,42 @@ namespace DX11Base {
     OriginalSelectorFn g_originalSelector = nullptr;
     PassabilityFn g_passability = nullptr;
 
-    struct CachedTileCandidate {
-      uintptr_t tile = 0;
-      int64_t distance = 0;
+    struct MapTileEntry {
+      int32_t q = 0;
+      int32_t r = 0;
       uint32_t index = 0;
     };
 
-    struct PlacementCache {
+    struct MapGeometryCache {
       bool valid = false;
       uintptr_t battleContainer = 0;
       uintptr_t tileBase = 0;
       uint32_t tileCount = 0;
-      uintptr_t commanderTile = 0;
-      int32_t commanderQ = 0;
-      int32_t commanderR = 0;
-      std::vector<CachedTileCandidate> candidates;
+      int32_t minQ = 0;
+      int32_t maxQ = 0;
+      int32_t minR = 0;
+      int32_t maxR = 0;
+      int64_t minS = 0;
+      int64_t maxS = 0;
+      std::vector<MapTileEntry> tilesByCoord;
+      std::vector<uint32_t> ringIndices;
     };
 
-    PlacementCache g_placementCache;
+    MapGeometryCache g_mapCache;
 
-    void ResetPlacementCache() {
-      g_placementCache.valid = false;
-      g_placementCache.battleContainer = 0;
-      g_placementCache.tileBase = 0;
-      g_placementCache.tileCount = 0;
-      g_placementCache.commanderTile = 0;
-      g_placementCache.commanderQ = 0;
-      g_placementCache.commanderR = 0;
-      g_placementCache.candidates.clear();
+    void ResetMapGeometryCache() {
+      g_mapCache.valid = false;
+      g_mapCache.battleContainer = 0;
+      g_mapCache.tileBase = 0;
+      g_mapCache.tileCount = 0;
+      g_mapCache.minQ = 0;
+      g_mapCache.maxQ = 0;
+      g_mapCache.minR = 0;
+      g_mapCache.maxR = 0;
+      g_mapCache.minS = 0;
+      g_mapCache.maxS = 0;
+      g_mapCache.tilesByCoord.clear();
+      g_mapCache.ringIndices.clear();
     }
 
     template <typename T>
@@ -168,84 +176,116 @@ namespace DX11Base {
       return true;
     }
 
-    bool EnsurePlacementCache(uintptr_t battleContainer,
-                              uintptr_t tileBase,
-                              uint32_t tileCount,
-                              uintptr_t commanderTile,
-                              int32_t commanderQ,
-                              int32_t commanderR) {
-      if (g_placementCache.valid &&
-          g_placementCache.battleContainer == battleContainer &&
-          g_placementCache.tileBase == tileBase &&
-          g_placementCache.tileCount == tileCount &&
-          g_placementCache.commanderTile == commanderTile &&
-          g_placementCache.commanderQ == commanderQ &&
-          g_placementCache.commanderR == commanderR) {
+    bool EnsureMapGeometryCache(uintptr_t battleContainer,
+                                uintptr_t tileBase,
+                                uint32_t tileCount) {
+      if (g_mapCache.valid &&
+          g_mapCache.battleContainer == battleContainer &&
+          g_mapCache.tileBase == tileBase &&
+          g_mapCache.tileCount == tileCount) {
         return true;
       }
 
-      ResetPlacementCache();
+      ResetMapGeometryCache();
 
       try {
-        g_placementCache.candidates.reserve(tileCount > 0 ? tileCount - 1 : 0);
+        g_mapCache.tilesByCoord.reserve(tileCount);
+        g_mapCache.ringIndices.reserve(tileCount);
 
+        bool haveBounds = false;
         for (uint32_t i = 0; i < tileCount; ++i) {
-          const uintptr_t tile =
-              tileBase + static_cast<uintptr_t>(i) * 0x40;
+          const uintptr_t tile = tileBase + static_cast<uintptr_t>(i) * 0x40;
 
           int32_t tileQ = 0;
           int32_t tileR = 0;
           if (!ReadValueFast(tile + 0x08, tileQ) ||
               !ReadValueFast(tile + 0x0C, tileR)) {
-            ResetPlacementCache();
+            ResetMapGeometryCache();
             return false;
           }
 
-          int64_t dq = static_cast<int64_t>(tileQ) - commanderQ;
-          int64_t dr = static_cast<int64_t>(tileR) - commanderR;
-          int64_t ds = dq + dr;
-          if (dq < 0)
-            dq = -dq;
-          if (dr < 0)
-            dr = -dr;
-          if (ds < 0)
-            ds = -ds;
+          g_mapCache.tilesByCoord.push_back({tileQ, tileR, i});
+          const int64_t tileS =
+              static_cast<int64_t>(tileQ) + static_cast<int64_t>(tileR);
 
-          int64_t distance = dq;
-          if (dr > distance)
-            distance = dr;
-          if (ds > distance)
-            distance = ds;
-
-          if (distance == 0)
-            continue;
-
-          g_placementCache.candidates.push_back(
-              {tile, distance, i});
+          if (!haveBounds) {
+            g_mapCache.minQ = g_mapCache.maxQ = tileQ;
+            g_mapCache.minR = g_mapCache.maxR = tileR;
+            g_mapCache.minS = g_mapCache.maxS = tileS;
+            haveBounds = true;
+          } else {
+            if (tileQ < g_mapCache.minQ) g_mapCache.minQ = tileQ;
+            if (tileQ > g_mapCache.maxQ) g_mapCache.maxQ = tileQ;
+            if (tileR < g_mapCache.minR) g_mapCache.minR = tileR;
+            if (tileR > g_mapCache.maxR) g_mapCache.maxR = tileR;
+            if (tileS < g_mapCache.minS) g_mapCache.minS = tileS;
+            if (tileS > g_mapCache.maxS) g_mapCache.maxS = tileS;
+          }
         }
 
-        std::sort(
-            g_placementCache.candidates.begin(),
-            g_placementCache.candidates.end(),
-            [](const CachedTileCandidate &a,
-               const CachedTileCandidate &b) {
-              if (a.distance != b.distance)
-                return a.distance < b.distance;
-              return a.index < b.index;
-            });
+        std::sort(g_mapCache.tilesByCoord.begin(),
+                  g_mapCache.tilesByCoord.end(),
+                  [](const MapTileEntry &a, const MapTileEntry &b) {
+                    if (a.q != b.q) return a.q < b.q;
+                    if (a.r != b.r) return a.r < b.r;
+                    return a.index < b.index;
+                  });
       } catch (...) {
-        ResetPlacementCache();
+        ResetMapGeometryCache();
         return false;
       }
 
-      g_placementCache.battleContainer = battleContainer;
-      g_placementCache.tileBase = tileBase;
-      g_placementCache.tileCount = tileCount;
-      g_placementCache.commanderTile = commanderTile;
-      g_placementCache.commanderQ = commanderQ;
-      g_placementCache.commanderR = commanderR;
-      g_placementCache.valid = true;
+      g_mapCache.battleContainer = battleContainer;
+      g_mapCache.tileBase = tileBase;
+      g_mapCache.tileCount = tileCount;
+      g_mapCache.valid = true;
       return true;
+    }
+
+    void AppendTileIndicesAt(int32_t q, int32_t r) {
+      size_t lo = 0;
+      size_t hi = g_mapCache.tilesByCoord.size();
+
+      while (lo < hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        const auto &entry = g_mapCache.tilesByCoord[mid];
+        if (entry.q < q || (entry.q == q && entry.r < r))
+          lo = mid + 1;
+        else
+          hi = mid;
+      }
+
+      while (lo < g_mapCache.tilesByCoord.size()) {
+        const auto &entry = g_mapCache.tilesByCoord[lo];
+        if (entry.q != q || entry.r != r)
+          break;
+        g_mapCache.ringIndices.push_back(entry.index);
+        ++lo;
+      }
+    }
+
+    int64_t AbsDiff64(int64_t a, int64_t b) {
+      const int64_t d = a - b;
+      return d < 0 ? -d : d;
+    }
+
+    int64_t GetMaxSearchRadius(int32_t commanderQ, int32_t commanderR) {
+      const int64_t commanderS =
+          static_cast<int64_t>(commanderQ) + static_cast<int64_t>(commanderR);
+      int64_t radius = 0;
+      const int64_t values[] = {
+          AbsDiff64(commanderQ, g_mapCache.minQ),
+          AbsDiff64(commanderQ, g_mapCache.maxQ),
+          AbsDiff64(commanderR, g_mapCache.minR),
+          AbsDiff64(commanderR, g_mapCache.maxR),
+          AbsDiff64(commanderS, g_mapCache.minS),
+          AbsDiff64(commanderS, g_mapCache.maxS),
+      };
+      for (const int64_t value : values) {
+        if (value > radius)
+          radius = value;
+      }
+      return radius;
     }
 
     uint64_t CallOriginal(void *reinforcement) {
@@ -302,36 +342,39 @@ namespace DX11Base {
           !ReadValue(unitList + 0x10, unitEntries) || !unitEntries)
         return CallOriginal(reinforcement);
 
+      const size_t unitEntryBytes = static_cast<size_t>(unitCount) * 0x10;
+      if (!IsValidPtr(unitEntries, unitEntryBytes))
+        return CallOriginal(reinforcement);
+
       uintptr_t commanderTile = 0;
       for (uint32_t i = 0; i < unitCount; ++i) {
         const uintptr_t entry = unitEntries + static_cast<uintptr_t>(i) * 0x10;
 
         uintptr_t unit = 0;
-        if (!ReadValue(entry + 0x08, unit) || !unit)
+        if (!ReadValueFast(entry + 0x08, unit) || !unit ||
+            !IsValidPtr(unit, 0x60))
           continue;
 
         uintptr_t unitBackref = 0;
-        if (!ReadValue(unit, unitBackref) || unitBackref != entry)
-          continue;
-
         uint8_t unitState5D = 0;
-        if (!ReadValue(unit + 0x5D, unitState5D) || unitState5D != 2)
-          continue;
-
         uint16_t commanderMarker = 0;
-        if (!ReadValue(unit + 0x38, commanderMarker) || commanderMarker == 0)
-          continue;
-
         uintptr_t unitSideHolder = 0;
-        uintptr_t unitSideObject = 0;
-        uint8_t unitSide = 0;
-        if (!ReadValue(unit + 0x30, unitSideHolder) || !unitSideHolder ||
-            !ReadValue(unitSideHolder, unitSideObject) || !unitSideObject ||
-            !ReadValue(unitSideObject + 0x18, unitSide) || unitSide != 1)
+        uintptr_t tile = 0;
+        if (!ReadValueFast(unit, unitBackref) || unitBackref != entry ||
+            !ReadValueFast(unit + 0x5D, unitState5D) || unitState5D != 2 ||
+            !ReadValueFast(unit + 0x38, commanderMarker) || commanderMarker == 0 ||
+            !ReadValueFast(unit + 0x30, unitSideHolder) || !unitSideHolder ||
+            !ReadValueFast(unit + 0x40, tile) || !tile)
           continue;
 
-        uintptr_t tile = 0;
-        if (!ReadValue(unit + 0x40, tile) || !tile)
+        uintptr_t unitSideObject = 0;
+        if (!IsValidPtr(unitSideHolder, sizeof(uintptr_t)) ||
+            !ReadValueFast(unitSideHolder, unitSideObject) || !unitSideObject ||
+            !IsValidPtr(unitSideObject + 0x18, 1))
+          continue;
+
+        uint8_t unitSide = 0;
+        if (!ReadValueFast(unitSideObject + 0x18, unitSide) || unitSide != 1)
           continue;
 
         if (commanderTile)
@@ -362,44 +405,72 @@ namespace DX11Base {
 
       int32_t commanderQ = 0;
       int32_t commanderR = 0;
-      if (!ReadValue(commanderTile + 0x08, commanderQ) ||
-          !ReadValue(commanderTile + 0x0C, commanderR))
+      if (!ReadValueFast(commanderTile + 0x08, commanderQ) ||
+          !ReadValueFast(commanderTile + 0x0C, commanderR))
         return CallOriginal(reinforcement);
 
-      if (!EnsurePlacementCache(battleContainer, tileBase, tileCount,
-                                commanderTile, commanderQ, commanderR)) {
+      if (!EnsureMapGeometryCache(battleContainer, tileBase, tileCount))
         return CallOriginal(reinforcement);
-      }
 
       if (!g_passability)
         return CallOriginal(reinforcement);
 
-      // 거리순(동일 거리에서는 원래 타일 인덱스순)으로 가까운 후보부터 확인합니다.
-      // 점유/지형/통행 여부는 캐시하지 않고 원군 도착 순간의 값을 매번 다시 읽습니다.
-      for (const auto &candidate : g_placementCache.candidates) {
-        const uintptr_t tile = candidate.tile;
+      static constexpr int32_t kDirections[6][2] = {
+          {1, 0}, {1, -1}, {0, -1},
+          {-1, 0}, {-1, 1}, {0, 1},
+      };
 
-        uintptr_t occupantA = 0;
-        uintptr_t occupantB = 0;
-        uintptr_t tileInfo = 0;
-        uint8_t tileType = 0;
-        if (!ReadValueFast(tile + 0x18, occupantA) || occupantA != 0 ||
-            !ReadValueFast(tile + 0x20, occupantB) || occupantB != 0 ||
-            !ReadValueFast(tile, tileInfo) || !tileInfo ||
-            !ReadValueFast(tileInfo + 0x09, tileType) || tileType == 0x0A) {
-          continue;
+      const int64_t maxRadius = GetMaxSearchRadius(commanderQ, commanderR);
+
+      for (int64_t radius = 1; radius <= maxRadius; ++radius) {
+        g_mapCache.ringIndices.clear();
+
+        int64_t q = static_cast<int64_t>(commanderQ) - radius;
+        int64_t r = static_cast<int64_t>(commanderR) + radius;
+
+        for (int sideIndex = 0; sideIndex < 6; ++sideIndex) {
+          for (int64_t step = 0; step < radius; ++step) {
+            if (q >= INT32_MIN && q <= INT32_MAX &&
+                r >= INT32_MIN && r <= INT32_MAX) {
+              AppendTileIndicesAt(static_cast<int32_t>(q),
+                                  static_cast<int32_t>(r));
+            }
+            q += kDirections[sideIndex][0];
+            r += kDirections[sideIndex][1];
+          }
         }
 
-        const uint8_t passable =
-            g_passability(reinterpret_cast<void *>(tile), reinforcement);
-        if (!passable)
+        if (g_mapCache.ringIndices.empty())
           continue;
 
-        uint64_t result = 0;
-        if (!ReadValue(tileInfo, result))
-          return CallOriginal(reinforcement);
+        std::sort(g_mapCache.ringIndices.begin(),
+                  g_mapCache.ringIndices.end());
 
-        return result;
+        for (const uint32_t index : g_mapCache.ringIndices) {
+          const uintptr_t tile =
+              tileBase + static_cast<uintptr_t>(index) * 0x40;
+
+          uintptr_t occupantA = 0;
+          uintptr_t occupantB = 0;
+          uintptr_t tileInfo = 0;
+          uint8_t tileType = 0;
+          if (!ReadValueFast(tile + 0x18, occupantA) || occupantA != 0 ||
+              !ReadValueFast(tile + 0x20, occupantB) || occupantB != 0 ||
+              !ReadValueFast(tile, tileInfo) || !tileInfo ||
+              !ReadValueFast(tileInfo + 0x09, tileType) || tileType == 0x0A)
+            continue;
+
+          const uint8_t passable =
+              g_passability(reinterpret_cast<void *>(tile), reinforcement);
+          if (!passable)
+            continue;
+
+          uint64_t result = 0;
+          if (!ReadValueFast(tileInfo, result))
+            return CallOriginal(reinforcement);
+
+          return result;
+        }
       }
 
       return kPlacementFailure;
@@ -486,7 +557,7 @@ namespace DX11Base {
         return false;
       }
 
-      ResetPlacementCache();
+      ResetMapGeometryCache();
       return true;
     }
   } // namespace
@@ -541,7 +612,7 @@ namespace DX11Base {
       g_stub = 0;
     }
 
-    ResetPlacementCache();
+    ResetMapGeometryCache();
     g_originalSelector = nullptr;
     g_passability = nullptr;
     g_applied = false;
