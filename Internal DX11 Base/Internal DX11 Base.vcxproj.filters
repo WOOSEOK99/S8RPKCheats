@@ -239,6 +239,9 @@
     <ClInclude Include="Cheats\Officer\OfficerRosterResolve.h">
       <Filter>Cheats\Officer</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\Officer\SpecialAbilityAutoAssign.h">
+      <Filter>Cheats\Officer</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\Civilian\NonggyeongCity.h">
       <Filter>Cheats\Civilian</Filter>
     </ClInclude>
@@ -464,6 +467,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\Officer\OfficerData.cpp">
+      <Filter>Cheats\Officer</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Officer\SpecialAbilityAutoAssign.cpp">
       <Filter>Cheats\Officer</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\System\TengiCave.cpp">
