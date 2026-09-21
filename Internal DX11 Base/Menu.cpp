@@ -351,8 +351,9 @@ namespace DX11Base {
     DrawTerrainBonusSettingsWin(scale);
     DrawMemoryNotepadWindow(scale);
 
-    // 상단 마퀴 알림 (치트메뉴와 독립적으로 항상 실행)
+    // 상단 마퀴 알림 및 설정 저장 실패 팝업은 치트메뉴와 독립적으로 항상 실행
     DrawMarqueeNotifications(scale);
+    DrawConfigSaveErrorPopup(scale);
   }
 
   void Menu::Loops() {
@@ -804,9 +805,17 @@ namespace DX11Base {
       }
 
       ImGui::SameLine(0, 15.0f * scale);
-      if (ImGui::Checkbox(u8"자동로드", &DX11Base::bAutoLoadMenu)) {
-        NotifyFeatureToggle(u8"자동로드", DX11Base::bAutoLoadMenu);
+      if (ImGui::Checkbox(u8"시작 시 치트창 표시", &DX11Base::bAutoLoadMenu)) {
+        NotifyFeatureToggle(u8"시작 시 치트창 표시", DX11Base::bAutoLoadMenu);
         DX11Base::SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(
+            u8"체크하면 게임 시작 시 치트창을 자동으로 표시합니다.");
+        ImGui::TextDisabled(
+            u8"※ 저장된 치트 설정 자체는 이 옵션과 관계없이 항상 불러옵니다.");
+        ImGui::EndTooltip();
       }
     }
 

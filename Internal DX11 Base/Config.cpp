@@ -159,6 +159,11 @@ namespace DX11Base {
   }
 
   void SaveConfig() {
+    if (IsConfigFileReadOnly()) {
+      ReportConfigSaveFailure("설정 파일 읽기 전용");
+      return;
+    }
+
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
     UpsertBoolConfigValue("bShortBattleCooldownEnabled", bShortBattleCooldownEnabled);

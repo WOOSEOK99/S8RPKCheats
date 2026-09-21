@@ -4,7 +4,6 @@
 #include "showlog.h"
 #include "Cheats/System/SpeedHack.h"
 #include <algorithm>
-#include <cmath>
 
 namespace DX11Base {
     // --- 전역 변수 초기화 ---
@@ -14,13 +13,15 @@ namespace DX11Base {
     bool bShowNotificationLog = false;
     bool bShowWidgetNotif = true;
 
-    static void PushNotification(const std::string& msg, bool isError) {
+    static bool s_configSaveErrorPopupRequested = false;
+
+    // --- 일반 알림 추가 ---
+    void AddNotification(const std::string& msg) {
         Notification n;
         n.message = msg;
         n.xPos = 0.0f;  // 나중에 Draw 루프에서 초기화됨 (화면 너비 알 수 있는 시점)
         n.width = 0.0f;
         n.active = true;
-        n.isError = isError;
         g_notifications.push_back(n);
 
         // 히스토리에 기록 보관 (최대 50개)
@@ -30,14 +31,43 @@ namespace DX11Base {
         }
     }
 
-    // --- 일반 알림 추가 ---
-    void AddNotification(const std::string& msg) {
-        PushNotification(msg, false);
+    void RequestConfigSaveErrorPopup() {
+        s_configSaveErrorPopupRequested = true;
     }
 
-    // --- 오류 알림 추가: 상단 마퀴에서 붉은색 점멸로 강조 ---
-    void AddErrorNotification(const std::string& msg) {
-        PushNotification(msg, true);
+    void DrawConfigSaveErrorPopup(float scale) {
+        if (s_configSaveErrorPopupRequested) {
+            ImGui::OpenPopup(u8"설정 저장 실패###ConfigSaveError");
+            s_configSaveErrorPopupRequested = false;
+        }
+
+        if (ImGui::BeginPopupModal(
+                u8"설정 저장 실패###ConfigSaveError",
+                nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.25f, 0.25f, 1.0f),
+                u8"치트 설정 파일을 저장할 수 없습니다.");
+            ImGui::Spacing();
+            ImGui::TextUnformatted(u8"S8RPK_cheat_config.json");
+            ImGui::TextWrapped(
+                u8"파일의 읽기 전용 속성 또는 치트 폴더의 쓰기 권한을 확인해 주세요.");
+            ImGui::TextWrapped(
+                u8"설정이 저장되지 않으면 게임을 다시 실행했을 때 체크 상태가 유지되지 않습니다.");
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            const float buttonWidth = 120.0f * scale;
+            const float available = ImGui::GetContentRegionAvail().x;
+            if (available > buttonWidth)
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (available - buttonWidth) * 0.5f);
+
+            if (ImGui::Button(u8"확인", ImVec2(buttonWidth, 0)))
+                ImGui::CloseCurrentPopup();
+
+            ImGui::EndPopup();
+        }
     }
 
     // --- 상단 흐르는 알림(Marquee) 렌더링 ---
@@ -71,8 +101,6 @@ namespace DX11Base {
             // ImGui의 DeltaTime은 SpeedHack이 후킹한 QPC의 영향을 받을 수 있으므로
             // marquee 애니메이션만 원본 QPC 기반 실제 시간으로 분리합니다.
             float deltaTime = SpeedHack_GetRealDeltaTime();
-            static float s_realAnimTime = 0.0f;
-            s_realAnimTime += deltaTime;
             float speed = g_notificationSpeed * scale;
             float minNextX = marqueeWidth;
             float gap = 80.0f * scale;
@@ -89,26 +117,8 @@ namespace DX11Base {
 
                 if (it->xPos + it->width > 0 && it->xPos < marqueeWidth) {
                     ImVec2 textPos = ImVec2(winPos.x + it->xPos, winPos.y + (marqueeHeight - fontSize) * 0.5f);
-
-                    if (it->isError) {
-                        // 약 5Hz로 빨강 강도를 점멸시켜 일반 알림과 즉시 구분되게 합니다.
-                        const float blink = 0.5f + 0.5f * std::sinf(s_realAnimTime * 10.0f);
-                        const int greenBlue = 35 + static_cast<int>(170.0f * blink);
-                        const int glowAlpha = 130 + static_cast<int>(100.0f * blink);
-
-                        drawList->AddText(
-                            NULL, fontSize,
-                            ImVec2(textPos.x + 2.0f, textPos.y + 2.0f),
-                            IM_COL32(120, 0, 0, glowAlpha),
-                            it->message.c_str());
-                        drawList->AddText(
-                            NULL, fontSize, textPos,
-                            IM_COL32(255, greenBlue, greenBlue, 255),
-                            it->message.c_str());
-                    } else {
-                        drawList->AddText(NULL, fontSize, ImVec2(textPos.x + 1.5f, textPos.y + 1.5f), IM_COL32(0, 0, 0, 255), it->message.c_str());
-                        drawList->AddText(NULL, fontSize, textPos, IM_COL32(255, 255, 60, 255), it->message.c_str());
-                    }
+                    drawList->AddText(NULL, fontSize, ImVec2(textPos.x + 1.5f, textPos.y + 1.5f), IM_COL32(0, 0, 0, 255), it->message.c_str());
+                    drawList->AddText(NULL, fontSize, textPos, IM_COL32(255, 255, 60, 255), it->message.c_str());
                 }
 
                 if (it->xPos + it->width < -100.0f) {
