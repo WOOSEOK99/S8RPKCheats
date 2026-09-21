@@ -30,7 +30,7 @@
 | 02 | [기능별 RVA/모듈 인덱스](02_FEATURE_INDEX.md) | 1차 완료 |
 | 03 | [AI 공격 후보 확장 / 목표세력 제한 해제 상세 해부](03_AI_ATTACK_TARGET_EXPANSION.md) | payload 수준 완료 · helper 내부는 후속 확인 |
 | 04 | [플레이어 우선공격 제거 상세 해부](04_AI_PLAYER_PRIORITY_REMOVAL.md) | static patch 수준 완료 · 호전/극호전 분기 매핑은 후속 확인 |
-| 05 | AI 포로 처형 조건 상세 해부 | 예정 |
+| 05 | [AI 포로 처형 조건 상세 해부](05_AI_PRISONER_EXECUTION.md) | 최종 payload/임계값 공식 완료 · native helper 의미는 후속 확인 |
 | 06 | AI 처형 로그 상세화 | 예정 |
 | 07 | 결전 발생빈도 조정 | 예정 |
 | 08 | AI 항복권고 실패 후 공격 우선도 / 항복 확률 | 예정 |

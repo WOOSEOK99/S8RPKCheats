@@ -1,0 +1,248 @@
+SAN8RPK_Viewer Step 05 raw prisoner analysis
+=================================================
+
+SOURCE
+------
+SAN8RPK_Viewer.exe
+SHA256:
+34abf52f9651d4313076b16042476e5646967aa55af65613f542d69883084c3d
+
+FINAL PRISON HOOK
+-----------------
+RVA +0x01E52A8D
+Original:
+3B CD 48 8B 6C 24 60 0F 9C C0 E9 05 FE FF FF CC
+
+Disassembly:
+cmp ecx,ebp
+mov rbp,[rsp+60h]
+setl al
+jmp +0x01E528A1
+int3
+
+Final cave target:
+cave + 0x200
+
+Final return:
++0x01E528A1
+
+HATRED_PRISON
+--------------
+size = 378 bytes
+
+Marker mapping:
+1111111111111111 = stats (cave+0x1000)
+2222222222222222 = base+0x01E528A1
+3333333333333333 = base+0x02E98BC8
+4444444444444444 = base+0x01712670
+5555555555555555 = base+0x017B0AB0
+
+Relevant disassembly:
+
+0000 movabs r11,stats
+000a lock inc qword ptr [r11+20h]      ; captive++
+
+000f movzx eax,byte ptr [rdi+5Dh]
+0013 movzx edx,byte ptr [rsi+5Dh]
+0017 sub eax,edx
+0019 cdq
+001a xor eax,edx
+001c sub eax,edx                       ; abs difference
+001e mov edx,150
+0023 sub edx,eax
+0025 cmp eax,edx
+0027 cmovg eax,edx                     ; d=min(abs,150-abs)
+002a mov r8d,100
+0030 sub r8d,eax                       ; T=100-d
+
+0033 movzx edx,byte ptr [rsi+5Eh]
+0037 and edx,0Fh                       ; H=honor
+
+003a mov rax,[rdi+10h]                 ; status_ptr
+003e test rax,rax
+0041 je 005b
+0043 cmp byte ptr [rax+8],1            ; status_id==1 ruler
+0047 je 006d
+0049 mov rax,[rdi+18h]                 ; force_ptr
+004d test rax,rax
+0050 je 005b
+0052 cmp [rax+0C0h],rdi                ; force.ruler == rdi
+0059 je 006d
+
+; non-ruler
+005b xor r9d,r9d
+005e cmp edx,11
+0061 jge 0068
+0063 imul edx,edx,3
+0066 jmp 007f
+0068 imul edx,edx,5
+006b jmp 007f
+
+; ruler
+006d sub r8d,25
+0071 mov r9d,1
+0077 cmp edx,11
+007a jl 007f
+007c imul edx,edx,6
+
+007f add r8d,edx
+
+0082 cmp byte ptr [rsi+30h],1
+0086 jne 008c
+0088 add r8d,10
+
+008c..00a1 clamp r8d to [0,100]
+
+00a1 cmp r8d,100
+00a5 jne 00ba
+00a7 test r9d,r9d
+00aa je 00ba
+00ac movzx edx,byte ptr [rsi+5Eh]
+00b0 and edx,0Fh
+00b3 add r8d,edx
+00b6 sub r8d,15                        ; T=85+H when ruler and T hit 100
+
+00ba sub rsp,40h
+00be save incoming ecx
+00c2 save T
+
+00c7 movabs rax,base+2E98BC8
+00d1 mov rcx,[rax]
+00d4 add rcx,72C8h
+00db movzx edx,word ptr [rsi+8]
+00df movzx r8d,word ptr [rdi+8]
+00e4 movabs rax,base+1712670
+00ee call rax
+00f0 movzx ecx,al
+00f3 movabs rax,base+17B0AB0
+00fd call rax
+
+00ff restore incoming ecx
+0103 restore T
+010c test al,al
+010e jne 0148
+
+0110 H=[rsi+5E]&0F
+0117 cmp H,11
+011a jl 0145                            ; T=0
+
+011c cmp H,15
+011f je 012b                            ; T*=75/100
+0121 cmp H,14
+0124 je 0131                            ; T*=66/100
+0126 shr r8d,1                          ; H 11..13 -> T/=2
+
+0145 xor r8d,r8d                        ; H<11 -> T=0
+
+0148 movabs r11,stats
+0152 cmp ecx,r8d
+0155 setge al
+0158 test al,al
+015a je 0163
+015c lock inc qword ptr [r11+30h]       ; executed++
+0161 jmp 0168
+0163 lock inc qword ptr [r11+28h]       ; released++
+
+0168 mov rbp,[rsp+60h]
+016d movabs r11,base+1E528A1
+0177 jmp r11
+
+READER CROSS-CHECK
+------------------
+viewer reader.py:
+data[93] -> compatibility -> UI "상성"
+data[94] & 0x0F -> honor -> UI "의리"
+
+Person object:
++0x10 status_ptr
++0x18 force_ptr
++0x20 city_ptr
+
+Force object:
++0xC0 ruler person pointer
+
+sample_snapshot.json confirms:
+status "군주" -> status_id 1
+
+
+HATRED_CLASSIFIER HOOK
+----------------------
+RVA +0x01E54190
+Original:
+C7 44 24 44 01 01 00 00
+4C 8D 44 24 44
+48 8B D3
+
+Target:
+cave +0x800
+
+Resume:
+base+0x01E541A8
+
+HATRED_CLASSIFIER size = 161 bytes
+
+Marker mapping:
+3333333333333333 = base+0x02E98BC8
+4444444444444444 = base+0x01712670
+5555555555555555 = base+0x017B0AB0
+6666666666666666 = base+0x017B4570
+7777777777777777 = base+0x017A8270
+8888888888888888 = base+0x01E541A8
+
+Control flow:
+- call +17B4570(r14,rbx,&0x101)
+- if false => end
+- require ([r14+5E]&0F) >= 11
+- call +17A8270(r14,rbx)
+- if true => end
+- relationship chain:
+  manager+72C8, id(r14), id(rbx)
+  call +1712670
+  pass AL to +17B0AB0
+- final AL = (second helper != 0)
+- jump +1E541A8
+
+GUARDS
+------
++1E52740 size 864
+af64f07a1c0a895430aae404aae2b9441577846a4ba2f911ecc8433af1b2aacc
+
++1711B00 size 7
+3fe825b42d30a9c9430d8fca20b1d2cb83f3e4347381df2ab306af2a84fc9aba
+
++175B1A1 size 52
+04fea700fe18f9652b411f477e5bfe16a81c997c193088062364e7e5c70c7e70
+
++1E54140 size 112
+d6c31dafe3ccd6d9010100d68147a88bd5d92a5afa5720e59f28cf18050a6b30
+
++17B4570 size 339
+a06654ad7d5387899d1f62bdc73b3a00c9ea28b9855e5ea90b2d5369f2d5e237
+
++17A8270 size 192
+c8773aec69fbe172f9412e23c071fb7408b3ee38357c5afdeea669b48fc88a5b
+
++1712670 size 128
+4a01e26e24bcd21ea63d45270d0813481f80fcfa5b8fd765e38a2aac9de844af
+
++17B0AB0 size 232
+a4e5e4ba929d43929f9f101d99d6f090aa732a18aa01df5bb2211c776bd45720
+
+CONFIDENCE
+----------
+CONFIRMED:
+- exact hook RVAs and bytes
+- exact HATRED_PRISON arithmetic
+- +5D = compatibility
+- +5E low nibble = honor
+- rdi ruler detection via status id / force.ruler pointer
+- stats executed/released branch
+
+LIKELY:
+- rdi = prisoner
+- rsi = deciding ruler/AI officer
+
+UNCONFIRMED:
+- exact semantic names of native helpers
+- exact meaning of +0x30 byte
+- upstream meaning/range of incoming ECX
