@@ -51,21 +51,6 @@ namespace DX11Base {
     OriginalSelectorFn g_originalSelector = nullptr;
     PassabilityFn g_passability = nullptr;
 
-    volatile LONG g_calls = 0;
-    volatile LONG g_relocated = 0;
-    volatile LONG g_missingCommander = 0;
-    volatile LONG g_noNearbyTile = 0;
-    volatile LONG g_originalUsed = 0;
-
-    // 프리징 진단용 상태값. 타일마다 로그를 남기지 않고 마지막 진행 위치만 갱신합니다.
-    volatile LONG g_diagStage = 0;
-    volatile LONG g_diagTileIndex = -1;
-    volatile LONG g_diagPassCalls = 0;
-    volatile LONG g_diagTileCount = 0;
-    volatile LONG g_diagCommanderQ = 0;
-    volatile LONG g_diagCommanderR = 0;
-    volatile LONG g_diagBestDistance = -1;
-
     template <typename T>
     bool ReadValue(uintptr_t address, T &out) {
       if (!address || !IsValidPtr(address, sizeof(T)))
@@ -153,19 +138,11 @@ namespace DX11Base {
     }
 
     uint64_t CallOriginal(void *reinforcement) {
-      InterlockedIncrement(&g_originalUsed);
       return g_originalSelector ? g_originalSelector(reinforcement)
                                 : kPlacementFailure;
     }
 
     uint64_t ReinforcementSelectorHook(void *reinforcement) {
-      InterlockedIncrement(&g_calls);
-      InterlockedExchange(&g_diagStage, 1);
-      InterlockedExchange(&g_diagTileIndex, -1);
-      InterlockedExchange(&g_diagPassCalls, 0);
-      InterlockedExchange(&g_diagTileCount, 0);
-      InterlockedExchange(&g_diagBestDistance, -1);
-
       const uintptr_t reinforcementAddr =
           reinterpret_cast<uintptr_t>(reinforcement);
       if (!reinforcementAddr)
@@ -197,10 +174,6 @@ namespace DX11Base {
           !ReadValue(sideObject + 0x18, side) || side != 1)
         return CallOriginal(reinforcement);
 
-      InterlockedExchange(&g_diagStage, 2);
-      AddLog(u8"[원군수비DBG] Stage=2 수비측 원군 조건 통과 unit=%p state=%p",
-             reinforcement, reinterpret_cast<void *>(unitState));
-
       uintptr_t battleHolder = 0;
       uintptr_t battleObject = 0;
       uintptr_t battleContainer = 0;
@@ -217,10 +190,6 @@ namespace DX11Base {
           unitCount == 0 || unitCount > 0x1000 ||
           !ReadValue(unitList + 0x10, unitEntries) || !unitEntries)
         return CallOriginal(reinforcement);
-
-      InterlockedExchange(&g_diagStage, 3);
-      AddLog(u8"[원군수비DBG] Stage=3 전투 부대목록 확인 battle=%p count=%u",
-             reinterpret_cast<void *>(battleContainer), unitCount);
 
       uintptr_t commanderTile = 0;
       for (uint32_t i = 0; i < unitCount; ++i) {
@@ -254,21 +223,13 @@ namespace DX11Base {
         if (!ReadValue(unit + 0x40, tile) || !tile)
           continue;
 
-        if (commanderTile) {
-          InterlockedIncrement(&g_missingCommander);
+        if (commanderTile)
           return CallOriginal(reinforcement);
-        }
         commanderTile = tile;
       }
 
-      if (!commanderTile) {
-        InterlockedIncrement(&g_missingCommander);
+      if (!commanderTile)
         return CallOriginal(reinforcement);
-      }
-
-      InterlockedExchange(&g_diagStage, 4);
-      AddLog(u8"[원군수비DBG] Stage=4 총대장 타일 확인 tile=%p",
-             reinterpret_cast<void *>(commanderTile));
 
       uintptr_t mapObject = 0;
       uint32_t tileCount = 0;
@@ -281,17 +242,12 @@ namespace DX11Base {
 
       const size_t tileBytes = static_cast<size_t>(tileCount) * 0x40;
       const uintptr_t tileEnd = tileBase + tileBytes;
-      if (!IsValidPtr(tileBase, tileBytes)) {
-        AddLog(u8"[원군수비DBG] 타일 배열 전체 범위 검증 실패 base=%p count=%u",
-               reinterpret_cast<void *>(tileBase), tileCount);
+      if (!IsValidPtr(tileBase, tileBytes))
         return CallOriginal(reinforcement);
-      }
 
       if (commanderTile < tileBase || commanderTile >= tileEnd ||
-          ((commanderTile - tileBase) & 0x3F) != 0) {
-        InterlockedIncrement(&g_missingCommander);
+          ((commanderTile - tileBase) & 0x3F) != 0)
         return CallOriginal(reinforcement);
-      }
 
       int32_t commanderQ = 0;
       int32_t commanderR = 0;
@@ -299,20 +255,10 @@ namespace DX11Base {
           !ReadValue(commanderTile + 0x0C, commanderR))
         return CallOriginal(reinforcement);
 
-      InterlockedExchange(&g_diagCommanderQ, commanderQ);
-      InterlockedExchange(&g_diagCommanderR, commanderR);
-      InterlockedExchange(&g_diagTileCount, static_cast<LONG>(tileCount));
-      InterlockedExchange(&g_diagStage, 5);
-      AddLog(u8"[원군수비DBG] Stage=5 맵 확인 tileCount=%u commander=(%d,%d)",
-             tileCount, commanderQ, commanderR);
-
       int32_t bestDistance = INT_MAX;
       uintptr_t bestTile = 0;
 
-      InterlockedExchange(&g_diagStage, 6);
-      AddLog(u8"[원군수비DBG] Stage=6 전체 타일 검색 시작");
       for (uint32_t i = 0; i < tileCount; ++i) {
-        InterlockedExchange(&g_diagTileIndex, static_cast<LONG>(i));
         const uintptr_t tile = tileBase + static_cast<uintptr_t>(i) * 0x40;
 
         uintptr_t occupantA = 0;
@@ -353,36 +299,22 @@ namespace DX11Base {
         if (!g_passability)
           continue;
 
-        const LONG passCall = InterlockedIncrement(&g_diagPassCalls);
-        InterlockedExchange(&g_diagStage, 7);
-        AddLog(u8"[원군수비DBG] PassCall=%ld BEFORE tileIndex=%u coord=(%d,%d) distance=%lld tile=%p",
-               passCall, i, tileQ, tileR,
-               static_cast<long long>(distance),
-               reinterpret_cast<void *>(tile));
-
         const uint8_t passable =
             g_passability(reinterpret_cast<void *>(tile), reinforcement);
-
-        InterlockedExchange(&g_diagStage, 8);
-        AddLog(u8"[원군수비DBG] PassCall=%ld AFTER tileIndex=%u result=%u",
-               passCall, i, static_cast<unsigned int>(passable));
-
         if (!passable)
           continue;
 
         bestTile = tile;
         bestDistance = static_cast<int32_t>(distance);
-        InterlockedExchange(&g_diagBestDistance, bestDistance);
+
+        // 총대장 타일 자체(distance 0)는 제외했으므로 1이 가능한 최소 거리입니다.
+        // 거리 1의 합법 타일을 찾았으면 더 가까운 후보가 존재할 수 없어 즉시 종료합니다.
+        if (bestDistance == 1)
+          break;
       }
 
-      InterlockedExchange(&g_diagStage, 9);
-      AddLog(u8"[원군수비DBG] Stage=9 타일 검색 완료 lastIndex=%ld passCalls=%ld bestDistance=%ld",
-             g_diagTileIndex, g_diagPassCalls, g_diagBestDistance);
-
-      if (!bestTile) {
-        InterlockedIncrement(&g_noNearbyTile);
+      if (!bestTile)
         return kPlacementFailure;
-      }
 
       uintptr_t tileInfo = 0;
       uint64_t result = 0;
@@ -390,11 +322,6 @@ namespace DX11Base {
           !ReadValue(tileInfo, result))
         return CallOriginal(reinforcement);
 
-      InterlockedIncrement(&g_relocated);
-      InterlockedExchange(&g_diagStage, 10);
-      AddLog(u8"[원군수비DBG] Stage=10 배치 타일 확정 tile=%p distance=%d result=%llX",
-             reinterpret_cast<void *>(bestTile), bestDistance,
-             static_cast<unsigned long long>(result));
       return result;
     }
 
@@ -479,18 +406,6 @@ namespace DX11Base {
         return false;
       }
 
-      g_calls = 0;
-      g_relocated = 0;
-      g_missingCommander = 0;
-      g_noNearbyTile = 0;
-      g_originalUsed = 0;
-      g_diagStage = 0;
-      g_diagTileIndex = -1;
-      g_diagPassCalls = 0;
-      g_diagTileCount = 0;
-      g_diagCommanderQ = 0;
-      g_diagCommanderR = 0;
-      g_diagBestDistance = -1;
       return true;
     }
   } // namespace
@@ -538,12 +453,7 @@ namespace DX11Base {
       return false;
     }
 
-    AddLog(u8"[원군수비배치] 해제 - 호출=%ld 재배치=%ld 총대장없음/중복=%ld 빈타일없음=%ld 원본사용=%ld",
-           g_calls, g_relocated, g_missingCommander, g_noNearbyTile,
-           g_originalUsed);
-    AddLog(u8"[원군수비DBG] 최종 Stage=%ld TileIndex=%ld PassCalls=%ld TileCount=%ld Commander=(%ld,%ld) BestDistance=%ld",
-           g_diagStage, g_diagTileIndex, g_diagPassCalls, g_diagTileCount,
-           g_diagCommanderQ, g_diagCommanderR, g_diagBestDistance);
+    AddLog(u8"[원군수비배치] 해제 - 원본 배치 함수 호출 복구");
 
     if (g_stub) {
       VirtualFree(reinterpret_cast<LPVOID>(g_stub), 0, MEM_RELEASE);
