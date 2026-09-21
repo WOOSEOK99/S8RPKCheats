@@ -177,6 +177,24 @@ namespace DX11Base {
     return std::filesystem::path(path).parent_path().append("S8RPK_cheat_config.json").string();
   }
 
+  // 설정 파일 저장 실패는 조용히 무시하지 않고 로그와 화면 알림으로 알려줍니다.
+  // SaveConfig() 한 번에 여러 보조 항목이 연속 갱신되므로 알림은 3초간 중복 표시를 막습니다.
+  static void ReportConfigSaveFailure(const char *stage, const char *key = nullptr) {
+    const std::string path = GetConfigPath();
+    AddLog(u8"[Config] 설정 저장 실패: 단계=%s / 항목=%s / 경로=%s",
+           stage ? stage : "unknown",
+           key ? key : "-",
+           path.c_str());
+
+    static ULONGLONG s_lastNotifyTick = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (s_lastNotifyTick == 0 || now - s_lastNotifyTick >= 3000) {
+      AddNotification(
+          u8"설정 저장 실패 - S8RPK_cheat_config.json의 쓰기 권한/읽기 전용 상태를 확인하세요.");
+      s_lastNotifyTick = now;
+    }
+  }
+
   // [신규] D3D Hook 이전, 모듈 로드 극초기에 로그출력 여부만 가장 먼저 파악
   void LoadEarlyLogConfig() {
     std::ifstream file(GetConfigPath());
@@ -195,8 +213,10 @@ namespace DX11Base {
 
   void SaveConfig() {
     std::ofstream file(GetConfigPath());
-    if (!file.is_open())
+    if (!file.is_open()) {
+      ReportConfigSaveFailure("기본 설정 파일 열기");
       return;
+    }
 
     file << "{\n";
     for (size_t i = 0; i < (sizeof(g_Entries) / sizeof(g_Entries[0])); ++i) {
@@ -276,7 +296,12 @@ namespace DX11Base {
     }
     file << "  \"config_end\": true\n";
     file << "}";
+
+    file.flush();
+    const bool writeOk = file.good();
     file.close();
+    if (!writeOk || file.fail())
+      ReportConfigSaveFailure("기본 설정 파일 쓰기");
   }
 
   void LoadConfig() {

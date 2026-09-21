@@ -15,8 +15,10 @@
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
     std::ifstream in(GetConfigPath(), std::ios::binary);
-    if (!in.is_open())
+    if (!in.is_open()) {
+      ReportConfigSaveFailure("추가 설정 파일 읽기", name);
       return;
+    }
 
     std::ostringstream ss;
     ss << in.rdbuf();
@@ -37,8 +39,10 @@ namespace DX11Base {
     }
 
     const size_t configEnd = data.find("\"config_end\"");
-    if (configEnd == std::string::npos)
+    if (configEnd == std::string::npos) {
+      ReportConfigSaveFailure("설정 파일 형식 확인", name);
       return;
+    }
 
     size_t insertPos = data.rfind('\n', configEnd);
     insertPos = (insertPos == std::string::npos) ? configEnd : insertPos + 1;
@@ -48,9 +52,17 @@ namespace DX11Base {
     data.insert(insertPos, line);
 
     std::ofstream out(GetConfigPath(), std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
+    if (!out.is_open()) {
+      ReportConfigSaveFailure("추가 설정 파일 열기", name);
       return;
+    }
+
     out << data;
+    out.flush();
+    const bool writeOk = out.good();
+    out.close();
+    if (!writeOk || out.fail())
+      ReportConfigSaveFailure("추가 설정 파일 쓰기", name);
   }
 
   static bool LoadBoolConfigValue(const char *name, bool &value) {
@@ -71,8 +83,10 @@ namespace DX11Base {
 
   static void UpsertIntConfigValue(const char *name, int value) {
     std::ifstream in(GetConfigPath(), std::ios::binary);
-    if (!in.is_open())
+    if (!in.is_open()) {
+      ReportConfigSaveFailure("추가 설정 파일 읽기", name);
       return;
+    }
 
     std::ostringstream ss;
     ss << in.rdbuf();
@@ -93,8 +107,10 @@ namespace DX11Base {
     }
 
     const size_t configEnd = data.find("\"config_end\"");
-    if (configEnd == std::string::npos)
+    if (configEnd == std::string::npos) {
+      ReportConfigSaveFailure("설정 파일 형식 확인", name);
       return;
+    }
 
     size_t insertPos = data.rfind('\n', configEnd);
     insertPos = (insertPos == std::string::npos) ? configEnd : insertPos + 1;
@@ -104,9 +120,17 @@ namespace DX11Base {
     data.insert(insertPos, line);
 
     std::ofstream out(GetConfigPath(), std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
+    if (!out.is_open()) {
+      ReportConfigSaveFailure("추가 설정 파일 열기", name);
       return;
+    }
+
     out << data;
+    out.flush();
+    const bool writeOk = out.good();
+    out.close();
+    if (!writeOk || out.fail())
+      ReportConfigSaveFailure("추가 설정 파일 쓰기", name);
   }
 
   static bool LoadIntConfigValue(const char *name, int &value) {
