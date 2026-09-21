@@ -63,12 +63,6 @@ namespace DX11Base {
       uintptr_t battleContainer = 0;
       uintptr_t tileBase = 0;
       uint32_t tileCount = 0;
-      int32_t minQ = 0;
-      int32_t maxQ = 0;
-      int32_t minR = 0;
-      int32_t maxR = 0;
-      int64_t minS = 0;
-      int64_t maxS = 0;
       std::vector<MapTileEntry> tilesByCoord;
       std::vector<uint32_t> ringIndices;
     };
@@ -80,12 +74,6 @@ namespace DX11Base {
       g_mapCache.battleContainer = 0;
       g_mapCache.tileBase = 0;
       g_mapCache.tileCount = 0;
-      g_mapCache.minQ = 0;
-      g_mapCache.maxQ = 0;
-      g_mapCache.minR = 0;
-      g_mapCache.maxR = 0;
-      g_mapCache.minS = 0;
-      g_mapCache.maxS = 0;
       g_mapCache.tilesByCoord.clear();
       g_mapCache.ringIndices.clear();
     }
@@ -192,7 +180,6 @@ namespace DX11Base {
         g_mapCache.tilesByCoord.reserve(tileCount);
         g_mapCache.ringIndices.reserve(tileCount);
 
-        bool haveBounds = false;
         for (uint32_t i = 0; i < tileCount; ++i) {
           const uintptr_t tile = tileBase + static_cast<uintptr_t>(i) * 0x40;
 
@@ -205,22 +192,6 @@ namespace DX11Base {
           }
 
           g_mapCache.tilesByCoord.push_back({tileQ, tileR, i});
-          const int64_t tileS =
-              static_cast<int64_t>(tileQ) + static_cast<int64_t>(tileR);
-
-          if (!haveBounds) {
-            g_mapCache.minQ = g_mapCache.maxQ = tileQ;
-            g_mapCache.minR = g_mapCache.maxR = tileR;
-            g_mapCache.minS = g_mapCache.maxS = tileS;
-            haveBounds = true;
-          } else {
-            if (tileQ < g_mapCache.minQ) g_mapCache.minQ = tileQ;
-            if (tileQ > g_mapCache.maxQ) g_mapCache.maxQ = tileQ;
-            if (tileR < g_mapCache.minR) g_mapCache.minR = tileR;
-            if (tileR > g_mapCache.maxR) g_mapCache.maxR = tileR;
-            if (tileS < g_mapCache.minS) g_mapCache.minS = tileS;
-            if (tileS > g_mapCache.maxS) g_mapCache.maxS = tileS;
-          }
         }
 
         std::sort(g_mapCache.tilesByCoord.begin(),
@@ -264,29 +235,6 @@ namespace DX11Base {
       }
     }
 
-    int64_t AbsDiff64(int64_t a, int64_t b) {
-      const int64_t d = a - b;
-      return d < 0 ? -d : d;
-    }
-
-    int64_t GetMaxSearchRadius(int32_t commanderQ, int32_t commanderR) {
-      const int64_t commanderS =
-          static_cast<int64_t>(commanderQ) + static_cast<int64_t>(commanderR);
-      int64_t radius = 0;
-      const int64_t values[] = {
-          AbsDiff64(commanderQ, g_mapCache.minQ),
-          AbsDiff64(commanderQ, g_mapCache.maxQ),
-          AbsDiff64(commanderR, g_mapCache.minR),
-          AbsDiff64(commanderR, g_mapCache.maxR),
-          AbsDiff64(commanderS, g_mapCache.minS),
-          AbsDiff64(commanderS, g_mapCache.maxS),
-      };
-      for (const int64_t value : values) {
-        if (value > radius)
-          radius = value;
-      }
-      return radius;
-    }
 
     uint64_t CallOriginal(void *reinforcement) {
       return g_originalSelector ? g_originalSelector(reinforcement)
@@ -420,9 +368,9 @@ namespace DX11Base {
           {-1, 0}, {-1, 1}, {0, 1},
       };
 
-      const int64_t maxRadius = GetMaxSearchRadius(commanderQ, commanderR);
+      constexpr int64_t kMaxPlacementRadius = 5;
 
-      for (int64_t radius = 1; radius <= maxRadius; ++radius) {
+      for (int64_t radius = 1; radius <= kMaxPlacementRadius; ++radius) {
         g_mapCache.ringIndices.clear();
 
         int64_t q = static_cast<int64_t>(commanderQ) - radius;
@@ -473,7 +421,7 @@ namespace DX11Base {
         }
       }
 
-      return kPlacementFailure;
+      return CallOriginal(reinforcement);
     }
 
     bool ValidateTargets(uintptr_t exeBase) {
