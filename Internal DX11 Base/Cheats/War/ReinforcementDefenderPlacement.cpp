@@ -5,9 +5,10 @@
 #include "../../showlog.h"
 #include "ReinforcementDefenderPlacement.h"
 
-#include <climits>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace DX11Base {
   namespace {
@@ -50,6 +51,36 @@ namespace DX11Base {
     uint8_t g_selectorCallPatched[5]{};
     OriginalSelectorFn g_originalSelector = nullptr;
     PassabilityFn g_passability = nullptr;
+
+    struct CachedTileCandidate {
+      uintptr_t tile = 0;
+      int64_t distance = 0;
+      uint32_t index = 0;
+    };
+
+    struct PlacementCache {
+      bool valid = false;
+      uintptr_t battleContainer = 0;
+      uintptr_t tileBase = 0;
+      uint32_t tileCount = 0;
+      uintptr_t commanderTile = 0;
+      int32_t commanderQ = 0;
+      int32_t commanderR = 0;
+      std::vector<CachedTileCandidate> candidates;
+    };
+
+    PlacementCache g_placementCache;
+
+    void ResetPlacementCache() {
+      g_placementCache.valid = false;
+      g_placementCache.battleContainer = 0;
+      g_placementCache.tileBase = 0;
+      g_placementCache.tileCount = 0;
+      g_placementCache.commanderTile = 0;
+      g_placementCache.commanderQ = 0;
+      g_placementCache.commanderR = 0;
+      g_placementCache.candidates.clear();
+    }
 
     template <typename T>
     bool ReadValue(uintptr_t address, T &out) {
@@ -134,6 +165,86 @@ namespace DX11Base {
       out[0] = 0xE8;
       const int32_t rel32 = static_cast<int32_t>(rel);
       memcpy(out + 1, &rel32, sizeof(rel32));
+      return true;
+    }
+
+    bool EnsurePlacementCache(uintptr_t battleContainer,
+                              uintptr_t tileBase,
+                              uint32_t tileCount,
+                              uintptr_t commanderTile,
+                              int32_t commanderQ,
+                              int32_t commanderR) {
+      if (g_placementCache.valid &&
+          g_placementCache.battleContainer == battleContainer &&
+          g_placementCache.tileBase == tileBase &&
+          g_placementCache.tileCount == tileCount &&
+          g_placementCache.commanderTile == commanderTile &&
+          g_placementCache.commanderQ == commanderQ &&
+          g_placementCache.commanderR == commanderR) {
+        return true;
+      }
+
+      ResetPlacementCache();
+
+      try {
+        g_placementCache.candidates.reserve(tileCount > 0 ? tileCount - 1 : 0);
+
+        for (uint32_t i = 0; i < tileCount; ++i) {
+          const uintptr_t tile =
+              tileBase + static_cast<uintptr_t>(i) * 0x40;
+
+          int32_t tileQ = 0;
+          int32_t tileR = 0;
+          if (!ReadValueFast(tile + 0x08, tileQ) ||
+              !ReadValueFast(tile + 0x0C, tileR)) {
+            ResetPlacementCache();
+            return false;
+          }
+
+          int64_t dq = static_cast<int64_t>(tileQ) - commanderQ;
+          int64_t dr = static_cast<int64_t>(tileR) - commanderR;
+          int64_t ds = dq + dr;
+          if (dq < 0)
+            dq = -dq;
+          if (dr < 0)
+            dr = -dr;
+          if (ds < 0)
+            ds = -ds;
+
+          int64_t distance = dq;
+          if (dr > distance)
+            distance = dr;
+          if (ds > distance)
+            distance = ds;
+
+          if (distance == 0)
+            continue;
+
+          g_placementCache.candidates.push_back(
+              {tile, distance, i});
+        }
+
+        std::sort(
+            g_placementCache.candidates.begin(),
+            g_placementCache.candidates.end(),
+            [](const CachedTileCandidate &a,
+               const CachedTileCandidate &b) {
+              if (a.distance != b.distance)
+                return a.distance < b.distance;
+              return a.index < b.index;
+            });
+      } catch (...) {
+        ResetPlacementCache();
+        return false;
+      }
+
+      g_placementCache.battleContainer = battleContainer;
+      g_placementCache.tileBase = tileBase;
+      g_placementCache.tileCount = tileCount;
+      g_placementCache.commanderTile = commanderTile;
+      g_placementCache.commanderQ = commanderQ;
+      g_placementCache.commanderR = commanderR;
+      g_placementCache.valid = true;
       return true;
     }
 
@@ -255,11 +366,18 @@ namespace DX11Base {
           !ReadValue(commanderTile + 0x0C, commanderR))
         return CallOriginal(reinforcement);
 
-      int32_t bestDistance = INT_MAX;
-      uintptr_t bestTile = 0;
+      if (!EnsurePlacementCache(battleContainer, tileBase, tileCount,
+                                commanderTile, commanderQ, commanderR)) {
+        return CallOriginal(reinforcement);
+      }
 
-      for (uint32_t i = 0; i < tileCount; ++i) {
-        const uintptr_t tile = tileBase + static_cast<uintptr_t>(i) * 0x40;
+      if (!g_passability)
+        return CallOriginal(reinforcement);
+
+      // 거리순(동일 거리에서는 원래 타일 인덱스순)으로 가까운 후보부터 확인합니다.
+      // 점유/지형/통행 여부는 캐시하지 않고 원군 도착 순간의 값을 매번 다시 읽습니다.
+      for (const auto &candidate : g_placementCache.candidates) {
+        const uintptr_t tile = candidate.tile;
 
         uintptr_t occupantA = 0;
         uintptr_t occupantB = 0;
@@ -268,61 +386,23 @@ namespace DX11Base {
         if (!ReadValueFast(tile + 0x18, occupantA) || occupantA != 0 ||
             !ReadValueFast(tile + 0x20, occupantB) || occupantB != 0 ||
             !ReadValueFast(tile, tileInfo) || !tileInfo ||
-            !ReadValueFast(tileInfo + 0x09, tileType) || tileType == 0x0A)
+            !ReadValueFast(tileInfo + 0x09, tileType) || tileType == 0x0A) {
           continue;
-
-        int32_t tileQ = 0;
-        int32_t tileR = 0;
-        if (!ReadValueFast(tile + 0x08, tileQ) ||
-            !ReadValueFast(tile + 0x0C, tileR))
-          continue;
-
-        int64_t dq = static_cast<int64_t>(tileQ) - commanderQ;
-        int64_t dr = static_cast<int64_t>(tileR) - commanderR;
-        int64_t ds = dq + dr;
-        if (dq < 0)
-          dq = -dq;
-        if (dr < 0)
-          dr = -dr;
-        if (ds < 0)
-          ds = -ds;
-
-        int64_t distance = dq;
-        if (dr > distance)
-          distance = dr;
-        if (ds > distance)
-          distance = ds;
-
-        if (distance == 0 || distance >= bestDistance)
-          continue;
-
-        if (!g_passability)
-          continue;
+        }
 
         const uint8_t passable =
             g_passability(reinterpret_cast<void *>(tile), reinforcement);
         if (!passable)
           continue;
 
-        bestTile = tile;
-        bestDistance = static_cast<int32_t>(distance);
+        uint64_t result = 0;
+        if (!ReadValue(tileInfo, result))
+          return CallOriginal(reinforcement);
 
-        // 총대장 타일 자체(distance 0)는 제외했으므로 1이 가능한 최소 거리입니다.
-        // 거리 1의 합법 타일을 찾았으면 더 가까운 후보가 존재할 수 없어 즉시 종료합니다.
-        if (bestDistance == 1)
-          break;
+        return result;
       }
 
-      if (!bestTile)
-        return kPlacementFailure;
-
-      uintptr_t tileInfo = 0;
-      uint64_t result = 0;
-      if (!ReadValue(bestTile, tileInfo) || !tileInfo ||
-          !ReadValue(tileInfo, result))
-        return CallOriginal(reinforcement);
-
-      return result;
+      return kPlacementFailure;
     }
 
     bool ValidateTargets(uintptr_t exeBase) {
@@ -406,6 +486,7 @@ namespace DX11Base {
         return false;
       }
 
+      ResetPlacementCache();
       return true;
     }
   } // namespace
@@ -460,6 +541,7 @@ namespace DX11Base {
       g_stub = 0;
     }
 
+    ResetPlacementCache();
     g_originalSelector = nullptr;
     g_passability = nullptr;
     g_applied = false;
