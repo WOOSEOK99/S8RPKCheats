@@ -55,46 +55,43 @@ struct OfficerProfile {
   std::array<int, 6> militaryTraits{};
 };
 
-bool SafeReadU8(uintptr_t address, uint8_t &out) {
-  out = 0;
-  if (!IsValidPtr(address, 1))
+bool ReadOfficerProfile(uintptr_t base, OfficerProfile &out) {
+  // 무장 레코드는 0x3D0 연속 구조이므로 레코드 전체를 한 번만 검증합니다.
+  // 이후 내부 필드는 __try 범위에서 직접 읽어 장수마다 수십 번 VirtualQuery 하는 비용을 피합니다.
+  if (!IsValidPtr(base, kOfficerStride))
     return false;
+
   __try {
-    out = *reinterpret_cast<uint8_t *>(address);
+    const uint16_t id = *reinterpret_cast<uint16_t *>(base + 0x08);
+    if (id < 1 || id > kOfficerCount)
+      return false;
+
+    out = {};
+    out.id = static_cast<int>(id);
+    out.lead = *reinterpret_cast<uint8_t *>(base + 0xAA);
+    out.war = *reinterpret_cast<uint8_t *>(base + 0xAB);
+    out.intel = *reinterpret_cast<uint8_t *>(base + 0xAC);
+    out.charm = *reinterpret_cast<uint8_t *>(base + 0xAE);
+
+    for (int i = 0; i < 5; ++i) {
+      out.infantry[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x139 + i), 3);
+      out.cavalry[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x13E + i), 3);
+      out.archer[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x143 + i), 3);
+      out.ship[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x148 + i), 3);
+      out.strategy[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x14D + i), 3);
+      out.support[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x152 + i), 3);
+    }
+
+    for (int i = 0; i < 6; ++i) {
+      out.branchTraits[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x1DC + i), 3);
+      out.militaryTraits[i] = (std::min<int>)(*reinterpret_cast<uint8_t *>(base + 0x1E2 + i), 3);
+    }
     return true;
   }
   __except (EXCEPTION_EXECUTE_HANDLER) {
-    out = 0;
+    out = {};
     return false;
   }
-}
-
-bool SafeReadU16(uintptr_t address, uint16_t &out) {
-  out = 0;
-  if (!IsValidPtr(address, 2))
-    return false;
-  __try {
-    out = *reinterpret_cast<uint16_t *>(address);
-    return true;
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER) {
-    out = 0;
-    return false;
-  }
-}
-
-int ReadLevel(uintptr_t base, uintptr_t offset) {
-  uint8_t value = 0;
-  if (!SafeReadU8(base + offset, value))
-    return 0;
-  return std::min<int>(value, 3);
-}
-
-int ReadStat(uintptr_t base, uintptr_t offset) {
-  uint8_t value = 0;
-  if (!SafeReadU8(base + offset, value))
-    return 0;
-  return static_cast<int>(value);
 }
 
 template <size_t N>
@@ -111,38 +108,6 @@ int MaxLevel(const std::array<int, N> &values) {
   for (int v : values)
     result = (std::max)(result, v);
   return result;
-}
-
-bool ReadOfficerProfile(uintptr_t base, OfficerProfile &out) {
-  if (!IsValidPtr(base, 0x1E8))
-    return false;
-
-  uint16_t id = 0;
-  if (!SafeReadU16(base + 0x08, id) || id < 1 || id > kOfficerCount)
-    return false;
-
-  out = {};
-  out.id = static_cast<int>(id);
-  out.lead = ReadStat(base, 0xAA);
-  out.war = ReadStat(base, 0xAB);
-  out.intel = ReadStat(base, 0xAC);
-  out.charm = ReadStat(base, 0xAE);
-
-  for (int i = 0; i < 5; ++i) {
-    out.infantry[i] = ReadLevel(base, 0x139 + i);
-    out.cavalry[i] = ReadLevel(base, 0x13E + i);
-    out.archer[i] = ReadLevel(base, 0x143 + i);
-    out.ship[i] = ReadLevel(base, 0x148 + i);
-    out.strategy[i] = ReadLevel(base, 0x14D + i);
-    out.support[i] = ReadLevel(base, 0x152 + i);
-  }
-
-  for (int i = 0; i < 6; ++i) {
-    out.branchTraits[i] = ReadLevel(base, 0x1DC + i);
-    out.militaryTraits[i] = ReadLevel(base, 0x1E2 + i);
-  }
-
-  return true;
 }
 
 std::array<bool, 10> EvaluateSpecialAbilities(const OfficerProfile &p) {
@@ -237,66 +202,28 @@ struct PendingAssignment {
   std::array<bool, 10> abilities{};
 };
 
-} // namespace
-
-bool AutoAssignSpecialAbilities() {
-  const uintptr_t exeBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+struct AutoAssignJob {
+  bool running = false;
+  bool cancelRequested = false;
   uintptr_t rosterBase = 0;
-  if (!exeBase || !TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) ||
-      rosterBase < 0x10000) {
-    AddLog(u8"[특수능력/자동] 무장 배열 주소를 찾지 못했습니다.");
-    return false;
-  }
-
+  size_t cursor = 0;
+  std::array<bool, kOfficerCount + 1> seenIds{};
   std::vector<PendingAssignment> pending;
-  pending.reserve(kOfficerCount);
-
-  bool seenIds[kOfficerCount + 1] = {};
   int validOfficers = 0;
   int matchedOfficers = 0;
   std::array<int, 10> matchedCounts{};
+  std::string status;
+};
 
-  for (int i = 0; i < kOfficerCount; ++i) {
-    const uintptr_t base =
-        rosterBase + static_cast<uintptr_t>(i) * kOfficerStride;
+AutoAssignJob g_autoAssignJob;
 
-    const RosterStats stats = SafeReadRosterStats(base);
-    if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerCount)
-      continue;
-
-    OfficerProfile profile;
-    if (!ReadOfficerProfile(base, profile))
-      continue;
-    if (profile.id != static_cast<int>(stats.id_08) || seenIds[profile.id])
-      continue;
-    seenIds[profile.id] = true;
-    ++validOfficers;
-
-    const std::array<bool, 10> matches =
-        EvaluateSpecialAbilities(profile);
-
-    bool any = false;
-    for (int a = 0; a < static_cast<int>(matches.size()); ++a) {
-      if (!matches[a])
-        continue;
-      any = true;
-      ++matchedCounts[a];
-    }
-
-    if (!any)
-      continue;
-
-    ++matchedOfficers;
-    pending.push_back({profile.id, matches});
-  }
-
+void FinishAutoAssignJob() {
   int newlyAssigned = 0;
   std::array<int, 10> newlyAssignedCounts{};
 
   {
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
-    for (const PendingAssignment &item : pending) {
+    for (const PendingAssignment &item : g_autoAssignJob.pending) {
       auto &skills = g_customSkillCounts[item.officerId];
       for (int a = 0; a < static_cast<int>(item.abilities.size()); ++a) {
         if (!item.abilities[a])
@@ -317,22 +244,154 @@ bool AutoAssignSpecialAbilities() {
   if (newlyAssigned > 0)
     SaveSkillCounts();
 
+  g_autoAssignJob.running = false;
+  g_autoAssignJob.status =
+      std::string(u8"완료: 유효 무장 ") +
+      std::to_string(g_autoAssignJob.validOfficers) +
+      u8"명 / 조건 충족 " +
+      std::to_string(g_autoAssignJob.matchedOfficers) +
+      u8"명 / 신규 부여 " +
+      std::to_string(newlyAssigned) + u8"건";
+
   AddLog(u8"[특수능력/자동] 판정 완료: 유효 무장 %d명 / 조건 충족 %d명 / 신규 부여 %d건",
-         validOfficers, matchedOfficers, newlyAssigned);
+         g_autoAssignJob.validOfficers,
+         g_autoAssignJob.matchedOfficers,
+         newlyAssigned);
 
   for (int a = 0; a < static_cast<int>(kAbilityNames.size()); ++a) {
     if (a == 4) {
       AddLog(u8"[특수능력/자동] 등갑군: 자동 판정 제외(수동 지정 유지)");
       continue;
     }
-    if (matchedCounts[a] == 0 && newlyAssignedCounts[a] == 0)
+    if (g_autoAssignJob.matchedCounts[a] == 0 && newlyAssignedCounts[a] == 0)
       continue;
 
     AddLog(u8"[특수능력/자동] %s: 조건 충족 %d명 / 신규 %d명",
-           kAbilityNames[a], matchedCounts[a], newlyAssignedCounts[a]);
+           kAbilityNames[a],
+           g_autoAssignJob.matchedCounts[a],
+           newlyAssignedCounts[a]);
   }
 
+  g_autoAssignJob.pending.clear();
+}
+
+} // namespace
+
+bool AutoAssignSpecialAbilities() {
+  if (g_autoAssignJob.running) {
+    AddLog(u8"[특수능력/자동] 이미 자동 부여 작업이 진행 중입니다.");
+    return false;
+  }
+
+  const uintptr_t exeBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+  uintptr_t rosterBase = 0;
+  if (!exeBase || !TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) ||
+      rosterBase < 0x10000) {
+    AddLog(u8"[특수능력/자동] 무장 배열 주소를 찾지 못했습니다.");
+    g_autoAssignJob.status =
+        u8"무장 배열 주소를 찾지 못했습니다. 전략 화면에서 다시 시도하세요.";
+    return false;
+  }
+
+  g_autoAssignJob = {};
+  g_autoAssignJob.running = true;
+  g_autoAssignJob.rosterBase = rosterBase;
+  g_autoAssignJob.pending.reserve(1024);
+  g_autoAssignJob.status = u8"처리 시작: 0 / 5102명";
+
+  AddLog(u8"[특수능력/자동] 증분 판정 시작: 프레임당 24명 처리");
   return true;
+}
+
+void TickSpecialAbilityAutoAssign() {
+  if (!g_autoAssignJob.running)
+    return;
+
+  if (g_autoAssignJob.cancelRequested) {
+    const size_t processed = g_autoAssignJob.cursor;
+    g_autoAssignJob.running = false;
+    g_autoAssignJob.pending.clear();
+    g_autoAssignJob.status =
+        std::string(u8"취소됨: ") + std::to_string(processed) +
+        u8" / 5102명 처리 (특수 능력 변경 없음)";
+    AddLog(u8"[특수능력/자동] 사용자 취소: %zu / %d명 처리, 변경 없음",
+           processed, kOfficerCount);
+    return;
+  }
+
+  // 게임/UI 스레드를 오래 점유하지 않도록 프레임당 24명만 판정합니다.
+  constexpr size_t kOfficersPerFrame = 24;
+  const size_t end = (std::min)(
+      g_autoAssignJob.cursor + kOfficersPerFrame,
+      static_cast<size_t>(kOfficerCount));
+
+  for (; g_autoAssignJob.cursor < end; ++g_autoAssignJob.cursor) {
+    const uintptr_t base =
+        g_autoAssignJob.rosterBase +
+        static_cast<uintptr_t>(g_autoAssignJob.cursor) * kOfficerStride;
+
+    const RosterStats stats = SafeReadRosterStats(base);
+    if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerCount)
+      continue;
+
+    OfficerProfile profile;
+    if (!ReadOfficerProfile(base, profile))
+      continue;
+    if (profile.id != static_cast<int>(stats.id_08) ||
+        g_autoAssignJob.seenIds[profile.id])
+      continue;
+
+    g_autoAssignJob.seenIds[profile.id] = true;
+    ++g_autoAssignJob.validOfficers;
+
+    const std::array<bool, 10> matches =
+        EvaluateSpecialAbilities(profile);
+
+    bool any = false;
+    for (int a = 0; a < static_cast<int>(matches.size()); ++a) {
+      if (!matches[a])
+        continue;
+      any = true;
+      ++g_autoAssignJob.matchedCounts[a];
+    }
+
+    if (!any)
+      continue;
+
+    ++g_autoAssignJob.matchedOfficers;
+    g_autoAssignJob.pending.push_back({profile.id, matches});
+  }
+
+  g_autoAssignJob.status =
+      std::string(u8"처리 중: ") +
+      std::to_string(g_autoAssignJob.cursor) +
+      u8" / 5102명";
+
+  if (g_autoAssignJob.cursor >= static_cast<size_t>(kOfficerCount))
+    FinishAutoAssignJob();
+}
+
+void CancelSpecialAbilityAutoAssign() {
+  if (g_autoAssignJob.running)
+    g_autoAssignJob.cancelRequested = true;
+}
+
+bool IsSpecialAbilityAutoAssignRunning() {
+  return g_autoAssignJob.running;
+}
+
+float GetSpecialAbilityAutoAssignProgress() {
+  if (g_autoAssignJob.cursor == 0)
+    return 0.0f;
+  if (g_autoAssignJob.cursor >= static_cast<size_t>(kOfficerCount))
+    return 1.0f;
+  return static_cast<float>(g_autoAssignJob.cursor) /
+         static_cast<float>(kOfficerCount);
+}
+
+const char *GetSpecialAbilityAutoAssignStatus() {
+  return g_autoAssignJob.status.c_str();
 }
 
 } // namespace DX11Base
