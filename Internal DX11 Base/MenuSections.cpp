@@ -1103,6 +1103,54 @@ namespace DX11Base {
       if (ImGui::Button(u8"세력별 기술력 편집", ImVec2(-1, 30 * scale))) {
         bShowFactionTechEditor = !bShowFactionTechEditor;
       }
+
+      ImGui::Spacing();
+
+      if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여", ImVec2(-1, 30 * scale))) {
+        DX11Base::OpenBatchRandomTraitAssignmentWindow();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"모든 유효 무장의 기존 기재는 유지하고 빈 슬롯만 랜덤으로 채웁니다.");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"실행 전 황금/녹색/적색 등급을 선택할 수 있습니다.");
+        ImGui::EndTooltip();
+      }
+
+      const bool specialAutoRunning = DX11Base::IsSpecialAbilityAutoAssignRunning();
+      if (specialAutoRunning)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"모든 무장 특수 능력 자동 부여", ImVec2(-1, 30 * scale))) {
+        DX11Base::AutoAssignSpecialAbilities();
+      }
+      if (specialAutoRunning)
+        ImGui::EndDisabled();
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"모든 유효 무장의 실제 전법/특기/능력치를 분석하여 특수 능력을 자동으로 추가합니다.");
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
+                           u8"기존에 수동으로 부여한 특수 능력은 삭제하지 않습니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                           u8"등갑군은 1차 자동 판정에서 제외됩니다.");
+        ImGui::EndTooltip();
+      }
+
+      if (specialAutoRunning) {
+        ImGui::ProgressBar(
+            DX11Base::GetSpecialAbilityAutoAssignProgress(),
+            ImVec2(-1.0f, 0.0f),
+            DX11Base::GetSpecialAbilityAutoAssignStatus());
+        if (ImGui::Button(u8"특수 능력 자동 부여 취소", ImVec2(-1, 26 * scale))) {
+          DX11Base::CancelSpecialAbilityAutoAssign();
+        }
+      } else {
+        const char *autoStatus = DX11Base::GetSpecialAbilityAutoAssignStatus();
+        if (autoStatus && autoStatus[0] != '\0')
+          ImGui::TextWrapped("%s", autoStatus);
+      }
       ::DX11Base::DrawBatchOfficerEditWindow(scale);
       ::DX11Base::DrawFactionTechEditor(scale);
 
@@ -1428,34 +1476,6 @@ namespace DX11Base {
       }
 
       ImGui::Spacing();
-
-      // 3행: 전체 폭
-      if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여", ImVec2(-FLT_MIN, 28.0f * scale))) {
-        DX11Base::OpenBatchRandomTraitAssignmentWindow();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 유효 무장의 기존 기재는 유지하고 빈 슬롯만 랜덤으로 채웁니다.");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"실행 전 황금/녹색/적색 등급을 선택할 수 있습니다.");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::Spacing();
-
-      if (ImGui::Button(u8"모든 무장 특수 능력 자동 부여", ImVec2(-FLT_MIN, 28.0f * scale))) {
-        if (DX11Base::AutoAssignSpecialAbilities())
-          DX11Base::AddLog(u8"[특수능력/자동] 자동 부여 작업 완료");
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"모든 유효 무장의 실제 전법/특기/능력치를 분석하여 특수 능력을 자동으로 추가합니다.");
-        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
-                           u8"기존에 수동으로 부여한 특수 능력은 삭제하지 않습니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                           u8"등갑군은 1차 자동 판정에서 제외됩니다.");
-        ImGui::EndTooltip();
-      }
 
       EndSection(); // 무장 정보
       DX11Base::TickTraitTextEditorAutoApply();
