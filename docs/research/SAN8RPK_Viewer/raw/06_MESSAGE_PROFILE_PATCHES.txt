@@ -1,0 +1,193 @@
+SAN8RPK_Viewer Step 06 raw message-profile analysis
+=======================================================
+
+SOURCE
+------
+SAN8RPK_Viewer.exe
+SHA256:
+34abf52f9651d4313076b16042476e5646967aa55af65613f542d69883084c3d
+
+message_profile.py docstring
+----------------------------
+Exact-build, display-only branches. No code cave or decision changes.
+
+message_patch.py docstring
+--------------------------
+Independent, reversible in-game captive-result message switch.
+
+HOOKS construction
+------------------
+
+HOOKS = [
+    (
+        0x01E5BA1F,
+        bytes.fromhex("0f84d1000000"),
+        0,
+    ),
+    (
+        0x01E599BE,
+        bytes.fromhex("7475"),
+        1,
+    ),
+]
+
+then:
+
+HOOKS.append((
+    0x01E5A82C,
+    bytes.fromhex("7559"),
+    2,
+))
+
+HOOKS.append((
+    0x01E5BA4B,
+    bytes.fromhex("ba43000000"),
+    3,
+))
+
+FINAL replacement(offset)
+-------------------------
+
+if offset == 0:
+    return bytes.fromhex("410fb6c69090")
+
+if offset == 3:
+    return bytes.fromhex("8d54803e90")
+
+otherwise:
+    return b"\x90" * len(original_for_offset)
+
+Therefore:
+
+offset 0:
++1E5BA1F
+0F 84 D1 00 00 00
+->
+41 0F B6 C6 90 90
+
+offset 1:
++1E599BE
+74 75
+->
+90 90
+
+offset 2:
++1E5A82C
+75 59
+->
+90 90
+
+offset 3:
++1E5BA4B
+BA 43 00 00 00
+->
+8D 54 80 3E 90
+
+
+DISASSEMBLY
+-----------
+
++1E599BE original:
+74 75
+je +0x75
+target = +1E59A35
+
+patched:
+nop
+nop
+
+
++1E5A82C original:
+75 59
+jne +0x59
+target = +1E5A887
+
+patched:
+nop
+nop
+
+
++1E5BA1F original:
+0F 84 D1 00 00 00
+je +0xD1
+target = +1E5BAF6
+
+patched:
+41 0F B6 C6
+movzx eax,r14b
+90 90
+nop
+nop
+
+
++1E5BA4B original:
+BA 43 00 00 00
+mov edx,0x43
+
+patched:
+8D 54 80 3E
+lea edx,[rax+rax*4+0x3e]
+90
+nop
+
+Formula:
+EDX = 5*EAX + 62
+
+With prior patch:
+EAX = zero_extend(R14B)
+
+Thus:
+EDX = 5*R14B + 62
+
+Examples:
+R14B 0 -> EDX 62
+R14B 1 -> EDX 67  (same as vanilla fixed 0x43)
+R14B 2 -> EDX 72
+R14B 3 -> EDX 77
+R14B 4 -> EDX 82
+
+
+GUARDS
+------
+
++1E5BA17 size 235
+f034802c495ea3279ec6b3db576bdbed440d5b57f8717d5f2a08b1947e0b8c29
+
++1E599BB size 122
+17960833a85ac04f861161182fe6e21662514a97572879753f5e236a9ab050c7
+
++1E5A81A size 112
+0cc8a29779ad8344050a90d9fd71888dbf08e0011d4115fc99006084b7a6993f
+
+
+VIEWER UI STRINGS
+-----------------
+
+포로 결과 메시지 켜기
+
+메시지 확장 꺼짐 · AI 전투의 등용·석방 결과 및 복수 처형 명단 표시
+
+메시지 확장 켜짐 · AI 전투의 등용·석방 결과 + 복수 처형 명단 표시
+
+
+CONFIDENCE
+----------
+
+CONFIRMED:
+- 4 exact RVAs
+- original bytes
+- replacement bytes
+- no code cave
+- display-only profile declaration
+- dynamic EDX formula
+- independent reversible controller
+
+LIKELY:
+- +1E599BE / +1E5A82C correspond to recruitment/release display gates
+- +1E5BA1F / +1E5BA4B form the multi-execution detail pair
+- R14B is count/index related to execution result list
+
+UNCONFIRMED:
+- exact recruitment vs release address mapping
+- exact semantic meaning of R14B
+- exact message-table meaning of IDs 62,67,72,...
