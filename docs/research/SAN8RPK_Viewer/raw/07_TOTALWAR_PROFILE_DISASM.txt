@@ -1,0 +1,182 @@
+SAN8RPK_Viewer Step 07 raw TotalWar analysis
+==================================================
+
+SOURCE
+------
+SAN8RPK_Viewer.exe
+SHA256:
+34abf52f9651d4313076b16042476e5646967aa55af65613f542d69883084c3d
+
+totalwar_profile.py docstring
+-----------------------------
+TotalWarPoint only: one-year retry gate, native remaining conditions preserved.
+
+Viewer UI strings
+-----------------
+결전 대기 1년 켜기
+꺼짐 · 결전의 원래 대기 기간 사용
+켜짐 · 결전 대기 1년 · 다른 발동 조건은 유지
+
+PROFILE
+-------
+totalwar_profile.marshal310
+size 1160
+sha256 44297589e2ea88df80d9da40f92d80c20ff846f3b47b8e03f8226c356841dc37
+
+totalwar_patch.marshal310
+size 454
+sha256 7f437bebbd35e1da8a6c06ebe7a734aac9e7f32cb76062da3ad0161960d64848
+
+
+HOOK A
+------
+RVA +0x01335961
+resume +0x01335971
+
+original 16:
+45 0F B6 59 38
+45 0F B6 51 35
+41 8D 43 FF
+3C 0B
+
+disasm:
+movzx r11d,byte ptr [r9+38h]
+movzx r10d,byte ptr [r9+35h]
+lea eax,[r11-1]
+cmp al,0Bh
+
+
+HOOK B
+------
+RVA +0x0132E4BD
+resume +0x0132E4CD
+
+original 16:
+45 0F B6 51 35
+45 0F B6 59 38
+41 8D 43 FF
+3C 0B
+
+disasm:
+movzx r10d,byte ptr [r9+35h]
+movzx r11d,byte ptr [r9+38h]
+lea eax,[r11-1]
+cmp al,0Bh
+
+
+COMMON TEMPLATE
+---------------
+totalwar_template.bin
+size 29
+sha256 1df97dc56963ed13d15823626fb7188107ef5c2160d6aa8f863d7acfdb9ece70
+
+bytes:
+45 0F B6 59 38
+45 0F B6 51 35
+41 80 79 08 01
+75 06
+41 BA 01 00 00 00
+41 8D 43 FF
+3C 0B
+
+disasm:
+movzx r11d,byte ptr [r9+38h]
+movzx r10d,byte ptr [r9+35h]
+cmp byte ptr [r9+08h],1
+jne +6
+mov r10d,1
+lea eax,[r11-1]
+cmp al,0Bh
+
+
+BUILD FUNCTIONS
+---------------
+
+build_v015_payload(base, stats):
+
+    return (
+        TEMPLATE
+        + b"\xFF\x25\x00\x00\x00\x00"
+        + pack("<Q", base + 0x01335971)
+    )
+
+build_payload(base, stats):
+
+    first = build_v015_payload(base, stats)
+
+    second = (
+        TEMPLATE
+        + b"\xFF\x25\x00\x00\x00\x00"
+        + pack("<Q", base + 0x0132E4CD)
+    )
+
+    return first.ljust(0x100, b"\xCC") + second
+
+Therefore:
+cave+000 -> path A payload
+cave+100 -> path B payload
+
+stats argument is unused.
+
+
+HOOK REPLACEMENT
+----------------
+Imported ai_profile.make_jump(destination):
+
+FF 25 00 00 00 00
+<8-byte destination>
+90 90
+
+= 16 bytes exactly.
+
+
+SEMANTIC DELTA
+--------------
+Native:
+r10d = byte [r9+35h]
+
+Viewer:
+r10d = byte [r9+35h]
+if byte [r9+08h] == 1:
+    r10d = 1
+
+Unchanged:
+r11d = byte [r9+38h]
+eax = r11d - 1
+cmp al,0Bh
+
+The cmp flags are returned to native code unchanged.
+
+
+GUARDS
+------
+Path A:
++0x013358E0 size 264
+4024c87461ec34b1f00ab30a703041de4e77e08af8be546b3e0359938e85ceae
+
+Path B:
++0x0132E340 size 588
+671dbd6df61a7ab184a9273d980fac063f815c2e44035445d25096d507a36636
+
+
+CONFIDENCE
+----------
+CONFIRMED:
+- 2 exact hooks
+- exact original bytes
+- exact common template
+- +08 == 1 is the only record discriminator used by this profile
+- effective +35 value is forced to 1 only in register
+- +38 and final cmp are untouched
+- remaining native logic is preserved
+- no ×3 probability math exists in current profile
+
+LIKELY:
+- +08==1 identifies TotalWarPoint according to profile semantics
+- +35 is the retry-period year input
+- +38 is month-like because of the 1..12 check
+- first occurrence remains close to vanilla because this is a retry gate, not a force-trigger patch
+
+UNCONFIRMED:
+- official names of r9 structure and +08/+35/+38 fields
+- exact scheduler role of hook A vs hook B

@@ -87,20 +87,28 @@ TotalWarPoint only: one-year retry gate, native remaining conditions preserved.
 확인된 RVA:
 
 ```text
-+0x01335961
-+0x01335971
-+0x0132E4BD
-+0x0132E4CD
++0x01335961  hook A
++0x01335971  resume A
++0x0132E4BD  hook B
++0x0132E4CD  resume B
 ```
 
-현재 유력한 구조:
+두 hook 모두 같은 논리를 삽입합니다.
 
-- `+1335961`: 첫 hook
-- `+1335971`: 첫 복귀 지점
-- `+132E4BD`: 두 번째 hook
-- `+132E4CD`: 두 번째 복귀 지점
+```text
+r11d = byte [r9+0x38]
+r10d = byte [r9+0x35]
 
-내부 설명상 이 기능은 **결전의 나머지 바닐라 조건은 유지하고 재시도 gate만 1년으로 줄이는 방식**입니다.
+if byte [r9+0x08] == 1:
+    r10d = 1
+
+eax = r11d - 1
+cmp al, 11
+```
+
+즉 `+0x08 == 1`인 TotalWarPoint 대상에 대해서만 `+0x35`에서 읽어온 retry 입력값을 레지스터상 `1`로 강제합니다. 메모리 원본은 수정하지 않고, `+0x38` 값과 원래 후속 조건분기용 flags는 그대로 유지합니다.
+
+상세 분석: [Step 07](07_TOTALWAR_ONE_YEAR_RETRY.md)
 
 ## D. 기능별 후속 문서 예정
 
