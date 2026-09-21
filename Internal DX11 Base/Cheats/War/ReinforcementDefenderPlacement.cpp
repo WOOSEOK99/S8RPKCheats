@@ -79,6 +79,21 @@ namespace DX11Base {
       }
     }
 
+    // 맵 타일 전체 범위를 한 번 검증한 뒤 hot loop에서 사용하는 빠른 읽기.
+    // 매 필드마다 VirtualQuery를 호출하지 않고 SEH로 잘못된 접근만 차단합니다.
+    template <typename T>
+    bool ReadValueFast(uintptr_t address, T &out) {
+      if (!address)
+        return false;
+
+      __try {
+        out = *reinterpret_cast<const T *>(address);
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
     bool ReadBytes(uintptr_t address, uint8_t *out, size_t size) {
       if (!out || !size || !IsValidPtr(address, size))
         return false;
@@ -264,8 +279,14 @@ namespace DX11Base {
           !ReadValue(mapObject + 0x1A0, tileBase) || !tileBase)
         return CallOriginal(reinforcement);
 
-      const uintptr_t tileEnd =
-          tileBase + static_cast<uintptr_t>(tileCount) * 0x40;
+      const size_t tileBytes = static_cast<size_t>(tileCount) * 0x40;
+      const uintptr_t tileEnd = tileBase + tileBytes;
+      if (!IsValidPtr(tileBase, tileBytes)) {
+        AddLog(u8"[원군수비DBG] 타일 배열 전체 범위 검증 실패 base=%p count=%u",
+               reinterpret_cast<void *>(tileBase), tileCount);
+        return CallOriginal(reinforcement);
+      }
+
       if (commanderTile < tileBase || commanderTile >= tileEnd ||
           ((commanderTile - tileBase) & 0x3F) != 0) {
         InterlockedIncrement(&g_missingCommander);
@@ -298,16 +319,16 @@ namespace DX11Base {
         uintptr_t occupantB = 0;
         uintptr_t tileInfo = 0;
         uint8_t tileType = 0;
-        if (!ReadValue(tile + 0x18, occupantA) || occupantA != 0 ||
-            !ReadValue(tile + 0x20, occupantB) || occupantB != 0 ||
-            !ReadValue(tile, tileInfo) || !tileInfo ||
-            !ReadValue(tileInfo + 0x09, tileType) || tileType == 0x0A)
+        if (!ReadValueFast(tile + 0x18, occupantA) || occupantA != 0 ||
+            !ReadValueFast(tile + 0x20, occupantB) || occupantB != 0 ||
+            !ReadValueFast(tile, tileInfo) || !tileInfo ||
+            !ReadValueFast(tileInfo + 0x09, tileType) || tileType == 0x0A)
           continue;
 
         int32_t tileQ = 0;
         int32_t tileR = 0;
-        if (!ReadValue(tile + 0x08, tileQ) ||
-            !ReadValue(tile + 0x0C, tileR))
+        if (!ReadValueFast(tile + 0x08, tileQ) ||
+            !ReadValueFast(tile + 0x0C, tileR))
           continue;
 
         int64_t dq = static_cast<int64_t>(tileQ) - commanderQ;
