@@ -396,15 +396,13 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing(); // 위아래 여백
 
-        if (ImGui::Checkbox(u8"전기 발생 무제한", &bInfTengi)) {
-          NotifyFeatureToggle(u8"전기 발생 무제한", bInfTengi);
+        if (ImGui::Checkbox(u8"매 평정 새로운 전기 발생", &bInfTengi)) {
+          NotifyFeatureToggle(u8"매 평정 새로운 전기 발생", bInfTengi);
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"매 평정 마다 새로운 전기가 발생합니다.");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
-                             u8"이미 전기가 발생 중이었다면, 전기 발생이 끝난뒤부터 적용됩니다.");
           ImGui::EndTooltip();
         }
 
@@ -439,7 +437,7 @@ namespace DX11Base {
 
         ImGui::SameLine(160.0f * scale);
 
-        if (ImGui::Button(u8"전기발생 취소", ImVec2(120, 26))) {
+        if (ImGui::Button(u8"전기발생 즉시 취소", ImVec2(120, 26))) {
           // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)
           if (DX11Base::GetCapturedTengiAddr() != 0) {
             DX11Base::CancelTengi();
@@ -448,7 +446,7 @@ namespace DX11Base {
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"전기 발생을 즉시 취소합니다.");
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"현재 발생된 전기를 즉시 취소합니다.");
           ImGui::EndTooltip();
         }
 
