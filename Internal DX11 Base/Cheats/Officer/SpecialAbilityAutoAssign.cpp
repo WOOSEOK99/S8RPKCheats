@@ -358,13 +358,23 @@ void FinishAutoAssignJob() {
   }
 
   if (g_autoAssignJob.annualMode && !g_autoAssignJob.resultLines.empty()) {
+    // 상단 마퀴는 요약 1건만 표시해 알림 폭주를 막습니다.
     AddNotification(
         std::string(u8"[연말 특수능력] ") +
         std::to_string(g_autoAssignJob.resultLines.size()) +
-        u8"명의 무장에게 특수 능력이 새로 부여되었습니다.");
+        u8"명의 무장에게 특수 능력이 새로 부여되었습니다. 알림 내역에서 확인하세요.");
 
-    for (const std::string &line : g_autoAssignJob.resultLines)
-      AddNotification(std::string(u8"[연말 특수능력] ") + line);
+    // 장수별 상세는 알림 내역에 직접 기록합니다.
+    for (const std::string &line : g_autoAssignJob.resultLines) {
+      g_notificationHistory.push_back(
+          std::string(u8"[연말 특수능력] ") + line);
+    }
+    if (g_notificationHistory.size() > 200) {
+      g_notificationHistory.erase(
+          g_notificationHistory.begin(),
+          g_notificationHistory.begin() +
+              (g_notificationHistory.size() - 200));
+    }
   }
 
   g_autoAssignJob.pending.clear();
