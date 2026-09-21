@@ -1118,6 +1118,23 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      if (ImGui::Checkbox(u8"자동 특수능력 부여", &bAnnualSpecialAbilityAutoAssign)) {
+        NotifyFeatureToggle(u8"자동 특수능력 부여", bAnnualSpecialAbilityAutoAssign);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 38.0f);
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"체크 시 매년 12월에서 1월로 넘어갈 때 특수 능력을 자동 판정합니다.");
+        ImGui::TextUnformatted(u8"- 이미 특수 능력을 하나라도 보유한 무장은 자동 판정에서 제외합니다.");
+        ImGui::TextUnformatted(u8"- 전체 무장을 한 번에 처리하지 않고 프레임 단위로 나누어 검사합니다.");
+        ImGui::TextUnformatted(u8"- 새로 부여된 무장이 있을 때만 상단 알림과 알림 내역에 표시합니다.");
+        ImGui::TextDisabled(u8"※ 수동 '모든 무장 특수 능력 자동 부여' 버튼과는 별도로 작동합니다.");
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+      }
+
       const bool specialAutoRunning = DX11Base::IsSpecialAbilityAutoAssignRunning();
       if (specialAutoRunning)
         ImGui::BeginDisabled();
