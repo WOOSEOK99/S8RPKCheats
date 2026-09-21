@@ -59,6 +59,7 @@ namespace DX11Base {
   bool bGovernorPrisonerConsumePrivilege = false;
   bool bReinforcementArrivalAction = false;
   bool bReinforcementDefenderPlacement = false;
+  bool bAnnualSpecialAbilityAutoAssign = false;
 
   // 전투 환경 / 조건 설정
   bool bWeatherSkillSimple = false;
