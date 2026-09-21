@@ -61,6 +61,7 @@ namespace DX11Base {
   extern bool bGovernorPrisonerDisposal;
   extern bool bGovernorPrisonerConsumePrivilege;
   extern bool bReinforcementArrivalAction;
+  extern bool bReinforcementDefenderPlacement;
 
   // 전투 환경 / 조건 설정
   extern bool bWeatherSkillSimple;

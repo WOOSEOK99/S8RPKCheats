@@ -2,6 +2,7 @@
 #include "Framework/imgui.h"
 #include "MenuState.h"
 #include "debug.h"
+#include <Windows.h>
 #include <cstdarg>
 #include <string>
 #include <vector>
@@ -19,6 +20,92 @@ namespace DX11Base {
   // 이전 데이터를 저장할 버퍼 (구조체 크기 0x3D0 만큼)
   static unsigned char g_OldData[0x3D0] = {0};
   static bool g_FirstRun = true;
+
+  static bool IsValidUtf8(const char *text) {
+    if (!text)
+      return false;
+
+    const unsigned char *p =
+        reinterpret_cast<const unsigned char *>(text);
+    while (*p) {
+      if (*p < 0x80) {
+        ++p;
+        continue;
+      }
+
+      int trailing = 0;
+      uint32_t codePoint = 0;
+      if ((*p & 0xE0) == 0xC0) {
+        trailing = 1;
+        codePoint = *p & 0x1F;
+        if (codePoint < 0x02)
+          return false;
+      } else if ((*p & 0xF0) == 0xE0) {
+        trailing = 2;
+        codePoint = *p & 0x0F;
+      } else if ((*p & 0xF8) == 0xF0) {
+        trailing = 3;
+        codePoint = *p & 0x07;
+        if (codePoint > 0x04)
+          return false;
+      } else {
+        return false;
+      }
+
+      ++p;
+      for (int i = 0; i < trailing; ++i, ++p) {
+        if ((*p & 0xC0) != 0x80)
+          return false;
+        codePoint = (codePoint << 6) | (*p & 0x3F);
+      }
+
+      if ((trailing == 2 && codePoint < 0x800) ||
+          (trailing == 3 && codePoint < 0x10000) ||
+          (codePoint >= 0xD800 && codePoint <= 0xDFFF) ||
+          codePoint > 0x10FFFF) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static std::string NormalizeLogTextToUtf8(const char *text) {
+    if (!text)
+      return {};
+
+    if (IsValidUtf8(text))
+      return std::string(text);
+
+    // 기존 일반 문자열 리터럴 중 CP949 바이트가 섞인 경우 UTF-8로 변환합니다.
+    constexpr UINT kKoreanCodePage = 949;
+    int wideLength =
+        MultiByteToWideChar(kKoreanCodePage, 0, text, -1, nullptr, 0);
+    if (wideLength <= 0)
+      return std::string(text);
+
+    std::wstring wide(static_cast<size_t>(wideLength), L'\0');
+    if (MultiByteToWideChar(kKoreanCodePage, 0, text, -1,
+                            wide.data(), wideLength) <= 0) {
+      return std::string(text);
+    }
+
+    int utf8Length =
+        WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1,
+                            nullptr, 0, nullptr, nullptr);
+    if (utf8Length <= 0)
+      return std::string(text);
+
+    std::string utf8(static_cast<size_t>(utf8Length), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1,
+                            utf8.data(), utf8Length,
+                            nullptr, nullptr) <= 0) {
+      return std::string(text);
+    }
+
+    if (!utf8.empty() && utf8.back() == '\0')
+      utf8.pop_back();
+    return utf8;
+  }
 
   // 로그 추가 함수
   void AddLog(const char *fmt, ...) {
@@ -57,8 +144,10 @@ namespace DX11Base {
           struct tm tm_info;
           localtime_s(&tm_info, &now);
           
+          const std::string utf8Message = NormalizeLogTextToUtf8(buf);
           std::stringstream ss;
-          ss << "[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S") << "] " << buf << "\r\n";
+          ss << "[" << std::put_time(&tm_info, "%Y-%m-%d %H:%M:%S")
+             << "] " << utf8Message << "\r\n";
           std::string entry = ss.str();
           logFile.write(entry.c_str(), entry.size());
           logFile.close();

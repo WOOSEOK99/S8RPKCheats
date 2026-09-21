@@ -194,6 +194,9 @@
     <ClInclude Include="Cheats\War\ReinforcementArrivalAction.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\ReinforcementDefenderPlacement.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\SiegeWarfare.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -407,6 +410,9 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\ReinforcementArrivalAction.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\ReinforcementDefenderPlacement.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\SiegeWarfare.cpp">
