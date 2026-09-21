@@ -21,6 +21,8 @@ namespace DX11Base {
 
     // --- 기능 함수 ---
     void AddNotification(const std::string& msg);
+    void RequestConfigSaveErrorPopup();
+    void DrawConfigSaveErrorPopup(float scale);
     /// 메인 메뉴 체크박스 등 ON/OFF 알림용
     inline void NotifyFeatureToggle(const char *featureLabel, bool enabled) {
         AddNotification(std::string(featureLabel) + (enabled ? u8": 활성화" : u8": 비활성화"));

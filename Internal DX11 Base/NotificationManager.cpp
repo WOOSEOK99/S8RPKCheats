@@ -13,7 +13,9 @@ namespace DX11Base {
     bool bShowNotificationLog = false;
     bool bShowWidgetNotif = true;
 
-    // --- 알림 추가 ---
+    static bool s_configSaveErrorPopupRequested = false;
+
+    // --- 일반 알림 추가 ---
     void AddNotification(const std::string& msg) {
         Notification n;
         n.message = msg;
@@ -26,6 +28,51 @@ namespace DX11Base {
         g_notificationHistory.push_back(msg);
         if (g_notificationHistory.size() > 50) {
             g_notificationHistory.erase(g_notificationHistory.begin());
+        }
+    }
+
+    void RequestConfigSaveErrorPopup() {
+        s_configSaveErrorPopupRequested = true;
+    }
+
+    void DrawConfigSaveErrorPopup(float scale) {
+        if (s_configSaveErrorPopupRequested) {
+            ImGui::OpenPopup(u8"설정 저장 실패###ConfigSaveError");
+            s_configSaveErrorPopupRequested = false;
+        }
+
+        ImGui::SetNextWindowSizeConstraints(
+            ImVec2(560.0f * scale, 0.0f),
+            ImVec2(560.0f * scale, 1000.0f * scale));
+
+        if (ImGui::BeginPopupModal(
+                u8"설정 저장 실패###ConfigSaveError",
+                nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::SetWindowFontScale(1.20f);
+
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.25f, 0.25f, 1.0f),
+                u8"치트 설정 파일을 저장할 수 없습니다.");
+            ImGui::Spacing();
+            ImGui::TextUnformatted(u8"S8RPK_cheat_config.json");
+            ImGui::TextWrapped(
+                u8"파일의 읽기 전용 속성 또는 치트 폴더의 쓰기 권한을 확인해 주세요.");
+            ImGui::TextWrapped(
+                u8"설정이 저장되지 않으면 게임을 다시 실행했을 때 체크 상태가 유지되지 않습니다.");
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            const float buttonWidth = 150.0f * scale;
+            const float available = ImGui::GetContentRegionAvail().x;
+            if (available > buttonWidth)
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (available - buttonWidth) * 0.5f);
+
+            if (ImGui::Button(u8"확인", ImVec2(buttonWidth, 0)))
+                ImGui::CloseCurrentPopup();
+
+            ImGui::EndPopup();
         }
     }
 
