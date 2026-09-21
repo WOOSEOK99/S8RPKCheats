@@ -41,12 +41,26 @@ namespace DX11Base {
 
     static std::atomic<float> s_multiplier{1.0f};
 
-    static constexpr float MAX_MULTIPLIER = 3.0f;
+    static constexpr float MIN_MULTIPLIER = 1.0f;
+    static constexpr float MAX_MULTIPLIER = 5.0f;
+    static constexpr float MULTIPLIER_STEP = 0.5f;
     static LONGLONG s_maxDeltaQpc = 33000;
     static LONGLONG s_safeDeltaQpc = 50000;
 
+    float NormalizeMultiplier(float value) {
+      if (value < MIN_MULTIPLIER)
+        value = MIN_MULTIPLIER;
+      if (value > MAX_MULTIPLIER)
+        value = MAX_MULTIPLIER;
+
+      const int stepIndex = static_cast<int>(
+          ((value - MIN_MULTIPLIER) / MULTIPLIER_STEP) + 0.5f);
+      return MIN_MULTIPLIER + (stepIndex * MULTIPLIER_STEP);
+    }
+
     void ResetBases(float desiredMul) {
-      s_multiplier.store(desiredMul, std::memory_order_relaxed);
+      s_multiplier.store(NormalizeMultiplier(desiredMul),
+                         std::memory_order_relaxed);
     }
 
     void ResetClockState() {
@@ -216,6 +230,10 @@ namespace DX11Base {
 
   void SpeedHack_Init() { SpeedHack_Sleep_Install(); }
 
+  float SpeedHack_NormalizeMultiplier(float value) {
+    return NormalizeMultiplier(value);
+  }
+
   void SpeedHack_Update(uintptr_t p1) {
     // 배속을 한 번도 켜지 않았다면 시간 API 훅 자체를 설치하지 않습니다.
     if (!s_installed) {
@@ -232,9 +250,9 @@ namespace DX11Base {
     }
 
     // 전투 중에는 주인공 주소(p1)가 0으로 풀리므로 p1과 무관하게 배속 상태를 유지합니다.
-    float desired = bSpeedHack ? g_speedMultiplier : 1.0f;
-    if (desired > MAX_MULTIPLIER)
-      desired = MAX_MULTIPLIER;
+    float desired = bSpeedHack ? NormalizeMultiplier(g_speedMultiplier) : 1.0f;
+    if (bSpeedHack && g_speedMultiplier != desired)
+      g_speedMultiplier = desired;
 
     float current = s_multiplier.load(std::memory_order_relaxed);
     if (current != desired) {

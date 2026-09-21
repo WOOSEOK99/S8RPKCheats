@@ -746,44 +746,72 @@ namespace DX11Base {
 
       ImGui::PopStyleColor();
 
-      ImGui::SameLine();
+      // 실제 적용 배율과 선택 중인 배율을 분리합니다.
+      // +/-는 선택값만 바꾸고 [적용]을 눌렀을 때 한 번만 실제 속도를 변경합니다.
+      static bool s_speedPendingInitialized = false;
+      static float s_speedPending = 1.0f;
+      static float s_speedAppliedSnapshot = 1.0f;
 
-      // 🔥 모드 선택 추가 (핵심)
-      // 모드 선택 제거 (QPC 필터링 적용으로 통합됨)
-
-      // [-] 버튼
-      if (ImGui::Button("-##SpeedMinus", ImVec2(25 * scale, 0))) {
-        g_speedMultiplier -= 0.1f;
-        if (g_speedMultiplier < 0.1f)
-          g_speedMultiplier = 0.1f;
-
-        SpeedHack_Update(p1);
-        SaveConfig();
+      const float normalizedApplied =
+          SpeedHack_NormalizeMultiplier(g_speedMultiplier);
+      if (!s_speedPendingInitialized ||
+          normalizedApplied != s_speedAppliedSnapshot) {
+        s_speedPending = normalizedApplied;
+        s_speedAppliedSnapshot = normalizedApplied;
+        s_speedPendingInitialized = true;
       }
 
       ImGui::SameLine();
 
-      ImGui::SetNextItemWidth(100.0f * scale);
-      if (ImGui::SliderFloat(u8"##SpeedMul", &g_speedMultiplier, 0.1f, 5.0f, u8"%.1fx")) {
-        SpeedHack_Update(p1);
-        SaveConfig();
-      }
+      if (s_speedPending <= 1.0f)
+        ImGui::BeginDisabled();
+      if (ImGui::Button("-##SpeedMinus", ImVec2(25 * scale, 0)))
+        s_speedPending =
+            SpeedHack_NormalizeMultiplier(s_speedPending - 0.5f);
+      if (s_speedPending <= 1.0f)
+        ImGui::EndDisabled();
 
       ImGui::SameLine();
+      ImGui::Text(u8"%.1fx", s_speedPending);
+      ImGui::SameLine();
 
-      // [+] 버튼
-      if (ImGui::Button("+##SpeedPlus", ImVec2(25 * scale, 0))) {
-        g_speedMultiplier += 0.1f;
-        if (g_speedMultiplier > 5.0f)
-          g_speedMultiplier = 5.0f;
+      if (s_speedPending >= 5.0f)
+        ImGui::BeginDisabled();
+      if (ImGui::Button("+##SpeedPlus", ImVec2(25 * scale, 0)))
+        s_speedPending =
+            SpeedHack_NormalizeMultiplier(s_speedPending + 0.5f);
+      if (s_speedPending >= 5.0f)
+        ImGui::EndDisabled();
 
-        SpeedHack_Update(p1);
+      ImGui::SameLine();
+      const bool hasPendingChange =
+          s_speedPending != normalizedApplied;
+      if (!hasPendingChange)
+        ImGui::BeginDisabled();
+      if (ImGui::Button(u8"적용##SpeedApply", ImVec2(55 * scale, 0))) {
+        g_speedMultiplier =
+            SpeedHack_NormalizeMultiplier(s_speedPending);
+        s_speedAppliedSnapshot = g_speedMultiplier;
+
+        if (bSpeedHack)
+          SpeedHack_Update(p1);
+
+        AddLog(u8"[SpeedHack] 사용자 배율 적용: %.1fx",
+               g_speedMultiplier);
         SaveConfig();
       }
+      if (!hasPendingChange)
+        ImGui::EndDisabled();
 
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"0.1 = 슬로우, 1.0 = 정상, 2.0 = 2배속, 최대 5배속");
+        ImGui::TextColored(
+            ImVec4(1, 1, 0, 1),
+            u8"1.0x가 기본 속도이며 0.5x 단위로 최대 5.0x까지 설정합니다.");
+        ImGui::TextUnformatted(
+            u8"+/-로 배율을 선택한 뒤 [적용]을 눌렀을 때만 실제 속도가 변경됩니다.");
+        ImGui::TextDisabled(
+            u8"※ 배속 체크를 끄면 게임은 1.0x로 동작하며, 선택한 배율 값은 다음 사용을 위해 저장됩니다.");
         ImGui::EndTooltip();
       }
 
