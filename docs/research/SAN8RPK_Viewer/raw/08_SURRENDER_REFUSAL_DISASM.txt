@@ -1,0 +1,254 @@
+SAN8RPK_Viewer Step 08 raw surrender/refusal analysis
+==========================================================
+
+SOURCE
+------
+SAN8RPK_Viewer.exe
+SHA256:
+34abf52f9651d4313076b16042476e5646967aa55af65613f542d69883084c3d
+
+REFUSAL MARKERS
+---------------
+1111111111111111 = stats = cave+0x1000
+2222222222222222 = base+0x017AF090
+3333333333333333 = base+0x017A5130
+4444444444444444 = base+0x0144D27A
+5555555555555555 = base+0x02E98BC8
+6666666666666666 = base+0x017121D0
+7777777777777777 = base+0x01451EBD
+8888888888888888 = base+0x01451EDD
+9999999999999999 = base+0x01451ED9
+AAAAAAAAAAAAAAAA = base+0x00125AA0
+BBBBBBBBBBBBBBBB = base+0x0144CA10
+
+
+REFUSAL PRE HOOK
+----------------
+RVA +0x01451EAD
+cave+0x400
+
+original 16:
+C6 44 24 20 00
+44 0F B6 CD
+4D 8B 87 98 00 00 00
+
+normal resume:
++0x01451EBD
+
+skip destination:
++0x01451ED9
+
+key record formula:
+id = byte [r8+8]
+if id <= 150:
+    record = stats + 0x100 + id*0x20
+
+record layout:
++00 qword r8
++08 qword r9
++10 qword manager
++18 dword startMonthIndex
++1C dword endMonthIndex
+
+currentMonthIndex:
+WORD [manager+72D0] * 12 + BYTE [manager+72D2]
+
+active window:
+current >= start
+current < end
+
+on active match:
+stats+48h skipped++
+jmp +1451ED9
+
+
+REFUSAL POST HOOK
+-----------------
+RVA +0x01451ECD
+cave+0x600
+
+original 16:
+85 ED
+74 08
+66 41 09 BF 20 01 00 00
+49 8B 5E 10
+
+resume:
++0x01451EDD
+
+flow:
+r9 = call +17121D0(r15)
+r8 = [r14+10]
+
+require:
+r8 != 0
+r9 != 0
+r8 != r9
+manager != 0
+player-associated exclusion not matched
+call +17AF090(r9,r8) returns false
+
+then:
+stats+38h refused++
+
+native threshold:
++125AA0(100,0,0)
+if eax >= 95:
+    no record
+
+if accepted:
+record = stats+0x100 + byte[r8+8]*0x20
+current = WORD[manager+72D0]*12 + BYTE[manager+72D2]
+
+record+08 = r9
+record+10 = manager
+record+18 = current
+record+1C = current+3
+record+00 = r8
+
+stats+40h switched++
+
+call +144CA10(
+    ecx = 0,
+    rdx = r14
+)
+
+
+REFUSAL ATTACK BOOST
+--------------------
+Occurs after normal score helper returns XMM0.
+
+Record matching:
+same stats+0x100 table
+pair pointers match
+manager matches
+player-associated force excluded
+current date in [start,end)
+
+minimum:
+if XMM0 < 1.2f:
+    no boost
+
+boost:
+XMM0 *= 5.0f
+stats+50h boosted++
+
+after this, designated target A may still receive:
+XMM0 *= 1.1f
+
+Therefore combined maximum multiplier from these two Viewer-added blocks:
+5.0 * 1.1 = 5.5
+
+
+SURRENDER HOOK
+--------------
+RVA +0x0193C86E
+cave+0xA00
+
+original 16:
+48 8B 8D E0 00 00 00
+48 85 C9
+74 06
+F3 0F 2C C6
+
+resume:
++0x0193C880
+
+SURRENDER_TEMPLATE size:
+171 bytes
+
+manager marker:
+1111111111111111 = base+0x02E98BC8
+
+resume marker:
+2222222222222222 = base+0x0193C880
+
+target force:
+rdx = qword [stack argument after cave prologue]
+
+target ruler:
+rax = [rdx+0xC0]
+
+ruler honor:
+H = byte [rax+0x5E] & 0x0F
+
+if H < 11:
+    no change
+
+if H >= 11:
+    XMM6 = min(XMM6,100.0)
+    XMM6 -= float((H-10)*20)
+    XMM6 = max(XMM6,0.0)
+
+table:
+H11 -20
+H12 -40
+H13 -60
+H14 -80
+H15 -100
+
+then original behavior:
+rcx=[rbp+E0]
+if rcx:
+    eax=int_trunc(XMM6)
+    [rcx]=eax
+jump +193C880
+
+
+PLAYER-ASSOCIATED EXCLUSION
+---------------------------
+Shared pattern:
+
+manager = *(base+2E98BC8)
+ctx = [manager+E0]
+force = [ctx+18]
+
+Refusal/attack path excludes when this force == r8.
+Surrender path excludes when this force == r13 or rdx.
+
+Likely player/hero-associated force.
+Official semantic name remains unconfirmed.
+
+
+OVERLAP HAZARD
+--------------
+POST hook range:
++1451ECD .. +1451EDC   (16 bytes)
+
+PRE skip destination:
++1451ED9
+
+Therefore +1451ED9 lies inside the POST trampoline replacement.
+
+AIController.make_jump():
+FF 25 00 00 00 00
+<8-byte cave pointer>
+90 90
+
+So when both hooks are active, jumping to +1451ED9 would enter
+the middle of the trampoline data.
+
+Original instruction at +1451ED9 appears to be:
+49 8B 5E 10
+mov rbx,[r14+10h]
+
+Potential safe reimplementation idea (NOT yet validated):
+execute mov rbx,[r14+10h] in PRE cave and jump to +1451EDD.
+
+Do not copy the +1451ED9 jump literally into S8RPKCheats
+without runtime verification.
+
+
+GUARDS
+------
++1451E60 size 168
+b56606d1c5d31002af3933eabf796b04c1ab3f5967528e91a07c38ed6b04a13c
+
++17121D0 size 56
+6e0101651e23057521eede3eff0992af516efd1506209293059a1dfcec87c4be
+
++125AA0 size 48
+fda86f3a3383d33fbef1047c74ce05325c38bd8f66f2b616d323b21676f0274d
+
++193B410 size 5366
+68f1f77535ab5ec36e4d8d8de6b03260d516c3f99c84ad4e95b407fc710780ac
