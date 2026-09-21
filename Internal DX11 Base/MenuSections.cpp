@@ -24,6 +24,7 @@
 #include "Cheats/System/SkillCondition.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/Officer/OfficerDetail.h"
+#include "Cheats/Officer/SpecialAbilityAutoAssign.h"
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Officer/TraitTextEditorWindow.h"
 #include "Cheats/System/FactionTechEditor.h"
@@ -1436,6 +1437,23 @@ namespace DX11Base {
         ImGui::BeginTooltip();
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 유효 무장의 기존 기재는 유지하고 빈 슬롯만 랜덤으로 채웁니다.");
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"실행 전 황금/녹색/적색 등급을 선택할 수 있습니다.");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::Spacing();
+
+      if (ImGui::Button(u8"모든 무장 특수 능력 자동 부여", ImVec2(-FLT_MIN, 28.0f * scale))) {
+        if (DX11Base::AutoAssignSpecialAbilities())
+          DX11Base::AddLog(u8"[특수능력/자동] 자동 부여 작업 완료");
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"모든 유효 무장의 실제 전법/특기/능력치를 분석하여 특수 능력을 자동으로 추가합니다.");
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
+                           u8"기존에 수동으로 부여한 특수 능력은 삭제하지 않습니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                           u8"등갑군은 1차 자동 판정에서 제외됩니다.");
         ImGui::EndTooltip();
       }
 
