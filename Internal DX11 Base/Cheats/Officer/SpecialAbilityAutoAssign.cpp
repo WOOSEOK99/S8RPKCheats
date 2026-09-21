@@ -213,6 +213,7 @@ struct AutoAssignJob {
   int matchedOfficers = 0;
   std::array<int, 10> matchedCounts{};
   std::string status;
+  std::vector<std::string> resultLines;
 };
 
 AutoAssignJob g_autoAssignJob;
@@ -220,11 +221,15 @@ AutoAssignJob g_autoAssignJob;
 void FinishAutoAssignJob() {
   int newlyAssigned = 0;
   std::array<int, 10> newlyAssignedCounts{};
+  g_autoAssignJob.resultLines.clear();
+  LoadOfficerNames();
 
   {
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
     for (const PendingAssignment &item : g_autoAssignJob.pending) {
       auto &skills = g_customSkillCounts[item.officerId];
+      std::string assigned;
+
       for (int a = 0; a < static_cast<int>(item.abilities.size()); ++a) {
         if (!item.abilities[a])
           continue;
@@ -237,6 +242,21 @@ void FinishAutoAssignJob() {
         skills[key] = 1;
         ++newlyAssigned;
         ++newlyAssignedCounts[a];
+
+        if (!assigned.empty())
+          assigned += ", ";
+        assigned += kAbilityNames[a];
+      }
+
+      if (!assigned.empty()) {
+        std::string officerName = u8"무장";
+        auto nameIt = g_officerNames.find(item.officerId);
+        if (nameIt != g_officerNames.end() && !nameIt->second.empty())
+          officerName = nameIt->second;
+
+        g_autoAssignJob.resultLines.push_back(
+            officerName + " (ID " + std::to_string(item.officerId) +
+            ") : " + assigned);
       }
     }
   }
@@ -312,6 +332,7 @@ void TickSpecialAbilityAutoAssign() {
     const size_t processed = g_autoAssignJob.cursor;
     g_autoAssignJob.running = false;
     g_autoAssignJob.pending.clear();
+    g_autoAssignJob.resultLines.clear();
     g_autoAssignJob.status =
         std::string(u8"취소됨: ") + std::to_string(processed) +
         u8" / 5102명 처리 (특수 능력 변경 없음)";
@@ -392,6 +413,16 @@ float GetSpecialAbilityAutoAssignProgress() {
 
 const char *GetSpecialAbilityAutoAssignStatus() {
   return g_autoAssignJob.status.c_str();
+}
+
+std::size_t GetSpecialAbilityAutoAssignResultCount() {
+  return g_autoAssignJob.resultLines.size();
+}
+
+const char *GetSpecialAbilityAutoAssignResultLine(std::size_t index) {
+  if (index >= g_autoAssignJob.resultLines.size())
+    return "";
+  return g_autoAssignJob.resultLines[index].c_str();
 }
 
 } // namespace DX11Base
