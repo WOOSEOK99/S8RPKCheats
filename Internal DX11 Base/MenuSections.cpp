@@ -1122,7 +1122,8 @@ namespace DX11Base {
       if (specialAutoRunning)
         ImGui::BeginDisabled();
       if (ImGui::Button(u8"모든 무장 특수 능력 자동 부여", ImVec2(-1, 30 * scale))) {
-        DX11Base::AutoAssignSpecialAbilities();
+        if (DX11Base::AutoAssignSpecialAbilities())
+          ImGui::OpenPopup(u8"특수 능력 자동 부여 진행###SpecialAbilityAutoAssignPopup");
       }
       if (specialAutoRunning)
         ImGui::EndDisabled();
@@ -1156,18 +1157,78 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (specialAutoRunning) {
+      ImGui::SetNextWindowSize(ImVec2(620.0f * scale, 480.0f * scale), ImGuiCond_Appearing);
+      if (ImGui::BeginPopupModal(
+              u8"특수 능력 자동 부여 진행###SpecialAbilityAutoAssignPopup",
+              nullptr,
+              ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings)) {
+        const bool popupRunning = DX11Base::IsSpecialAbilityAutoAssignRunning();
+        const char *autoStatus = DX11Base::GetSpecialAbilityAutoAssignStatus();
+
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.84f, 0.0f, 1.0f),
+            popupRunning ? u8"[ 특수 능력 자동 부여 진행 중 ]"
+                         : u8"[ 특수 능력 자동 부여 결과 ]");
+        ImGui::Separator();
+
         ImGui::ProgressBar(
             DX11Base::GetSpecialAbilityAutoAssignProgress(),
             ImVec2(-1.0f, 0.0f),
-            DX11Base::GetSpecialAbilityAutoAssignStatus());
-        if (ImGui::Button(u8"특수 능력 자동 부여 취소", ImVec2(-1, 26 * scale))) {
-          DX11Base::CancelSpecialAbilityAutoAssign();
+            autoStatus && autoStatus[0] != '\0' ? autoStatus : nullptr);
+
+        if (popupRunning) {
+          ImGui::Spacing();
+          ImGui::TextDisabled(
+              u8"게임/UI가 멈추지 않도록 전체 무장을 프레임 단위로 나누어 분석하고 있습니다.");
+          ImGui::TextDisabled(
+              u8"완료 전에는 실제 특수 능력 설정을 변경하지 않습니다.");
+
+          ImGui::Spacing();
+          if (ImGui::Button(
+                  u8"작업 취소",
+                  ImVec2(-1.0f, 30.0f * scale))) {
+            DX11Base::CancelSpecialAbilityAutoAssign();
+          }
+        } else {
+          ImGui::Spacing();
+          ImGui::TextColored(
+              ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
+              u8"이번 실행에서 새로 특수 능력을 부여받은 무장");
+          ImGui::Separator();
+
+          const std::size_t resultCount =
+              DX11Base::GetSpecialAbilityAutoAssignResultCount();
+
+          ImGui::BeginChild(
+              "##SpecialAbilityAutoAssignResults",
+              ImVec2(0.0f, 300.0f * scale),
+              true,
+              ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
+          if (resultCount == 0) {
+            ImGui::TextDisabled(
+                u8"새로 부여된 특수 능력이 없습니다.");
+            ImGui::TextDisabled(
+                u8"조건을 만족한 무장이 이미 해당 능력을 보유했거나 작업이 취소된 경우입니다.");
+          } else {
+            for (std::size_t i = 0; i < resultCount; ++i) {
+              const char *line =
+                  DX11Base::GetSpecialAbilityAutoAssignResultLine(i);
+              if (line && line[0] != '\0')
+                ImGui::TextWrapped("%s", line);
+            }
+          }
+          ImGui::EndChild();
+
+          ImGui::Spacing();
+          if (ImGui::Button(
+                  u8"닫기",
+                  ImVec2(-1.0f, 32.0f * scale))) {
+            ImGui::CloseCurrentPopup();
+          }
         }
-      } else {
-        const char *autoStatus = DX11Base::GetSpecialAbilityAutoAssignStatus();
-        if (autoStatus && autoStatus[0] != '\0')
-          ImGui::TextWrapped("%s", autoStatus);
+
+        ImGui::EndPopup();
       }
       ::DX11Base::DrawBatchOfficerEditWindow(scale);
       ::DX11Base::DrawFactionTechEditor(scale);
