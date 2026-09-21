@@ -2,7 +2,9 @@
 
 #include "../../Cheats.h"
 #include "../../showlog.h"
+#include "../../NotificationManager.h"
 #include "../System/SkillCountManager.h"
+#include "../System/SystemMonth.h"
 #include "OfficerRosterResolve.h"
 #include "OfficerData.h"
 #include "SpecialAbilityAutoAssign.h"
@@ -205,11 +207,14 @@ struct PendingAssignment {
 struct AutoAssignJob {
   bool running = false;
   bool cancelRequested = false;
+  bool annualMode = false;
   uintptr_t rosterBase = 0;
   size_t cursor = 0;
   std::array<bool, kOfficerCount + 1> seenIds{};
+  std::array<bool, kOfficerCount + 1> excludedExistingIds{};
   std::vector<PendingAssignment> pending;
   int validOfficers = 0;
+  int excludedExisting = 0;
   int matchedOfficers = 0;
   std::array<int, 10> matchedCounts{};
   std::string status;
@@ -217,6 +222,62 @@ struct AutoAssignJob {
 };
 
 AutoAssignJob g_autoAssignJob;
+bool g_annualAssignPending = false;
+uint8_t g_lastAnnualMonth = 0;
+uint64_t g_lastAnnualMonthPollTick = 0;
+
+bool StartAutoAssignJob(bool annualMode) {
+  if (g_autoAssignJob.running)
+    return false;
+
+  const uintptr_t exeBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+  uintptr_t rosterBase = 0;
+  if (!exeBase || !TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) ||
+      rosterBase < 0x10000) {
+    AddLog(u8"[특수능력/자동] 무장 배열 주소를 찾지 못했습니다.");
+    g_autoAssignJob.status =
+        u8"무장 배열 주소를 찾지 못했습니다. 전략 화면에서 다시 시도하세요.";
+    return false;
+  }
+
+  g_autoAssignJob = {};
+  g_autoAssignJob.running = true;
+  g_autoAssignJob.annualMode = annualMode;
+  g_autoAssignJob.rosterBase = rosterBase;
+  g_autoAssignJob.pending.reserve(annualMode ? 256 : 1024);
+  g_autoAssignJob.status = annualMode
+      ? u8"연말 자동 판정 시작: 0 / 5102명"
+      : u8"처리 시작: 0 / 5102명";
+
+  if (annualMode) {
+    // 연말 자동 판정은 이미 특수 능력(0x1000~0x1009)을 하나라도 가진
+    // 무장을 스캔 시작 전에 한 번만 스냅샷으로 제외합니다.
+    std::lock_guard<std::mutex> lock(g_skillCountMutex);
+    for (const auto &[officerId, skills] : g_customSkillCounts) {
+      if (officerId < 1 || officerId > kOfficerCount)
+        continue;
+
+      bool hasAny = false;
+      for (uintptr_t key : kAbilityOffsets) {
+        auto it = skills.find(key);
+        if (it != skills.end() && it->second > 0) {
+          hasAny = true;
+          break;
+        }
+      }
+
+      if (hasAny)
+        g_autoAssignJob.excludedExistingIds[officerId] = true;
+    }
+
+    AddLog(u8"[특수능력/연말자동] 12월->1월 자동 판정 시작: 프레임당 24명 처리");
+  } else {
+    AddLog(u8"[특수능력/자동] 증분 판정 시작: 프레임당 24명 처리");
+  }
+
+  return true;
+}
 
 void FinishAutoAssignJob() {
   int newlyAssigned = 0;
@@ -266,15 +327,19 @@ void FinishAutoAssignJob() {
 
   g_autoAssignJob.running = false;
   g_autoAssignJob.status =
-      std::string(u8"완료: 유효 무장 ") +
+      std::string(g_autoAssignJob.annualMode ? u8"연말 자동 완료: " : u8"완료: ") +
+      u8"유효 무장 " +
       std::to_string(g_autoAssignJob.validOfficers) +
       u8"명 / 조건 충족 " +
       std::to_string(g_autoAssignJob.matchedOfficers) +
       u8"명 / 신규 부여 " +
       std::to_string(newlyAssigned) + u8"건";
 
-  AddLog(u8"[특수능력/자동] 판정 완료: 유효 무장 %d명 / 조건 충족 %d명 / 신규 부여 %d건",
+  AddLog(g_autoAssignJob.annualMode
+             ? u8"[특수능력/연말자동] 판정 완료: 유효 %d명 / 기존능력 제외 %d명 / 조건 충족 %d명 / 신규 부여 %d건"
+             : u8"[특수능력/자동] 판정 완료: 유효 %d명 / 기존능력 제외 %d명 / 조건 충족 %d명 / 신규 부여 %d건",
          g_autoAssignJob.validOfficers,
+         g_autoAssignJob.excludedExisting,
          g_autoAssignJob.matchedOfficers,
          newlyAssigned);
 
@@ -292,6 +357,16 @@ void FinishAutoAssignJob() {
            newlyAssignedCounts[a]);
   }
 
+  if (g_autoAssignJob.annualMode && !g_autoAssignJob.resultLines.empty()) {
+    AddNotification(
+        std::string(u8"[연말 특수능력] ") +
+        std::to_string(g_autoAssignJob.resultLines.size()) +
+        u8"명의 무장에게 특수 능력이 새로 부여되었습니다.");
+
+    for (const std::string &line : g_autoAssignJob.resultLines)
+      AddNotification(std::string(u8"[연말 특수능력] ") + line);
+  }
+
   g_autoAssignJob.pending.clear();
 }
 
@@ -302,26 +377,7 @@ bool AutoAssignSpecialAbilities() {
     AddLog(u8"[특수능력/자동] 이미 자동 부여 작업이 진행 중입니다.");
     return false;
   }
-
-  const uintptr_t exeBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-  uintptr_t rosterBase = 0;
-  if (!exeBase || !TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) ||
-      rosterBase < 0x10000) {
-    AddLog(u8"[특수능력/자동] 무장 배열 주소를 찾지 못했습니다.");
-    g_autoAssignJob.status =
-        u8"무장 배열 주소를 찾지 못했습니다. 전략 화면에서 다시 시도하세요.";
-    return false;
-  }
-
-  g_autoAssignJob = {};
-  g_autoAssignJob.running = true;
-  g_autoAssignJob.rosterBase = rosterBase;
-  g_autoAssignJob.pending.reserve(1024);
-  g_autoAssignJob.status = u8"처리 시작: 0 / 5102명";
-
-  AddLog(u8"[특수능력/자동] 증분 판정 시작: 프레임당 24명 처리");
-  return true;
+  return StartAutoAssignJob(false);
 }
 
 void TickSpecialAbilityAutoAssign() {
@@ -356,11 +412,20 @@ void TickSpecialAbilityAutoAssign() {
     if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerCount)
       continue;
 
+    if (g_autoAssignJob.seenIds[stats.id_08])
+      continue;
+
+    if (g_autoAssignJob.annualMode &&
+        g_autoAssignJob.excludedExistingIds[stats.id_08]) {
+      g_autoAssignJob.seenIds[stats.id_08] = true;
+      ++g_autoAssignJob.excludedExisting;
+      continue;
+    }
+
     OfficerProfile profile;
     if (!ReadOfficerProfile(base, profile))
       continue;
-    if (profile.id != static_cast<int>(stats.id_08) ||
-        g_autoAssignJob.seenIds[profile.id])
+    if (profile.id != static_cast<int>(stats.id_08))
       continue;
 
     g_autoAssignJob.seenIds[profile.id] = true;
@@ -391,6 +456,34 @@ void TickSpecialAbilityAutoAssign() {
 
   if (g_autoAssignJob.cursor >= static_cast<size_t>(kOfficerCount))
     FinishAutoAssignJob();
+}
+
+void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
+  if (!enabled) {
+    g_annualAssignPending = false;
+    g_lastAnnualMonth = 0;
+    g_lastAnnualMonthPollTick = 0;
+    return;
+  }
+
+  const uint64_t now = GetTickCount64();
+  if (now - g_lastAnnualMonthPollTick >= 250ull) {
+    g_lastAnnualMonthPollTick = now;
+
+    const uint8_t month = GetSystemMonthValue();
+    if (month >= 1 && month <= 12) {
+      if (g_lastAnnualMonth == 12 && month == 1) {
+        g_annualAssignPending = true;
+        AddLog(u8"[특수능력/연말자동] 12월 -> 1월 전환 감지, 자동 판정 예약");
+      }
+      g_lastAnnualMonth = month;
+    }
+  }
+
+  if (g_annualAssignPending && !g_autoAssignJob.running) {
+    if (StartAutoAssignJob(true))
+      g_annualAssignPending = false;
+  }
 }
 
 void CancelSpecialAbilityAutoAssign() {
