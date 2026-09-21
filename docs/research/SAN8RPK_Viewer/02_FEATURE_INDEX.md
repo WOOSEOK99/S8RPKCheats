@@ -180,3 +180,14 @@ Step 03~08의 결과를 현재 S8RPKCheats `main`과 대조한 종합표는 [Ste
 - Viewer AI 포로 판정과 현재 `도독 포로 직접 처분`은 주소/목적이 분리됨.
 - 메시지 상세화와 결전 1년 gate는 현재 확인 범위에서 독립 이식 가능.
 - 항복권고 PRE/POST는 Viewer 자체 hook overlap 위험 때문에 그대로 복사하지 않고 재설계 필요.
+
+
+## F. 런타임 검증 기준
+
+정적 분석 내용을 실제 게임에서 확정하기 위한 체크리스트는 [Step 10](10_RUNTIME_VALIDATION_CHECKLIST.md)에 정리했습니다.
+
+핵심 원칙:
+- 공격 후보 확장은 기존 +144D24C와 동시 적용 금지.
+- AI 포로 공식은 먼저 read-only 로그로 rdi/rsi/ECX/T 의미를 확정.
+- 항복권고 PRE/POST는 overlap 위험 때문에 원본 Viewer jump를 그대로 사용하지 않음.
+- 메시지/결전/고의리 항복 억제는 독립 기능부터 단독 검증.

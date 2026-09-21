@@ -1,0 +1,159 @@
+SAN8RPK Viewer runtime validation record template
+===================================================
+
+TEST ID:
+DATE:
+S8RPKCHEATS COMMIT:
+FEATURE:
+
+GAME
+----
+Scenario:
+Difficulty:
+Year/Month:
+Player force:
+Target AI force:
+Save/checkpoint:
+
+FEATURE STATE
+-------------
+Existing S8RPKCheats features ON:
+Existing S8RPKCheats features OFF:
+Experimental Viewer-derived feature:
+Combination under test:
+
+PATCH
+-----
+Hook RVA:
+Original bytes:
+Applied bytes:
+Cave:
+Resume:
+Original-byte verification:
+Rollback verification:
+
+RUNTIME INPUT
+-------------
+Register values:
+Pointer values:
+Object IDs/names:
+Relevant structure fields:
+Native helper results:
+
+CALCULATION
+-----------
+Expected formula:
+Input values:
+Expected intermediate value:
+Expected final value:
+
+GAME RESULT
+-----------
+Expected:
+Actual:
+
+REPEAT
+------
+Run 1:
+Run 2:
+Run 3:
+
+RESULT
+------
+[ ] PASS
+[ ] FAIL
+[ ] HOLD / NEED MORE DATA
+
+NOTES
+-----
+
+===================================================
+
+FEATURE-SPECIFIC QUICK FIELDS
+
+AI ATTACK
+---------
+candidate:
+target A match:
+target B match:
+relation:
+base score:
+refusal boost:
+target 1.1 bonus:
+final score:
+best before:
+selected:
+outside:
+friendly:
+
+PLAYER PRIORITY
+---------------
+AI personality/aggression:
+patch A +144BB60:
+patch B +144BC8B:
+current patch C +1464B91:
+player strength:
+other AI strength:
+chosen target:
+
+PRISONER
+--------
+rdi id/name:
+rsi id/name:
+compat A:
+compat B:
+distance d:
+honor H:
+ruler R:
+flag +30:
+relation helper:
+ECX:
+threshold T:
+predicted:
+actual:
+
+MESSAGE
+-------
+patch:
+event type:
+R14B:
+EDX:
+actual result count:
+displayed names:
+
+TOTALWAR
+--------
+hook A/B:
+r9:
++08:
++35:
++38:
+current year/month:
+effective r10d:
+first/next totalwar date:
+
+SURRENDER HONOR
+---------------
+target force:
+ruler:
+honor H:
+XMM6 before:
+XMM6 after:
+player-associated exclusion:
+actual surrender result:
+
+REFUSAL
+-------
+r8:
+r9:
+manager:
+monthIndex:
+record id:
+record start:
+record end:
+relation:
+threshold helper result:
+skipped:
+switched:
+base attack score:
+boosted score:
