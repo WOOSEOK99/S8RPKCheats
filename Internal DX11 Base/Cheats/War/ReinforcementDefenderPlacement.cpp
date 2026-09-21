@@ -333,21 +333,18 @@ namespace DX11Base {
           continue;
 
         const LONG passCall = InterlockedIncrement(&g_diagPassCalls);
-        if (passCall == 1) {
-          InterlockedExchange(&g_diagStage, 7);
-          AddLog(u8"[원군수비DBG] Stage=7 첫 통행판정 호출 직전 tileIndex=%u tile=%p distance=%lld",
-                 i, reinterpret_cast<void *>(tile),
-                 static_cast<long long>(distance));
-        }
+        InterlockedExchange(&g_diagStage, 7);
+        AddLog(u8"[원군수비DBG] PassCall=%ld BEFORE tileIndex=%u coord=(%d,%d) distance=%lld tile=%p",
+               passCall, i, tileQ, tileR,
+               static_cast<long long>(distance),
+               reinterpret_cast<void *>(tile));
 
         const uint8_t passable =
             g_passability(reinterpret_cast<void *>(tile), reinforcement);
 
-        if (passCall == 1) {
-          InterlockedExchange(&g_diagStage, 8);
-          AddLog(u8"[원군수비DBG] Stage=8 첫 통행판정 복귀 result=%u",
-                 static_cast<unsigned int>(passable));
-        }
+        InterlockedExchange(&g_diagStage, 8);
+        AddLog(u8"[원군수비DBG] PassCall=%ld AFTER tileIndex=%u result=%u",
+               passCall, i, static_cast<unsigned int>(passable));
 
         if (!passable)
           continue;
