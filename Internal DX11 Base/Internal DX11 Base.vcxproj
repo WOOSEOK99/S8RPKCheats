@@ -224,6 +224,7 @@
     <ClInclude Include="Cheats\Social\Resonancecave.h" />
     <ClInclude Include="Cheats\War\Selfheal.h" />
     <ClInclude Include="Cheats\War\ShortBattleCooldown.h" />
+    <ClInclude Include="Cheats\War\TroopCountCombatScaling.h" />
     <ClInclude Include="Cheats\War\GovernorPrisonerDisposal.h" />
     <ClInclude Include="Cheats\War\ReinforcementArrivalAction.h" />
     <ClInclude Include="Cheats\War\ReinforcementDefenderPlacement.h" />
@@ -340,6 +341,7 @@
     <ClCompile Include="Cheats\Social\Resonancecave.cpp" />
     <ClCompile Include="Cheats\War\Selfheal.cpp" />
     <ClCompile Include="Cheats\War\ShortBattleCooldown.cpp" />
+    <ClCompile Include="Cheats\War\TroopCountCombatScaling.cpp" />
     <ClCompile Include="Cheats\War\GovernorPrisonerDisposal.cpp" />
     <ClCompile Include="Cheats\War\ReinforcementArrivalAction.cpp" />
     <ClCompile Include="Cheats\War\ReinforcementDefenderPlacement.cpp" />

@@ -54,6 +54,7 @@ namespace DX11Base {
   bool bBattleMapShuffle = false;
   bool bShortBattleCooldownEnabled = false;
   int iShortBattleCooldownDays = 3;
+  bool bTroopCountCombatScaling = false;
   bool bGovernorPrisonerDisposal = false;
   bool bGovernorPrisonerConsumePrivilege = false;
   bool bReinforcementArrivalAction = false;

@@ -58,6 +58,7 @@ namespace DX11Base {
   extern bool bBattleMapShuffle;
   extern bool bShortBattleCooldownEnabled;
   extern int iShortBattleCooldownDays;
+  extern bool bTroopCountCombatScaling;
   extern bool bGovernorPrisonerDisposal;
   extern bool bGovernorPrisonerConsumePrivilege;
   extern bool bReinforcementArrivalAction;

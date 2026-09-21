@@ -7,6 +7,7 @@
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/War/ShortBattleCooldown.h"
+#include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
@@ -138,6 +139,7 @@ namespace DX11Base {
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
     UpsertBoolConfigValue("bShortBattleCooldownEnabled", bShortBattleCooldownEnabled);
     UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
+    UpsertBoolConfigValue("bTroopCountCombatScaling", bTroopCountCombatScaling);
     UpsertBoolConfigValue("bGovernorPrisonerDisposal", bGovernorPrisonerDisposal);
     UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
@@ -211,6 +213,17 @@ namespace DX11Base {
       AddLog(u8"[Config] 단기접전 쿨타임 설정 로드: %s / %d일",
              bShortBattleCooldownEnabled ? "ON" : "OFF",
              iShortBattleCooldownDays);
+    }
+
+    bool savedTroopCountCombatScaling = false;
+    if (LoadBoolConfigValue("bTroopCountCombatScaling",
+                            savedTroopCountCombatScaling)) {
+      bTroopCountCombatScaling = savedTroopCountCombatScaling;
+      if (!SetTroopCountCombatScaling(savedTroopCountCombatScaling))
+        bTroopCountCombatScaling = IsTroopCountCombatScalingApplied();
+
+      AddLog(u8"[Config] 병력수 공방 반영 설정 로드: %s",
+             bTroopCountCombatScaling ? "ON" : "OFF");
     }
 
     // 이전 설정 파일에 키가 없으면 기본값(true)으로 실제 패치까지 적용합니다.
