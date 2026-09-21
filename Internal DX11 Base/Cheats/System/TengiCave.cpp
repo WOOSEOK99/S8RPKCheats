@@ -221,4 +221,63 @@ namespace DX11Base {
       }
   }
 
+
+  void DumpTengiParameterDiagnostics() {
+    struct Entry { int id; const char *name; };
+    static const Entry kEntries[] = {
+        {1, u8"결전"}, {2, u8"이민족습격"}, {7, u8"악적발호"},
+        {8, u8"의심암귀"}, {9, u8"민심혼란"}, {10, u8"붕벽"},
+        {12, u8"여세"}, {14, u8"피폐"}, {16, u8"권위고양"},
+        {18, u8"보장각성"}, {19, u8"기장각성"}, {20, u8"궁장각성"},
+        {21, u8"병격난무"}, {22, u8"전승기"}, {23, u8"중지성성"}};
+
+    constexpr uintptr_t kManagerRva = 0x02E98BC8;
+    constexpr uintptr_t kEventTableOffset = 0x58A670;
+    constexpr uintptr_t kValueOffset = 0x12;
+
+    uintptr_t exeBase = reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+    if (!exeBase) {
+      AddLog(u8"[전기진단] 게임 EXE base 없음");
+      return;
+    }
+
+    uintptr_t managerSlot = exeBase + kManagerRva;
+    if (!IsValidPtr(managerSlot, sizeof(uintptr_t))) {
+      AddLog(u8"[전기진단] manager slot 읽기 불가: %p", reinterpret_cast<void *>(managerSlot));
+      return;
+    }
+
+    uintptr_t manager = *reinterpret_cast<uintptr_t *>(managerSlot);
+    if (!manager || !IsValidPtr(manager, 1)) {
+      AddLog(u8"[전기진단] manager 포인터 준비 안 됨: %p", reinterpret_cast<void *>(manager));
+      return;
+    }
+
+    AddLog(u8"[전기진단] ===== +0x12 읽기 시작 / manager=%p =====", reinterpret_cast<void *>(manager));
+
+    for (const auto &entry : kEntries) {
+      uintptr_t slot = manager + kEventTableOffset +
+                       static_cast<uintptr_t>(entry.id) * sizeof(uintptr_t);
+      if (!IsValidPtr(slot, sizeof(uintptr_t))) {
+        AddLog(u8"[전기진단] ID:%d %s | table slot 읽기 불가", entry.id, entry.name);
+        continue;
+      }
+
+      uintptr_t eventPtr = *reinterpret_cast<uintptr_t *>(slot);
+      if (!eventPtr || !IsValidPtr(eventPtr + kValueOffset, sizeof(int16_t))) {
+        AddLog(u8"[전기진단] ID:%d %s | event=%p | +12 읽기 불가",
+               entry.id, entry.name, reinterpret_cast<void *>(eventPtr));
+        continue;
+      }
+
+      int16_t value = *reinterpret_cast<const int16_t *>(eventPtr + kValueOffset);
+      AddLog(u8"[전기진단] ID:%d %s | event=%p | +12=%d (0x%04X)",
+             entry.id, entry.name, reinterpret_cast<void *>(eventPtr),
+             static_cast<int>(value),
+             static_cast<unsigned int>(static_cast<uint16_t>(value)));
+    }
+
+    AddLog(u8"[전기진단] ===== 읽기 완료 / 메모리 변경 없음 =====");
+  }
+
 } // namespace DX11Base
