@@ -1,0 +1,137 @@
+SAN8RPK_Viewer Step 03 raw attack payload notes
+==================================================
+
+Source EXE SHA-256:
+34abf52f9651d4313076b16042476e5646967aa55af65613f542d69883084c3d
+
+Python module:
+ai_profile.py
+
+Final active attack template:
+REFUSAL_ATTACK
+size = 399 bytes
+SHA-256 = c08f5c998d2cb20f399402a59ee0394e7320c249ca3f13c42e6d0df1f32b3b57
+
+Hook:
+RVA +0x0144D248
+
+Original 16 bytes:
+49 3B 4D 30 74 0A 48 8B 47 18 49 3B 45 38 75 22
+
+Resume:
+RVA +0x0144D27A
+
+Marker mapping used in attack segment:
+1111111111111111 = stats = cave+0x1000
+2222222222222222 = relation = base+0x017AF090
+3333333333333333 = score = base+0x017A5130
+4444444444444444 = resume = base+0x0144D27A
+5555555555555555 = base+0x02E98BC8 (used by refusal-boost portion)
+
+Stats mapping from viewer.py show_ai_status():
++00 examined
++08 outside   -> UI "추가 후보"
++10 selected  -> UI "갱신"
++18 friendly
++20 captive
++28 released
++30 executed
++38 refused
++40 switched
++48 skipped
++50 boosted
+
+Disassembly of REFUSAL_ATTACK
+-----------------------------
+
+0000: movabs r11, stats
+000a: lock inc qword ptr [r11]               ; examined++
+
+000e: test rcx, rcx
+0011: je 0183
+0017: mov rdx, qword ptr [r13+10h]
+001b: test rdx, rdx
+001e: je 0183
+0024: cmp rcx, rdx
+0027: je 0174                                 ; friendly++
+
+002d: sub rsp,20h
+0031: movabs rax, relation
+003b: call rax
+003d: add rsp,20h
+0041: test al,al
+0043: jne 0174                                ; friendly++
+
+0049: mov rax,[rdi+90h]
+0050: mov rax,[rax+10h]
+0054: cmp rax,[r13+30h]
+0058: je 0073
+005a: mov rax,[rdi+18h]
+005e: cmp rax,[r13+38h]
+0062: je 0073
+0064: movabs r11,stats
+006e: lock inc qword ptr [r11+08h]            ; outside++
+
+0073: mov rdx,rdi
+0076: mov rcx,rsi
+0079: sub rsp,20h
+007d: movabs rax,score
+0087: call rax
+0089: add rsp,20h
+
+; 008d..0139 = surrender-refusal attack boost logic
+; Step 08에서 별도 해부
+; 조건 충족 시 xmm0 *= 5.0f and stats+50h (boosted)++
+
+013a: mov rax,[rdi+90h]
+0141: mov rax,[rax+10h]
+0145: cmp rax,[r13+30h]
+0149: jne 0158
+014b: mov eax,3F8CCCCDh                        ; 1.1f
+0150: movd xmm1,eax
+0154: mulss xmm0,xmm1                         ; designated target bonus
+
+0158: comiss xmm0,xmm6
+015b: jbe 0183
+015d: movaps xmm6,xmm0
+0160: mov r15,rdi
+0163: movabs r11,stats
+016d: lock inc qword ptr [r11+10h]            ; selected++
+
+0174: movabs r11,stats
+017e: lock inc qword ptr [r11+18h]            ; friendly++
+
+0183: movabs rax,resume
+018d: jmp rax
+
+Static patches installed by same profile
+----------------------------------------
+
+RVA +0x0144BB60
+original:
+48 B8 00 88 9F 2A 03 00 00 00 48 03 F0
+replacement:
+90 90 90 90 90 90 90 90 90 90 90 90 90
+
+RVA +0x0144BC8B
+original:
+48 81 C6 00 F1 53 65
+replacement:
+90 90 90 90 90 90 90
+
+Meaning of these two static patches is intentionally NOT assigned yet.
+
+Guard hashes
+------------
+
++0x0144D0E2 size 426
+5f4831b7ca17070c153034d472fc0490f309e972509b150eaedb1079ddf171ec
+
++0x017AF090 size 170
+c7477a9233bc2c5689c58309ffeee45ace225527433e0781d8ddf2ef63a18f2d
+
++0x017A5130 size 282
+364edeb14758c11b1a7050dd183d4a978aafce8eba2c00b4047ed2127414234a
+
++0x0144BA40 size 736
+60c495cf393e8a5a71f4e8c7357cf5979ba5d248d6c27f42778b078baa95fa8f

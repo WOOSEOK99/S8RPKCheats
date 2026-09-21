@@ -28,7 +28,7 @@
 | 00 | [EXE 구조 및 추출 인벤토리](00_EXE_INVENTORY.md) | 1차 완료 |
 | 01 | [S8RPKCheats AI 전투 개선과 Viewer 비교](01_AI_WAR_COMPARE.md) | 1차 완료 |
 | 02 | [기능별 RVA/모듈 인덱스](02_FEATURE_INDEX.md) | 1차 완료 |
-| 03 | AI 공격 후보 확장 / 목표세력 제한 해제 상세 해부 | 예정 |
+| 03 | [AI 공격 후보 확장 / 목표세력 제한 해제 상세 해부](03_AI_ATTACK_TARGET_EXPANSION.md) | payload 수준 완료 · helper 내부는 후속 확인 |
 | 04 | 플레이어 우선공격 제거 상세 해부 | 예정 |
 | 05 | AI 포로 처형 조건 상세 해부 | 예정 |
 | 06 | AI 처형 로그 상세화 | 예정 |
