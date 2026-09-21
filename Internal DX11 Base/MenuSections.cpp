@@ -828,64 +828,186 @@ namespace DX11Base {
       BeginSection();
       ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.7f, 1.0f), u8"[ 전쟁 관련 ]");
 
-      if (ImGui::Checkbox(u8"모든 무장 성향 적극", &bAllAggressive)) {
-        DX11Base::NotifyFeatureToggle(u8"모든 무장 성향 적극 자동 적용", bAllAggressive);
-        DX11Base::SaveConfig();
+      if (ImGui::BeginTable(
+              "WarOptionsLayout",
+              2,
+              ImGuiTableFlags_SizingStretchSame |
+                  ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn(
+            "WarLeft",
+            ImGuiTableColumnFlags_WidthStretch,
+            1.0f);
+        ImGui::TableSetupColumn(
+            "WarRight",
+            ImGuiTableColumnFlags_WidthStretch,
+            1.0f);
+
+        // 1행: 모든 무장 성향 적극 / AI 전투 개선
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"모든 무장 성향 적극", &bAllAggressive)) {
+          DX11Base::NotifyFeatureToggle(u8"모든 무장 성향 적극 자동 적용", bAllAggressive);
+          DX11Base::SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+              u8"체크 시, 게임 진입(주인공 포착) 순간 모든 유효 무장의 전략 성향이 '적극'으로 자동 적용됩니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 로드할 때 딱 한 번 적용되며 계속 유지해야 다음 플레이 시에도 반영됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"AI 전투 개선", &bAIWarImprove)) {
+          const bool requested = bAIWarImprove;
+          DX11Base::SetAIWarImprove(requested);
+          DX11Base::NotifyFeatureToggle(u8"AI 전투 개선", bAIWarImprove);
+          DX11Base::SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"AI가 더 적극적으로 전쟁을 걸고 공백지도 더 잘 점령하도록 조정합니다.");
+          ImGui::TextUnformatted(u8"- 한 세력이 한 턴에 여러 세력을 공격할 수 있게 변경");
+          ImGui::TextUnformatted(u8"- 주인공만 지나치게 공격하는 행동을 줄임");
+          ImGui::TextUnformatted(u8"- 일부 군주가 빈 도시를 점령하지 않는 현상을 완화");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 게임 버전이 달라 예상한 데이터와 다르면 적용하지 않습니다.");
+          ImGui::EndTooltip();
+        }
+
+        // 2행: 전투맵 랜덤 / 도독 포로 직접 처분
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"전투맵 랜덤(관문제외)", &bBattleMapShuffle)) {
+          DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
+          NotifyFeatureToggle(u8"전투맵 랜덤(관문제외)", bBattleMapShuffle);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"매 분기 평정 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"도독 포로 직접 처분", &bGovernorPrisonerDisposal)) {
+          const bool requested = bGovernorPrisonerDisposal;
+          if (!DX11Base::SetGovernorPrisonerDisposal(requested))
+            bGovernorPrisonerDisposal = DX11Base::IsGovernorPrisonerDisposalApplied();
+          NotifyFeatureToggle(u8"도독 포로 직접 처분", bGovernorPrisonerDisposal);
+          SaveConfig();
+        }
+        const bool governorPrisonerHovered = ImGui::IsItemHovered();
+
+        ImGui::Indent(18.0f * scale);
+        if (ImGui::Checkbox(u8"특권 1개 소비", &bGovernorPrisonerConsumePrivilege)) {
+          SaveConfig();
+        }
+        const bool governorPrivilegeHovered = ImGui::IsItemHovered();
+        ImGui::Unindent(18.0f * scale);
+
+        if (governorPrisonerHovered) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"도독이 통치권 내 도시의 정규군 전투에서 승리했을 때 포로를 직접 처분할지 선택할 수 있게 합니다.");
+          ImGui::TextUnformatted(u8"- 조건을 만족하면 포로 처분 전에 예/아니오 질문이 표시됩니다.");
+          ImGui::TextUnformatted(u8"- 아니오를 선택하면 원래 게임의 포로 처분 흐름을 그대로 따릅니다.");
+          ImGui::TextUnformatted(u8"- 체크 상태와 특권 소비 옵션은 설정 파일에 저장됩니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 게임 버전의 후킹 지점 바이트가 다르면 안전을 위해 적용하지 않습니다.");
+          ImGui::EndTooltip();
+        }
+
+        if (governorPrivilegeHovered) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(u8"OFF: 예를 선택해도 특권을 소비하지 않습니다.");
+          ImGui::TextUnformatted(u8"ON: 예를 선택하면 특권 1개를 소비한 뒤 직접 처분합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 특권이 0개이면 특권 소비 모드에서 직접 처분할 수 없습니다.");
+          ImGui::EndTooltip();
+        }
+
+        // 3행: 원군 도착 턴 즉시 행동 / 수비측 원군 총대장 근처 배치
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"원군 도착 턴 즉시 행동", &bReinforcementArrivalAction)) {
+          const bool requested = bReinforcementArrivalAction;
+          if (!DX11Base::SetReinforcementArrivalAction(requested))
+            bReinforcementArrivalAction = DX11Base::IsReinforcementArrivalActionApplied();
+          NotifyFeatureToggle(u8"원군 도착 턴 즉시 행동", bReinforcementArrivalAction);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"전투에 도착한 원군이 도착한 그 턴부터 바로 행동할 수 있게 합니다.");
+          ImGui::TextUnformatted(u8"- 원군 도착 처리를 명령 처리보다 먼저 실행하도록 순서를 변경합니다.");
+          ImGui::TextUnformatted(u8"- 공격측/수비측 원군의 배치 위치는 이 옵션에서 변경하지 않습니다.");
+          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장되어 다음 실행 시 다시 적용됩니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"수비측 원군 총대장 근처 배치", &bReinforcementDefenderPlacement)) {
+          const bool requested = bReinforcementDefenderPlacement;
+          if (!DX11Base::SetReinforcementDefenderPlacement(requested))
+            bReinforcementDefenderPlacement = DX11Base::IsReinforcementDefenderPlacementApplied();
+          NotifyFeatureToggle(u8"수비측 원군 총대장 근처 배치", bReinforcementDefenderPlacement);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"수비측 원군이 도착할 때 총대장과 가까운 이동 가능한 빈 타일에 배치합니다.");
+          ImGui::TextUnformatted(u8"- 총대장 기준 최대 5칸 범위에서 가까운 순서로 배치 위치를 탐색합니다.");
+          ImGui::TextUnformatted(u8"- 점유된 타일, 사용 불가 지형, 통행 불가 타일은 제외합니다.");
+          ImGui::TextUnformatted(u8"- 5칸 범위 안에 적절한 위치가 없으면 게임의 원래 배치 방식을 사용합니다.");
+          ImGui::TextUnformatted(u8"- 총대장을 찾지 못하거나 판별이 애매해도 게임의 원래 배치 방식을 사용합니다.");
+          ImGui::TextUnformatted(u8"- 공격측 원군의 배치 위치는 변경하지 않습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 원군 도착 순간 일시적인 화면 끊김이 발생할 수 있습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 다수의 원군이 동시에 도착할 경우 더 눈에 띌 수 있습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
       }
 
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(
-            ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-            u8"체크 시, 게임 진입(주인공 포착) 순간 모든 유효 무장의 전략 성향이 '적극'으로 자동 적용됩니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 로드할 때 딱 한 번 적용되며 계속 유지해야 다음 플레이 시에도 반영됩니다.");
-        ImGui::EndTooltip();
-      }
+      ImGui::Spacing();
 
-      ImGui::SameLine(160.0f * scale);
+      // 단기접전 대기일수는 체크 상태와 수정값이 하나의 설정임을 명확히 보이도록 묶습니다.
+      ImGui::PushStyleColor(
+          ImGuiCol_Border,
+          ImVec4(0.62f, 0.54f, 0.28f, 0.90f));
+      ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f * scale);
+      ImGui::BeginChild(
+          "##ShortBattleCooldownGroup",
+          ImVec2(0.0f, 42.0f * scale),
+          true,
+          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
-      if (ImGui::Checkbox(u8"AI 전투 개선", &bAIWarImprove)) {
-        const bool requested = bAIWarImprove;
-        DX11Base::SetAIWarImprove(requested);
-        DX11Base::NotifyFeatureToggle(u8"AI 전투 개선", bAIWarImprove);
-        DX11Base::SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"AI가 더 적극적으로 전쟁을 걸고 공백지도 더 잘 점령하도록 조정합니다.");
-        ImGui::TextUnformatted(u8"- 한 세력이 한 턴에 여러 세력을 공격할 수 있게 변경");
-        ImGui::TextUnformatted(u8"- 주인공만 지나치게 공격하는 행동을 줄임");
-        ImGui::TextUnformatted(u8"- 일부 군주가 빈 도시를 점령하지 않는 현상을 완화");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 게임 버전이 달라 예상한 데이터와 다르면 적용하지 않습니다.");
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"전투맵 랜덤(관문제외)", &bBattleMapShuffle)) {
-        DX11Base::SetBattleMapShuffle(bBattleMapShuffle);
-        NotifyFeatureToggle(u8"전투맵 랜덤(관문제외)", bBattleMapShuffle);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"매 분기 평정 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"단기접전 쿨타임 적용", &bShortBattleCooldownEnabled)) {
+      bool shortCooldownHovered = false;
+      if (ImGui::Checkbox(u8"단기접전 대기일수 변경", &bShortBattleCooldownEnabled)) {
         const bool requested = bShortBattleCooldownEnabled;
         if (!DX11Base::SetShortBattleCooldown(requested, iShortBattleCooldownDays))
           bShortBattleCooldownEnabled = DX11Base::IsShortBattleCooldownApplied();
-        NotifyFeatureToggle(u8"단기접전 쿨타임 적용", bShortBattleCooldownEnabled);
+        NotifyFeatureToggle(u8"단기접전 대기일수 변경", bShortBattleCooldownEnabled);
         SaveConfig();
       }
-      const bool shortCooldownHovered = ImGui::IsItemHovered();
+      shortCooldownHovered |= ImGui::IsItemHovered();
 
-      ImGui::SameLine(210.0f * scale);
+      ImGui::SameLine(0.0f, 14.0f * scale);
       ImGui::SetNextItemWidth(55.0f * scale);
       const int previousShortCooldownDays = iShortBattleCooldownDays;
       if (ImGui::InputInt("##ShortBattleCooldownDays", &iShortBattleCooldownDays, 0, 0,
@@ -896,6 +1018,8 @@ namespace DX11Base {
         }
         SaveConfig();
       }
+      shortCooldownHovered |= ImGui::IsItemHovered();
+
       ImGui::SameLine();
       ImGui::TextDisabled(u8"기본값 : 10");
 
@@ -912,85 +1036,11 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      if (ImGui::Checkbox(u8"도독 포로 직접 처분", &bGovernorPrisonerDisposal)) {
-        const bool requested = bGovernorPrisonerDisposal;
-        if (!DX11Base::SetGovernorPrisonerDisposal(requested))
-          bGovernorPrisonerDisposal = DX11Base::IsGovernorPrisonerDisposalApplied();
-        NotifyFeatureToggle(u8"도독 포로 직접 처분", bGovernorPrisonerDisposal);
-        SaveConfig();
-      }
-      const bool governorPrisonerHovered = ImGui::IsItemHovered();
+      ImGui::EndChild();
+      ImGui::PopStyleVar();
+      ImGui::PopStyleColor();
 
-      ImGui::SameLine(190.0f * scale);
-      if (ImGui::Checkbox(u8"특권 1개 소비", &bGovernorPrisonerConsumePrivilege)) {
-        SaveConfig();
-      }
-      const bool governorPrivilegeHovered = ImGui::IsItemHovered();
-
-      if (governorPrisonerHovered) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"도독이 통치권 내 도시의 정규군 전투에서 승리했을 때 포로를 직접 처분할지 선택할 수 있게 합니다.");
-        ImGui::TextUnformatted(u8"- 조건을 만족하면 포로 처분 전에 예/아니오 질문이 표시됩니다.");
-        ImGui::TextUnformatted(u8"- 아니오를 선택하면 원래 게임의 포로 처분 흐름을 그대로 따릅니다.");
-        ImGui::TextUnformatted(u8"- 체크 상태와 특권 소비 옵션은 설정 파일에 저장됩니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 게임 버전의 후킹 지점 바이트가 다르면 안전을 위해 적용하지 않습니다.");
-        ImGui::EndTooltip();
-      }
-
-      if (governorPrivilegeHovered) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(u8"OFF: 예를 선택해도 특권을 소비하지 않습니다.");
-        ImGui::TextUnformatted(u8"ON: 예를 선택하면 특권 1개를 소비한 뒤 직접 처분합니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 특권이 0개이면 특권 소비 모드에서 직접 처분할 수 없습니다.");
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"원군 도착 턴 즉시 행동", &bReinforcementArrivalAction)) {
-        const bool requested = bReinforcementArrivalAction;
-        if (!DX11Base::SetReinforcementArrivalAction(requested))
-          bReinforcementArrivalAction = DX11Base::IsReinforcementArrivalActionApplied();
-        NotifyFeatureToggle(u8"원군 도착 턴 즉시 행동", bReinforcementArrivalAction);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"전투에 도착한 원군이 도착한 그 턴부터 바로 행동할 수 있게 합니다.");
-        ImGui::TextUnformatted(u8"- 원군 도착 처리를 명령 처리보다 먼저 실행하도록 순서를 변경합니다.");
-        ImGui::TextUnformatted(u8"- 공격측/수비측 원군의 배치 위치는 이 옵션에서 변경하지 않습니다.");
-        ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장되어 다음 실행 시 다시 적용됩니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"수비측 원군 총대장 근처 배치", &bReinforcementDefenderPlacement)) {
-        const bool requested = bReinforcementDefenderPlacement;
-        if (!DX11Base::SetReinforcementDefenderPlacement(requested))
-          bReinforcementDefenderPlacement = DX11Base::IsReinforcementDefenderPlacementApplied();
-        NotifyFeatureToggle(u8"수비측 원군 총대장 근처 배치", bReinforcementDefenderPlacement);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"수비측 원군이 도착할 때 총대장과 가까운 이동 가능한 빈 타일에 배치합니다.");
-        ImGui::TextUnformatted(u8"- 총대장 기준 최대 5칸 범위에서 가까운 순서로 배치 위치를 탐색합니다.");
-        ImGui::TextUnformatted(u8"- 점유된 타일, 사용 불가 지형, 통행 불가 타일은 제외합니다.");
-        ImGui::TextUnformatted(u8"- 5칸 범위 안에 적절한 위치가 없으면 게임의 원래 배치 방식을 사용합니다.");
-        ImGui::TextUnformatted(u8"- 총대장을 찾지 못하거나 판별이 애매해도 게임의 원래 배치 방식을 사용합니다.");
-        ImGui::TextUnformatted(u8"- 공격측 원군의 배치 위치는 변경하지 않습니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 원군 도착 순간 일시적인 화면 끊김이 발생할 수 있습니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 다수의 원군이 동시에 도착할 경우 더 눈에 띌 수 있습니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                           u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
-        ImGui::EndTooltip();
-      }
+      ImGui::Spacing();
 
       if (ImGui::Button(u8"전투 환경 및 조건 설정", ImVec2(150 * scale, 30 * scale))) {
         bShowBattleEnvWin = !bShowBattleEnvWin;
