@@ -10,4 +10,5 @@ namespace DX11Base {
     uintptr_t GetTengiHookOffset();
     uintptr_t GetCapturedTengiAddr();
     void TengiCave_Tick();
+    void DumpTengiParameterDiagnostics(); // read-only: 전기 객체 +0x12 진단 로그
 }
