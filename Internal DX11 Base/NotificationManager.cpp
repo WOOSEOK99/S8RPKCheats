@@ -41,10 +41,16 @@ namespace DX11Base {
             s_configSaveErrorPopupRequested = false;
         }
 
+        ImGui::SetNextWindowSizeConstraints(
+            ImVec2(560.0f * scale, 0.0f),
+            ImVec2(560.0f * scale, 1000.0f * scale));
+
         if (ImGui::BeginPopupModal(
                 u8"설정 저장 실패###ConfigSaveError",
                 nullptr,
                 ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::SetWindowFontScale(1.20f);
+
             ImGui::TextColored(
                 ImVec4(1.0f, 0.25f, 0.25f, 1.0f),
                 u8"치트 설정 파일을 저장할 수 없습니다.");
@@ -58,7 +64,7 @@ namespace DX11Base {
             ImGui::Separator();
             ImGui::Spacing();
 
-            const float buttonWidth = 120.0f * scale;
+            const float buttonWidth = 150.0f * scale;
             const float available = ImGui::GetContentRegionAvail().x;
             if (available > buttonWidth)
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (available - buttonWidth) * 0.5f);
