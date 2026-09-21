@@ -39,6 +39,7 @@
 #include "Cheats/War/GovernorPrisonerDisposal.h"
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
+#include "Cheats/War/ReinforcementDefenderPlacement.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/ShortBattleCooldown.h"
@@ -961,6 +962,27 @@ namespace DX11Base {
         ImGui::TextUnformatted(u8"- 원군 도착 처리를 명령 처리보다 먼저 실행하도록 순서를 변경합니다.");
         ImGui::TextUnformatted(u8"- 공격측/수비측 원군의 배치 위치는 이 옵션에서 변경하지 않습니다.");
         ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장되어 다음 실행 시 다시 적용됩니다.");
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                           u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
+        ImGui::EndTooltip();
+      }
+
+      if (ImGui::Checkbox(u8"수비측 원군 총대장 근처 배치", &bReinforcementDefenderPlacement)) {
+        const bool requested = bReinforcementDefenderPlacement;
+        if (!DX11Base::SetReinforcementDefenderPlacement(requested))
+          bReinforcementDefenderPlacement = DX11Base::IsReinforcementDefenderPlacementApplied();
+        NotifyFeatureToggle(u8"수비측 원군 총대장 근처 배치", bReinforcementDefenderPlacement);
+        SaveConfig();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"수비측 원군이 도착할 때 총대장과 가장 가까운 이동 가능한 빈 타일에 배치합니다.");
+        ImGui::TextUnformatted(u8"- 맵 전체를 검색하며 거리 제한은 없습니다.");
+        ImGui::TextUnformatted(u8"- 점유된 타일, 사용 불가 지형, 통행 불가 타일은 제외합니다.");
+        ImGui::TextUnformatted(u8"- 총대장을 찾지 못하거나 판별이 애매하면 게임의 원래 배치 방식을 사용합니다.");
+        ImGui::TextUnformatted(u8"- 총대장은 확인됐지만 배치 가능한 빈 타일이 전혀 없으면 원군 배치를 실패 처리합니다.");
+        ImGui::TextUnformatted(u8"- 공격측 원군의 배치 위치는 변경하지 않습니다.");
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                            u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
         ImGui::EndTooltip();

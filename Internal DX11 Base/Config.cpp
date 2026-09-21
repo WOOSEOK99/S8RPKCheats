@@ -9,6 +9,7 @@
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
+#include "Cheats/War/ReinforcementDefenderPlacement.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -140,6 +141,7 @@ namespace DX11Base {
     UpsertBoolConfigValue("bGovernorPrisonerDisposal", bGovernorPrisonerDisposal);
     UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
+    UpsertBoolConfigValue("bReinforcementDefenderPlacement", bReinforcementDefenderPlacement);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
     UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
@@ -182,6 +184,18 @@ namespace DX11Base {
 
       AddLog(u8"[Config] 원군 도착 턴 즉시 행동 설정 로드: %s",
              bReinforcementArrivalAction ? "ON" : "OFF");
+    }
+
+    bool savedReinforcementDefenderPlacement = false;
+    if (LoadBoolConfigValue("bReinforcementDefenderPlacement",
+                            savedReinforcementDefenderPlacement)) {
+      bReinforcementDefenderPlacement = savedReinforcementDefenderPlacement;
+      if (!SetReinforcementDefenderPlacement(savedReinforcementDefenderPlacement))
+        bReinforcementDefenderPlacement =
+            IsReinforcementDefenderPlacementApplied();
+
+      AddLog(u8"[Config] 수비측 원군 총대장 근처 배치 설정 로드: %s",
+             bReinforcementDefenderPlacement ? "ON" : "OFF");
     }
 
     int savedShortBattleCooldownDays = 3;
