@@ -526,14 +526,14 @@ namespace DX11Base {
     UINT dpi = GetDpiForWindow(g_Engine->pGameWindow);
     float scale = (dpi == 0) ? 1.0f : (float)dpi / 96.0f;
 
-    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
+    static const char *s_windowTitleStr = u8"삼국지 8 리메이크 PK 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
     ImGuiWindow *pMainWin = ImGui::FindWindowByName(s_windowTitleStr);
     bool bMenuCollapsedLastFrame = pMainWin ? pMainWin->Collapsed : false;
 
     // 상태에 따른 표시용 문자열과 ImGui 고유 ID 문자열 결정
-    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")";
+    const char *visibleTitle = bMenuCollapsedLastFrame ? u8"치트" : u8"삼국지 8 리메이크 PK 치트 (" SAM8_CHEAT_VERSION ")";
     const char *finalTitle = bMenuCollapsedLastFrame ? u8"치트###SAM8_CHEAT"
-                                                     : u8"삼국지 8 리메이크 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
+                                                     : u8"삼국지 8 리메이크 PK 치트 (" SAM8_CHEAT_VERSION ")###SAM8_CHEAT";
 
     // AlwaysAutoResize: 레이아웃이 복잡할 때 좌표 계산 오차가 발생할 수 있음
     // 펼쳐진 상태에서는 스크롤바는 끄되, 가로/세로 자동 조절은 켜둠 (NoScrollbar만으로 오프셋 해결 시도)

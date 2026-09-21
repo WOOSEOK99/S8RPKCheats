@@ -206,8 +206,8 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing(); // 위아래 여백
 
-        if (ImGui::Checkbox(u8"행동력 무한", &bInfiniteAP)) {
-          NotifyFeatureToggle(u8"행동력 무한", bInfiniteAP);
+        if (ImGui::Checkbox(u8"행동력 무제한", &bInfiniteAP)) {
+          NotifyFeatureToggle(u8"행동력 무제한", bInfiniteAP);
           SaveConfig();
         }
 
@@ -225,13 +225,15 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        if (ImGui::Checkbox(u8"명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
-          NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
+        if (ImGui::Checkbox(u8"청부 무제한 (주점)", &bInfiniteTavernRequests)) {
+          NotifyFeatureToggle(u8"청부 무제한 (주점)", bInfiniteTavernRequests);
           SaveConfig();
         }
 
-        if (ImGui::Checkbox(u8"청부 무한 유지 (주점)", &bInfiniteTavernRequests)) {
-          NotifyFeatureToggle(u8"청부 무한 유지 (주점)", bInfiniteTavernRequests);
+        ImGui::SameLine(160.0f * scale);
+
+        if (ImGui::Checkbox(u8"명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
+          NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
           SaveConfig();
         }
 
@@ -517,15 +519,11 @@ namespace DX11Base {
       if (p1 != 0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
         DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, 60, scale);
-        ImGui::SameLine(120 * scale);
+        ImGui::SameLine(160 * scale);
         if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
           NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
           SaveConfig();
         }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
 
         bool allJewelsOpen = DX11Base::IsAllJewelsOpenPreferred();
         if (ImGui::Checkbox(u8"보주 전체 개방", &allJewelsOpen)) {
@@ -542,10 +540,11 @@ namespace DX11Base {
         }
 
         bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
-        if (ImGui::Checkbox(u8"보조 보주 전체 사용", &allSecondaryJewels)) {
+        ImGui::SameLine(160 * scale);
+        if (ImGui::Checkbox(u8"보조 보주 모두 사용", &allSecondaryJewels)) {
           if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels)) {
-            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 전체 사용 ON"
-                                                         : u8"보조 보주 전체 사용 OFF");
+            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 모두 사용 ON"
+                                                         : u8"보조 보주 모두 사용 OFF");
             SaveConfig();
           }
         }
