@@ -703,6 +703,7 @@ namespace DX11Base {
           ImGui::TableSetColumnIndex(0);
           // 왼쪽 내용 그리기
           MenuSections::DrawCivilianSection(p1, gameBase, scale);
+          MenuSections::DrawScenarioSection(p1, scale);
 
           // --- [ 오른쪽 컬럼 ] ---
           ImGui::TableSetColumnIndex(1);

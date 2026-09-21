@@ -1118,7 +1118,7 @@ namespace DX11Base {
       EndSection(); // 전쟁
     }
 
-    void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
+    void DrawScenarioSection(uintptr_t p1, float scale) {
       BeginSection();
       ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.0f, 1.0f), u8"[ 시나리오 ]");
 
@@ -1303,7 +1303,9 @@ namespace DX11Base {
       }
 
       EndSection(); // 시나리오
+    }
 
+    void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
       BeginSection();
 
       float btnHeight = 26.0f * scale;
