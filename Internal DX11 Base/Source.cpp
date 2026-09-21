@@ -275,6 +275,8 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   // [�ű�] ���� �ʱ⿡ �������� �α���� �÷��׸� Ȯ���Ͽ� D3D �� �� ���ʱ�
   // ������ ���Ͽ� ���
   DX11Base::LoadEarlyLogConfig();
+  const ULONGLONG startupPerfBegin = GetTickCount64();
+  DX11Base::AddLog(u8"[StartupPerf] 초기화 스레드 진입");
 
   // ���� DLL ���ϸ� Ȯ��
   char dllPath[MAX_PATH];
@@ -283,6 +285,8 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
 
   // [�߿�] �ʱ�ȭ �������� ���� 5�� ���
   Sleep(5000);
+  DX11Base::AddLog(u8"[StartupPerf] 5초 지연 종료: thread+%llu ms",
+                   static_cast<unsigned long long>(GetTickCount64() - startupPerfBegin));
 
   DX11Base::AddLog(u8"========================================");
   DX11Base::AddLog(u8"[System] ġƮ �ε� ���� (DLL: %s)", dllName.c_str());
@@ -297,14 +301,34 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   // �߻��մϴ�. SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
   // -----------------------------------------------------------
 
-  g_Engine = std::make_unique<Engine>();
+  {
+    const ULONGLONG begin = GetTickCount64();
+    g_Engine = std::make_unique<Engine>();
+    DX11Base::AddLog(u8"[StartupPerf] Engine 생성: %llu ms",
+                     static_cast<unsigned long long>(GetTickCount64() - begin));
+  }
+
   // initialize cheats subsystem (resolve pointers)
   // try immediately, but also retry in background until game finishes loading
-  DX11Base::InitCheats();
+  {
+    const ULONGLONG begin = GetTickCount64();
+    const bool ok = DX11Base::InitCheats();
+    DX11Base::AddLog(u8"[StartupPerf] InitCheats 즉시 호출: %llu ms / result=%s",
+                     static_cast<unsigned long long>(GetTickCount64() - begin),
+                     ok ? "OK" : "WAIT");
+  }
+
   std::thread([]() {
     int attempts = 0;
     while (attempts < 60) { // retry up to ~30 seconds
-      if (DX11Base::InitCheats())
+      const ULONGLONG begin = GetTickCount64();
+      const bool ok = DX11Base::InitCheats();
+      const ULONGLONG elapsed = GetTickCount64() - begin;
+      DX11Base::AddLog(u8"[StartupPerf] InitCheats retry #%d: %llu ms / result=%s",
+                       attempts + 1,
+                       static_cast<unsigned long long>(elapsed),
+                       ok ? "OK" : "WAIT");
+      if (ok)
         break;
       std::this_thread::sleep_for(std::chrono::milliseconds(500));
       attempts++;
@@ -313,14 +337,28 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
 
   // Config Loading and Initial AutoLoad is now deferred to Menu::Loops() when p1 becomes valid
 
-  g_RenderManager->HookD3D();
-  g_Hooking->Initialize();
+  {
+    const ULONGLONG begin = GetTickCount64();
+    const bool ok = g_RenderManager->HookD3D();
+    DX11Base::AddLog(u8"[StartupPerf] HookD3D: %llu ms / result=%s",
+                     static_cast<unsigned long long>(GetTickCount64() - begin),
+                     ok ? "OK" : "FAIL");
+  }
+
+  {
+    const ULONGLONG begin = GetTickCount64();
+    g_Hooking->Initialize();
+    DX11Base::AddLog(u8"[StartupPerf] Hooking::Initialize: %llu ms",
+                     static_cast<unsigned long long>(GetTickCount64() - begin));
+  }
 
   // 2. [�߰�] �� �ʱ�ȭ ���Ŀ� �츮���� ��ǥ ���̱� ���� ��ġ�մϴ�.
   // [����] MH_EnableHook�� IAT ����(&GetCursorPos ��)�� ���� �ѱ��
   //        �Ϻ� PC���� �浹 �߻�. MH_CreateHookApi ��� �� MH_ALL_HOOKS��
   //        �Ѳ����� Ȱ��ȭ�ϴ� ������� ����.
   if (oGetCursorPos == NULL) {
+    const ULONGLONG inputHookBegin = GetTickCount64();
+
     MH_CreateHookApi(L"user32.dll", "GetCursorPos", &hkGetCursorPos, (LPVOID *)&oGetCursorPos);
     MH_CreateHookApi(L"user32.dll", "GetAsyncKeyState", &hkGetAsyncKeyState, (LPVOID *)&oGetAsyncKeyState);
     MH_CreateHookApi(L"user32.dll", "GetKeyState", &hkGetKeyState, (LPVOID *)&oGetKeyState);
@@ -328,9 +366,19 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
     MH_CreateHookApi(L"user32.dll", "PeekMessageW", &hkPeekMessageW, (LPVOID *)&oPeekMessageW);
     MH_CreateHookApi(L"user32.dll", "PeekMessageA", &hkPeekMessageA, (LPVOID *)&oPeekMessageA);
 
+    DX11Base::AddLog(u8"[StartupPerf] 입력 API hook 생성: %llu ms",
+                     static_cast<unsigned long long>(GetTickCount64() - inputHookBegin));
+    const ULONGLONG enableHookBegin = GetTickCount64();
+
     // ��� ��ϵ� ���� �Ѳ����� Ȱ��ȭ (����)
-    MH_EnableHook(MH_ALL_HOOKS);
+    const MH_STATUS enableStatus = MH_EnableHook(MH_ALL_HOOKS);
+    DX11Base::AddLog(u8"[StartupPerf] MH_EnableHook(MH_ALL_HOOKS): %llu ms / status=%d",
+                     static_cast<unsigned long long>(GetTickCount64() - enableHookBegin),
+                     static_cast<int>(enableStatus));
   }
+
+  DX11Base::AddLog(u8"[StartupPerf] 초기화 핵심 구간 완료: thread+%llu ms",
+                   static_cast<unsigned long long>(GetTickCount64() - startupPerfBegin));
 
   //	INITIALIZE BACKGROUND THREAD
   std::thread WCMUpdate(ClientBGThread);
