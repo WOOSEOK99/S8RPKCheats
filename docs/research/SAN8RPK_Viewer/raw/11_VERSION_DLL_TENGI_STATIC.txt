@@ -1,0 +1,120 @@
+version.dll Tengi static-analysis notes
+=======================================
+
+FILE
+----
+size 1543680
+sha256 01bfb8941d58f231231244b5bd6b8073a97e9630b91ea2312db3b9c2bc982c0a
+PE32+ x64
+PDB: E:\SteamLibrary\steamapps\common\SAN8R\version.pdb
+
+EVENT TABLE
+-----------
+version.dll VA 0x18012BA80
+stride 0x18
+count 15
+
+layout:
++00 DWORD id
++08 QWORD wchar_t* name
++10 DWORD signed defaultValue
+
+entries:
+1   결전        6
+2   이민족습격  0
+7   악적발호    6
+8   의심암귀   -30
+9   민심혹란   -50
+10  붕벽        6
+12  여세        6
+14  피폐        6
+16  권위고양    6
+18  보장각성    6
+19  기장각성    6
+20  궁장각성    6
+21  병격난무    6
+22  전승기      6
+23  중지성성    0
+
+format:
+positive -> [%d] %s (%d개월)
+negative -> [%d] %s (효과 %d)
+zero     -> [%d] %s (즉발)
+
+FORCE FUNCTION
+--------------
+version.dll function around VA 0x18005E260
+
+manager root:
+SAN8RPK.exe + 0x02E98BC8
+
+event pointer:
+eventPtr = *(manager + 0x58A670 + eventId*8)
+
+event numeric:
+WORD [eventPtr+0x12]
+
+hook:
+SAN8RPK.exe + 0x0132E340
+length 16
+
+forced hook semantics:
+if selectedEventPtr == 0:
+    execute original 16 bytes and continue
+
+if currentCandidate == selectedEventPtr:
+    AL=1
+    ret
+
+else:
+    AL=0
+    ret
+
+gauge:
+BYTE [manager+0x1EBDE0] = 100
+
+running state:
+manager+0x1EBDF8
+
+state machine:
+prepare
+-> wait +1EBDF8 == 1
+-> event started
+-> wait +1EBDF8 == 0
+-> restore saved WORD [eventPtr+0x12]
+
+CUSTOM VALUE UI
+---------------
+Combo item data packs:
+low16 eventId
+high16 signed defaultValue
+
+if high16 > 0:
+    parse user input
+    clamp 1..120
+
+if high16 < 0:
+    parse user input
+    clamp -100..100
+
+if high16 == 0:
+    customValue=0
+
+KNOWN LIMITATION
+----------------
+No static reference in this DLL identifies the game's original
+scenario-start per-event ON/OFF storage location.
+
+Do not guess that field.
+
+SAFE NEXT STEP
+--------------
+Read-only runtime differential:
+same scenario, toggle exactly one event ON/OFF at new-game setup,
+then compare event/settings memory and confirm repeated pattern.
+
+Possible temporary runtime filter:
+call native/original event eligibility first,
+then veto only cheat-disabled events.
+This can safely turn ON-game events OFF midgame,
+but cannot resurrect an event already disabled by original game settings.

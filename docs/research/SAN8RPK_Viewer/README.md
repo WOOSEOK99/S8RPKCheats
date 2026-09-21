@@ -57,3 +57,8 @@ Step 00~10까지의 1차 정적 분석과 이식 전 검증 계획이 모두 문
 3. read-only 진단
 4. 게임 런타임 검증
 5. 필요한 경우에만 write 구현
+
+
+## 추가 분석 - version.dll 전기 기능
+
+- [Step 11 - version.dll 전기 15종 / 수치 / 강제발동 구조](11_VERSION_DLL_TENGI_SETTINGS.md)
