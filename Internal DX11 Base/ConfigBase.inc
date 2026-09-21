@@ -189,7 +189,7 @@ namespace DX11Base {
     static ULONGLONG s_lastNotifyTick = 0;
     const ULONGLONG now = GetTickCount64();
     if (s_lastNotifyTick == 0 || now - s_lastNotifyTick >= 3000) {
-      AddNotification(
+      AddErrorNotification(
           u8"설정 저장 실패 - S8RPK_cheat_config.json의 쓰기 권한/읽기 전용 상태를 확인하세요.");
       s_lastNotifyTick = now;
     }
