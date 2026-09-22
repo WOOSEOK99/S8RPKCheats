@@ -176,6 +176,8 @@ namespace DX11Base {
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
     UpsertBoolConfigValue("bReinforcementDefenderPlacement", bReinforcementDefenderPlacement);
     UpsertBoolConfigValue("bAnnualSpecialAbilityAutoAssign", bAnnualSpecialAbilityAutoAssign);
+    UpsertBoolConfigValue("bAIOfficerAutoGrowth", bAIOfficerAutoGrowth);
+    UpsertIntConfigValue("iAIOfficerGrowthSpeed", iAIOfficerGrowthSpeed);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
     UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
@@ -237,6 +239,21 @@ namespace DX11Base {
       AddLog(u8"[Config] 자동 특수능력 부여 설정 로드: %s",
              bAnnualSpecialAbilityAutoAssign ? "ON" : "OFF");
     }
+
+    bool savedAIOfficerAutoGrowth = false;
+    if (LoadBoolConfigValue("bAIOfficerAutoGrowth", savedAIOfficerAutoGrowth))
+      bAIOfficerAutoGrowth = savedAIOfficerAutoGrowth;
+
+    int savedAIOfficerGrowthSpeed = 2;
+    if (LoadIntConfigValue("iAIOfficerGrowthSpeed", savedAIOfficerGrowthSpeed)) {
+      if (savedAIOfficerGrowthSpeed < 1) savedAIOfficerGrowthSpeed = 1;
+      if (savedAIOfficerGrowthSpeed > 3) savedAIOfficerGrowthSpeed = 3;
+      iAIOfficerGrowthSpeed = savedAIOfficerGrowthSpeed;
+    }
+
+    AddLog(u8"[Config] AI 무장 자동성장 설정 로드: %s / 속도=%d",
+           bAIOfficerAutoGrowth ? "ON" : "OFF",
+           iAIOfficerGrowthSpeed);
 
     bool savedReinforcementDefenderPlacement = false;
     if (LoadBoolConfigValue("bReinforcementDefenderPlacement",
