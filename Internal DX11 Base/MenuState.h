@@ -63,6 +63,7 @@ namespace DX11Base {
   extern bool bGovernorPrisonerConsumePrivilege;
   extern bool bReinforcementArrivalAction;
   extern bool bReinforcementDefenderPlacement;
+  extern bool bOfficerChangeNotify;            // 평정 종료 시 사망/등용 장수 알림
   extern bool bAnnualSpecialAbilityAutoAssign; // 매년 12월->1월 전환 시 특수 능력 자동 판정
   extern bool bAIOfficerAutoGrowth;             // AI 무장 자동성장
   extern int iAIOfficerGrowthSpeed;             // 1=느림, 2=보통, 3=빠름
