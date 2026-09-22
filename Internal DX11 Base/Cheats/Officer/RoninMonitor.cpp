@@ -370,6 +370,23 @@ namespace DX11Base {
     float sc = ImGui::GetIO().FontGlobalScale;
     ImVec2 disp = ImGui::GetIO().DisplaySize;
 
+    // 특수능력 알림은 줄바꿈하지 않고 가장 긴 문자열에 맞춰 창 폭을 자동 확장합니다.
+    float specialColumnWidth = 360.f * sc;
+    if (showSpecial) {
+      float maxTextWidth =
+          ImGui::CalcTextSize(u8" [ 특수 능력 부여!! ]").x * 1.8f;
+      for (const std::string &line : specialLines) {
+        const float w = ImGui::CalcTextSize(line.c_str()).x * 1.8f;
+        if (w > maxTextWidth)
+          maxTextWidth = w;
+      }
+
+      // 좌우 패딩/테이블 여유분을 더하되 화면 밖으로 나가지는 않게 제한합니다.
+      const float maxAllowed = (std::max)(360.f * sc, disp.x - 100.f * sc);
+      specialColumnWidth =
+          (std::min)(maxTextWidth + 30.f * sc, maxAllowed);
+    }
+
     ImGui::SetNextWindowPos(
         ImVec2(disp.x - 20.f, disp.y * 0.12f),
         ImGuiCond_Always,
@@ -455,7 +472,7 @@ namespace DX11Base {
           ImGui::TableSetupColumn(
               u8"부여 내역",
               ImGuiTableColumnFlags_WidthFixed,
-              360.f * sc);
+              specialColumnWidth);
 
           for (const std::string &line : specialLines) {
             ImGui::TableNextRow();
