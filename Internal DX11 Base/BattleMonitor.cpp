@@ -552,8 +552,9 @@ namespace DX11Base {
         UpdateOfficerStats99To100();
 
         // 능력치 한계돌파와 동일한 평정 진입 타이밍을 사용합니다.
-        // 자동 특수능력은 연 1회만 실행하므로 1월 평정에서만 시작합니다.
-        if (sm == 1 && bAnnualSpecialAbilityAutoAssign)
+        // 연말 자동 특수능력은 12월 평정에 들어온 직후 판정하여,
+        // 해당 평정 기간의 전투부터 바로 사용할 수 있게 합니다.
+        if (sm == 12 && bAnnualSpecialAbilityAutoAssign)
           DX11Base::AutoAssignSpecialAbilitiesFromCouncil();
 
         DX11Base::RunAutoCityExchange();
