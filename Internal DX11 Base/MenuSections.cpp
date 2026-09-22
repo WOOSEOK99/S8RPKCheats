@@ -1355,6 +1355,19 @@ namespace DX11Base {
         }
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
                            u8"매년 1월 평정에서 AI 자동성장이 끝난 뒤 특수 능력을 자동 판정합니다.");
+        ImGui::Separator();
+        ImGui::TextColored(
+            ImVec4(0.65f, 0.85f, 1.0f, 1.0f),
+            u8"[ 자동 기능 조합 ]");
+        ImGui::TextUnformatted(
+            u8"AI 성장 OFF / 특수능력 OFF : 두 기능 모두 미사용");
+        ImGui::TextUnformatted(
+            u8"AI 성장 ON  / 특수능력 OFF : AI 자동성장만 적용");
+        ImGui::TextUnformatted(
+            u8"AI 성장 ON  / 특수능력 ON  : AI 성장 후 특수능력 자동 판정");
+        ImGui::TextDisabled(
+            u8"AI 성장 OFF / 특수능력 ON  : 사용 불가 (특수능력 자동은 비활성화)");
+        ImGui::Separator();
         ImGui::TextUnformatted(u8"- AI 자동성장 결과로 상승한 전법/능력치를 반영한 뒤 판정합니다.");
         ImGui::TextUnformatted(u8"- 이미 특수 능력을 하나라도 보유한 무장은 자동 판정에서 제외합니다.");
         ImGui::TextUnformatted(u8"- 전체 무장 공간(1~5102)는 백그라운드 worker에서 판정합니다.");
