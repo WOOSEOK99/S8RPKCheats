@@ -8,5 +8,6 @@ namespace DX11Base {
   // 별도 UI 토글 없이 기본 적용하며, 원본 바이트가 정확히 일치할 때만
   // 안전하게 hook을 설치합니다.
   bool InstallIsolatedCityCaptureFix();
+  bool UninstallIsolatedCityCaptureFix();
   bool IsIsolatedCityCaptureFixApplied();
 } // namespace DX11Base
