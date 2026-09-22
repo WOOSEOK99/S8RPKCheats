@@ -44,6 +44,7 @@
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
+#include "Cheats/War/Spell5HealProbe.h"
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
@@ -1581,6 +1582,20 @@ namespace DX11Base {
       }
 
       ImGui::TextDisabled(u8"전투 중 선택한 진영의 책략 게이지를 최대치(10000)로 유지합니다.");
+
+      ImGui::Spacing();
+      ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
+      static bool s_spell5HealProbe = false;
+      if (ImGui::Checkbox(u8"5번 책략 광역힐 테스트", &s_spell5HealProbe)) {
+        if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
+          s_spell5HealProbe = !s_spell5HealProbe;
+          AddNotification(u8"5번 책략 광역힐 테스트 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"5번 책략 광역힐 테스트", s_spell5HealProbe);
+        }
+      }
+      ImGui::TextDisabled(u8"신산화계의 +16/+18 실행 데이터를 유지한 채 효과20=치료 여부를 시험합니다.");
+      ImGui::TextDisabled(u8"아군 / 효과20 / 수치2000 / 범위5. 클릭 후 실제 병력 회복 여부를 확인하세요.");
 
       EndSection(); // 전쟁
     }
