@@ -465,6 +465,10 @@ namespace DX11Base {
     }
     if (nowTick - s_lastTechMonitorTick >= 500) {
       s_lastTechMonitorTick = nowTick;
+
+      // 1월 평정에서는 AI 성장을 먼저 확정한 뒤
+      // MonitorTechStatus()의 특수능력 자동판정이 성장 후 데이터를 읽도록 합니다.
+      DX11Base::TickAIOfficerAutoGrowth();
       MonitorTechStatus();
       MonitorAllAggressive();
     }
@@ -485,7 +489,6 @@ namespace DX11Base {
     ApplyStoredConfigs(p1, gameBase);
     RunYearlyRearSupport(p1);
     TickAutoAffinityGrowth(p1);
-    DX11Base::TickAIOfficerAutoGrowth();
     DX11Base::TickSpecialAbilityAutoAssign();
 
     // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
