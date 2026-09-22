@@ -47,9 +47,23 @@ namespace DX11Base {
       uintptr_t cityPtr = 0;
     };
 
+    struct OfficerChangeDisplayRow {
+      std::string officerName;
+      std::string previousForce;
+      std::string currentForce;
+    };
+
     struct SharedPopup {
+      enum class Kind {
+        Generic,
+        OfficerChange
+      };
+
+      Kind kind = Kind::Generic;
       std::string title;
       std::vector<std::string> lines;
+      std::vector<OfficerChangeDisplayRow> recruitRows;
+      std::vector<OfficerChangeDisplayRow> deadRows;
       float timeRemaining = 12.f;
     };
 
@@ -345,8 +359,8 @@ namespace DX11Base {
 
     LoadOfficerNames();
 
-    std::vector<std::string> deadLines;
-    std::vector<std::string> recruitLines;
+    std::vector<OfficerChangeDisplayRow> deadRows;
+    std::vector<OfficerChangeDisplayRow> recruitRows;
     OfficerChangeSnapshot next[5103]{};
     bool seenThisTick[5103] = {false};
     uintptr_t lastPage = 0;
@@ -388,11 +402,10 @@ namespace DX11Base {
         continue;
 
       if (before.status != kStatusDead && status == kStatusDead) {
-        std::string line =
-            u8"사망  " + OfficerName(id) +
-            u8"  [" + ForceName(before.forcePtr) +
-            u8" / " + CityName(before.cityPtr) + u8"]";
-        deadLines.push_back(line);
+        deadRows.push_back({
+            OfficerName(id),
+            ForceName(before.forcePtr),
+            std::string()});
         AddLog(u8"[장수변동] 사망: %s / 직전 %s / %s",
                OfficerName(id).c_str(),
                ForceName(before.forcePtr).c_str(),
@@ -404,12 +417,10 @@ namespace DX11Base {
       if (status != kStatusDead &&
           before.forcePtr != forcePtr &&
           forcePtr > 0x10000) {
-        std::string line =
-            u8"등용  " + OfficerName(id) +
-            u8"  " + ForceName(before.forcePtr) +
-            u8" → " + ForceName(forcePtr) +
-            u8" / " + CityName(cityPtr);
-        recruitLines.push_back(line);
+        recruitRows.push_back({
+            OfficerName(id),
+            ForceName(before.forcePtr),
+            ForceName(forcePtr)});
         AddLog(u8"[장수변동] 등용/세력변경: %s / %s -> %s / %s",
                OfficerName(id).c_str(),
                ForceName(before.forcePtr).c_str(),
@@ -421,19 +432,37 @@ namespace DX11Base {
     std::memcpy(s_changeBaseline, next, sizeof(s_changeBaseline));
     s_changeBaselineInitialized = true;
 
-    if (deadLines.empty() && recruitLines.empty()) {
+    if (deadRows.empty() && recruitRows.empty()) {
       AddLog(u8"[장수변동] 평정 종료 확인: 사망/등용 변동 없음");
       return;
     }
 
-    std::vector<std::string> lines;
-    lines.reserve(deadLines.size() + recruitLines.size());
-    lines.insert(lines.end(), recruitLines.begin(), recruitLines.end());
-    lines.insert(lines.end(), deadLines.begin(), deadLines.end());
+    {
+      std::lock_guard<std::mutex> lk(s_notifMtx);
 
-    RoninMonitor_QueueSharedNotice(u8" [ 사망장수 및 등용장수 ]", lines);
-    AddLog(u8"[장수변동] 평정 종료 알림 큐 등록: 등용 %zu명 / 사망 %zu명",
-           recruitLines.size(), deadLines.size());
+      SharedPopup popup;
+      popup.kind = SharedPopup::Kind::OfficerChange;
+      popup.title = u8" [ 사망장수 및 등용장수 ]";
+
+      const size_t recruitLimit =
+          (std::min<size_t>)(recruitRows.size(), 16);
+      const size_t deadLimit =
+          (std::min<size_t>)(deadRows.size(), 16);
+      popup.recruitRows.assign(
+          recruitRows.begin(), recruitRows.begin() + recruitLimit);
+      popup.deadRows.assign(
+          deadRows.begin(), deadRows.begin() + deadLimit);
+
+      // 장수 변동 표는 읽을 항목이 많아 기존 공용 알림(12초)보다 길게 표시합니다.
+      popup.timeRemaining = 20.f;
+      s_sharedPopupQueue.push_back(std::move(popup));
+
+      if (s_sharedPopupQueue.size() > 4)
+        s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
+    }
+
+    AddLog(u8"[장수변동] 평정 종료 알림 큐 등록: 등용 %zu명 / 사망 %zu명 / 표시 20초",
+           recruitRows.size(), deadRows.size());
   }
 
   void RoninMonitor_QueueSharedNotice(
@@ -560,9 +589,12 @@ namespace DX11Base {
 
     std::vector<RoninNotification> roninSnap;
     std::vector<std::string> sharedLines;
+    std::vector<OfficerChangeDisplayRow> recruitRows;
+    std::vector<OfficerChangeDisplayRow> deadRows;
     std::string sharedTitle;
     bool showRonin = false;
     bool showShared = false;
+    bool showOfficerChange = false;
 
     {
       std::lock_guard<std::mutex> lk(s_notifMtx);
@@ -593,6 +625,10 @@ namespace DX11Base {
         } else {
           sharedTitle = popup.title;
           sharedLines = popup.lines;
+          recruitRows = popup.recruitRows;
+          deadRows = popup.deadRows;
+          showOfficerChange =
+              popup.kind == SharedPopup::Kind::OfficerChange;
           showShared = true;
         }
       }
@@ -605,7 +641,7 @@ namespace DX11Base {
     ImVec2 disp = ImGui::GetIO().DisplaySize;
 
     float sharedColumnWidth = 360.f * sc;
-    if (showShared) {
+    if (showShared && !showOfficerChange) {
       float maxTextWidth = ImGui::CalcTextSize(sharedTitle.c_str()).x * 1.8f;
       for (const std::string &line : sharedLines) {
         const float w = ImGui::CalcTextSize(line.c_str()).x * 1.8f;
@@ -694,6 +730,86 @@ namespace DX11Base {
                 n.cityName.c_str());
           }
           ImGui::EndTable();
+        }
+      } else if (showOfficerChange) {
+        if (!recruitRows.empty()) {
+          ImGui::Spacing();
+          ImGui::TextColored(
+              ImVec4(0.35f, 1.f, 0.45f, 1.f),
+              u8"[등용]");
+          if (ImGui::BeginTable(
+                  "##OfficerRecruitTable",
+                  3,
+                  ImGuiTableFlags_BordersInnerV |
+                      ImGuiTableFlags_BordersInnerH |
+                      ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn(
+                u8"장수명",
+                ImGuiTableColumnFlags_WidthFixed,
+                150.f * sc);
+            ImGui::TableSetupColumn(
+                u8"이전 세력",
+                ImGuiTableColumnFlags_WidthFixed,
+                180.f * sc);
+            ImGui::TableSetupColumn(
+                u8"현재 세력",
+                ImGuiTableColumnFlags_WidthFixed,
+                180.f * sc);
+            ImGui::TableHeadersRow();
+
+            for (const auto &row : recruitRows) {
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::TextColored(
+                  ImVec4(0.35f, 1.f, 1.f, 1.f),
+                  u8"%s",
+                  row.officerName.c_str());
+              ImGui::TableSetColumnIndex(1);
+              ImGui::TextUnformatted(row.previousForce.c_str());
+              ImGui::TableSetColumnIndex(2);
+              ImGui::TextColored(
+                  ImVec4(1.f, 1.f, 0.55f, 1.f),
+                  u8"%s",
+                  row.currentForce.c_str());
+            }
+            ImGui::EndTable();
+          }
+        }
+
+        if (!deadRows.empty()) {
+          if (!recruitRows.empty())
+            ImGui::Spacing();
+          ImGui::TextColored(
+              ImVec4(1.f, 0.4f, 0.4f, 1.f),
+              u8"[사망]");
+          if (ImGui::BeginTable(
+                  "##OfficerDeathTable",
+                  2,
+                  ImGuiTableFlags_BordersInnerV |
+                      ImGuiTableFlags_BordersInnerH |
+                      ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn(
+                u8"장수명",
+                ImGuiTableColumnFlags_WidthFixed,
+                150.f * sc);
+            ImGui::TableSetupColumn(
+                u8"세력",
+                ImGuiTableColumnFlags_WidthFixed,
+                180.f * sc);
+            ImGui::TableHeadersRow();
+
+            for (const auto &row : deadRows) {
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::TextColored(
+                  ImVec4(1.f, 0.55f, 0.55f, 1.f),
+                  u8"%s",
+                  row.officerName.c_str());
+              ImGui::TableSetColumnIndex(1);
+              ImGui::TextUnformatted(row.previousForce.c_str());
+            }
+            ImGui::EndTable();
+          }
         }
       } else {
         if (ImGui::BeginTable(
