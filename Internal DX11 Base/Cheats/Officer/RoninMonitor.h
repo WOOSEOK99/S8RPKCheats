@@ -11,6 +11,8 @@
 // =============================================================================
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace DX11Base {
 
@@ -22,5 +24,9 @@ namespace DX11Base {
 
     // 외부(치트 메뉴 등)에서 수동으로 상태 변경 시 알림 중복 방지를 위한 동기화
     void RoninMonitor_UpdatePrevStatus(int officerID, uint8_t newStatus);
+
+    // 연말 자동 특수능력 부여 결과 팝업.
+    // 재야 알림 체크 여부와 무관하게 표시되며, 재야 알림이 실제 표시 중이면 뒤에서 대기합니다.
+    void RoninMonitor_QueueSpecialAbilityNotice(const std::vector<std::string>& lines);
 
 } // namespace DX11Base
