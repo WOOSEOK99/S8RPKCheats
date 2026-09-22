@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace DX11Base {
