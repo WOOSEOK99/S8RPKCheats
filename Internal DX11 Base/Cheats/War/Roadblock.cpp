@@ -119,7 +119,7 @@ namespace DX11Base {
 
     AIWarPatchSnapshot snapshots[_countof(kAIWarPatches)]{};
 
-    // 먼저 세 주소를 모두 검증합니다. 하나라도 예상과 다르면 아무 것도 쓰지 않습니다.
+    // 먼저 5개 static 주소를 모두 검증합니다. 하나라도 예상과 다르면 아무 것도 쓰지 않습니다.
     for (size_t i = 0; i < _countof(kAIWarPatches); ++i) {
       const AIWarPatchSpec &spec = kAIWarPatches[i];
       AIWarPatchSnapshot &snapshot = snapshots[i];
