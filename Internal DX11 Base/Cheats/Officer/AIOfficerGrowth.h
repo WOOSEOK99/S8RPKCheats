@@ -30,6 +30,15 @@ struct AIOfficerGrowthPreview {
 
 const char *GetAIOfficerGrowthCategoryName(std::size_t index);
 
+// 12월 미리보기와 다음 1월 실제 적용에서 동일한 전법 선택 순서를 사용합니다.
+uint32_t MakeAIOfficerGrowthAnnualSeed(
+    unsigned short applyYear,
+    uint16_t officerId);
+
+// 해당 연도 1월 평정에서 AI 자동성장이 실제 적용되었는지 확인합니다.
+// 1월 세이브를 단순 로드한 경우에는 false입니다.
+bool WasAIOfficerGrowthAppliedForYear(unsigned short year);
+
 // GrowthM 원본 로직을 기준으로 현재 무장 1명의 성장 결과를 메모리에 쓰지 않고 계산합니다.
 // 남는 소양의 능력 EXP 전환 대상만 S8RPKCheats 규칙을 사용합니다.
 bool BuildAIOfficerGrowthPreview(
