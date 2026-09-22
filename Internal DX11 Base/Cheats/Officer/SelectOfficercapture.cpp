@@ -13,6 +13,7 @@
 #include "OfficerRosterResolve.h"
 #include "RoninMonitor.h" // 알림 동기화용 추가
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -23,6 +24,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -909,6 +911,7 @@ namespace DX11Base {
   }
 
   // --- [모든 무장 일괄 랜덤 기재 부여] ---
+  constexpr int kBatchRandomOfficerCount = 1800;
   static bool s_showBatchRandomTraitWindow = false;
   static bool s_batchRandomGold = true;
   static bool s_batchRandomGreen = true;
@@ -929,8 +932,13 @@ namespace DX11Base {
     int filledSlots = 0;
     int alreadyFull = 0;
     int failedOfficers = 0;
+    bool collectingOfficers = false;
   };
   static BatchRandomTraitJob s_batchRandomJob;
+  static std::atomic<bool> s_batchRandomCollectRunning{false};
+  static std::atomic<bool> s_batchRandomCollectDone{false};
+  static std::mutex s_batchRandomCollectMutex;
+  static std::vector<uintptr_t> s_batchRandomCollectedOfficers;
 
   static int GetBatchTraitGrade(uint16_t traitId) {
     if ((traitId >= 1 && traitId <= 70) || traitId == 201 || traitId == 202)
@@ -967,33 +975,52 @@ namespace DX11Base {
     return false;
   }
 
-  static std::vector<uintptr_t> CollectValidOfficerBasesForBatch() {
-    std::vector<uintptr_t> officers;
+  static void StartCollectValidOfficerBasesForBatchWorker() {
+    if (s_batchRandomCollectRunning.load())
+      return;
 
-    const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-    uintptr_t arrayBase = 0;
-    if (!exe || !TryResolveOfficerRosterArrayBase(exe, &arrayBase) || arrayBase < 0x10000)
-      return officers;
+    s_batchRandomCollectRunning = true;
+    s_batchRandomCollectDone = false;
 
-    bool seenIds[5103] = {};
-    officers.reserve(5102);
+    std::thread([]() {
+      std::vector<uintptr_t> officers;
 
-    for (int i = 0; i < 5102; ++i) {
-      const uintptr_t base = arrayBase + static_cast<uintptr_t>(i) * 0x3D0;
-      const RosterStats stats = SafeReadRosterStats(base);
-      if (!stats.valid || stats.id_08 < 1 || stats.id_08 > 5102)
-        continue;
-      if (seenIds[stats.id_08])
-        continue;
-      if (!IsValidPtr(base + 0x10, 1))
-        continue;
+      const uintptr_t exe =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      uintptr_t arrayBase = 0;
+      if (exe &&
+          TryResolveOfficerRosterArrayBase(exe, &arrayBase) &&
+          arrayBase >= 0x10000) {
+        bool seenIds[kBatchRandomOfficerCount + 1] = {};
+        officers.reserve(kBatchRandomOfficerCount);
 
-      seenIds[stats.id_08] = true;
-      officers.push_back(base);
-    }
+        for (int i = 0; i < kBatchRandomOfficerCount; ++i) {
+          const uintptr_t base =
+              arrayBase + static_cast<uintptr_t>(i) * 0x3D0;
+          const RosterStats stats = SafeReadRosterStats(base);
+          if (!stats.valid ||
+              stats.id_08 < 1 ||
+              stats.id_08 > kBatchRandomOfficerCount)
+            continue;
+          if (seenIds[stats.id_08])
+            continue;
+          if (!IsValidPtr(base + 0x10, 1))
+            continue;
 
-    return officers;
+          seenIds[stats.id_08] = true;
+          officers.push_back(base);
+        }
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(s_batchRandomCollectMutex);
+        s_batchRandomCollectedOfficers = std::move(officers);
+      }
+      s_batchRandomCollectRunning = false;
+      s_batchRandomCollectDone = true;
+    }).detach();
   }
+
 
   static int AssignRandomTraitsToOneOfficerBatchFast(
       uintptr_t officerBase,
@@ -1065,6 +1092,33 @@ namespace DX11Base {
   static void TickBatchRandomTraitJob() {
     if (!s_batchRandomJob.running)
       return;
+
+    // 0단계: 1~1800 실사용 무장 목록은 worker에서 수집합니다.
+    if (s_batchRandomJob.collectingOfficers) {
+      if (!s_batchRandomCollectDone.load())
+        return;
+
+      {
+        std::lock_guard<std::mutex> lock(s_batchRandomCollectMutex);
+        s_batchRandomJob.officers =
+            std::move(s_batchRandomCollectedOfficers);
+        s_batchRandomCollectedOfficers.clear();
+      }
+      s_batchRandomCollectDone = false;
+      s_batchRandomJob.collectingOfficers = false;
+
+      if (s_batchRandomJob.officers.empty()) {
+        s_batchRandomJob.running = false;
+        s_batchRandomStatus =
+            u8"1~1800 무장 범위에서 유효 무장을 찾지 못했습니다.";
+        return;
+      }
+
+      s_batchRandomStatus =
+          std::string(u8"유효 무장 수집 완료: ") +
+          std::to_string(s_batchRandomJob.officers.size()) +
+          u8"명 / 기재 객체 준비 중";
+    }
 
     // 1단계: 기재 객체 카탈로그를 프로세스 메모리에서 프레임 분할로 검색합니다.
     if (s_batchRandomJob.scanningTraits) {
@@ -1235,7 +1289,11 @@ namespace DX11Base {
                        u8"※ 기존 기재는 유지하고 빈 슬롯만 변경합니다.");
 
     if (s_batchRandomJob.running) {
-      if (s_batchRandomJob.scanningTraits) {
+      if (s_batchRandomJob.collectingOfficers) {
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
+                           u8"1~1800 실사용 무장 목록 수집 중...");
+        ImGui::TextDisabled(u8"장수 배열 검사는 백그라운드 worker에서 처리합니다.");
+      } else if (s_batchRandomJob.scanningTraits) {
         ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
                            u8"기재 객체 검색 중... %zu / %zu개 발견",
                            s_batchRandomJob.traitObjects.size(),
@@ -1274,17 +1332,13 @@ namespace DX11Base {
           }
         }
 
-        std::vector<uintptr_t> officers = CollectValidOfficerBasesForBatch();
-        if (officers.empty()) {
-          s_batchRandomStatus =
-              u8"무장 배열을 찾지 못했습니다. 인게임 전략 화면에서 다시 시도하세요.";
-        } else if (enabledPool.empty()) {
+        if (enabledPool.empty()) {
           s_batchRandomStatus =
               u8"선택한 등급에 사용 가능한 기재가 없습니다.";
         } else {
           s_batchRandomJob = {};
           s_batchRandomJob.running = true;
-          s_batchRandomJob.officers = std::move(officers);
+          s_batchRandomJob.collectingOfficers = true;
           s_batchRandomJob.requestedPool = std::move(enabledPool);
 
           if (!SeedTraitObjectsForBatch(
@@ -1292,6 +1346,7 @@ namespace DX11Base {
                   s_batchRandomJob.traitObjects,
                   s_batchRandomJob.traitVtable)) {
             s_batchRandomJob.running = false;
+            s_batchRandomJob.collectingOfficers = false;
             s_batchRandomStatus =
                 u8"기재 객체 형식(vtable)을 확인할 기준 기재를 찾지 못했습니다.";
           } else {
@@ -1301,19 +1356,13 @@ namespace DX11Base {
 
             if (!s_batchRandomJob.scanningTraits) {
               s_batchRandomJob.pool = s_batchRandomJob.requestedPool;
-              s_batchRandomStatus =
-                  std::string(u8"기재 객체 준비 완료: ") +
-                  std::to_string(s_batchRandomJob.pool.size()) +
-                  u8"개 / 무장 적용 시작";
             } else {
               s_batchRandomJob.scanAddress = 0;
-              s_batchRandomStatus =
-                  std::string(u8"기재 객체 검색 시작: 현재 ") +
-                  std::to_string(s_batchRandomJob.traitObjects.size()) +
-                  u8" / " +
-                  std::to_string(s_batchRandomJob.requestedPool.size()) +
-                  u8"개 확인";
             }
+
+            StartCollectValidOfficerBasesForBatchWorker();
+            s_batchRandomStatus =
+                u8"1~1800 실사용 무장 목록 수집 시작";
           }
         }
       }
