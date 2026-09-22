@@ -127,11 +127,12 @@ namespace DX11Base {
         return false;
       }
 
-      // Step 4:
-      // Start from the entire known-good 신산화계 (#2) 0x20-byte record so the
-      // +16/+18 tail remains identical to a proven working strategy.
-      // Then change only the confirmed strategy fields to test whether effect
-      // code 20 is interpreted as troop healing in the strategy engine.
+      // Step 4b:
+      // Keep the entire known-good 신산화계 (#2) 0x20-byte tail (+16/+18), but
+      // do NOT put the unverified effect 20 in effect1. In the previous Step 4
+      // that combination froze the strategy-selection UI when opening the list.
+      // Use a known-good strategy-native primary effect (morale +40) and place
+      // effect 20 only in effect2 as the healing candidate.
       const uintptr_t spell2 = table + 1 * kSpellStride;
       const uintptr_t spell4 = table + 3 * kSpellStride;
       const uintptr_t spell5 = table + 4 * kSpellStride;
@@ -148,17 +149,17 @@ namespace DX11Base {
       SpellRecord clone{};
       std::memcpy(&clone, reinterpret_cast<const void *>(spell2), sizeof(clone));
 
-      // Keep the working #2 tail (+16/+18), but turn the confirmed prefix into
-      // a controlled healing probe for code #5.
+      // Keep the working #2 tail (+16/+18), but use only a known-safe strategy
+      // effect in slot 1. The healing candidate is isolated in slot 2.
       clone.code1 = 5;
       clone.code2 = 5;
       clone.code3 = 5;
       clone.target = 1;      // ally
-      clone.effect1 = 20;    // healing candidate; confirmed in tactics, not yet in strategy
-      clone.power1 = 2000;
+      clone.effect1 = 10;    // known strategy-native morale change
+      clone.power1 = 40;     // +40 morale anchor
       clone.duration1 = 0;
-      clone.effect2 = 0;
-      clone.power2 = 0;
+      clone.effect2 = 20;    // healing candidate; confirmed only in tactics so far
+      clone.power2 = 2000;
       clone.duration2 = 0;
       clone.range = 5;
 
@@ -180,7 +181,7 @@ namespace DX11Base {
       g_spell5Addr = spell5;
       g_applied = true;
 
-      AddLog(u8"[책략5DBG] Step4 적용: 신산화계 tail 유지 + 코드5 치료효과20 실험");
+      AddLog(u8"[책략5DBG] Step4b 적용: 신산화계 tail 유지 + 효과1 사기+40 + 효과2 치료후보20");
       AddLog(u8"[책략5DBG] table=%p selector4=%p canonical5=%p source2=%p",
              reinterpret_cast<void *>(table), reinterpret_cast<void *>(spell4),
              reinterpret_cast<void *>(spell5), reinterpret_cast<void *>(spell2));
@@ -188,7 +189,7 @@ namespace DX11Base {
              (int)clone.target, (int)clone.effect1, (int)clone.power1,
              (int)clone.effect2, (int)clone.power2, (int)clone.range,
              (int)clone.unknown16, reinterpret_cast<void *>((uintptr_t)clone.unknownPtr));
-      AddLog(u8"[책략5DBG] 기대값: 아군 / 효과20 / 회복량후보2000 / 범위5. 클릭 후 실제 병력이 증가하는지 확인하세요.");
+      AddLog(u8"[책략5DBG] 기대값: 아군 / 사기+40 + 효과2=20(회복후보2000) / 범위5. 먼저 메뉴 프리징 여부부터 확인하세요.");
       return true;
     }
 
