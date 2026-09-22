@@ -52,6 +52,7 @@ namespace DX11Base {
   bool bAllAggressive = false;
   bool bBattleUnit = false;
   bool bBattleMapShuffle = false;
+  bool bPrisonerCaptureManagement = true;
   bool bShortBattleCooldownEnabled = false;
   int iShortBattleCooldownDays = 3;
   bool bTroopCountCombatScaling = false;
