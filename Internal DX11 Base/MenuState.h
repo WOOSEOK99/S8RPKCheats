@@ -56,6 +56,7 @@ namespace DX11Base {
   extern bool bAllAggressive;
   extern bool bBattleUnit;
   extern bool bBattleMapShuffle;
+  extern bool bPrisonerCaptureManagement;      // 부장/고립도시 포로 처리 개선 (기본 ON)
   extern bool bShortBattleCooldownEnabled;
   extern int iShortBattleCooldownDays;
   extern bool bTroopCountCombatScaling;
