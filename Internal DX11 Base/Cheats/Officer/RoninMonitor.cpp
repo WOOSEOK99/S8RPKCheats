@@ -834,6 +834,27 @@ namespace DX11Base {
             ImGui::EndTable();
           }
         }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        const float closeButtonWidth = 120.f * sc;
+        const float closeAvail = ImGui::GetContentRegionAvail().x;
+        if (closeAvail > closeButtonWidth)
+          ImGui::SetCursorPosX(
+              ImGui::GetCursorPosX() + (closeAvail - closeButtonWidth) * 0.5f);
+
+        if (ImGui::Button(
+                u8"닫기",
+                ImVec2(closeButtonWidth, 0.f))) {
+          std::lock_guard<std::mutex> lk(s_notifMtx);
+          if (!s_sharedPopupQueue.empty() &&
+              s_sharedPopupQueue.front().kind ==
+                  SharedPopup::Kind::OfficerChange) {
+            s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
+          }
+        }
       } else {
         if (ImGui::BeginTable(
                 "##SharedNotificationTable",
