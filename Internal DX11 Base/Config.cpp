@@ -175,6 +175,7 @@ namespace DX11Base {
     UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
     UpsertBoolConfigValue("bReinforcementDefenderPlacement", bReinforcementDefenderPlacement);
+    UpsertBoolConfigValue("bOfficerChangeNotify", bOfficerChangeNotify);
     UpsertBoolConfigValue("bAnnualSpecialAbilityAutoAssign", bAnnualSpecialAbilityAutoAssign);
     UpsertBoolConfigValue("bAIOfficerAutoGrowth", bAIOfficerAutoGrowth);
     UpsertIntConfigValue("iAIOfficerGrowthSpeed", iAIOfficerGrowthSpeed);
@@ -231,6 +232,13 @@ namespace DX11Base {
 
       AddLog(u8"[Config] 원군 도착 턴 즉시 행동 설정 로드: %s",
              bReinforcementArrivalAction ? "ON" : "OFF");
+    }
+
+    bool savedOfficerChangeNotify = false;
+    if (LoadBoolConfigValue("bOfficerChangeNotify", savedOfficerChangeNotify)) {
+      bOfficerChangeNotify = savedOfficerChangeNotify;
+      AddLog(u8"[Config] 사망장수 및 등용장수 알림 설정 로드: %s",
+             bOfficerChangeNotify ? "ON" : "OFF");
     }
 
     bool savedAnnualSpecialAbilityAutoAssign = false;
