@@ -223,8 +223,10 @@ struct AutoAssignJob {
 
 AutoAssignJob g_autoAssignJob;
 bool g_annualAssignPending = false;
+uint16_t g_lastAnnualYear = 0;
 uint8_t g_lastAnnualMonth = 0;
 uint64_t g_lastAnnualMonthPollTick = 0;
+uint64_t g_annualAssignReadyTick = 0;
 
 bool StartAutoAssignJob(bool annualMode) {
   if (g_autoAssignJob.running)
@@ -471,28 +473,66 @@ void TickSpecialAbilityAutoAssign() {
 void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
   if (!enabled) {
     g_annualAssignPending = false;
+    g_lastAnnualYear = 0;
     g_lastAnnualMonth = 0;
     g_lastAnnualMonthPollTick = 0;
+    g_annualAssignReadyTick = 0;
     return;
   }
 
   const uint64_t now = GetTickCount64();
-  if (now - g_lastAnnualMonthPollTick >= 250ull) {
+
+  // UI 캡처 월값이 아니라 실제 시나리오 날짜를 기준으로 감지합니다.
+  // 날짜 편집으로 12월로 점프한 뒤 곧바로 평정을 진행하는 테스트도 놓치지 않도록
+  // 100ms 간격으로 가볍게 확인합니다.
+  if (now - g_lastAnnualMonthPollTick >= 100ull) {
     g_lastAnnualMonthPollTick = now;
 
-    const uint8_t month = GetSystemMonthValue();
-    if (month >= 1 && month <= 12) {
-      if (g_lastAnnualMonth == 12 && month == 1) {
-        g_annualAssignPending = true;
-        AddLog(u8"[특수능력/연말자동] 12월 -> 1월 전환 감지, 자동 판정 예약");
+    unsigned short currentYear = 0;
+    uint8_t currentMonth = 0;
+    if (ReadScenarioDate(&currentYear, &currentMonth) &&
+        currentYear > 0 &&
+        currentMonth >= 1 && currentMonth <= 12) {
+      if (g_lastAnnualYear == 0 || g_lastAnnualMonth == 0) {
+        // 처음 활성화/로드한 시점은 기준만 잡고 소급 실행하지 않습니다.
+        g_lastAnnualYear = currentYear;
+        g_lastAnnualMonth = currentMonth;
+      } else {
+        const unsigned int previousSerial =
+            (unsigned int)g_lastAnnualYear * 12u +
+            (unsigned int)g_lastAnnualMonth;
+        const unsigned int currentSerial =
+            (unsigned int)currentYear * 12u +
+            (unsigned int)currentMonth;
+
+        // 정상적인 12월->1월뿐 아니라 테스트 중 날짜 점프로 직전 월을 짧게 건너뛰어도
+        // "연도가 증가했고 현재가 1월"이면 새해 평정으로 인정합니다.
+        const bool crossedIntoJanuary =
+            currentSerial > previousSerial &&
+            currentYear > g_lastAnnualYear &&
+            currentMonth == 1;
+
+        g_lastAnnualYear = currentYear;
+        g_lastAnnualMonth = currentMonth;
+
+        if (crossedIntoJanuary) {
+          g_annualAssignPending = true;
+          // 연초 평정의 능력/전법 상승 처리가 모두 끝난 뒤 읽도록 3초 유예합니다.
+          g_annualAssignReadyTick = now + 3000ull;
+          AddLog(
+              u8"[특수능력/연말자동] 새해 1월 전환 감지 -> 3초 후 자동 판정 예약");
+        }
       }
-      g_lastAnnualMonth = month;
     }
   }
 
-  if (g_annualAssignPending && !g_autoAssignJob.running) {
-    if (StartAutoAssignJob(true))
+  if (g_annualAssignPending &&
+      !g_autoAssignJob.running &&
+      now >= g_annualAssignReadyTick) {
+    if (StartAutoAssignJob(true)) {
       g_annualAssignPending = false;
+      g_annualAssignReadyTick = 0;
+    }
   }
 }
 
