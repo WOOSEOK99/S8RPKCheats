@@ -1556,7 +1556,7 @@ namespace DX11Base {
 
       ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 책략 ]");
 
-      if (ImGui::Checkbox(u8"공격측 책략 게이지 최대", &bMaxAttackStratagemGauge)) {
+      if (ImGui::Checkbox(u8"공격측 책략 게이지 시작 최대", &bMaxAttackStratagemGauge)) {
         const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
         if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
           bMaxAttackStratagemGauge = !bMaxAttackStratagemGauge;
@@ -1569,7 +1569,7 @@ namespace DX11Base {
 
       ImGui::SameLine();
 
-      if (ImGui::Checkbox(u8"수비측 책략 게이지 최대", &bMaxDefenseStratagemGauge)) {
+      if (ImGui::Checkbox(u8"수비측 책략 게이지 시작 최대", &bMaxDefenseStratagemGauge)) {
         const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
         if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
           bMaxDefenseStratagemGauge = !bMaxDefenseStratagemGauge;
@@ -1580,7 +1580,7 @@ namespace DX11Base {
         }
       }
 
-      ImGui::TextDisabled(u8"전투 중 선택한 진영의 책략 게이지를 최대치(10000)로 유지합니다.");
+      ImGui::TextDisabled(u8"전투 중 해당 진영의 책략 게이지 처리 시 최대치(10000)로 한 번 채웁니다.");
 
       EndSection(); // 전쟁
     }
