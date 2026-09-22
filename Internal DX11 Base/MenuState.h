@@ -66,6 +66,7 @@ namespace DX11Base {
   extern bool bAnnualSpecialAbilityAutoAssign; // 매년 12월->1월 전환 시 특수 능력 자동 판정
   extern bool bAIOfficerAutoGrowth;             // AI 무장 자동성장
   extern int iAIOfficerGrowthSpeed;             // 1=느림, 2=보통, 3=빠름
+  extern bool bAIOfficerGrowthRestoreNone;       // ON 전 게임 설정이 양쪽 모두 '없음'이었는지 기억
 
   // 전투 환경 / 조건 설정
   extern bool bWeatherSkillSimple;
