@@ -7,6 +7,7 @@
 #include "OfficerRosterResolve.h"
 #include "OfficerData.h"
 #include "SpecialAbilityAutoAssign.h"
+#include "RoninMonitor.h"
 
 #include <algorithm>
 #include <array>
@@ -551,13 +552,11 @@ void FinishAutoAssignJob() {
   }
 
   if (g_autoAssignJob.annualMode && !g_autoAssignJob.resultLines.empty()) {
-    // 상단 마퀴는 요약 1건만 표시해 알림 폭주를 막습니다.
-    AddNotification(
-        std::string(u8"[연말 특수능력] ") +
-        std::to_string(g_autoAssignJob.resultLines.size()) +
-        u8"명의 무장에게 특수 능력이 새로 부여되었습니다. 알림 내역에서 확인하세요.");
+    // 재야 장수 발견 알림과 같은 위치/스타일의 자동 소멸 팝업으로 표시합니다.
+    // 재야 알림이 실제 표시 중이면 그 팝업이 끝난 뒤 순서대로 표시됩니다.
+    RoninMonitor_QueueSpecialAbilityNotice(g_autoAssignJob.resultLines);
 
-    // 장수별 상세는 알림 내역에 직접 기록합니다.
+    // 장수별 상세는 알림 내역에도 그대로 기록합니다.
     for (const std::string &line : g_autoAssignJob.resultLines) {
       g_notificationHistory.push_back(
           std::string(u8"[연말 특수능력] ") + line);
