@@ -10,6 +10,7 @@
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
+#include "Cheats/War/PrisonerCaptureManagement.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
 
@@ -171,6 +172,7 @@ namespace DX11Base {
     UpsertBoolConfigValue("bShortBattleCooldownEnabled", bShortBattleCooldownEnabled);
     UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
     UpsertBoolConfigValue("bTroopCountCombatScaling", bTroopCountCombatScaling);
+    UpsertBoolConfigValue("bPrisonerCaptureManagement", bPrisonerCaptureManagement);
     UpsertBoolConfigValue("bGovernorPrisonerDisposal", bGovernorPrisonerDisposal);
     UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
@@ -204,6 +206,16 @@ namespace DX11Base {
 
     AddLog(u8"[Config] 결전 발생 주기 단축 설정 로드: %s",
            bTotalWarCycleShortening ? "ON" : "OFF");
+
+    bool savedPrisonerCaptureManagement = bPrisonerCaptureManagement;
+    LoadBoolConfigValue("bPrisonerCaptureManagement",
+                        savedPrisonerCaptureManagement);
+    bPrisonerCaptureManagement = savedPrisonerCaptureManagement;
+    if (!SetPrisonerCaptureManagement(bPrisonerCaptureManagement))
+      bPrisonerCaptureManagement = IsPrisonerCaptureManagementApplied();
+
+    AddLog(u8"[Config] 포로 관리 설정 로드: %s",
+           bPrisonerCaptureManagement ? "ON" : "OFF");
 
     bool savedGovernorPrisonerConsumePrivilege = false;
     if (LoadBoolConfigValue("bGovernorPrisonerConsumePrivilege",
