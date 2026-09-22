@@ -1135,9 +1135,6 @@ namespace DX11Base {
           ImGui::TextUnformatted(u8"- 포로와 처분 주체의 상성 차이를 반영");
           ImGui::TextUnformatted(u8"- 처분 주체의 의리와 포로의 군주 여부를 반영");
           ImGui::TextUnformatted(u8"- 두 장수의 관계 판정과 세력 간 특수 관계를 함께 반영");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 게임 버전의 hook 원본 바이트가 다르면 적용하지 않습니다.");
           ImGui::EndTooltip();
         }
 
