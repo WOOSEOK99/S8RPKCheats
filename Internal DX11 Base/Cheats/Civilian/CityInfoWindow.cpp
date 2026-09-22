@@ -346,6 +346,7 @@ namespace DX11Base {
     };
     static std::vector<CitySnap> s_snap;
     static bool s_snapDirty = true; // 창 첫 열림 시 읽기 트리거
+    static bool s_frontierDirty = true; // 도시 자원/병력 변경 시 수송 탭 재계산
 
     static void RefreshSnap(uintptr_t cityBase) {
       s_snap.assign(g_CityCount, CitySnap{});
@@ -592,7 +593,6 @@ namespace DX11Base {
     static std::vector<FrontierCityRow> s_frontierRows;
     static uintptr_t s_frontierSelectedForce = 0;
     static uintptr_t s_frontierPlayerForce = 0;
-    static bool s_frontierDirty = true;
     static int s_frontierFilter = 0; // 0=전체, 1=전선, 2=후방
 
     // 수동 즉시 지원: 선택 세력 내 도시끼리 자유 이동(전선->전선 포함)
