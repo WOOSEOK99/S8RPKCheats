@@ -1553,7 +1553,7 @@ namespace DX11Base {
       ImGui::Spacing();
       ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
       static bool s_spell5HealProbe = false;
-      if (ImGui::Checkbox(u8"5번 책략 신산화계 복제 테스트", &s_spell5HealProbe)) {
+      if (ImGui::Checkbox(u8"5번 책략 광역힐 테스트", &s_spell5HealProbe)) {
         if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
           s_spell5HealProbe = !s_spell5HealProbe;
           AddNotification(u8"5번 책략 신산화계 복제 테스트 적용 실패 - 로그 확인");
@@ -1561,8 +1561,8 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"5번 책략 신산화계 복제 테스트", s_spell5HealProbe);
         }
       }
-      ImGui::TextDisabled(u8"신산화계 0x20 전체 레코드를 복제하고 코드만 5로 변경합니다.");
-      ImGui::TextDisabled(u8"4번 선택 슬롯과 실제 5번 레코드에 동일 적용. 해제 시 두 레코드 모두 원복합니다.");
+      ImGui::TextDisabled(u8"신산화계의 +16/+18 실행 데이터를 유지한 채 효과20=치료 여부를 시험합니다.");
+      ImGui::TextDisabled(u8"아군 / 효과20 / 수치2000 / 범위5. 클릭 후 실제 병력 회복 여부를 확인하세요.");
 
       EndSection(); // 전쟁
     }
