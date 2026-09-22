@@ -13,6 +13,7 @@
 #include "Cheats/War/PrisonerCaptureManagement.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
+#include "Cheats/War/AIExecutionConditionChange.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -178,6 +179,7 @@ namespace DX11Base {
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
     UpsertBoolConfigValue("bReinforcementDefenderPlacement", bReinforcementDefenderPlacement);
     UpsertBoolConfigValue("bOfficerChangeNotify", bOfficerChangeNotify);
+    UpsertBoolConfigValue("bAIExecutionConditionChange", bAIExecutionConditionChange);
     UpsertBoolConfigValue("bAnnualSpecialAbilityAutoAssign", bAnnualSpecialAbilityAutoAssign);
     UpsertBoolConfigValue("bAIOfficerAutoGrowth", bAIOfficerAutoGrowth);
     UpsertIntConfigValue("iAIOfficerGrowthSpeed", iAIOfficerGrowthSpeed);
@@ -251,6 +253,17 @@ namespace DX11Base {
       bOfficerChangeNotify = savedOfficerChangeNotify;
       AddLog(u8"[Config] 사망장수 및 등용장수 알림 설정 로드: %s",
              bOfficerChangeNotify ? "ON" : "OFF");
+    }
+
+    bool savedAIExecutionConditionChange = false;
+    if (LoadBoolConfigValue("bAIExecutionConditionChange",
+                            savedAIExecutionConditionChange)) {
+      bAIExecutionConditionChange = savedAIExecutionConditionChange;
+      if (!SetAIExecutionConditionChange(savedAIExecutionConditionChange))
+        bAIExecutionConditionChange = IsAIExecutionConditionChangeApplied();
+
+      AddLog(u8"[Config] AI 처형조건 변경 설정 로드: %s",
+             bAIExecutionConditionChange ? "ON" : "OFF");
     }
 
     bool savedAnnualSpecialAbilityAutoAssign = false;
