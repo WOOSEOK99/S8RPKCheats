@@ -2,6 +2,7 @@
 #include "Cheats.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
+#include "Cheats/Officer/SpecialAbilityAutoAssign.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SkillCountManager.h"
 #include "Cheats/System/SystemMonth.h"
@@ -549,6 +550,12 @@ namespace DX11Base {
     if (isRelevantState && gameState == 0x05) {
       if (s_lastAppliedMonth != sm) {
         UpdateOfficerStats99To100();
+
+        // 능력치 한계돌파와 동일한 평정 진입 타이밍을 사용합니다.
+        // 자동 특수능력은 연 1회만 실행하므로 1월 평정에서만 시작합니다.
+        if (sm == 1 && bAnnualSpecialAbilityAutoAssign)
+          DX11Base::AutoAssignSpecialAbilitiesFromCouncil();
+
         DX11Base::RunAutoCityExchange();
         s_lastAppliedMonth = sm;
       }
