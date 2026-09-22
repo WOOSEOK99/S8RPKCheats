@@ -170,6 +170,7 @@
     <ClInclude Include="debug.h" />
     <ClInclude Include="Cheats\War\Defbuildingboost.h" />
     <ClInclude Include="Cheats\War\DeputyCaptureFix.h" />
+    <ClInclude Include="Cheats\War\IsolatedCityCaptureFix.h" />
     <ClInclude Include="Engine.h" />
     <ClInclude Include="Cheats\Social\Fastrelationship.h" />
     <ClInclude Include="Cheats\Social\ChildEarlyAppearance.h" />
@@ -277,6 +278,7 @@
     <ClCompile Include="debug.cpp" />
     <ClCompile Include="Cheats\War\Defbuildingboost.cpp" />
     <ClCompile Include="Cheats\War\DeputyCaptureFix.cpp" />
+    <ClCompile Include="Cheats\War\IsolatedCityCaptureFix.cpp" />
     <ClCompile Include="dllmain.cpp">
       <!-- ProxyType이 dinput8일 때만 이 파일 포함 (기본값) -->
       <ExcludedFromBuild Condition="'$(ProxyType)'!='' and '$(ProxyType)'!='dinput8'">true</ExcludedFromBuild>
