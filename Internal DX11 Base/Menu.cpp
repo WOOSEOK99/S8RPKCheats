@@ -485,7 +485,6 @@ namespace DX11Base {
     RunYearlyRearSupport(p1);
     TickAutoAffinityGrowth(p1);
     DX11Base::TickSpecialAbilityAutoAssign();
-    DX11Base::TickAnnualSpecialAbilityAutoAssign(bAnnualSpecialAbilityAutoAssign);
 
     // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
     RoninMonitor_Tick(p1);
