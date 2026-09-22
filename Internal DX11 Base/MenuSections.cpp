@@ -1262,6 +1262,7 @@ namespace DX11Base {
           }
           SaveConfig();
         }
+        const bool growthToggleHovered = ImGui::IsItemHovered();
 
         ImGui::SameLine();
         ImGui::BeginDisabled(!bAIOfficerAutoGrowth);
@@ -1286,18 +1287,42 @@ namespace DX11Base {
           }
           SaveConfig();
         }
+        const bool growthComboHovered = ImGui::IsItemHovered();
         ImGui::EndDisabled();
 
-        if (ImGui::IsItemHovered()) {
+        const char *growthSpeedGuide =
+            speedIndex == 0
+                ? u8"장기 시나리오용"
+                : (speedIndex == 2
+                       ? u8"단기 시나리오 / 성장 체감 강조용"
+                       : u8"추천 기본값");
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"- %s", growthSpeedGuide);
+        const bool growthGuideHovered = ImGui::IsItemHovered();
+
+        if (growthToggleHovered || growthComboHovered || growthGuideHovered) {
           ImGui::BeginTooltip();
+          ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0f);
           ImGui::TextUnformatted(
               u8"AI 자동성장과 게임 원본 능력성장 속도를 한 번에 제어합니다.");
+          ImGui::Separator();
+          ImGui::TextColored(
+              ImVec4(0.65f, 0.85f, 1.0f, 1.0f),
+              u8"느림 : 장기 시나리오용");
+          ImGui::TextColored(
+              ImVec4(0.65f, 1.0f, 0.65f, 1.0f),
+              u8"보통 : 추천 기본값");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.82f, 0.45f, 1.0f),
+              u8"빠름 : 단기 시나리오 / 성장 체감 강조용");
+          ImGui::Separator();
           ImGui::TextUnformatted(
               u8"- 게임 설정이 '없음'이면 기능을 켤 때 자동으로 '보통'으로 변경합니다.");
           ImGui::TextUnformatted(
               u8"- 원래 게임 설정이 '없음'이었다면 기능을 끌 때 다시 '없음'으로 복귀합니다.");
           ImGui::TextUnformatted(
               u8"- 원래 느림/보통/빠름이었다면 기능을 꺼도 마지막 선택 속도를 유지합니다.");
+          ImGui::PopTextWrapPos();
           ImGui::EndTooltip();
         }
       }
