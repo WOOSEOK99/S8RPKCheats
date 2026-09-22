@@ -19,6 +19,7 @@
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/SpecialAbility.h"
+#include "Cheats/War/Spell5HealProbe.h"
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/Terrainignore.h"
 #include "MenuState.h"
@@ -452,6 +453,11 @@ namespace DX11Base {
       if (unitListBase > 0x10000) {
           __try {
             UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
+          } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+          // 5번 책략 대상 진단: 읽기 전용으로 전의 변화를 추적합니다.
+          __try {
+            UpdateSpell5TargetDiagnostics((int)unitCountTotal, unitListBase);
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
 
