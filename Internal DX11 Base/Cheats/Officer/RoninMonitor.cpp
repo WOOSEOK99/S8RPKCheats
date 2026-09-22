@@ -15,6 +15,7 @@
 #include "../../Config.h"
 #include "../../Framework/imgui.h"
 #include "../../MenuState.h"
+#include "../../NotificationManager.h"
 #include "OfficerData.h"
 #include "OfficerRosterResolve.h"
 #include "../../pch.h"
@@ -463,6 +464,28 @@ namespace DX11Base {
 
     AddLog(u8"[장수변동] 평정 종료 알림 큐 등록: 등용 %zu명 / 사망 %zu명 / 표시 20초",
            recruitRows.size(), deadRows.size());
+
+    // 팝업은 20초 후 사라지므로, 알림 확인 창에서도 다시 볼 수 있게
+    // 장수별 결과를 최근 알림 기록에 별도로 남깁니다.
+    for (const auto &row : recruitRows) {
+      g_notificationHistory.push_back(
+          std::string(u8"[등용] ") + row.officerName +
+          u8" | " + row.previousForce +
+          u8" → " + row.currentForce);
+    }
+    for (const auto &row : deadRows) {
+      g_notificationHistory.push_back(
+          std::string(u8"[사망] ") + row.officerName +
+          u8" | " + row.previousForce);
+    }
+
+    // 연말 특수능력 기록과 동일하게 최대 200개까지 유지합니다.
+    if (g_notificationHistory.size() > 200) {
+      g_notificationHistory.erase(
+          g_notificationHistory.begin(),
+          g_notificationHistory.begin() +
+              (g_notificationHistory.size() - 200));
+    }
   }
 
   void RoninMonitor_QueueSharedNotice(
