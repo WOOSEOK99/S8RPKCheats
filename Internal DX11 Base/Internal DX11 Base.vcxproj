@@ -229,6 +229,7 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="Cheats\Social\Resonancecave.h" />
     <ClInclude Include="Cheats\War\Selfheal.h" />
+    <ClInclude Include="Cheats\War\Spell5HealProbe.h" />
     <ClInclude Include="Cheats\War\ShortBattleCooldown.h" />
     <ClInclude Include="Cheats\War\TotalWarCycleShortening.h" />
     <ClInclude Include="Cheats\War\TroopCountCombatScaling.h" />
@@ -357,6 +358,7 @@
     </ClCompile>
     <ClCompile Include="Cheats\Social\Resonancecave.cpp" />
     <ClCompile Include="Cheats\War\Selfheal.cpp" />
+    <ClCompile Include="Cheats\War\Spell5HealProbe.cpp" />
     <ClCompile Include="Cheats\War\ShortBattleCooldown.cpp" />
     <ClCompile Include="Cheats\War\TotalWarCycleShortening.cpp" />
     <ClCompile Include="Cheats\War\TroopCountCombatScaling.cpp" />
