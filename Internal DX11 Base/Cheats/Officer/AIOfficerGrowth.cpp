@@ -16,6 +16,7 @@ namespace {
 
 constexpr uintptr_t kOfficerStride = 0x3D0;
 constexpr uint16_t kGrowthOfficerIdMax = 1800;
+unsigned short s_lastAppliedGrowthYear = 0;
 
 constexpr std::array<uintptr_t, 5> kCurrentExpOffsets = {
     0xB0, 0xB2, 0xB4, 0xB6, 0xB8};
@@ -249,6 +250,18 @@ const char *GetAIOfficerGrowthCategoryName(std::size_t index) {
   static constexpr std::array<const char *, 7> kNames = {
       u8"보병", u8"기병", u8"궁병", u8"함선", u8"군략", u8"보조", u8"둔갑"};
   return index < kNames.size() ? kNames[index] : u8"알 수 없음";
+}
+
+uint32_t MakeAIOfficerGrowthAnnualSeed(
+    unsigned short applyYear,
+    uint16_t officerId) {
+  return (static_cast<uint32_t>(applyYear) << 16) ^
+         (static_cast<uint32_t>(officerId) * 0x45D9F3Bu) ^
+         0xA17E5D31u;
+}
+
+bool WasAIOfficerGrowthAppliedForYear(unsigned short year) {
+  return year != 0 && s_lastAppliedGrowthYear == year;
 }
 
 bool BuildAIOfficerGrowthPreview(
@@ -523,9 +536,7 @@ void RunAnnualAIOfficerGrowth(unsigned short year) {
 
     AIOfficerGrowthPreview preview{};
     const uint32_t seed =
-        (static_cast<uint32_t>(year) << 16) ^
-        (static_cast<uint32_t>(id) * 0x45D9F3Bu) ^
-        0xA17E5D31u;
+        MakeAIOfficerGrowthAnnualSeed(year, id);
 
     if (!BuildAIOfficerGrowthPreview(
             officerBase, speed, &preview, seed) ||
@@ -592,7 +603,6 @@ void TickAIOfficerAutoGrowth() {
   static uint8_t s_lastMonth = 0;
   static bool s_pendingJanuaryCouncil = false;
   static unsigned short s_pendingYear = 0;
-  static unsigned short s_lastAppliedYear = 0;
 
   unsigned short year = 0;
   uint8_t month = 0;
@@ -621,7 +631,7 @@ void TickAIOfficerAutoGrowth() {
   if (s_lastMonth == 12 &&
       month == 1 &&
       year >= s_lastYear &&
-      year != s_lastAppliedYear) {
+      year != s_lastAppliedGrowthYear) {
     s_pendingJanuaryCouncil = true;
     s_pendingYear = year;
     AddLog(u8"[AI성장] %u년 1월 전환 감지: 평정 진입 대기",
@@ -633,7 +643,7 @@ void TickAIOfficerAutoGrowth() {
 
   if (!s_pendingJanuaryCouncil ||
       s_pendingYear == 0 ||
-      s_pendingYear == s_lastAppliedYear) {
+      s_pendingYear == s_lastAppliedGrowthYear) {
     return;
   }
 
@@ -643,7 +653,7 @@ void TickAIOfficerAutoGrowth() {
   const unsigned short applyYear = s_pendingYear;
   s_pendingJanuaryCouncil = false;
   s_pendingYear = 0;
-  s_lastAppliedYear = applyYear;
+  s_lastAppliedGrowthYear = applyYear;
 
   RunAnnualAIOfficerGrowth(applyYear);
 }
