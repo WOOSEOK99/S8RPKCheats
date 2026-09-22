@@ -242,6 +242,9 @@
     <ClInclude Include="Cheats\Officer\SpecialAbilityAutoAssign.h">
       <Filter>Cheats\Officer</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\Officer\AIOfficerGrowth.h">
+      <Filter>Cheats\Officer</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\Civilian\NonggyeongCity.h">
       <Filter>Cheats\Civilian</Filter>
     </ClInclude>
@@ -470,6 +473,9 @@
       <Filter>Cheats\Officer</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\Officer\SpecialAbilityAutoAssign.cpp">
+      <Filter>Cheats\Officer</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\Officer\AIOfficerGrowth.cpp">
       <Filter>Cheats\Officer</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\System\TengiCave.cpp">
