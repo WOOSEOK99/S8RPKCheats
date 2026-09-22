@@ -29,4 +29,10 @@ namespace DX11Base {
     // 재야 알림 체크 여부와 무관하게 표시되며, 재야 알림이 실제 표시 중이면 뒤에서 대기합니다.
     void RoninMonitor_QueueSpecialAbilityNotice(const std::vector<std::string>& lines);
 
+    // 기존 RoninMonitor 알림창을 공용으로 재사용합니다.
+    // 별도의 ImGui 창을 만들지 않고 제목/행 목록만 큐에 추가합니다.
+    void RoninMonitor_QueueSharedNotice(
+        const std::string& title,
+        const std::vector<std::string>& lines);
+
 } // namespace DX11Base
