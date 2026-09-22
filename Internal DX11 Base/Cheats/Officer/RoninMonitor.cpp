@@ -498,6 +498,13 @@ namespace DX11Base {
     if (gameState == 0)
       return;
 
+    // 개별 체크박스를 끈 동안에는 해당 기준선을 무효화합니다.
+    // 같은 세션에서 다시 켰을 때 과거 상태를 소급 비교하지 않고 현재 상태부터 새로 시작합니다.
+    if (!bMonitorRonin)
+      s_initialized = false;
+    if (!bOfficerChangeNotify)
+      s_changeBaselineInitialized = false;
+
     // 기능을 켠 직후에는 현재 상태를 기준선으로만 저장합니다.
     if (s_lastRelevantGameState == 0) {
       s_lastRelevantGameState = gameState;
@@ -507,6 +514,13 @@ namespace DX11Base {
         CaptureOfficerChangeBaseline();
       return;
     }
+
+    // 다른 모니터가 이미 동작 중인 상태에서 체크박스를 새로 켠 경우도
+    // 현재 상태를 즉시 기준선으로 잡아 다음 전환부터 정상 비교합니다.
+    if (bMonitorRonin && !s_initialized)
+      ScanRonins(false);
+    if (bOfficerChangeNotify && !s_changeBaselineInitialized)
+      CaptureOfficerChangeBaseline();
 
     if (gameState == s_lastRelevantGameState)
       return;
