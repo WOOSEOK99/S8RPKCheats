@@ -12,13 +12,16 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace DX11Base {
 namespace {
 
-constexpr int kOfficerCount = 5102;
+constexpr int kOfficerCount = 1800;
 constexpr uintptr_t kOfficerStride = 0x3D0;
 
 constexpr std::array<uintptr_t, 10> kAbilityOffsets = {
@@ -262,6 +265,110 @@ bool IsAnnualAutoAssignSafeState() {
   return s_lastSafe;
 }
 
+std::atomic<bool> g_autoWorkerRunning{false};
+std::atomic<bool> g_autoWorkerDone{false};
+std::atomic<bool> g_autoWorkerCancel{false};
+std::atomic<bool> g_autoWorkerPause{false};
+std::atomic<size_t> g_autoWorkerProgress{0};
+std::mutex g_autoWorkerResultMutex;
+
+struct AutoAssignWorkerResult {
+  std::vector<PendingAssignment> pending;
+  int validOfficers = 0;
+  int excludedExisting = 0;
+  int matchedOfficers = 0;
+  std::array<int, 10> matchedCounts{};
+};
+AutoAssignWorkerResult g_autoWorkerResult;
+
+void StartAutoAssignWorker(
+    uintptr_t rosterBase,
+    bool annualMode,
+    std::array<bool, kOfficerCount + 1> excludedExistingIds) {
+  g_autoWorkerRunning = true;
+  g_autoWorkerDone = false;
+  g_autoWorkerCancel = false;
+  g_autoWorkerPause = false;
+  g_autoWorkerProgress = 0;
+
+  {
+    std::lock_guard<std::mutex> lock(g_autoWorkerResultMutex);
+    g_autoWorkerResult = {};
+  }
+
+  std::thread(
+      [rosterBase, annualMode, excludedExistingIds = std::move(excludedExistingIds)]() mutable {
+        AutoAssignWorkerResult local;
+        local.pending.reserve(annualMode ? 256 : 1024);
+        std::array<bool, kOfficerCount + 1> seenIds{};
+
+        for (int i = 0; i < kOfficerCount; ++i) {
+          if (g_autoWorkerCancel.load()) {
+            break;
+          }
+
+          while (g_autoWorkerPause.load() && !g_autoWorkerCancel.load())
+            Sleep(10);
+
+          if (g_autoWorkerCancel.load())
+            break;
+
+          const uintptr_t base =
+              rosterBase + static_cast<uintptr_t>(i) * kOfficerStride;
+
+          const RosterStats stats = SafeReadRosterStats(base);
+          g_autoWorkerProgress = static_cast<size_t>(i + 1);
+
+          if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerCount)
+            continue;
+
+          if (seenIds[stats.id_08])
+            continue;
+
+          if (annualMode && excludedExistingIds[stats.id_08]) {
+            seenIds[stats.id_08] = true;
+            ++local.excludedExisting;
+            continue;
+          }
+
+          OfficerProfile profile;
+          if (!ReadOfficerProfile(base, profile))
+            continue;
+          if (profile.id != static_cast<int>(stats.id_08))
+            continue;
+
+          seenIds[profile.id] = true;
+          ++local.validOfficers;
+
+          const std::array<bool, 10> matches =
+              EvaluateSpecialAbilities(profile);
+
+          bool any = false;
+          for (int a = 0; a < static_cast<int>(matches.size()); ++a) {
+            if (!matches[a])
+              continue;
+            any = true;
+            ++local.matchedCounts[a];
+          }
+
+          if (!any)
+            continue;
+
+          ++local.matchedOfficers;
+          local.pending.push_back({profile.id, matches});
+        }
+
+        {
+          std::lock_guard<std::mutex> lock(g_autoWorkerResultMutex);
+          g_autoWorkerResult = std::move(local);
+        }
+
+        g_autoWorkerRunning = false;
+        g_autoWorkerDone = true;
+      })
+      .detach();
+}
+
 bool StartAutoAssignJob(bool annualMode) {
   if (g_autoAssignJob.running)
     return false;
@@ -283,12 +390,12 @@ bool StartAutoAssignJob(bool annualMode) {
   g_autoAssignJob.rosterBase = rosterBase;
   g_autoAssignJob.pending.reserve(annualMode ? 256 : 1024);
   g_autoAssignJob.status = annualMode
-      ? u8"연말 자동 판정 시작: 0 / 5102명"
-      : u8"처리 시작: 0 / 5102명";
+      ? u8"연말 자동 판정 시작: 0 / 1800명"
+      : u8"처리 시작: 0 / 1800명";
 
   if (annualMode) {
     // 연말 자동 판정은 이미 특수 능력(0x1000~0x1009)을 하나라도 가진
-    // 무장을 스캔 시작 전에 한 번만 스냅샷으로 제외합니다.
+    // 무장을 worker 시작 전에 한 번만 스냅샷으로 제외합니다.
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
     for (const auto &[officerId, skills] : g_customSkillCounts) {
       if (officerId < 1 || officerId > kOfficerCount)
@@ -307,11 +414,15 @@ bool StartAutoAssignJob(bool annualMode) {
         g_autoAssignJob.excludedExistingIds[officerId] = true;
     }
 
-    AddLog(u8"[특수능력/연말자동] 12월->1월 자동 판정 시작: 프레임당 24명 처리");
+    AddLog(u8"[특수능력/연말자동] 1~1800 실사용 무장 worker 판정 시작");
   } else {
-    AddLog(u8"[특수능력/자동] 증분 판정 시작: 프레임당 24명 처리");
+    AddLog(u8"[특수능력/자동] 1~1800 실사용 무장 worker 판정 시작");
   }
 
+  StartAutoAssignWorker(
+      rosterBase,
+      annualMode,
+      g_autoAssignJob.excludedExistingIds);
   return true;
 }
 
@@ -430,83 +541,53 @@ void TickSpecialAbilityAutoAssign() {
   if (!g_autoAssignJob.running)
     return;
 
-  // 연말 자동 모드는 내정(0x07) 안정 상태에서만 진행합니다.
-  // 검은 화면/평정/다른 전환 상태가 되면 현재 cursor를 유지한 채 다음 프레임으로 미룹니다.
-  if (g_autoAssignJob.annualMode && !IsAnnualAutoAssignSafeState())
+  // 연말 자동 worker는 내정(0x07) 안정 상태에서만 메모리를 읽습니다.
+  // 화면 전환이 시작되면 worker를 잠시 멈췄다가 안전 상태에서 이어갑니다.
+  if (g_autoAssignJob.annualMode)
+    g_autoWorkerPause = !IsAnnualAutoAssignSafeState();
+  else
+    g_autoWorkerPause = false;
+
+  if (g_autoAssignJob.cancelRequested)
+    g_autoWorkerCancel = true;
+
+  const size_t progress = g_autoWorkerProgress.load();
+  g_autoAssignJob.cursor = progress;
+  g_autoAssignJob.status =
+      std::string(g_autoAssignJob.annualMode ? u8"연말 자동 판정 중: " : u8"처리 중: ") +
+      std::to_string(progress) + u8" / " +
+      std::to_string(kOfficerCount) + u8"명";
+
+  if (!g_autoWorkerDone.load())
     return;
 
-  if (g_autoAssignJob.cancelRequested) {
-    const size_t processed = g_autoAssignJob.cursor;
+  if (g_autoAssignJob.cancelRequested || g_autoWorkerCancel.load()) {
     g_autoAssignJob.running = false;
     g_autoAssignJob.pending.clear();
     g_autoAssignJob.resultLines.clear();
     g_autoAssignJob.status =
-        std::string(u8"취소됨: ") + std::to_string(processed) +
-        u8" / 5102명 처리 (특수 능력 변경 없음)";
+        std::string(u8"취소됨: ") + std::to_string(progress) +
+        u8" / " + std::to_string(kOfficerCount) +
+        u8"명 처리 (특수 능력 변경 없음)";
+    g_autoWorkerDone = false;
+    g_autoWorkerCancel = false;
     AddLog(u8"[특수능력/자동] 사용자 취소: %zu / %d명 처리, 변경 없음",
-           processed, kOfficerCount);
+           progress, kOfficerCount);
     return;
   }
 
-  // 게임/UI 스레드를 오래 점유하지 않도록 프레임당 24명만 판정합니다.
-  constexpr size_t kOfficersPerFrame = 24;
-  const size_t end = (std::min)(
-      g_autoAssignJob.cursor + kOfficersPerFrame,
-      static_cast<size_t>(kOfficerCount));
-
-  for (; g_autoAssignJob.cursor < end; ++g_autoAssignJob.cursor) {
-    const uintptr_t base =
-        g_autoAssignJob.rosterBase +
-        static_cast<uintptr_t>(g_autoAssignJob.cursor) * kOfficerStride;
-
-    const RosterStats stats = SafeReadRosterStats(base);
-    if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerCount)
-      continue;
-
-    if (g_autoAssignJob.seenIds[stats.id_08])
-      continue;
-
-    if (g_autoAssignJob.annualMode &&
-        g_autoAssignJob.excludedExistingIds[stats.id_08]) {
-      g_autoAssignJob.seenIds[stats.id_08] = true;
-      ++g_autoAssignJob.excludedExisting;
-      continue;
-    }
-
-    OfficerProfile profile;
-    if (!ReadOfficerProfile(base, profile))
-      continue;
-    if (profile.id != static_cast<int>(stats.id_08))
-      continue;
-
-    g_autoAssignJob.seenIds[profile.id] = true;
-    ++g_autoAssignJob.validOfficers;
-
-    const std::array<bool, 10> matches =
-        EvaluateSpecialAbilities(profile);
-
-    bool any = false;
-    for (int a = 0; a < static_cast<int>(matches.size()); ++a) {
-      if (!matches[a])
-        continue;
-      any = true;
-      ++g_autoAssignJob.matchedCounts[a];
-    }
-
-    if (!any)
-      continue;
-
-    ++g_autoAssignJob.matchedOfficers;
-    g_autoAssignJob.pending.push_back({profile.id, matches});
+  {
+    std::lock_guard<std::mutex> lock(g_autoWorkerResultMutex);
+    g_autoAssignJob.pending = std::move(g_autoWorkerResult.pending);
+    g_autoAssignJob.validOfficers = g_autoWorkerResult.validOfficers;
+    g_autoAssignJob.excludedExisting = g_autoWorkerResult.excludedExisting;
+    g_autoAssignJob.matchedOfficers = g_autoWorkerResult.matchedOfficers;
+    g_autoAssignJob.matchedCounts = g_autoWorkerResult.matchedCounts;
+    g_autoWorkerResult = {};
   }
 
-  g_autoAssignJob.status =
-      std::string(u8"처리 중: ") +
-      std::to_string(g_autoAssignJob.cursor) +
-      u8" / 5102명";
-
-  if (g_autoAssignJob.cursor >= static_cast<size_t>(kOfficerCount))
-    FinishAutoAssignJob();
+  g_autoWorkerDone = false;
+  FinishAutoAssignJob();
 }
 
 void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
