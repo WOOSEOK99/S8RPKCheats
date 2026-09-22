@@ -168,14 +168,16 @@ namespace DX11Base {
       return false;
     }
 
-    g_cave = reinterpret_cast<uintptr_t>(
-        VirtualAlloc(nullptr,
-                     kCaveSize,
-                     MEM_COMMIT | MEM_RESERVE,
-                     PAGE_EXECUTE_READWRITE));
     if (!g_cave) {
-      AddLog(u8"[포로개선/부장] 코드케이브 할당 실패");
-      return false;
+      g_cave = reinterpret_cast<uintptr_t>(
+          VirtualAlloc(nullptr,
+                       kCaveSize,
+                       MEM_COMMIT | MEM_RESERVE,
+                       PAGE_EXECUTE_READWRITE));
+      if (!g_cave) {
+        AddLog(u8"[포로개선/부장] 코드케이브 할당 실패");
+        return false;
+      }
     }
 
     std::memset(reinterpret_cast<void*>(g_cave), 0, kCaveSize);
@@ -227,6 +229,32 @@ namespace DX11Base {
     AddLog(u8"[포로개선/부장] 기본 적용 완료 (+%llX)",
            static_cast<unsigned long long>(kHookOffset));
     AddLog(u8"[포로개선/부장] 총대장 포획 성공 시 같은 부대 부장 최대 2명도 포획 처리됩니다.");
+    return true;
+  }
+
+  bool UninstallDeputyCaptureFix() {
+    if (!g_applied)
+      return true;
+
+    const uintptr_t exeBase =
+        reinterpret_cast<uintptr_t>(GetModuleHandle(NULL));
+    if (!exeBase)
+      return false;
+
+    const uintptr_t hookAddr = exeBase + kHookOffset;
+    if (!BytesEqual(hookAddr, g_hookPatched, sizeof(g_hookPatched))) {
+      AddLog(u8"[포로개선/부장] 해제 보류: hook 지점에 외부 변경 감지");
+      return false;
+    }
+
+    if (!WriteBytes(hookAddr, kOriginal, sizeof(kOriginal))) {
+      AddLog(u8"[포로개선/부장] 원본 복구 실패");
+      return false;
+    }
+
+    // 실행 중인 cave로 복귀할 가능성을 고려해 메모리는 프로세스 종료까지 유지합니다.
+    g_applied = false;
+    AddLog(u8"[포로개선/부장] 적용 해제");
     return true;
   }
 
