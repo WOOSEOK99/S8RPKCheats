@@ -32,8 +32,10 @@ namespace DX11Base {
     constexpr uintptr_t kSpellStride = 0x20;
 
     static bool g_applied = false;
-    static uintptr_t g_patchedAddr = 0;
-    static SpellPrefix g_original{};
+    static uintptr_t g_spell4Addr = 0;
+    static uintptr_t g_spell5Addr = 0;
+    static SpellPrefix g_spell4Original{};
+    static SpellPrefix g_spell5Original{};
 
     static bool Deref(uintptr_t base, uintptr_t offset, uintptr_t &out) {
       const uintptr_t addr = base + offset;
@@ -123,21 +125,27 @@ namespace DX11Base {
         return false;
       }
 
-      // Keep the active 4th record's +16..+1F tail untouched.
-      // Only replace the confirmed 22-byte prefix so the existing live metadata remains intact.
+      // Step 2:
+      // The first probe only rewrote entry #4 to code 5. That was enough for the
+      // battle-preparation picker to show/select code 5, but the in-battle list
+      // dropped it. The likely lookup path is: selected ID 5 -> canonical entry #5.
+      // Therefore keep the real #5 record populated as well, while using #4 as the
+      // temporary selector surrogate. Only the confirmed 22-byte prefix is touched.
       const uintptr_t spell4 = table + 3 * kSpellStride;
-      if (!IsValidPtr(spell4, sizeof(SpellPrefix))) {
-        AddLog(u8"[책략5DBG] 4번 책략 레코드 주소가 유효하지 않습니다.");
+      const uintptr_t spell5 = table + 4 * kSpellStride;
+      if (!IsValidPtr(spell4, sizeof(SpellPrefix)) || !IsValidPtr(spell5, sizeof(SpellPrefix))) {
+        AddLog(u8"[책략5DBG] 4/5번 책략 레코드 주소가 유효하지 않습니다.");
         return false;
       }
 
-      std::memcpy(&g_original, reinterpret_cast<const void *>(spell4), sizeof(g_original));
+      std::memcpy(&g_spell4Original, reinterpret_cast<const void *>(spell4), sizeof(g_spell4Original));
+      std::memcpy(&g_spell5Original, reinterpret_cast<const void *>(spell5), sizeof(g_spell5Original));
 
       // Probe profile:
-      // - code 4 -> code 5: asks the game to expose the unused #5 resource through the 4th slot.
-      // - effect1=10 / power1=+40: known-good ally morale effect, used as a safe cast anchor.
-      // - effect2=20 / power2=2000: effect 20 is confirmed as healing in tactics, but NOT yet in strategy.
-      // - range=5: conservative first test.
+      // - code 5 / ally target
+      // - effect1=10 / power1=+40: known-good strategy effect, cast anchor
+      // - effect2=20 / power2=2000: healing candidate (confirmed only in tactics so far)
+      // - range=5
       const SpellPrefix probe{
           5, 5, 5,
           1,
@@ -146,37 +154,53 @@ namespace DX11Base {
           5,
       };
 
-      if (!WritePrefix(spell4, probe)) {
-        AddLog(u8"[책략5DBG] 5번 힐 실험 데이터 쓰기 실패.");
+      // Populate the canonical #5 definition first.
+      if (!WritePrefix(spell5, probe)) {
+        AddLog(u8"[책략5DBG] 실제 5번 책략 레코드 쓰기 실패.");
         return false;
       }
 
-      g_patchedAddr = spell4;
+      // Then expose code 5 through the existing 4th selectable slot.
+      if (!WritePrefix(spell4, probe)) {
+        WritePrefix(spell5, g_spell5Original);
+        AddLog(u8"[책략5DBG] 4번 선택 슬롯 치환 실패 - 5번 레코드는 원복했습니다.");
+        return false;
+      }
+
+      g_spell4Addr = spell4;
+      g_spell5Addr = spell5;
       g_applied = true;
 
-      AddLog(u8"[책략5DBG] 적용: table=%p, slot4=%p", reinterpret_cast<void *>(table),
-             reinterpret_cast<void *>(spell4));
-      AddLog(u8"[책략5DBG] 4번 슬롯 -> 코드5 / 아군 / 사기+40 / 효과2=20(치료 후보) / 2000 / 범위5");
-      AddLog(u8"[책략5DBG] 주의: 책략 엔진에서 효과20은 아직 미확인입니다. 전투에서 실제 병력 회복 여부를 확인하세요.");
+      AddLog(u8"[책략5DBG] Step2 적용: table=%p, selector4=%p, canonical5=%p",
+             reinterpret_cast<void *>(table), reinterpret_cast<void *>(spell4),
+             reinterpret_cast<void *>(spell5));
+      AddLog(u8"[책략5DBG] 4번 선택 슬롯과 실제 5번 정의를 동일하게 설정: 아군 / 사기+40 / 효과2=20 / 2000 / 범위5");
+      AddLog(u8"[책략5DBG] 전투 준비에서 5번 선택 후, 실제 전투 책략 목록에 유지되는지 먼저 확인하세요.");
+      AddLog(u8"[책략5DBG] 목록에 남으면 그 다음으로 병력 +2000 여부를 확인하세요.");
       return true;
     }
 
     if (!g_applied)
       return true;
 
-    bool restored = false;
-    if (g_patchedAddr && IsValidPtr(g_patchedAddr, sizeof(SpellPrefix))) {
-      restored = WritePrefix(g_patchedAddr, g_original);
-    }
+    bool restored4 = false;
+    bool restored5 = false;
 
-    if (restored)
-      AddLog(u8"[책략5DBG] 원복 완료: 기존 사모위계 22바이트 복구.");
+    if (g_spell4Addr && IsValidPtr(g_spell4Addr, sizeof(SpellPrefix)))
+      restored4 = WritePrefix(g_spell4Addr, g_spell4Original);
+    if (g_spell5Addr && IsValidPtr(g_spell5Addr, sizeof(SpellPrefix)))
+      restored5 = WritePrefix(g_spell5Addr, g_spell5Original);
+
+    if (restored4 && restored5)
+      AddLog(u8"[책략5DBG] 원복 완료: 4번 사모위계 + 실제 5번 더미 레코드 복구.");
     else
-      AddLog(u8"[책략5DBG] 원복 주소가 더 이상 유효하지 않습니다. 전투/화면 전환으로 테이블이 재생성되었을 수 있습니다.");
+      AddLog(u8"[책략5DBG] 일부 원복 주소가 더 이상 유효하지 않습니다. 전투/화면 전환으로 테이블이 재생성되었을 수 있습니다.");
 
     g_applied = false;
-    g_patchedAddr = 0;
-    g_original = {};
+    g_spell4Addr = 0;
+    g_spell5Addr = 0;
+    g_spell4Original = {};
+    g_spell5Original = {};
     return true;
   }
 } // namespace DX11Base
