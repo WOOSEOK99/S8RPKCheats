@@ -23,8 +23,8 @@ namespace DX11Base {
 
     // Written by the generated code cave. These are only consumed while
     // BattleMonitor reports an active battle.
-    static uintptr_t g_attackInfo = 0;
-    static uintptr_t g_defenseInfo = 0;
+    static volatile uintptr_t g_attackInfo = 0;
+    static volatile uintptr_t g_defenseInfo = 0;
 
     static uintptr_t g_lastLoggedAttack = 0;
     static uintptr_t g_lastLoggedDefense = 0;
