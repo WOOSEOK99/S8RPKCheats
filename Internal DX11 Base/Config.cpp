@@ -258,6 +258,11 @@ namespace DX11Base {
       bAIOfficerGrowthRestoreNone = savedAIOfficerGrowthRestoreNone;
     }
 
+    if (!bAIOfficerAutoGrowth && bAnnualSpecialAbilityAutoAssign) {
+      bAnnualSpecialAbilityAutoAssign = false;
+      AddLog(u8"[Config] AI 자동성장 OFF이므로 자동 특수능력 부여도 OFF 처리");
+    }
+
     AddLog(u8"[Config] AI 무장 자동성장 설정 로드: %s / 속도=%d / 없음복귀=%s",
            bAIOfficerAutoGrowth ? "ON" : "OFF",
            iAIOfficerGrowthSpeed,
