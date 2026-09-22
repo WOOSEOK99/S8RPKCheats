@@ -61,7 +61,6 @@ namespace DX11Base {
   bool bReinforcementArrivalAction = false;
   bool bReinforcementDefenderPlacement = false;
   bool bOfficerChangeNotify = false;
-  bool bAIExecutionConditionChange = false;
   bool bAnnualSpecialAbilityAutoAssign = false;
   bool bAIOfficerAutoGrowth = false;
   int iAIOfficerGrowthSpeed = 2; // 기본: 보통

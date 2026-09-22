@@ -56,7 +56,7 @@ namespace DX11Base {
   extern bool bAllAggressive;
   extern bool bBattleUnit;
   extern bool bBattleMapShuffle;
-  extern bool bPrisonerCaptureManagement;      // 부장/고립도시 포로 처리 개선 (기본 ON)
+  extern bool bPrisonerCaptureManagement;      // 포획/AI 처형조건 통합 관리 (기본 ON)
   extern bool bShortBattleCooldownEnabled;
   extern int iShortBattleCooldownDays;
   extern bool bTroopCountCombatScaling;
@@ -65,7 +65,6 @@ namespace DX11Base {
   extern bool bReinforcementArrivalAction;
   extern bool bReinforcementDefenderPlacement;
   extern bool bOfficerChangeNotify;            // 평정 종료 시 사망/등용 장수 알림
-  extern bool bAIExecutionConditionChange;       // AI 포로 처형조건 변경
   extern bool bAnnualSpecialAbilityAutoAssign; // 매년 12월->1월 전환 시 특수 능력 자동 판정
   extern bool bAIOfficerAutoGrowth;             // AI 무장 자동성장
   extern int iAIOfficerGrowthSpeed;             // 1=느림, 2=보통, 3=빠름
