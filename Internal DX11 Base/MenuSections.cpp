@@ -38,6 +38,7 @@
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/FactionLordBonus.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
+#include "Cheats/War/PrisonerCaptureManagement.h"
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
@@ -994,6 +995,27 @@ namespace DX11Base {
                              u8"매 분기 평정 기간 마다 모든 도시의 전투맵 데이터를 랜덤하게 섞습니다.");
           ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                              u8"※ 평정 종료 시 자동으로 원상 복구됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        if (ImGui::Checkbox(u8"포로 관리", &bPrisonerCaptureManagement)) {
+          const bool requested = bPrisonerCaptureManagement;
+          if (!DX11Base::SetPrisonerCaptureManagement(requested))
+            bPrisonerCaptureManagement =
+                DX11Base::IsPrisonerCaptureManagementApplied();
+          NotifyFeatureToggle(u8"포로 관리", bPrisonerCaptureManagement);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"전투 결과의 포로 처리에서 누락되던 상황을 보완합니다.");
+          ImGui::TextUnformatted(u8"- 총대장이 포로가 되면 같은 부대의 부장 최대 2명도 함께 포로 처리");
+          ImGui::TextUnformatted(u8"- 고립된 도시가 함락되면 그 도시에 남은 수비측 장수를 포로 처리");
+          ImGui::TextUnformatted(u8"- 고립 여부는 패배 세력 소유의 인접 도시가 있는지로 판정합니다.");
+          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장되며 기본값은 ON입니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 게임 버전의 후킹 지점 바이트가 다르면 안전을 위해 적용하지 않습니다.");
           ImGui::EndTooltip();
         }
 
