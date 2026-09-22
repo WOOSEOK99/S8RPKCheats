@@ -10,8 +10,8 @@ namespace DX11Base {
 // 호출 시 작업만 시작하며 실제 처리는 TickSpecialAbilityAutoAssign()에서 분할 실행합니다.
 bool AutoAssignSpecialAbilities();
 void TickSpecialAbilityAutoAssign();
-// 체크 ON 상태에서 12월 -> 1월 전환을 감지해 연 1회 자동 판정을 예약합니다.
-void TickAnnualSpecialAbilityAutoAssign(bool enabled);
+// 능력치 한계돌파와 동일한 "평정 진입 월 1회" 조건에서 자동 판정을 시작합니다.
+bool AutoAssignSpecialAbilitiesFromCouncil();
 void CancelSpecialAbilityAutoAssign();
 
 bool IsSpecialAbilityAutoAssignRunning();
