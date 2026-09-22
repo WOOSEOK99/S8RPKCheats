@@ -133,8 +133,9 @@ namespace DX11Base {
       }
     }
 
-    static bool WriteOfficerGrowthGameSettings(int speed) {
-      if (speed < 1 || speed > 3)
+    static bool WriteOfficerGrowthGameSettingsRaw(int playerForce, int otherForces) {
+      if (playerForce < 0 || playerForce > 3 ||
+          otherForces < 0 || otherForces > 3)
         return false;
 
       const uintptr_t exe = (uintptr_t)GetModuleHandle(nullptr);
@@ -152,8 +153,8 @@ namespace DX11Base {
       const uint8_t oldValue = *(const uint8_t *)addr;
       const uint8_t newValue =
           (uint8_t)((oldValue & 0xF0) |
-                    (speed & 0x03) |
-                    ((speed & 0x03) << 2));
+                    (playerForce & 0x03) |
+                    ((otherForces & 0x03) << 2));
 
       DWORD oldProtect = 0;
       if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &oldProtect))
@@ -164,6 +165,14 @@ namespace DX11Base {
       DWORD dummy = 0;
       VirtualProtect((LPVOID)addr, 1, oldProtect, &dummy);
       return *(const uint8_t *)addr == newValue;
+    }
+
+    static bool WriteOfficerGrowthGameSettings(int speed) {
+      if (speed < 1 || speed > 3)
+        return false;
+
+      return WriteOfficerGrowthGameSettingsRaw(speed, speed);
+
     }
 
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
@@ -1216,6 +1225,9 @@ namespace DX11Base {
             // 게임이 이미 느림/보통/빠름이면 그 값을 초기 속도로 존중한다.
             // 둘 다 없음이면 보통으로 시작한다.
             if (current.valid) {
+              bAIOfficerGrowthRestoreNone =
+                  (current.playerForce == 0 && current.otherForces == 0);
+
               if (current.otherForces >= 1 && current.otherForces <= 3)
                 iAIOfficerGrowthSpeed = current.otherForces;
               else if (current.playerForce >= 1 && current.playerForce <= 3)
@@ -1223,6 +1235,7 @@ namespace DX11Base {
               else
                 iAIOfficerGrowthSpeed = 2;
             } else {
+              bAIOfficerGrowthRestoreNone = false;
               iAIOfficerGrowthSpeed = 2;
             }
 
@@ -1234,9 +1247,18 @@ namespace DX11Base {
               AddLog(u8"[AI성장] 게임 능력성장 설정 적용 실패");
             }
           } else {
-            // OFF에서는 AI 자동성장만 중지하고 게임 원본 설정은 유지한다.
             s_growthSettingApplied = false;
-            AddLog(u8"[AI성장] 자동성장 OFF / 게임 능력성장 설정은 유지");
+
+            if (bAIOfficerGrowthRestoreNone) {
+              if (WriteOfficerGrowthGameSettingsRaw(0, 0)) {
+                AddLog(u8"[AI성장] 자동성장 OFF / 원래 설정이 '없음'이어서 게임 능력성장도 '없음'으로 복귀");
+              } else {
+                AddLog(u8"[AI성장] 자동성장 OFF / 게임 능력성장 '없음' 복귀 실패");
+              }
+              bAIOfficerGrowthRestoreNone = false;
+            } else {
+              AddLog(u8"[AI성장] 자동성장 OFF / 게임 능력성장 설정은 유지");
+            }
           }
           SaveConfig();
         }
@@ -1273,7 +1295,9 @@ namespace DX11Base {
           ImGui::TextUnformatted(
               u8"- 게임 설정이 '없음'이면 기능을 켤 때 자동으로 '보통'으로 변경합니다.");
           ImGui::TextUnformatted(
-              u8"- 기능을 꺼도 마지막으로 선택한 게임 능력성장 속도는 유지됩니다.");
+              u8"- 원래 게임 설정이 '없음'이었다면 기능을 끌 때 다시 '없음'으로 복귀합니다.");
+          ImGui::TextUnformatted(
+              u8"- 원래 느림/보통/빠름이었다면 기능을 꺼도 마지막 선택 속도를 유지합니다.");
           ImGui::EndTooltip();
         }
       }
