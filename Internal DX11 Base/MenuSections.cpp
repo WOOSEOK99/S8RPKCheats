@@ -44,6 +44,7 @@
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
+#include "Cheats/War/Spell5HealProbe.h"
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
@@ -1581,6 +1582,20 @@ namespace DX11Base {
       }
 
       ImGui::TextDisabled(u8"전투 중 해당 진영의 책략 게이지 처리 시 최대치(10000)로 한 번 채웁니다.");
+
+      ImGui::Spacing();
+      ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
+      static bool s_spell5HealProbe = false;
+      if (ImGui::Checkbox(u8"5번 책략 대상 진단", &s_spell5HealProbe)) {
+        if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
+          s_spell5HealProbe = !s_spell5HealProbe;
+          AddNotification(u8"5번 책략 대상 진단 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"5번 책략 대상 진단", s_spell5HealProbe);
+        }
+      }
+      ImGui::TextDisabled(u8"5번 책략은 아군 사기+40 / 범위5로 유지하고, 사기가 오른 부대만 읽기 전용으로 추적합니다.");
+      ImGui::TextDisabled(u8"책략 사용 후 로그의 [책략5대상DBG] 후보 주소/병력/좌표/상태 값을 확인하세요.");
 
       EndSection(); // 전쟁
     }
