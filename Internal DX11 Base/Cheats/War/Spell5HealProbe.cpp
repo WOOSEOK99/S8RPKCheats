@@ -127,11 +127,11 @@ namespace DX11Base {
         return false;
       }
 
-      // Step 3:
-      // Clone the entire known-good 신산화계 (#2) 0x20-byte record into code #5.
-      // Only code1/code2/code3 are changed to 5. This deliberately carries the
-      // +16/+18 tail as-is so we can test whether the previously-zero tail is
-      // required for the actual in-battle effect dispatcher.
+      // Step 4:
+      // Start from the entire known-good 신산화계 (#2) 0x20-byte record so the
+      // +16/+18 tail remains identical to a proven working strategy.
+      // Then change only the confirmed strategy fields to test whether effect
+      // code 20 is interpreted as troop healing in the strategy engine.
       const uintptr_t spell2 = table + 1 * kSpellStride;
       const uintptr_t spell4 = table + 3 * kSpellStride;
       const uintptr_t spell5 = table + 4 * kSpellStride;
@@ -147,13 +147,24 @@ namespace DX11Base {
 
       SpellRecord clone{};
       std::memcpy(&clone, reinterpret_cast<const void *>(spell2), sizeof(clone));
+
+      // Keep the working #2 tail (+16/+18), but turn the confirmed prefix into
+      // a controlled healing probe for code #5.
       clone.code1 = 5;
       clone.code2 = 5;
       clone.code3 = 5;
+      clone.target = 1;      // ally
+      clone.effect1 = 20;    // healing candidate; confirmed in tactics, not yet in strategy
+      clone.power1 = 2000;
+      clone.duration1 = 0;
+      clone.effect2 = 0;
+      clone.power2 = 0;
+      clone.duration2 = 0;
+      clone.range = 5;
 
-      // Populate canonical #5 first with an exact #2 clone except for the IDs.
+      // Populate canonical #5 first while preserving 신산화계's +16/+18 tail.
       if (!WriteRecord(spell5, clone)) {
-        AddLog(u8"[책략5DBG] 실제 5번 레코드에 신산화계 전체 복제 실패.");
+        AddLog(u8"[책략5DBG] 실제 5번 레코드에 치료 실험 데이터 쓰기 실패.");
         return false;
       }
 
@@ -169,7 +180,7 @@ namespace DX11Base {
       g_spell5Addr = spell5;
       g_applied = true;
 
-      AddLog(u8"[책략5DBG] Step3 적용: 신산화계 0x20 전체 복제 -> 코드5");
+      AddLog(u8"[책략5DBG] Step4 적용: 신산화계 tail 유지 + 코드5 치료효과20 실험");
       AddLog(u8"[책략5DBG] table=%p selector4=%p canonical5=%p source2=%p",
              reinterpret_cast<void *>(table), reinterpret_cast<void *>(spell4),
              reinterpret_cast<void *>(spell5), reinterpret_cast<void *>(spell2));
@@ -177,7 +188,7 @@ namespace DX11Base {
              (int)clone.target, (int)clone.effect1, (int)clone.power1,
              (int)clone.effect2, (int)clone.power2, (int)clone.range,
              (int)clone.unknown16, reinterpret_cast<void *>((uintptr_t)clone.unknownPtr));
-      AddLog(u8"[책략5DBG] 기대값: 적군 / 직접피해200 / 화계100 / 범위5. 실제 발동 효과가 신산화계와 같은지 확인하세요.");
+      AddLog(u8"[책략5DBG] 기대값: 아군 / 효과20 / 회복량후보2000 / 범위5. 클릭 후 실제 병력이 증가하는지 확인하세요.");
       return true;
     }
 
