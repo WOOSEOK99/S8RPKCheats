@@ -20,6 +20,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <mutex>
 #include <psapi.h>
 #include <random>
 #include <sstream>
