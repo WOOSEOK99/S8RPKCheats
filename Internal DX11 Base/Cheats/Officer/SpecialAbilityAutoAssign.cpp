@@ -227,7 +227,40 @@ bool g_annualAssignPending = false;
 uint16_t g_lastAnnualYear = 0;
 uint8_t g_lastAnnualMonth = 0;
 uint64_t g_lastAnnualMonthPollTick = 0;
-uint64_t g_annualAssignReadyTick = 0;
+uint64_t g_annualDomesticStableSince = 0;
+
+bool IsAnnualAutoAssignSafeState() {
+  static uint64_t s_lastProbeTick = 0;
+  static bool s_lastSafe = false;
+
+  const uint64_t now = GetTickCount64();
+  if (now - s_lastProbeTick < 100ull)
+    return s_lastSafe;
+  s_lastProbeTick = now;
+
+  const uintptr_t gameBase = GetGameBaseFast();
+  if (gameBase <= 0x10000) {
+    s_lastSafe = false;
+    return false;
+  }
+
+  uint8_t gameState = 0xFF;
+  __try {
+    if (!IsValidPtr(gameBase + 0xD0, 1)) {
+      s_lastSafe = false;
+      return false;
+    }
+    gameState = *reinterpret_cast<uint8_t *>(gameBase + 0xD0);
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    s_lastSafe = false;
+    return false;
+  }
+
+  // 0x05=평정, 0x07=내정. 검은 화면/전환 중간 상태에서는 절대 스캔하지 않습니다.
+  s_lastSafe = (gameState == 0x07);
+  return s_lastSafe;
+}
 
 bool StartAutoAssignJob(bool annualMode) {
   if (g_autoAssignJob.running)
@@ -397,6 +430,11 @@ void TickSpecialAbilityAutoAssign() {
   if (!g_autoAssignJob.running)
     return;
 
+  // 연말 자동 모드는 내정(0x07) 안정 상태에서만 진행합니다.
+  // 검은 화면/평정/다른 전환 상태가 되면 현재 cursor를 유지한 채 다음 프레임으로 미룹니다.
+  if (g_autoAssignJob.annualMode && !IsAnnualAutoAssignSafeState())
+    return;
+
   if (g_autoAssignJob.cancelRequested) {
     const size_t processed = g_autoAssignJob.cursor;
     g_autoAssignJob.running = false;
@@ -477,15 +515,13 @@ void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
     g_lastAnnualYear = 0;
     g_lastAnnualMonth = 0;
     g_lastAnnualMonthPollTick = 0;
-    g_annualAssignReadyTick = 0;
+    g_annualDomesticStableSince = 0;
     return;
   }
 
   const uint64_t now = GetTickCount64();
 
-  // UI 캡처 월값이 아니라 실제 시나리오 날짜를 기준으로 감지합니다.
-  // 날짜 편집으로 12월로 점프한 뒤 곧바로 평정을 진행하는 테스트도 놓치지 않도록
-  // 100ms 간격으로 가볍게 확인합니다.
+  // UI용 월 캡처가 아니라 실제 시나리오 연/월을 읽습니다.
   if (now - g_lastAnnualMonthPollTick >= 100ull) {
     g_lastAnnualMonthPollTick = now;
 
@@ -495,7 +531,6 @@ void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
         currentYear > 0 &&
         currentMonth >= 1 && currentMonth <= 12) {
       if (g_lastAnnualYear == 0 || g_lastAnnualMonth == 0) {
-        // 처음 활성화/로드한 시점은 기준만 잡고 소급 실행하지 않습니다.
         g_lastAnnualYear = currentYear;
         g_lastAnnualMonth = currentMonth;
       } else {
@@ -506,8 +541,6 @@ void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
             (unsigned int)currentYear * 12u +
             (unsigned int)currentMonth;
 
-        // 정상적인 12월->1월뿐 아니라 테스트 중 날짜 점프로 직전 월을 짧게 건너뛰어도
-        // "연도가 증가했고 현재가 1월"이면 새해 평정으로 인정합니다.
         const bool crossedIntoJanuary =
             currentSerial > previousSerial &&
             currentYear > g_lastAnnualYear &&
@@ -518,22 +551,37 @@ void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
 
         if (crossedIntoJanuary) {
           g_annualAssignPending = true;
-          // 연초 평정의 능력/전법 상승 처리가 모두 끝난 뒤 읽도록 3초 유예합니다.
-          g_annualAssignReadyTick = now + 3000ull;
+          g_annualDomesticStableSince = 0;
           AddLog(
-              u8"[특수능력/연말자동] 새해 1월 전환 감지 -> 3초 후 자동 판정 예약");
+              u8"[특수능력/연말자동] 새해 1월 전환 감지 -> 내정 화면 안정 대기");
         }
       }
     }
   }
 
-  if (g_annualAssignPending &&
-      !g_autoAssignJob.running &&
-      now >= g_annualAssignReadyTick) {
-    if (StartAutoAssignJob(true)) {
-      g_annualAssignPending = false;
-      g_annualAssignReadyTick = 0;
-    }
+  if (!g_annualAssignPending || g_autoAssignJob.running)
+    return;
+
+  // 평정 종료 후 검은 전환 화면을 완전히 지나서,
+  // 실제 내정 상태(0x07)가 2초 연속 유지된 뒤에만 대량 스캔을 시작합니다.
+  if (!IsAnnualAutoAssignSafeState()) {
+    g_annualDomesticStableSince = 0;
+    return;
+  }
+
+  if (g_annualDomesticStableSince == 0) {
+    g_annualDomesticStableSince = now;
+    return;
+  }
+
+  if (now - g_annualDomesticStableSince < 2000ull)
+    return;
+
+  if (StartAutoAssignJob(true)) {
+    g_annualAssignPending = false;
+    g_annualDomesticStableSince = 0;
+    AddLog(
+        u8"[특수능력/연말자동] 내정 상태 2초 안정 확인 -> 자동 판정 시작");
   }
 }
 
