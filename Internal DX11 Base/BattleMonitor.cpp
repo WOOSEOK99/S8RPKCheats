@@ -2,6 +2,7 @@
 #include "Cheats.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
+#include "Cheats/Officer/SpecialAbilityAutoAssign.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SkillCountManager.h"
 #include "Cheats/System/SystemMonth.h"
@@ -548,7 +549,42 @@ namespace DX11Base {
     // 전투 종료 후 0x04 -> 0x05 같은 복귀를 새 평정으로 오인하지 않습니다.
     if (isRelevantState && gameState == 0x05) {
       if (s_lastAppliedMonth != sm) {
+        unsigned short scenarioYear = 0;
+        uint8_t scenarioMonth = 0;
+        const bool hasScenarioDate =
+            ReadScenarioDate(&scenarioYear, &scenarioMonth) &&
+            scenarioYear > 0 &&
+            scenarioMonth >= 1 &&
+            scenarioMonth <= 12;
+
+        AddLog(
+            u8"[특수능력/연말자동/DBG] 평정 진입: uiMonth=%u scenario=%s%u년%u월 state=0x%02X auto=%s lastMonth=%u",
+            (unsigned)sm,
+            hasScenarioDate ? "" : "INVALID ",
+            (unsigned)scenarioYear,
+            (unsigned)scenarioMonth,
+            (unsigned)gameState,
+            bAnnualSpecialAbilityAutoAssign ? "ON" : "OFF",
+            (unsigned)s_lastAppliedMonth);
+
         UpdateOfficerStats99To100();
+
+        // 능력치 한계돌파와 동일한 평정 진입 타이밍에서 실행합니다.
+        // 연 1회 자동 특수능력은 실제 시나리오 날짜가 1월인 평정에 들어온 순간 시작합니다.
+        // GetSystemMonthValue()는 평정 전환 순간 0일 수 있으므로 연말 판정에는 사용하지 않습니다.
+        if (bAnnualSpecialAbilityAutoAssign &&
+            hasScenarioDate &&
+            scenarioMonth == 1) {
+          AddLog(
+              u8"[특수능력/연말자동/DBG] %u년 1월 평정 조건 통과 -> AutoAssignSpecialAbilitiesFromCouncil 호출",
+              (unsigned)scenarioYear);
+          DX11Base::AutoAssignSpecialAbilitiesFromCouncil();
+        } else if (bAnnualSpecialAbilityAutoAssign) {
+          AddLog(
+              u8"[특수능력/연말자동/DBG] 자동 ON이지만 실제 시나리오 월=%u -> 1월 자동 판정 미실행",
+              (unsigned)scenarioMonth);
+        }
+
         DX11Base::RunAutoCityExchange();
         s_lastAppliedMonth = sm;
       }

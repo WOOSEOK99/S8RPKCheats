@@ -63,6 +63,7 @@ namespace DX11Base {
   extern bool bGovernorPrisonerConsumePrivilege;
   extern bool bReinforcementArrivalAction;
   extern bool bReinforcementDefenderPlacement;
+  extern bool bAnnualSpecialAbilityAutoAssign; // 매년 12월->1월 전환 시 특수 능력 자동 판정
 
   // 전투 환경 / 조건 설정
   extern bool bWeatherSkillSimple;

@@ -52,6 +52,13 @@ namespace DX11Base {
 
     static std::mutex s_notifMtx;
     static std::vector<RoninNotification> s_notifications;
+
+    struct SpecialAbilityPopup {
+      std::vector<std::string> lines;
+      float timeRemaining = 12.f;
+    };
+
+    static std::vector<SpecialAbilityPopup> s_specialAbilityQueue;
   } // namespace
 
   void RoninMonitor_UpdatePrevStatus(int id, uint8_t st) {
@@ -232,6 +239,25 @@ namespace DX11Base {
     }
   }
 
+  void RoninMonitor_QueueSpecialAbilityNotice(const std::vector<std::string>& lines) {
+    if (lines.empty())
+      return;
+
+    std::lock_guard<std::mutex> lk(s_notifMtx);
+
+    // 한 번의 연말 판정 결과를 한 팝업 묶음으로 보관합니다.
+    // 너무 많은 행으로 화면이 커지는 것을 막기 위해 최대 24행까지만 표시하고,
+    // 전체 내역은 기존 알림 기록에 그대로 남습니다.
+    SpecialAbilityPopup popup;
+    const size_t limit = (std::min<size_t>)(lines.size(), 24);
+    popup.lines.assign(lines.begin(), lines.begin() + limit);
+    popup.timeRemaining = 12.f;
+    s_specialAbilityQueue.push_back(std::move(popup));
+
+    if (s_specialAbilityQueue.size() > 4)
+      s_specialAbilityQueue.erase(s_specialAbilityQueue.begin());
+  }
+
   // ---------------------------------------------------------------------------
   // Tick – 백그라운드 스레드
   // ---------------------------------------------------------------------------
@@ -295,71 +321,173 @@ namespace DX11Base {
   // Draw – UI 스레드
   // ---------------------------------------------------------------------------
   void RoninMonitor_Draw() {
-    if (!bMonitorRonin)
-      return;
-
     float dt = ImGui::GetIO().DeltaTime;
     if (dt > 0.1f)
       dt = 0.1f;
 
-    std::vector<RoninNotification> snap;
+    std::vector<RoninNotification> roninSnap;
+    std::vector<std::string> specialLines;
+    bool showRonin = false;
+    bool showSpecial = false;
+
     {
       std::lock_guard<std::mutex> lk(s_notifMtx);
-      for (auto &n : s_notifications)
-        n.timeRemaining -= dt;
-      s_notifications.erase(std::remove_if(s_notifications.begin(), s_notifications.end(),
-                                           [](const RoninNotification &n) { return n.timeRemaining <= 0.f; }),
-                            s_notifications.end());
-      snap = s_notifications;
+
+      // 재야 알림은 체크 ON일 때만 타이머를 진행/표시합니다.
+      if (bMonitorRonin) {
+        for (auto &n : s_notifications)
+          n.timeRemaining -= dt;
+        s_notifications.erase(
+            std::remove_if(
+                s_notifications.begin(),
+                s_notifications.end(),
+                [](const RoninNotification &n) {
+                  return n.timeRemaining <= 0.f;
+                }),
+            s_notifications.end());
+        roninSnap = s_notifications;
+      }
+
+      showRonin = bMonitorRonin && !roninSnap.empty();
+
+      // 특수능력 알림은 재야 체크박스와 무관합니다.
+      // 실제 재야 팝업이 떠 있는 동안에는 타이머를 줄이지 않고 그대로 대기합니다.
+      if (!showRonin && !s_specialAbilityQueue.empty()) {
+        SpecialAbilityPopup &popup = s_specialAbilityQueue.front();
+        popup.timeRemaining -= dt;
+        if (popup.timeRemaining <= 0.f) {
+          s_specialAbilityQueue.erase(s_specialAbilityQueue.begin());
+        } else {
+          specialLines = popup.lines;
+          showSpecial = true;
+        }
+      }
     }
 
-    if (snap.empty())
+    if (!showRonin && !showSpecial)
       return;
 
     float sc = ImGui::GetIO().FontGlobalScale;
     ImVec2 disp = ImGui::GetIO().DisplaySize;
 
-    ImGui::SetNextWindowPos(ImVec2(disp.x - 20.f, disp.y * 0.12f), ImGuiCond_Always, ImVec2(1.f, 0.f));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.f, 0.f, 0.f, 0.98f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.f, 0.84f, 0.f, 1.f));
+    // 특수능력 알림은 줄바꿈하지 않고 가장 긴 문자열에 맞춰 창 폭을 자동 확장합니다.
+    float specialColumnWidth = 360.f * sc;
+    if (showSpecial) {
+      float maxTextWidth =
+          ImGui::CalcTextSize(u8" [ 특수 능력 부여!! ]").x * 1.8f;
+      for (const std::string &line : specialLines) {
+        const float w = ImGui::CalcTextSize(line.c_str()).x * 1.8f;
+        if (w > maxTextWidth)
+          maxTextWidth = w;
+      }
+
+      // 좌우 패딩/테이블 여유분을 더하되 화면 밖으로 나가지는 않게 제한합니다.
+      const float maxAllowed = (std::max)(360.f * sc, disp.x - 100.f * sc);
+      specialColumnWidth =
+          (std::min)(maxTextWidth + 30.f * sc, maxAllowed);
+    }
+
+    ImGui::SetNextWindowPos(
+        ImVec2(disp.x - 20.f, disp.y * 0.12f),
+        ImGuiCond_Always,
+        ImVec2(1.f, 0.f));
+    ImGui::PushStyleColor(
+        ImGuiCol_WindowBg,
+        ImVec4(0.f, 0.f, 0.f, 0.98f));
+    ImGui::PushStyleColor(
+        ImGuiCol_Border,
+        ImVec4(1.f, 0.84f, 0.f, 1.f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 3.f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(30.f, 20.f));
+    ImGui::PushStyleVar(
+        ImGuiStyleVar_WindowPadding,
+        ImVec2(30.f, 20.f));
 
-    constexpr ImGuiWindowFlags kF = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                                    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                                    ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+    constexpr ImGuiWindowFlags kF =
+        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoNav |
+        ImGuiWindowFlags_NoMove;
 
     if (ImGui::Begin("##RoninMonitorNotif", nullptr, kF)) {
       ImGui::SetWindowFontScale(1.8f);
 
       ImGui::Separator();
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 1.f, 0.6f, 1.f));
-      ImGui::Text(u8" [ 재야 장수 발견!! ]");
+      ImGui::PushStyleColor(
+          ImGuiCol_Text,
+          ImVec4(1.f, 1.f, 0.6f, 1.f));
+      ImGui::TextUnformatted(
+          showRonin
+              ? u8" [ 재야 장수 발견!! ]"
+              : u8" [ 특수 능력 부여!! ]");
       ImGui::PopStyleColor();
       ImGui::Separator();
 
-      if (ImGui::BeginTable("##RoninTable", 2, ImGuiTableFlags_SizingFixedFit)) {
-        ImGui::TableSetupColumn(u8"이름", ImGuiTableColumnFlags_WidthFixed, 130.f * sc);
-        ImGui::TableSetupColumn(u8"도시", ImGuiTableColumnFlags_WidthFixed, 90.f * sc);
+      if (showRonin) {
+        if (ImGui::BeginTable(
+                "##RoninTable",
+                2,
+                ImGuiTableFlags_SizingFixedFit)) {
+          ImGui::TableSetupColumn(
+              u8"이름",
+              ImGuiTableColumnFlags_WidthFixed,
+              130.f * sc);
+          ImGui::TableSetupColumn(
+              u8"도시",
+              ImGuiTableColumnFlags_WidthFixed,
+              90.f * sc);
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.f), u8"이름");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.f), u8"도시");
-
-        for (auto &n : snap) {
           ImGui::TableNextRow();
           ImGui::TableSetColumnIndex(0);
-          ImGui::TextColored(ImVec4(0.3f, 1.f, 1.f, 1.f), u8"%s", n.name.c_str());
+          ImGui::TextColored(
+              ImVec4(0.8f, 0.8f, 0.8f, 1.f),
+              u8"이름");
           ImGui::TableSetColumnIndex(1);
-          ImGui::TextColored(ImVec4(1.f, 1.f, 0.6f, 1.f), u8"%s", n.cityName.c_str());
+          ImGui::TextColored(
+              ImVec4(0.8f, 0.8f, 0.8f, 1.f),
+              u8"도시");
+
+          for (auto &n : roninSnap) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextColored(
+                ImVec4(0.3f, 1.f, 1.f, 1.f),
+                u8"%s",
+                n.name.c_str());
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextColored(
+                ImVec4(1.f, 1.f, 0.6f, 1.f),
+                u8"%s",
+                n.cityName.c_str());
+          }
+          ImGui::EndTable();
         }
-        ImGui::EndTable();
+      } else {
+        if (ImGui::BeginTable(
+                "##SpecialAbilityTable",
+                1,
+                ImGuiTableFlags_SizingFixedFit)) {
+          ImGui::TableSetupColumn(
+              u8"부여 내역",
+              ImGuiTableColumnFlags_WidthFixed,
+              specialColumnWidth);
+
+          for (const std::string &line : specialLines) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextColored(
+                ImVec4(0.3f, 1.f, 1.f, 1.f),
+                u8"%s",
+                line.c_str());
+          }
+          ImGui::EndTable();
+        }
       }
     }
     ImGui::End();
+
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
   }

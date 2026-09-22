@@ -233,6 +233,7 @@
     <ClInclude Include="Cheats\War\Dongto.h" />
     <ClInclude Include="Cheats\Officer\SelectOfficercapture.h" />
     <ClInclude Include="Cheats\Officer\OfficerRosterResolve.h" />
+    <ClInclude Include="Cheats\Officer\SpecialAbilityAutoAssign.h" />
     <ClInclude Include="showcal.h" />
     <ClInclude Include="showlog.h" />
     <ClInclude Include="Cheats\War\Terrainignore.h" />
@@ -313,6 +314,7 @@
     <ClCompile Include="MenuState.cpp" />
     <ClCompile Include="MenuSections.cpp" />
     <ClCompile Include="Cheats\Officer\OfficerData.cpp" />
+    <ClCompile Include="Cheats\Officer\SpecialAbilityAutoAssign.cpp" />
     <ClCompile Include="Cheats\Officer\OfficerDetail.cpp" />
     <ClCompile Include="Cheats\Officer\TraitViewerWidths.cpp" />
     <ClCompile Include="Cheats\Officer\TraitTextEditorData.cpp" />
