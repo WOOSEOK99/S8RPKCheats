@@ -43,6 +43,7 @@
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
 #include "Cheats/War/Selfheal.h"
+#include "Cheats/War/Spell5HealProbe.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
@@ -1548,6 +1549,20 @@ namespace DX11Base {
         NotifyFeatureToggle(u8"방어 건물 강화", bDefBuilding);
         SaveConfig();
       }
+
+      ImGui::Spacing();
+      ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
+      static bool s_spell5HealProbe = false;
+      if (ImGui::Checkbox(u8"5번 책략 힐 테스트", &s_spell5HealProbe)) {
+        if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
+          s_spell5HealProbe = !s_spell5HealProbe;
+          AddNotification(u8"5번 책략 힐 테스트 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"5번 책략 힐 테스트", s_spell5HealProbe);
+        }
+      }
+      ImGui::TextDisabled(u8"4번 슬롯을 5번 코드로 임시 치환: 아군 / 사기+40 / 효과20(치료 후보) 2000 / 범위5");
+      ImGui::TextDisabled(u8"실험 기능이라 설정에는 저장하지 않습니다. 해제하면 기존 사모위계 데이터를 원복합니다.");
 
       EndSection(); // 전쟁
     }
