@@ -19,6 +19,7 @@
 #include "../../Framework/imgui.h"
 #include "../../showlog.h"
 #include "../System/SkillCountManager.h"
+#include "../System/MonthCapture.h"
 
 extern ImGuiWindowFlags Flags;
 
@@ -1158,8 +1159,24 @@ namespace DX11Base {
         // --- [ AI 자동성장 예상 / read-only ] ---
         // Step 3 검증용. GrowthM 원본 계산 결과를 표시만 하며 게임 메모리는 수정하지 않는다.
         AIOfficerGrowthPreview growthPreview{};
+        unsigned short previewYear = 0;
+        uint8_t previewMonth = 0;
+        uint32_t previewSeed = 0;
+        if (ReadScenarioDate(&previewYear, &previewMonth) &&
+            previewYear > 0 &&
+            previewMonth >= 1 && previewMonth <= 12 &&
+            IsValidPtr(pBase + 0x08, sizeof(uint16_t))) {
+          const uint16_t previewOfficerId =
+              *reinterpret_cast<const uint16_t *>(pBase + 0x08);
+          const unsigned short applyYear =
+              static_cast<unsigned short>(
+                  previewYear + (previewMonth == 12 ? 1 : 0));
+          previewSeed =
+              MakeAIOfficerGrowthAnnualSeed(applyYear, previewOfficerId);
+        }
+
         if (BuildAIOfficerGrowthPreview(
-                pBase, iAIOfficerGrowthSpeed, &growthPreview)) {
+                pBase, iAIOfficerGrowthSpeed, &growthPreview, previewSeed)) {
           ImGui::TableNextRow();
           ImGui::TableSetColumnIndex(0);
           ImGui::PushStyleColor(
