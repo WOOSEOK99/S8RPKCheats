@@ -824,16 +824,6 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"중개 무제한", bInfiniteMediation);
           SaveConfig();
         }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(
-              ImVec4(1, 1, 0, 1),
-              u8"중개 실행 후 생기는 사용 완료 플래그(+0x71E5 bit6)만 자동으로 해제합니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 다른 상태 비트는 그대로 유지합니다.");
-          ImGui::EndTooltip();
-        }
 
         ImGui::TableSetColumnIndex(1);
         if (ImGui::Checkbox(
@@ -851,13 +841,9 @@ namespace DX11Base {
               ImVec4(1, 1, 0, 1),
               u8"매 분기 평정월(1·4·7·10월) 시작 시 AI 무장끼리 친밀도를 추가 상승시킵니다.");
           ImGui::TextUnformatted(
-              u8"같은 세력·같은 도시에 있는 AI 쌍만 대상이며 주인공과 친밀도 -1 이하인 쌍은 제외합니다.");
-          ImGui::TextUnformatted(
               u8"상성과 흥미·중시의 일치 정도를 반영하며 최대 친밀도는 100입니다.");
           ImGui::TextUnformatted(
               u8"친밀도만 가속하며 부부·의형제·상생 관계를 직접 생성하지 않습니다.");
-          ImGui::TextDisabled(
-              u8"※ 체크 상태는 설정 파일에 저장됩니다.");
           ImGui::EndTooltip();
         }
 
@@ -869,16 +855,6 @@ namespace DX11Base {
             ::DX11Base::TickInfiniteBanquet();
           NotifyFeatureToggle(u8"연회 무제한", bInfiniteBanquet);
           SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(
-              ImVec4(1, 1, 0, 1),
-              u8"연회 실행 후 생기는 사용 완료 플래그만 자동으로 해제하여 계속 연회할 수 있게 합니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 다른 상태 비트는 그대로 유지합니다.");
-          ImGui::EndTooltip();
         }
 
         ImGui::TableSetColumnIndex(1);
@@ -1008,14 +984,8 @@ namespace DX11Base {
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                             u8"전투 결과의 포로 처리에서 누락되던 상황을 보완합니다.");
-          ImGui::TextUnformatted(u8"- 총대장이 포로가 되면 같은 부대의 부장 최대 2명도 함께 포로 처리");
-          ImGui::TextUnformatted(u8"- 고립된 도시가 함락되면 그 도시에 남은 수비측 장수를 포로 처리");
-          ImGui::TextUnformatted(u8"- 고립 여부는 패배 세력 소유의 인접 도시가 있는지로 판정합니다.");
-          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장되며 기본값은 ON입니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 게임 버전의 후킹 지점 바이트가 다르면 안전을 위해 적용하지 않습니다.");
+          ImGui::TextUnformatted(u8"- 총대장이 포로가 되면 같은 부대의 부장도 함께 포로 처리");
+          ImGui::TextUnformatted(u8"- 고립된 도시가 함락되면 그 도시에 남은 수비측 장수 전부 포로 처리");
           ImGui::EndTooltip();
         }
 
@@ -1072,8 +1042,6 @@ namespace DX11Base {
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
                              u8"전투에 도착한 원군이 도착한 그 턴부터 바로 행동할 수 있게 합니다.");
           ImGui::TextUnformatted(u8"- 원군 도착 처리를 명령 처리보다 먼저 실행하도록 순서를 변경합니다.");
-          ImGui::TextUnformatted(u8"- 공격측/수비측 원군의 배치 위치는 이 옵션에서 변경하지 않습니다.");
-          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장되어 다음 실행 시 다시 적용됩니다.");
           ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                              u8"※ 전투 턴 전환 중에는 이 옵션을 켜거나 끄지 마세요.");
           ImGui::EndTooltip();
@@ -1124,16 +1092,6 @@ namespace DX11Base {
               u8"- 공격/방어 공용 계산 함수에서 게임에 남아 있는 선형 병력 환산 경로를 사용합니다.");
           ImGui::TextUnformatted(
               u8"- 병력이 많을수록 공방 계산에서 더 유리하고, 병력이 적을수록 상대적으로 불리해지는 방향입니다.");
-          ImGui::TextUnformatted(
-              u8"- 공격력/방어력에 고정 보너스를 더하는 기능이 아니라 계산 분기 자체를 오리지널식 경로로 바꿉니다.");
-          ImGui::TextUnformatted(
-              u8"- 병력 몇 명당 공방이 몇 상승하는지 같은 정확한 수치 공식은 CT 스크립트에 기재되어 있지 않습니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 게임 버전의 해당 바이트가 예상값과 다르면 안전을 위해 적용하지 않습니다.");
-          ImGui::TextColored(
-              ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-              u8"※ 체크 해제 시 원래 계산 분기로 복구합니다.");
           ImGui::EndTooltip();
         }
 
@@ -1217,6 +1175,13 @@ namespace DX11Base {
       if (ImGui::Button(u8"전투 환경 및 조건 설정", ImVec2(150 * scale, 30 * scale))) {
         bShowBattleEnvWin = !bShowBattleEnvWin;
       }
+
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"클릭하여 날씨, 일자, 지형, 여울(공성전) 등의 상세 설정을 엽니다.");
+        ImGui::EndTooltip();
+      }
+
       ImGui::SameLine();
       if (ImGui::Button(u8"모든 무장 일괄 편집", ImVec2(-1, 30 * scale))) {
         bShowBatchOfficerEditWin = !bShowBatchOfficerEditWin;
@@ -1408,7 +1373,6 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::TextUnformatted(u8"- AI 자동성장 결과로 상승한 전법/능력치를 반영한 뒤 판정합니다.");
         ImGui::TextUnformatted(u8"- 이미 특수 능력을 하나라도 보유한 무장은 자동 판정에서 제외합니다.");
-        ImGui::TextUnformatted(u8"- 전체 무장 공간(1~5102)는 백그라운드 worker에서 판정합니다.");
         ImGui::TextUnformatted(u8"- 새로 부여된 무장이 있을 때만 상단 알림과 알림 내역에 표시합니다.");
         ImGui::TextDisabled(u8"※ 수동 '모든 무장 특수 능력 자동 부여' 버튼과는 별도로 작동합니다.");
         ImGui::PopTextWrapPos();
@@ -1476,7 +1440,7 @@ namespace DX11Base {
         if (popupRunning) {
           ImGui::Spacing();
           ImGui::TextDisabled(
-              u8"전체 무장 공간 1~5102 범위를 백그라운드 worker에서 분석하고 있습니다.");
+              u8"전체 무장 공간을 분석하고 있습니다.");
           ImGui::TextDisabled(
               u8"완료 전에는 실제 특수 능력 설정을 변경하지 않습니다.");
 
@@ -1529,12 +1493,6 @@ namespace DX11Base {
       }
       ::DX11Base::DrawBatchOfficerEditWindow(scale);
       ::DX11Base::DrawFactionTechEditor(scale);
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"클릭하여 날씨, 일자, 지형, 여울(공성전) 등의 상세 설정을 엽니다.");
-        ImGui::EndTooltip();
-      }
 
       ImGui::Spacing();
       ImGui::Separator();

@@ -1306,13 +1306,11 @@ namespace DX11Base {
       if (s_batchRandomJob.collectingOfficers) {
         ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
                            u8"1~5102 전체 무장 공간 목록 수집 중...");
-        ImGui::TextDisabled(u8"장수 배열 검사는 백그라운드 worker에서 처리합니다.");
       } else if (s_batchRandomJob.scanningTraits) {
         ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
                            u8"기재 객체 검색 중... %zu / %zu개 발견",
                            s_batchRandomJob.traitObjects.size(),
                            s_batchRandomJob.requestedPool.size());
-        ImGui::TextDisabled(u8"프로세스 메모리를 여러 프레임에 나누어 검색하고 있습니다.");
       } else {
         const float progress = s_batchRandomJob.officers.empty()
             ? 0.0f
@@ -1324,7 +1322,6 @@ namespace DX11Base {
                  u8"%zu / %zu명", s_batchRandomJob.cursor,
                  s_batchRandomJob.officers.size());
         ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), progressText);
-        ImGui::TextDisabled(u8"적용 중... 게임/UI가 멈추지 않도록 프레임 단위로 나누어 처리합니다.");
       }
     } else {
       const bool noGradeSelected =
