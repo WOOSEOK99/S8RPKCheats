@@ -588,7 +588,7 @@ bool AutoAssignSpecialAbilitiesFromCouncil() {
   if (g_autoAssignJob.running)
     return false;
 
-  AddLog(u8"[특수능력/연말자동] 1월 평정 진입 감지 -> 자동 판정 시작");
+  AddLog(u8"[특수능력/연말자동] 12월 평정 진입 감지 -> 자동 판정 시작");
   return StartAutoAssignJob(true);
 }
 
