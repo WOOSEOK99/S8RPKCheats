@@ -1586,16 +1586,16 @@ namespace DX11Base {
       ImGui::Spacing();
       ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
       static bool s_spell5HealProbe = false;
-      if (ImGui::Checkbox(u8"5번 책략 대상 진단", &s_spell5HealProbe)) {
+      if (ImGui::Checkbox(u8"5번 책략 광역힐 2차 테스트", &s_spell5HealProbe)) {
         if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
           s_spell5HealProbe = !s_spell5HealProbe;
-          AddNotification(u8"5번 책략 대상 진단 적용 실패 - 로그 확인");
+          AddNotification(u8"5번 책략 광역힐 2차 테스트 적용 실패 - 로그 확인");
         } else {
-          NotifyFeatureToggle(u8"5번 책략 대상 진단", s_spell5HealProbe);
+          NotifyFeatureToggle(u8"5번 책략 광역힐 2차 테스트", s_spell5HealProbe);
         }
       }
-      ImGui::TextDisabled(u8"5번 책략은 아군 사기+40 / 범위5로 유지하고, 사기가 오른 부대만 읽기 전용으로 추적합니다.");
-      ImGui::TextDisabled(u8"책략 사용 후 로그의 [책략5대상DBG] 후보 주소/병력/좌표/상태 값을 확인하세요.");
+      ImGui::TextDisabled(u8"아군 사기+40 / 범위5는 그대로 두고, 실제 영향 대상에게 병력 +2000을 적용합니다.");
+      ImGui::TextDisabled(u8"병력은 최대병력을 넘지 않습니다. 로그의 [책략5힐DBG] 전/후 병력과 최대값을 확인하세요.");
 
       EndSection(); // 전쟁
     }
