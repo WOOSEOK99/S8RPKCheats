@@ -66,6 +66,7 @@ namespace DX11Base {
   static uintptr_t s_nextTargetFallback = 0;           // [UX] 일괄 변경 시 다음으로 선택할 무장 주소 보관
   static std::unordered_set<int> s_selectedOfficerIDs;    // 다중 선택용 보관함
   static std::vector<uintptr_t>  s_selectedOfficerBases;  // [캐시] 선택된 무장들의 메모리 베이스 (패치 고속화용)
+  constexpr int kOfficerListActiveCount = 1800; // GrowthM 실사용 장수 범위 기준
   static std::vector<CachedOfficer> s_allOfficerCache; // [최적화] 전체 무장 캐시 (새로고침 시 1회 구축)
   static std::vector<CachedOfficer> s_filteredIndices; // [최적화] 필터링 및 이름/ID 캐싱된 목록
   static int s_officerNameEditId = -1;                 // JSON 이름 편집 중인 무장 ID
@@ -83,6 +84,16 @@ namespace DX11Base {
     for (auto &info : s_allOfficerCache) {
       if (info.officerID == officerID) {
         info.statusByte = newStatus;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool UpdateOfficerNameInAllCache(int officerID, const std::string &newName) {
+    for (auto &info : s_allOfficerCache) {
+      if (info.officerID == officerID) {
+        info.displayName = newName;
         return true;
       }
     }
@@ -244,9 +255,11 @@ namespace DX11Base {
         if (ImGui::IsKeyPressed(ImGuiKey_Escape))
           s_officerNameEditId = -1;
         else if (enter || ImGui::IsItemDeactivatedAfterEdit()) {
-          if (SaveOfficerNameToJson((int)currentID, s_officerNameEditBuf))
+          if (SaveOfficerNameToJson((int)currentID, s_officerNameEditBuf)) {
+            UpdateOfficerNameInAllCache((int)currentID, s_officerNameEditBuf);
+            s_forceFilterRebuild = true;
             AddLog(u8"[이름] ID %u → S8RPK_cheat_char.json 저장", (unsigned)currentID);
-          else
+          } else
             AddLog(u8"[이름] ID %u JSON 저장 실패", (unsigned)currentID);
           s_officerNameEditId = -1;
         }
@@ -2246,7 +2259,7 @@ namespace DX11Base {
     return s_selectedOfficerIDs.size();
   }
 
-  // [캐시 재구축] 전체 배열을 1회 순회해 선택된 무장의 베이스 주소만 뽑아 캐시에 저장
+  // [캐시 재구축] 실사용 1~1800 범위를 1회 순회해 선택된 무장의 베이스 주소만 뽑아 캐시에 저장
   // · 체크박스 토글 / 전체선택 / 선택해제 시 호출해야 함
   // · 이후 ApplyPatchToSelectedOfficers는 이 캐시만 순회 → O(N_selected) 패치
   static void RebuildSelectedOfficerBases() {
@@ -2256,7 +2269,7 @@ namespace DX11Base {
 
     s_selectedOfficerBases.reserve(s_selectedOfficerIDs.size());
 
-    for (int i = 0; i < 5102; i++) {
+    for (int i = 0; i < kOfficerListActiveCount; i++) {
       uintptr_t base = s_stableArrayBase + (i * 0x3D0);
       if (!IsValidPtr(base + 0x08, 2)) continue;
       unsigned short id = *(unsigned short*)(base + 0x08);
@@ -2277,7 +2290,7 @@ namespace DX11Base {
 
     DWORD oldProt = 0;
     bool protChanged = false;
-    if (VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, PAGE_READWRITE, &oldProt))
+    if (VirtualProtect((LPVOID)s_stableArrayBase, kOfficerListActiveCount * 0x3D0, PAGE_READWRITE, &oldProt))
       protChanged = true;
 
     for (uintptr_t base : s_selectedOfficerBases) {
@@ -2285,7 +2298,7 @@ namespace DX11Base {
     }
 
     if (protChanged)
-      VirtualProtect((LPVOID)s_stableArrayBase, 5102 * 0x3D0, oldProt, &oldProt);
+      VirtualProtect((LPVOID)s_stableArrayBase, kOfficerListActiveCount * 0x3D0, oldProt, &oldProt);
   }
 
   void DrawOfficerListWindow(uintptr_t p1, float scale) {
@@ -2345,11 +2358,6 @@ namespace DX11Base {
       // 자동 새로고침이 한 번 실행되도록 함 (첫 프레임에 p1만 비어 있던 경우의 버그 수정)
       bool justOpened = !s_wasOpen;
       s_wasOpen = true;
-      if (justOpened) {
-        // 첫 프레임은 창만 즉시 띄우고, 다음 프레임부터 캐시 구축 시작
-        s_deferInitialBuild = true;
-      }
-
       static char s_searchBuf[64] = "";
       static int s_scrollToIndex = -1;
       static int s_lastFilterForCache = -2;
@@ -2359,7 +2367,7 @@ namespace DX11Base {
       static bool s_cacheBuildInProgress = false;
       static int s_cacheBuildCursor = 0;
       static bool s_cacheFirstChunkDone = false;
-      static bool s_cacheSeenIDs[5103] = {};
+      static bool s_cacheSeenIDs[kOfficerListActiveCount + 1] = {};
       static ULONGLONG s_lastFilterInputMs = 0;
       static int s_prevObservedFilter = -2;
       const ULONGLONG nowMsUi = GetTickCount64();
@@ -2369,10 +2377,16 @@ namespace DX11Base {
         s_requestOfficerListRefresh = false;
       }
       if (justOpened) {
-        s_forceOfficerListRefresh = true;
-        s_capOfficerSnapGame = 0; // 같은 무장 선택 유지 시에도 게임 메모리에서 스냅샷 재수집 (CE 등 외부 변경 반영)
+        // 상세 패널 스냅샷만 다시 읽습니다. 전체 목록 캐시는 DLL 실행 중 재사용합니다.
+        s_capOfficerSnapGame = 0;
+        if (s_allOfficerCache.empty()) {
+          s_forceOfficerListRefresh = true;
+          s_deferInitialBuild = true;
+        } else {
+          s_deferInitialBuild = false;
+        }
       }
-      if (justOpened || s_forceOfficerListRefresh) {
+      if (s_forceOfficerListRefresh || s_allOfficerCache.empty()) {
         LoadOfficerNames();
       }
       bool doSearch = false;
@@ -2391,10 +2405,24 @@ namespace DX11Base {
       // 배열 베이스는 매 프레임 재탐색하지 않고, 목록 갱신이 필요할 때만 갱신
       static uintptr_t s_cachedListArrayBase = 0;
       uintptr_t arrayBase = s_cachedListArrayBase;
-      if (arrayBase == 0 && hasRosterArray) {
-        arrayBase = preResolvedArrayBase;
+
+      // 세이브/시나리오 전환 등으로 마스터 배열 베이스가 바뀐 경우에만 전체 캐시를 무효화합니다.
+      if (hasRosterArray &&
+          s_cachedListArrayBase != 0 &&
+          preResolvedArrayBase != 0 &&
+          preResolvedArrayBase != s_cachedListArrayBase) {
+        s_cachedListArrayBase = preResolvedArrayBase;
+        s_stableArrayBase = preResolvedArrayBase;
+        s_forceOfficerListRefresh = true;
+        s_deferInitialBuild = false;
+        s_selectedOfficerBases.clear();
+        AddLog(u8"[모든무장] 배열 베이스 변경 감지 -> 목록 캐시 재구축");
+      }
+
+      if (s_cachedListArrayBase == 0 && hasRosterArray) {
         s_cachedListArrayBase = preResolvedArrayBase;
       }
+      arrayBase = s_cachedListArrayBase;
 
       ImGui::SetNextItemWidth(100.0f * scale);
       if (ImGui::InputTextWithHint(u8"##search", u8"이름 or ID", s_searchBuf, sizeof(s_searchBuf),
@@ -2406,11 +2434,15 @@ namespace DX11Base {
       if (ImGui::Button(u8"찾기")) {
         doSearch = true;
       }
-      // ImGui::SameLine();
-      // if (ImGui::Button(u8"목록 새로고침")) {
-      //   s_forceOfficerListRefresh = true;
-      //   s_capOfficerSnapGame = 0;
-      // }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"목록 갱신")) {
+        s_forceOfficerListRefresh = true;
+        s_deferInitialBuild = false;
+        s_capOfficerSnapGame = 0;
+      }
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+        ImGui::SetTooltip(u8"외부 수정/상태 변화를 다시 읽을 때만 사용합니다.");
+      }
 
       // [토글] 전체 선택 / 선택 해제 버튼
       ImGui::SameLine();
@@ -2533,7 +2565,7 @@ namespace DX11Base {
           s_cacheFirstChunkDone = false;
           memset(s_cacheSeenIDs, 0, sizeof(s_cacheSeenIDs));
           s_allOfficerCache.clear();
-          s_allOfficerCache.reserve(5102);
+          s_allOfficerCache.reserve(kOfficerListActiveCount);
           s_filteredIndices.clear();
         } else {
           arrayBase = s_cachedListArrayBase;
@@ -2552,8 +2584,8 @@ namespace DX11Base {
           // 2) 나머지는 프레임 분할로 백그라운드 처리
           const int kChunkPerFrame = s_cacheFirstChunkDone ? 384 : 20;
           int endIdx = s_cacheBuildCursor + kChunkPerFrame;
-          if (endIdx > 5102)
-            endIdx = 5102;
+          if (endIdx > kOfficerListActiveCount)
+            endIdx = kOfficerListActiveCount;
 
           for (int i = s_cacheBuildCursor; i < endIdx; i++) {
             uintptr_t targetBase = arrayBase + (i * 0x3D0);
@@ -2561,7 +2593,7 @@ namespace DX11Base {
             RosterStats s = SafeReadRosterStats(targetBase);
             if (!s.valid)
               continue;
-            if (s.id_08 < 1 || s.id_08 > 5102)
+            if (s.id_08 < 1 || s.id_08 > kOfficerListActiveCount)
               continue;
             if (s_cacheSeenIDs[s.id_08])
               continue;
@@ -2585,7 +2617,7 @@ namespace DX11Base {
             s_cacheFirstChunkDone = true;
           }
 
-          if (s_cacheBuildCursor >= 5102) {
+          if (s_cacheBuildCursor >= kOfficerListActiveCount) {
             // 구축 완료 시 1회만 정렬
             std::sort(s_allOfficerCache.begin(), s_allOfficerCache.end(),
                       [](const CachedOfficer &a, const CachedOfficer &b) { return a.officerID < b.officerID; });
@@ -2615,7 +2647,7 @@ namespace DX11Base {
       }
 
       if (s_cacheBuildInProgress) {
-        ImGui::TextColored(ImVec4(0.8f, 0.9f, 0.3f, 1.0f), u8"목록 로딩 중... (%d/5102)", s_cacheBuildCursor);
+        ImGui::TextColored(ImVec4(0.8f, 0.9f, 0.3f, 1.0f), u8"목록 로딩 중... (%d/%d)", s_cacheBuildCursor, kOfficerListActiveCount);
       } else if (s_deferInitialBuild) {
         ImGui::TextColored(ImVec4(0.8f, 0.9f, 0.3f, 1.0f), u8"목록 로딩 준비 중...");
         // 다음 프레임부터 실제 캐시 구축/분할 로딩 시작
@@ -2789,8 +2821,11 @@ namespace DX11Base {
               if (ImGui::InputText("##e", s_officerNameEditBuf, sizeof(s_officerNameEditBuf),
                                    ImGuiInputTextFlags_EnterReturnsTrue) ||
                   ImGui::IsItemDeactivatedAfterEdit()) {
-                if (SaveOfficerNameToJson(officerID, s_officerNameEditBuf))
+                if (SaveOfficerNameToJson(officerID, s_officerNameEditBuf)) {
+                  UpdateOfficerNameInAllCache(officerID, s_officerNameEditBuf);
+                  s_forceFilterRebuild = true;
                   AddLog(u8"[이름] ID %d → S8RPK_cheat_char.json 저장", officerID);
+                }
                 s_officerNameEditId = -1;
               }
               if (ImGui::IsKeyPressed(ImGuiKey_Escape))
