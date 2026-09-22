@@ -1,6 +1,10 @@
 #include "../../pch.h"
 
 #include "../../Cheats.h"
+#include "../../MenuState.h"
+#include "../../showlog.h"
+#include "../System/MonthCapture.h"
+#include "OfficerRosterResolve.h"
 #include "AIOfficerGrowth.h"
 
 #include <algorithm>
@@ -402,6 +406,246 @@ bool BuildAIOfficerGrowthPreview(
     *out = {};
     return false;
   }
+}
+
+
+namespace {
+
+bool ApplyAIOfficerGrowthResult(
+    uintptr_t officerBase,
+    const AIOfficerGrowthPreview &preview) {
+  if (!preview.valid || !preview.eligible)
+    return false;
+
+  // 소양/EXP/전법/누적EXP가 모두 들어 있는 레코드 범위만 잠시 쓰기 허용.
+  DWORD oldProtect = 0;
+  if (!VirtualProtect(
+          reinterpret_cast<LPVOID>(officerBase + 0xB0),
+          0xAC,
+          PAGE_READWRITE,
+          &oldProtect)) {
+    return false;
+  }
+
+  bool ok = true;
+  __try {
+    for (int i = 0; i < 5; ++i) {
+      *reinterpret_cast<uint16_t *>(
+          officerBase + kCurrentExpOffsets[i]) =
+          preview.currentExpAfter[i];
+
+      // GrowthM 원본처럼 이번 성장 계산에 사용한 누적 EXP는 소비합니다.
+      *reinterpret_cast<uint16_t *>(
+          officerBase + kCumulativeExpOffsets[i]) = 0;
+    }
+
+    for (int category = 0; category < 7; ++category) {
+      *reinterpret_cast<uint8_t *>(
+          officerBase + kAptitudeOffsets[category]) =
+          preview.aptitudeAfter[category];
+
+      for (int i = 0; i < 5; ++i) {
+        *reinterpret_cast<uint8_t *>(
+            officerBase + kTacticBaseOffsets[category] + i) =
+            preview.tacticsAfter[category][i];
+      }
+    }
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    ok = false;
+  }
+
+  DWORD dummy = 0;
+  VirtualProtect(
+      reinterpret_cast<LPVOID>(officerBase + 0xB0),
+      0xAC,
+      oldProtect,
+      &dummy);
+
+  return ok;
+}
+
+bool IsCouncilState() {
+  const uintptr_t gameBase = GetGameBase();
+  if (gameBase <= 0x10000)
+    return false;
+
+  __try {
+    if (!IsValidPtr(gameBase + 0xD0, 1))
+      return false;
+    return *reinterpret_cast<uint8_t *>(gameBase + 0xD0) == 0x05;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+void RunAnnualAIOfficerGrowth(unsigned short year) {
+  const uintptr_t exeBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+  uintptr_t rosterBase = 0;
+  if (!exeBase ||
+      !TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) ||
+      rosterBase <= 0x10000) {
+    AddLog(u8"[AI성장] %u년 자동성장 실패: 무장 배열을 찾지 못했습니다.",
+           (unsigned)year);
+    return;
+  }
+
+  const int speed = ClampSpeed(iAIOfficerGrowthSpeed);
+  int eligibleCount = 0;
+  int changedOfficerCount = 0;
+  int totalTacticUps = 0;
+  int totalAptitudeGain = 0;
+  int consumedCumulativeCount = 0;
+
+  std::array<bool, kGrowthOfficerIdMax + 1> seenIds{};
+
+  // GrowthM 원본 범위: ID 1~1800.
+  for (int slot = 0; slot < kGrowthOfficerIdMax; ++slot) {
+    const uintptr_t officerBase =
+        rosterBase + static_cast<uintptr_t>(slot) * kOfficerStride;
+
+    if (!IsValidPtr(officerBase, kOfficerStride))
+      continue;
+
+    uint16_t id = 0;
+    __try {
+      id = *reinterpret_cast<uint16_t *>(officerBase + 0x08);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      continue;
+    }
+
+    if (id < 1 || id > kGrowthOfficerIdMax || seenIds[id])
+      continue;
+    seenIds[id] = true;
+
+    AIOfficerGrowthPreview preview{};
+    const uint32_t seed =
+        (static_cast<uint32_t>(year) << 16) ^
+        (static_cast<uint32_t>(id) * 0x45D9F3Bu) ^
+        0xA17E5D31u;
+
+    if (!BuildAIOfficerGrowthPreview(
+            officerBase, speed, &preview, seed) ||
+        !preview.valid ||
+        !preview.eligible) {
+      continue;
+    }
+
+    ++eligibleCount;
+
+    bool hasCumulative = false;
+    bool changed = false;
+    for (int i = 0; i < 5; ++i) {
+      if (preview.cumulativeExpBefore[i] != 0)
+        hasCumulative = true;
+      if (preview.currentExpAfter[i] != preview.currentExpBefore[i])
+        changed = true;
+    }
+
+    for (int category = 0; category < 7; ++category) {
+      totalAptitudeGain += preview.aptitudeGain[category];
+      totalTacticUps += preview.tacticLevelUps[category];
+
+      if (preview.aptitudeAfter[category] !=
+          preview.aptitudeBefore[category]) {
+        changed = true;
+      }
+
+      for (int i = 0; i < 5; ++i) {
+        if (preview.tacticsAfter[category][i] !=
+            preview.tacticsBefore[category][i]) {
+          changed = true;
+        }
+      }
+    }
+
+    // 누적 EXP가 하나라도 있으면 결과가 동일해 보여도 원본처럼 소비해야 합니다.
+    if (!hasCumulative)
+      continue;
+
+    if (ApplyAIOfficerGrowthResult(officerBase, preview)) {
+      ++consumedCumulativeCount;
+      if (changed)
+        ++changedOfficerCount;
+    }
+  }
+
+  AddLog(
+      u8"[AI성장] %u년 자동성장 완료: 대상 %d명 / 누적EXP 소비 %d명 / 변화 %d명 / 전법 상승 %dLv / 소양 획득 합계 %d / 속도=%s",
+      (unsigned)year,
+      eligibleCount,
+      consumedCumulativeCount,
+      changedOfficerCount,
+      totalTacticUps,
+      totalAptitudeGain,
+      speed == 1 ? u8"느림" : (speed == 3 ? u8"빠름" : u8"보통"));
+}
+
+} // namespace
+
+void TickAIOfficerAutoGrowth() {
+  static bool s_dateInitialized = false;
+  static unsigned short s_lastYear = 0;
+  static uint8_t s_lastMonth = 0;
+  static bool s_pendingJanuaryCouncil = false;
+  static unsigned short s_pendingYear = 0;
+  static unsigned short s_lastAppliedYear = 0;
+
+  unsigned short year = 0;
+  uint8_t month = 0;
+  if (!ReadScenarioDate(&year, &month) ||
+      month < 1 || month > 12) {
+    return;
+  }
+
+  if (!s_dateInitialized) {
+    s_dateInitialized = true;
+    s_lastYear = year;
+    s_lastMonth = month;
+    return;
+  }
+
+  // 기능이 꺼져 있는 동안에는 날짜 기준점만 따라가고 예약은 만들지 않습니다.
+  if (!bAIOfficerAutoGrowth) {
+    s_pendingJanuaryCouncil = false;
+    s_pendingYear = 0;
+    s_lastYear = year;
+    s_lastMonth = month;
+    return;
+  }
+
+  // 실제 12월 -> 다음 해 1월 전환을 본 경우에만 예약합니다.
+  if (s_lastMonth == 12 &&
+      month == 1 &&
+      year >= s_lastYear &&
+      year != s_lastAppliedYear) {
+    s_pendingJanuaryCouncil = true;
+    s_pendingYear = year;
+    AddLog(u8"[AI성장] %u년 1월 전환 감지: 평정 진입 대기",
+           (unsigned)year);
+  }
+
+  s_lastYear = year;
+  s_lastMonth = month;
+
+  if (!s_pendingJanuaryCouncil ||
+      s_pendingYear == 0 ||
+      s_pendingYear == s_lastAppliedYear) {
+    return;
+  }
+
+  if (!IsCouncilState())
+    return;
+
+  const unsigned short applyYear = s_pendingYear;
+  s_pendingJanuaryCouncil = false;
+  s_pendingYear = 0;
+  s_lastAppliedYear = applyYear;
+
+  RunAnnualAIOfficerGrowth(applyYear);
 }
 
 } // namespace DX11Base
