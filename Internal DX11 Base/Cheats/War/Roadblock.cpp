@@ -16,13 +16,25 @@ namespace DX11Base {
 
   // ───────────────────────────────────────────────
   //  AI 전투 개선
-  //  3개의 AI 전쟁 관련 패치를 하나의 토글로 함께 적용합니다.
+  //  5개의 AI 전쟁 관련 패치를 하나의 토글로 함께 적용합니다.
+  //  V2.0의 주인공 소속 도시 공격 유예/임계값 보정 2개를 추가합니다.
   //  모든 주소가 원본/패치 바이트 중 하나와 일치하는지 먼저 검증한 뒤 적용합니다.
   // ───────────────────────────────────────────────
   static const unsigned char kAIWarMultiAttackOriginal[] = {0x74, 0x0A};
   static const unsigned char kAIWarMultiAttackEnabled[] = {0xEB, 0x0A};
   static const unsigned char kAIWarHeroAggroOriginal[] = {0x75, 0x1E};
   static const unsigned char kAIWarHeroAggroEnabled[] = {0x90, 0x90};
+
+  // SAN8RPK AI V2.0 - 주인공 소속 도시 AI 보정.
+  // PLAYER_FORCE_GRACE_RVA: 별도 공격 유예 조건을 제거.
+  static const unsigned char kAIWarPlayerForceGraceOriginal[] = {0x0F, 0x45, 0xFD};
+  static const unsigned char kAIWarPlayerForceGraceEnabled[] = {0x90, 0x90, 0x90};
+
+  // PLAYER_CITY_THRESHOLD_RVA: 주인공 소속 도시만 다른 공격 임계값 경로를 타는 분기를
+  // 일반 AI 경로와 동일하게 건너뛰도록 보정.
+  static const unsigned char kAIWarPlayerCityThresholdOriginal[] = {0x74, 0x0D};
+  static const unsigned char kAIWarPlayerCityThresholdEnabled[] = {0xEB, 0x0D};
+
   static const unsigned char kAIWarEmptyCityOriginal[] = {0xB8, 0x01, 0x00, 0x00, 0x00};
   static const unsigned char kAIWarEmptyCityEnabled[] = {0xB8, 0x00, 0x00, 0x00, 0x00};
 
@@ -36,6 +48,8 @@ namespace DX11Base {
   static const AIWarPatchSpec kAIWarPatches[] = {
       {0x144D24C, kAIWarMultiAttackOriginal, kAIWarMultiAttackEnabled, sizeof(kAIWarMultiAttackOriginal)},
       {0x1464B91, kAIWarHeroAggroOriginal, kAIWarHeroAggroEnabled, sizeof(kAIWarHeroAggroOriginal)},
+      {0x1464B83, kAIWarPlayerForceGraceOriginal, kAIWarPlayerForceGraceEnabled, sizeof(kAIWarPlayerForceGraceOriginal)},
+      {0x145AEE6, kAIWarPlayerCityThresholdOriginal, kAIWarPlayerCityThresholdEnabled, sizeof(kAIWarPlayerCityThresholdOriginal)},
       {0x145BDAB, kAIWarEmptyCityOriginal, kAIWarEmptyCityEnabled, sizeof(kAIWarEmptyCityOriginal)},
   };
 
@@ -139,9 +153,9 @@ namespace DX11Base {
     }
 
     if (enable) {
-      AddLog(u8"[AI전투] 전투 개선 활성화: +144D24C, +1464B91, +145BDAB");
+      AddLog(u8"[AI전투] 전투 개선 활성화: +144D24C, +1464B91, +1464B83, +145AEE6, +145BDAB");
     } else {
-      AddLog(u8"[AI전투] 전투 개선 비활성화: 3개 주소 원본 복구");
+      AddLog(u8"[AI전투] 전투 개선 비활성화: 5개 주소 원본 복구");
     }
   }
 
@@ -159,12 +173,14 @@ namespace DX11Base {
 
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
-      ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"AI 세력의 전쟁 행동 관련 3개 분기를 함께 조정합니다.");
+      ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"AI 세력의 전쟁 행동 관련 5개 분기를 함께 조정합니다.");
       ImGui::TextUnformatted(u8"- 한 세력의 복수 공격 분기");
       ImGui::TextUnformatted(u8"- 주인공 대상 호전성 증가 분기 제거");
+      ImGui::TextUnformatted(u8"- 주인공이 군주가 아닐 때 소속 도시의 별도 공격 유예 조건 제거");
+      ImGui::TextUnformatted(u8"- 주인공 소속 도시의 공격 임계값을 일반 AI와 같은 경로로 보정");
       ImGui::TextUnformatted(u8"- 일부 군주의 공백지 점령 제한 플래그 무력화");
       ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                         u8"※ 세 주소 중 하나라도 예상 바이트와 다르면 전체 패치를 적용하지 않습니다.");
+                         u8"※ 다섯 주소 중 하나라도 예상 바이트와 다르면 전체 패치를 적용하지 않습니다.");
       ImGui::EndTooltip();
     }
 
