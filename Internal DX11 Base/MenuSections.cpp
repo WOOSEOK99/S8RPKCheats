@@ -38,6 +38,7 @@
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/FactionLordBonus.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
+#include "Cheats/War/AIExecutionConditionChange.h"
 #include "Cheats/War/PrisonerCaptureManagement.h"
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
@@ -1112,6 +1113,28 @@ namespace DX11Base {
           ImGui::TextUnformatted(u8"- 소속 세력이 새로 생기거나 다른 세력으로 바뀐 장수는 현재 세력/도시를 표시합니다.");
           ImGui::TextUnformatted(u8"- 사망 원인이나 세력 변경 원인까지는 구분하지 않고 최종 상태를 기준으로 판정합니다.");
           ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        // 5행: AI 처형조건 변경 / 빈칸
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"AI 처형조건 변경", &bAIExecutionConditionChange)) {
+          const bool requested = bAIExecutionConditionChange;
+          if (!DX11Base::SetAIExecutionConditionChange(requested))
+            bAIExecutionConditionChange =
+                DX11Base::IsAIExecutionConditionChangeApplied();
+          NotifyFeatureToggle(u8"AI 처형조건 변경", bAIExecutionConditionChange);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+              u8"AI가 포로를 석방/처형할 때 사용하는 판정 조건을 개선합니다.");
+          ImGui::TextUnformatted(u8"- 포로와 처분 주체의 상성 차이를 반영");
+          ImGui::TextUnformatted(u8"- 처분 주체의 의리와 포로의 군주 여부를 반영");
+          ImGui::TextUnformatted(u8"- 두 장수의 관계 판정과 세력 간 특수 관계를 함께 반영");
           ImGui::EndTooltip();
         }
 
