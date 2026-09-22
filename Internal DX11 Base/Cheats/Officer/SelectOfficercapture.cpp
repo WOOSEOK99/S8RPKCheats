@@ -66,7 +66,7 @@ namespace DX11Base {
   static uintptr_t s_nextTargetFallback = 0;           // [UX] 일괄 변경 시 다음으로 선택할 무장 주소 보관
   static std::unordered_set<int> s_selectedOfficerIDs;    // 다중 선택용 보관함
   static std::vector<uintptr_t>  s_selectedOfficerBases;  // [캐시] 선택된 무장들의 메모리 베이스 (패치 고속화용)
-  constexpr int kOfficerListActiveCount = 1800; // GrowthM 실사용 장수 범위 기준
+  constexpr int kOfficerListActiveCount = 5102; // 사용자 등록 장수까지 포함한 전체 장수 공간
   static std::vector<CachedOfficer> s_allOfficerCache; // [최적화] 전체 무장 캐시 (새로고침 시 1회 구축)
   static std::vector<CachedOfficer> s_filteredIndices; // [최적화] 필터링 및 이름/ID 캐싱된 목록
   static int s_officerNameEditId = -1;                 // JSON 이름 편집 중인 무장 ID
@@ -925,7 +925,7 @@ namespace DX11Base {
   }
 
   // --- [모든 무장 일괄 랜덤 기재 부여] ---
-  constexpr int kBatchRandomOfficerCount = 1800;
+  constexpr int kBatchRandomOfficerCount = 5102;
   static bool s_showBatchRandomTraitWindow = false;
   static bool s_batchRandomGold = true;
   static bool s_batchRandomGreen = true;
@@ -1107,7 +1107,7 @@ namespace DX11Base {
     if (!s_batchRandomJob.running)
       return;
 
-    // 0단계: 1~1800 실사용 무장 목록은 worker에서 수집합니다.
+    // 0단계: 1~5102 전체 무장 공간 목록은 worker에서 수집합니다.
     if (s_batchRandomJob.collectingOfficers) {
       if (!s_batchRandomCollectDone.load())
         return;
@@ -1124,7 +1124,7 @@ namespace DX11Base {
       if (s_batchRandomJob.officers.empty()) {
         s_batchRandomJob.running = false;
         s_batchRandomStatus =
-            u8"1~1800 무장 범위에서 유효 무장을 찾지 못했습니다.";
+            u8"1~5102 무장 범위에서 유효 무장을 찾지 못했습니다.";
         return;
       }
 
@@ -1305,7 +1305,7 @@ namespace DX11Base {
     if (s_batchRandomJob.running) {
       if (s_batchRandomJob.collectingOfficers) {
         ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
-                           u8"1~1800 실사용 무장 목록 수집 중...");
+                           u8"1~5102 전체 무장 공간 목록 수집 중...");
         ImGui::TextDisabled(u8"장수 배열 검사는 백그라운드 worker에서 처리합니다.");
       } else if (s_batchRandomJob.scanningTraits) {
         ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
@@ -1376,7 +1376,7 @@ namespace DX11Base {
 
             StartCollectValidOfficerBasesForBatchWorker();
             s_batchRandomStatus =
-                u8"1~1800 실사용 무장 목록 수집 시작";
+                u8"1~5102 전체 무장 공간 목록 수집 시작";
           }
         }
       }
@@ -2259,7 +2259,7 @@ namespace DX11Base {
     return s_selectedOfficerIDs.size();
   }
 
-  // [캐시 재구축] 실사용 1~1800 범위를 1회 순회해 선택된 무장의 베이스 주소만 뽑아 캐시에 저장
+  // [캐시 재구축] 실사용 1~5102 범위를 1회 순회해 선택된 무장의 베이스 주소만 뽑아 캐시에 저장
   // · 체크박스 토글 / 전체선택 / 선택해제 시 호출해야 함
   // · 이후 ApplyPatchToSelectedOfficers는 이 캐시만 순회 → O(N_selected) 패치
   static void RebuildSelectedOfficerBases() {
