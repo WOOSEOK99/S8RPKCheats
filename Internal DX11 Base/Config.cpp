@@ -176,6 +176,9 @@ namespace DX11Base {
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
     UpsertBoolConfigValue("bReinforcementDefenderPlacement", bReinforcementDefenderPlacement);
     UpsertBoolConfigValue("bAnnualSpecialAbilityAutoAssign", bAnnualSpecialAbilityAutoAssign);
+    UpsertBoolConfigValue("bAIOfficerAutoGrowth", bAIOfficerAutoGrowth);
+    UpsertIntConfigValue("iAIOfficerGrowthSpeed", iAIOfficerGrowthSpeed);
+    UpsertBoolConfigValue("bAIOfficerGrowthRestoreNone", bAIOfficerGrowthRestoreNone);
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
     UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
@@ -237,6 +240,33 @@ namespace DX11Base {
       AddLog(u8"[Config] 자동 특수능력 부여 설정 로드: %s",
              bAnnualSpecialAbilityAutoAssign ? "ON" : "OFF");
     }
+
+    bool savedAIOfficerAutoGrowth = false;
+    if (LoadBoolConfigValue("bAIOfficerAutoGrowth", savedAIOfficerAutoGrowth))
+      bAIOfficerAutoGrowth = savedAIOfficerAutoGrowth;
+
+    int savedAIOfficerGrowthSpeed = 2;
+    if (LoadIntConfigValue("iAIOfficerGrowthSpeed", savedAIOfficerGrowthSpeed)) {
+      if (savedAIOfficerGrowthSpeed < 1) savedAIOfficerGrowthSpeed = 1;
+      if (savedAIOfficerGrowthSpeed > 3) savedAIOfficerGrowthSpeed = 3;
+      iAIOfficerGrowthSpeed = savedAIOfficerGrowthSpeed;
+    }
+
+    bool savedAIOfficerGrowthRestoreNone = false;
+    if (LoadBoolConfigValue("bAIOfficerGrowthRestoreNone",
+                            savedAIOfficerGrowthRestoreNone)) {
+      bAIOfficerGrowthRestoreNone = savedAIOfficerGrowthRestoreNone;
+    }
+
+    if (!bAIOfficerAutoGrowth && bAnnualSpecialAbilityAutoAssign) {
+      bAnnualSpecialAbilityAutoAssign = false;
+      AddLog(u8"[Config] AI 자동성장 OFF이므로 자동 특수능력 부여도 OFF 처리");
+    }
+
+    AddLog(u8"[Config] AI 무장 자동성장 설정 로드: %s / 속도=%d / 없음복귀=%s",
+           bAIOfficerAutoGrowth ? "ON" : "OFF",
+           iAIOfficerGrowthSpeed,
+           bAIOfficerGrowthRestoreNone ? "YES" : "NO");
 
     bool savedReinforcementDefenderPlacement = false;
     if (LoadBoolConfigValue("bReinforcementDefenderPlacement",

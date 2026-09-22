@@ -2121,20 +2121,6 @@ namespace DX11Base {
     const uintptr_t pSnap = (uintptr_t)s_capOfficerSnap;
     g_officerInlineReadPtr = pSnap;
 
-    // [요청 반영] 소양(EXP) 탭은 주인공 무장일 때만 표시
-    bool isHeroOfficer = false;
-    {
-      uintptr_t gameBase = DX11Base::GetGameBase();
-      if (gameBase > 0x10000) {
-        uintptr_t heroBase = *(uintptr_t *)(gameBase + 0xE0);
-        if (heroBase > 0x10000 && IsValidPtr(heroBase + 0x08, 2) && IsValidPtr(pBase + 0x08, 2)) {
-          uint16_t heroId = *(uint16_t *)(heroBase + 0x08);
-          uint16_t selectedId = *(uint16_t *)(pBase + 0x08);
-          isHeroOfficer = (heroId == selectedId);
-        }
-      }
-    }
-
     // --- [ 다중 선택 배너 ] ---
     {
       size_t selCount = GetSelectedOfficerIDCount();
@@ -2180,14 +2166,12 @@ namespace DX11Base {
         RenderSpecialAbilityTab(pBase, scale);
         ImGui::EndTabItem();
       }
-      if (isHeroOfficer) {
-        if (ImGui::BeginTabItem(u8"소양(EXP)")) {
-          if (currentTabIdx != 2) {
-            currentTabIdx = 2;
-          }
-          RenderExpTab(pBase, scale);
-          ImGui::EndTabItem();
+      if (ImGui::BeginTabItem(u8"소양(EXP)")) {
+        if (currentTabIdx != 2) {
+          currentTabIdx = 2;
         }
+        RenderExpTab(pBase, scale);
+        ImGui::EndTabItem();
       }
       ImGui::EndTabBar();
     }

@@ -91,6 +91,90 @@ namespace DX11Base {
     //
     // ─────────────────────────────────────────────────────────────
 
+    // GrowthM이 참조하는 게임 능력 성장 설정.
+    // EXE + 0x3BA9850 구조체의 +0x38 한 바이트에
+    // 플레이어 세력/타 세력 성장 속도가 각각 2bit로 저장되어 있다.
+    // Step 1에서는 읽기 전용 진단만 수행한다.
+    struct OfficerGrowthGameSettings {
+      bool valid = false;
+      uint8_t packed = 0;
+      int playerForce = 0; // bits 0..1
+      int otherForces = 0; // bits 2..3
+    };
+
+    static OfficerGrowthGameSettings ReadOfficerGrowthGameSettings() {
+      OfficerGrowthGameSettings result{};
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(nullptr);
+      if (!exe)
+        return result;
+
+      constexpr uintptr_t kGrowthSettingObjectOffset = 0x3BA9850;
+      constexpr uintptr_t kGrowthSettingPackedOffset = 0x38;
+      const uintptr_t addr =
+          exe + kGrowthSettingObjectOffset + kGrowthSettingPackedOffset;
+
+      if (!DX11Base::IsValidPtr(addr, 1))
+        return result;
+
+      result.packed = *(const uint8_t *)addr;
+      result.playerForce = (int)(result.packed & 0x03);
+      result.otherForces = (int)((result.packed >> 2) & 0x03);
+      result.valid = true;
+      return result;
+    }
+
+    static const char *OfficerGrowthSettingName(int raw) {
+      switch (raw) {
+      case 0: return u8"없음";
+      case 1: return u8"느림";
+      case 2: return u8"보통";
+      case 3: return u8"빠름";
+      default: return u8"알 수 없음";
+      }
+    }
+
+    static bool WriteOfficerGrowthGameSettingsRaw(int playerForce, int otherForces) {
+      if (playerForce < 0 || playerForce > 3 ||
+          otherForces < 0 || otherForces > 3)
+        return false;
+
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(nullptr);
+      if (!exe)
+        return false;
+
+      constexpr uintptr_t kGrowthSettingObjectOffset = 0x3BA9850;
+      constexpr uintptr_t kGrowthSettingPackedOffset = 0x38;
+      const uintptr_t addr =
+          exe + kGrowthSettingObjectOffset + kGrowthSettingPackedOffset;
+
+      if (!DX11Base::IsValidPtr(addr, 1))
+        return false;
+
+      const uint8_t oldValue = *(const uint8_t *)addr;
+      const uint8_t newValue =
+          (uint8_t)((oldValue & 0xF0) |
+                    (playerForce & 0x03) |
+                    ((otherForces & 0x03) << 2));
+
+      DWORD oldProtect = 0;
+      if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &oldProtect))
+        return false;
+
+      *(uint8_t *)addr = newValue;
+
+      DWORD dummy = 0;
+      VirtualProtect((LPVOID)addr, 1, oldProtect, &dummy);
+      return *(const uint8_t *)addr == newValue;
+    }
+
+    static bool WriteOfficerGrowthGameSettings(int speed) {
+      if (speed < 1 || speed > 3)
+        return false;
+
+      return WriteOfficerGrowthGameSettingsRaw(speed, speed);
+
+    }
+
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
                      float scale) {
       // 1. 현재 값 미리 읽기
@@ -1118,15 +1202,173 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      // AI 무장 자동성장: 사용자에게는 하나의 옵션만 노출하고
+      // 내부적으로 게임 원본 능력성장 설정(플레이어/타 세력)도 같은 속도로 맞춘다.
+      {
+        static bool s_growthSettingApplied = false;
+
+        if (bAIOfficerAutoGrowth && !s_growthSettingApplied) {
+          if (iAIOfficerGrowthSpeed < 1 || iAIOfficerGrowthSpeed > 3)
+            iAIOfficerGrowthSpeed = 2;
+          if (WriteOfficerGrowthGameSettings(iAIOfficerGrowthSpeed)) {
+            s_growthSettingApplied = true;
+          }
+        }
+        if (!bAIOfficerAutoGrowth)
+          s_growthSettingApplied = false;
+
+        if (ImGui::Checkbox(u8"AI 무장 자동성장", &bAIOfficerAutoGrowth)) {
+          if (bAIOfficerAutoGrowth) {
+            const OfficerGrowthGameSettings current =
+                ReadOfficerGrowthGameSettings();
+
+            // 게임이 이미 느림/보통/빠름이면 그 값을 초기 속도로 존중한다.
+            // 둘 다 없음이면 보통으로 시작한다.
+            if (current.valid) {
+              bAIOfficerGrowthRestoreNone =
+                  (current.playerForce == 0 && current.otherForces == 0);
+
+              if (current.otherForces >= 1 && current.otherForces <= 3)
+                iAIOfficerGrowthSpeed = current.otherForces;
+              else if (current.playerForce >= 1 && current.playerForce <= 3)
+                iAIOfficerGrowthSpeed = current.playerForce;
+              else
+                iAIOfficerGrowthSpeed = 2;
+            } else {
+              bAIOfficerGrowthRestoreNone = false;
+              iAIOfficerGrowthSpeed = 2;
+            }
+
+            if (WriteOfficerGrowthGameSettings(iAIOfficerGrowthSpeed)) {
+              s_growthSettingApplied = true;
+              AddLog(u8"[AI성장] 자동성장 ON / 게임 능력성장=%s",
+                     OfficerGrowthSettingName(iAIOfficerGrowthSpeed));
+            } else {
+              AddLog(u8"[AI성장] 게임 능력성장 설정 적용 실패");
+            }
+          } else {
+            s_growthSettingApplied = false;
+
+            if (bAnnualSpecialAbilityAutoAssign) {
+              bAnnualSpecialAbilityAutoAssign = false;
+              AddLog(u8"[AI성장] 자동성장 OFF -> 자동 특수능력 부여도 OFF");
+            }
+
+            if (bAIOfficerGrowthRestoreNone) {
+              if (WriteOfficerGrowthGameSettingsRaw(0, 0)) {
+                AddLog(u8"[AI성장] 자동성장 OFF / 원래 설정이 '없음'이어서 게임 능력성장도 '없음'으로 복귀");
+              } else {
+                AddLog(u8"[AI성장] 자동성장 OFF / 게임 능력성장 '없음' 복귀 실패");
+              }
+              bAIOfficerGrowthRestoreNone = false;
+            } else {
+              AddLog(u8"[AI성장] 자동성장 OFF / 게임 능력성장 설정은 유지");
+            }
+          }
+          SaveConfig();
+        }
+        const bool growthToggleHovered = ImGui::IsItemHovered();
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!bAIOfficerAutoGrowth);
+        ImGui::SetNextItemWidth(90.0f * scale);
+
+        const char *growthSpeedItems[] = {u8"느림", u8"보통", u8"빠름"};
+        int speedIndex = iAIOfficerGrowthSpeed - 1;
+        if (speedIndex < 0 || speedIndex > 2)
+          speedIndex = 1;
+
+        if (ImGui::Combo(u8"##AIOfficerGrowthSpeed",
+                         &speedIndex,
+                         growthSpeedItems,
+                         IM_ARRAYSIZE(growthSpeedItems))) {
+          iAIOfficerGrowthSpeed = speedIndex + 1;
+          if (WriteOfficerGrowthGameSettings(iAIOfficerGrowthSpeed)) {
+            s_growthSettingApplied = true;
+            AddLog(u8"[AI성장] 성장 속도 변경: %s",
+                   OfficerGrowthSettingName(iAIOfficerGrowthSpeed));
+          } else {
+            AddLog(u8"[AI성장] 성장 속도 적용 실패");
+          }
+          SaveConfig();
+        }
+        const bool growthComboHovered = ImGui::IsItemHovered();
+        ImGui::EndDisabled();
+
+        const char *growthSpeedGuide =
+            speedIndex == 0
+                ? u8"장기 시나리오용"
+                : (speedIndex == 2
+                       ? u8"단기 시나리오 / 성장 체감 강조용"
+                       : u8"추천 기본값");
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"- %s", growthSpeedGuide);
+        const bool growthGuideHovered = ImGui::IsItemHovered();
+
+        if (growthToggleHovered || growthComboHovered || growthGuideHovered) {
+          ImGui::BeginTooltip();
+          ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0f);
+          ImGui::TextUnformatted(
+              u8"AI 자동성장과 게임 원본 능력성장 속도를 한 번에 제어합니다.");
+          ImGui::Separator();
+          ImGui::TextColored(
+              ImVec4(0.65f, 0.85f, 1.0f, 1.0f),
+              u8"느림 : 장기 시나리오용");
+          ImGui::TextColored(
+              ImVec4(0.65f, 1.0f, 0.65f, 1.0f),
+              u8"보통 : 추천 기본값");
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.82f, 0.45f, 1.0f),
+              u8"빠름 : 단기 시나리오 / 성장 체감 강조용");
+          ImGui::Separator();
+          ImGui::TextUnformatted(
+              u8"- 게임 설정이 '없음'이면 기능을 켤 때 자동으로 '보통'으로 변경합니다.");
+          ImGui::TextUnformatted(
+              u8"- 원래 게임 설정이 '없음'이었다면 기능을 끌 때 다시 '없음'으로 복귀합니다.");
+          ImGui::TextUnformatted(
+              u8"- 원래 느림/보통/빠름이었다면 기능을 꺼도 마지막 선택 속도를 유지합니다.");
+          ImGui::PopTextWrapPos();
+          ImGui::EndTooltip();
+        }
+      }
+
+      if (!bAIOfficerAutoGrowth)
+        ImGui::BeginDisabled();
+
       if (ImGui::Checkbox(u8"자동 특수능력 부여", &bAnnualSpecialAbilityAutoAssign)) {
         NotifyFeatureToggle(u8"자동 특수능력 부여", bAnnualSpecialAbilityAutoAssign);
         SaveConfig();
       }
-      if (ImGui::IsItemHovered()) {
+      const bool annualSpecialHovered = ImGui::IsItemHovered();
+
+      if (!bAIOfficerAutoGrowth)
+        ImGui::EndDisabled();
+
+      if (annualSpecialHovered) {
         ImGui::BeginTooltip();
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 38.0f);
+        if (!bAIOfficerAutoGrowth) {
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+              u8"AI 무장 자동성장을 먼저 켜야 사용할 수 있습니다.");
+          ImGui::Separator();
+        }
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"체크 시 매년 12월에서 1월로 넘어갈 때 특수 능력을 자동 판정합니다.");
+                           u8"매년 1월 평정에서 AI 자동성장이 끝난 뒤 특수 능력을 자동 판정합니다.");
+        ImGui::Separator();
+        ImGui::TextColored(
+            ImVec4(0.65f, 0.85f, 1.0f, 1.0f),
+            u8"[ 자동 기능 조합 ]");
+        ImGui::TextUnformatted(
+            u8"AI 성장 OFF / 특수능력 OFF : 두 기능 모두 미사용");
+        ImGui::TextUnformatted(
+            u8"AI 성장 ON  / 특수능력 OFF : AI 자동성장만 적용");
+        ImGui::TextUnformatted(
+            u8"AI 성장 ON  / 특수능력 ON  : AI 성장 후 특수능력 자동 판정");
+        ImGui::TextDisabled(
+            u8"AI 성장 OFF / 특수능력 ON  : 사용 불가 (특수능력 자동은 비활성화)");
+        ImGui::Separator();
+        ImGui::TextUnformatted(u8"- AI 자동성장 결과로 상승한 전법/능력치를 반영한 뒤 판정합니다.");
         ImGui::TextUnformatted(u8"- 이미 특수 능력을 하나라도 보유한 무장은 자동 판정에서 제외합니다.");
         ImGui::TextUnformatted(u8"- 전체 무장 공간(1~5102)는 백그라운드 worker에서 판정합니다.");
         ImGui::TextUnformatted(u8"- 새로 부여된 무장이 있을 때만 상단 알림과 알림 내역에 표시합니다.");

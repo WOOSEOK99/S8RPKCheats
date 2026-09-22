@@ -60,6 +60,9 @@ namespace DX11Base {
   bool bReinforcementArrivalAction = false;
   bool bReinforcementDefenderPlacement = false;
   bool bAnnualSpecialAbilityAutoAssign = false;
+  bool bAIOfficerAutoGrowth = false;
+  int iAIOfficerGrowthSpeed = 2; // 기본: 보통
+  bool bAIOfficerGrowthRestoreNone = false;
 
   // 전투 환경 / 조건 설정
   bool bWeatherSkillSimple = false;

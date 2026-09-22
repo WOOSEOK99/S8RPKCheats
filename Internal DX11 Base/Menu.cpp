@@ -6,6 +6,7 @@
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/Officer/OfficerDetail.h"
+#include "Cheats/Officer/AIOfficerGrowth.h"
 #include "Cheats/Officer/SpecialAbilityAutoAssign.h"
 #include "Cheats/Officer/OfficerData.h"
 #include "Cheats/Officer/RoninMonitor.h"
@@ -464,6 +465,10 @@ namespace DX11Base {
     }
     if (nowTick - s_lastTechMonitorTick >= 500) {
       s_lastTechMonitorTick = nowTick;
+
+      // 1월 평정에서는 AI 성장을 먼저 확정한 뒤
+      // MonitorTechStatus()의 특수능력 자동판정이 성장 후 데이터를 읽도록 합니다.
+      DX11Base::TickAIOfficerAutoGrowth();
       MonitorTechStatus();
       MonitorAllAggressive();
     }

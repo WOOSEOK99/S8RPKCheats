@@ -9,14 +9,17 @@
 #include "OfficerDetail.h"
 #include "../../Cheats.h"
 #include "../../MenuState.h"
+#include "../../debug.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
 #include "OfficerRosterResolve.h"
+#include "AIOfficerGrowth.h"
 #include "CustomTraitDisplay.h"
 #include "../Civilian/CityData.h"
 #include "../../Framework/imgui.h"
 #include "../../showlog.h"
 #include "../System/SkillCountManager.h"
+#include "../System/MonthCapture.h"
 
 extern ImGuiWindowFlags Flags;
 
@@ -1060,6 +1063,192 @@ namespace DX11Base {
         RenderStatRow(pBase, u8"지모소양", 0xCC, 1, &v_Exp_Intel, scale);
         RenderStatRow(pBase, u8"병과소양", 0xCD, 1, &v_Exp_War, scale);
         RenderStatRow(pBase, u8"군사소양", 0xCE, 1, &v_Exp_Mil, scale);
+
+        // 진단용 EXP/AI 성장 예상은 디버그 모드에서만 표시합니다.
+        if (bShowDebug) {
+        // --- [ 현재 능력 EXP / read-only ] ---
+        // GrowthM worker가 누적 EXP 바로 앞에서 읽는 5개 WORD 값.
+        // 게임 UI의 현재 경험치와 일치하는지 검증하기 위한 진단 표시입니다.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.25f, 0.50f, 0.45f, 0.25f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 1.0f, 0.80f, 1.0f));
+        ImGui::Selectable(u8" [ 현재 능력 EXP ]", true,
+                          ImGuiSelectableFlags_SpanAllColumns |
+                          ImGuiSelectableFlags_Disabled);
+        ImGui::PopStyleColor(2);
+
+        struct CurrentExpRow {
+          const char* label;
+          uintptr_t offset;
+        };
+        const CurrentExpRow currentExpRows[] = {
+            {u8"현재 통솔 EXP", 0xB0},
+            {u8"현재 무력 EXP", 0xB2},
+            {u8"현재 지력 EXP", 0xB4},
+            {u8"현재 정치 EXP", 0xB6},
+            {u8"현재 매력 EXP", 0xB8},
+        };
+
+        for (const auto &row : currentExpRows) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::AlignTextToFramePadding();
+          ImGui::TextUnformatted(row.label);
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::AlignTextToFramePadding();
+
+          if (IsValidPtr(pBase + row.offset, sizeof(uint16_t))) {
+            const uint16_t rawExp =
+                *reinterpret_cast<const uint16_t *>(pBase + row.offset);
+            ImGui::TextColored(
+                ImVec4(0.55f, 1.0f, 0.80f, 1.0f),
+                "%u",
+                static_cast<unsigned>(rawExp));
+          } else {
+            ImGui::TextDisabled("-");
+          }
+        }
+
+        // --- [ 누적 능력 EXP / read-only ] ---
+        // GrowthM이 AI 소양 계산의 원자료로 읽는 5개 WORD 값.
+        // 현재 단계에서는 진단 목적이므로 절대 쓰지 않고 표시만 합니다.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.35f, 0.35f, 0.75f, 0.25f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.75f, 1.0f, 1.0f));
+        ImGui::Selectable(u8" [ 누적 능력 EXP ]", true,
+                          ImGuiSelectableFlags_SpanAllColumns |
+                          ImGuiSelectableFlags_Disabled);
+        ImGui::PopStyleColor(2);
+
+        struct CumulativeExpRow {
+          const char* label;
+          uintptr_t offset;
+        };
+        const CumulativeExpRow cumulativeExpRows[] = {
+            {u8"누적 통솔 EXP", 0xBA},
+            {u8"누적 무력 EXP", 0xBC},
+            {u8"누적 지력 EXP", 0xBE},
+            {u8"누적 정치 EXP", 0xC0},
+            {u8"누적 매력 EXP", 0xC2},
+        };
+
+        for (const auto &row : cumulativeExpRows) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::AlignTextToFramePadding();
+          ImGui::TextUnformatted(row.label);
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::AlignTextToFramePadding();
+
+          if (IsValidPtr(pBase + row.offset, sizeof(uint16_t))) {
+            const uint16_t rawExp =
+                *reinterpret_cast<const uint16_t *>(pBase + row.offset);
+            ImGui::TextColored(
+                ImVec4(0.55f, 0.85f, 1.0f, 1.0f),
+                "%u",
+                static_cast<unsigned>(rawExp));
+          } else {
+            ImGui::TextDisabled("-");
+          }
+        }
+
+        // --- [ AI 자동성장 예상 / read-only ] ---
+        // Step 3 검증용. GrowthM 원본 계산 결과를 표시만 하며 게임 메모리는 수정하지 않는다.
+        AIOfficerGrowthPreview growthPreview{};
+        unsigned short previewYear = 0;
+        uint8_t previewMonth = 0;
+        uint32_t previewSeed = 0;
+        if (ReadScenarioDate(&previewYear, &previewMonth) &&
+            previewYear > 0 &&
+            previewMonth >= 1 && previewMonth <= 12 &&
+            IsValidPtr(pBase + 0x08, sizeof(uint16_t))) {
+          const uint16_t previewOfficerId =
+              *reinterpret_cast<const uint16_t *>(pBase + 0x08);
+          const unsigned short applyYear =
+              static_cast<unsigned short>(
+                  previewYear + (previewMonth == 12 ? 1 : 0));
+          previewSeed =
+              MakeAIOfficerGrowthAnnualSeed(applyYear, previewOfficerId);
+        }
+
+        if (BuildAIOfficerGrowthPreview(
+                pBase, iAIOfficerGrowthSpeed, &growthPreview, previewSeed)) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::PushStyleColor(
+              ImGuiCol_Header, ImVec4(0.45f, 0.25f, 0.65f, 0.25f));
+          ImGui::PushStyleColor(
+              ImGuiCol_Text, ImVec4(0.82f, 0.65f, 1.0f, 1.0f));
+          ImGui::Selectable(
+              u8" [ AI 자동성장 예상 ]",
+              true,
+              ImGuiSelectableFlags_SpanAllColumns |
+                  ImGuiSelectableFlags_Disabled);
+          ImGui::PopStyleColor(2);
+
+          if (!growthPreview.eligible) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled(u8"대상");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextDisabled(
+                u8"AI 성장 대상 아님 (주인공/무세력/ID 1801 이상)");
+          } else {
+            for (std::size_t category = 0;
+                 category < kAIOfficerGrowthCategoryCount;
+                 ++category) {
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::AlignTextToFramePadding();
+              ImGui::Text(
+                  u8"%s 예상",
+                  GetAIOfficerGrowthCategoryName(category));
+
+              ImGui::TableSetColumnIndex(1);
+              ImGui::AlignTextToFramePadding();
+              ImGui::Text(
+                  u8"%u + %d → %u  | 전법 +%dLv",
+                  (unsigned)growthPreview.aptitudeBefore[category],
+                  growthPreview.aptitudeGain[category],
+                  (unsigned)growthPreview.aptitudeAfter[category],
+                  growthPreview.tacticLevelUps[category]);
+            }
+
+            static const char *statNames[] = {
+                u8"통솔", u8"무력", u8"지력", u8"정치", u8"매력"};
+            for (int stat = 0; stat < 5; ++stat) {
+              if (growthPreview.currentExpAfter[stat] ==
+                  growthPreview.currentExpBefore[stat])
+                continue;
+
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::Text(u8"%s EXP 예상", statNames[stat]);
+              ImGui::TableSetColumnIndex(1);
+              ImGui::Text(
+                  u8"%u → %u",
+                  (unsigned)growthPreview.currentExpBefore[stat],
+                  (unsigned)growthPreview.currentExpAfter[stat]);
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled(u8"속도");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextDisabled(
+                u8"%s (GrowthM 배율 %d)",
+                growthPreview.speed == 1
+                    ? u8"느림"
+                    : (growthPreview.speed == 3 ? u8"빠름" : u8"보통"),
+                growthPreview.growthFactor);
+          }
+        }
+        }
+
         ImGui::EndTable();
     }
   }
