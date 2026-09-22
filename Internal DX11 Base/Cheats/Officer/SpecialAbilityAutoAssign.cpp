@@ -20,7 +20,7 @@
 namespace DX11Base {
 namespace {
 
-constexpr int kOfficerSlotCount = 1800;
+constexpr int kOfficerSlotCount = 5102;
 constexpr int kOfficerIdMax = 5102;
 constexpr uintptr_t kOfficerStride = 0x3D0;
 
@@ -384,8 +384,8 @@ bool StartAutoAssignJob(bool annualMode) {
   g_autoAssignJob.rosterBase = rosterBase;
   g_autoAssignJob.pending.reserve(annualMode ? 256 : 1024);
   g_autoAssignJob.status = annualMode
-      ? u8"연말 자동 판정 시작: 0 / 1800명"
-      : u8"처리 시작: 0 / 1800명";
+      ? u8"연말 자동 판정 시작: 0 / 5102명"
+      : u8"처리 시작: 0 / 5102명";
 
   if (annualMode) {
     // 연말 자동 판정은 이미 특수 능력(0x1000~0x1009)을 하나라도 가진
@@ -408,9 +408,9 @@ bool StartAutoAssignJob(bool annualMode) {
         g_autoAssignJob.excludedExistingIds[officerId] = true;
     }
 
-    AddLog(u8"[특수능력/연말자동] 1~1800 실사용 무장 worker 판정 시작");
+    AddLog(u8"[특수능력/연말자동] 1~5102 전체 무장 공간 worker 판정 시작");
   } else {
-    AddLog(u8"[특수능력/자동] 1~1800 실사용 무장 worker 판정 시작");
+    AddLog(u8"[특수능력/자동] 1~5102 전체 무장 공간 worker 판정 시작");
   }
 
   StartAutoAssignWorker(
