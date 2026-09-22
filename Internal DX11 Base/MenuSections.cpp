@@ -133,6 +133,39 @@ namespace DX11Base {
       }
     }
 
+    static bool WriteOfficerGrowthGameSettings(int speed) {
+      if (speed < 1 || speed > 3)
+        return false;
+
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(nullptr);
+      if (!exe)
+        return false;
+
+      constexpr uintptr_t kGrowthSettingObjectOffset = 0x3BA9850;
+      constexpr uintptr_t kGrowthSettingPackedOffset = 0x38;
+      const uintptr_t addr =
+          exe + kGrowthSettingObjectOffset + kGrowthSettingPackedOffset;
+
+      if (!DX11Base::IsValidPtr(addr, 1))
+        return false;
+
+      const uint8_t oldValue = *(const uint8_t *)addr;
+      const uint8_t newValue =
+          (uint8_t)((oldValue & 0xF0) |
+                    (speed & 0x03) |
+                    ((speed & 0x03) << 2));
+
+      DWORD oldProtect = 0;
+      if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &oldProtect))
+        return false;
+
+      *(uint8_t *)addr = newValue;
+
+      DWORD dummy = 0;
+      VirtualProtect((LPVOID)addr, 1, oldProtect, &dummy);
+      return *(const uint8_t *)addr == newValue;
+    }
+
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
                      float scale) {
       // 1. 현재 값 미리 읽기
@@ -1160,20 +1193,88 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      // Step 1: 게임 원본 능력 성장 설정 read-only 확인.
-      // 최종 AI 성장 UI가 붙으면 이 진단 표시는 제거한다.
+      // AI 무장 자동성장: 사용자에게는 하나의 옵션만 노출하고
+      // 내부적으로 게임 원본 능력성장 설정(플레이어/타 세력)도 같은 속도로 맞춘다.
       {
-        const OfficerGrowthGameSettings growthSettings =
-            ReadOfficerGrowthGameSettings();
-        if (growthSettings.valid) {
-          ImGui::TextDisabled(
-              u8"[AI성장DBG] 게임 능력성장: 플레이어 세력 %s / 타 세력 %s (raw=0x%02X)",
-              OfficerGrowthSettingName(growthSettings.playerForce),
-              OfficerGrowthSettingName(growthSettings.otherForces),
-              (unsigned int)growthSettings.packed);
-        } else {
-          ImGui::TextDisabled(
-              u8"[AI성장DBG] 게임 능력성장 설정을 읽지 못했습니다.");
+        static bool s_growthSettingApplied = false;
+
+        if (bAIOfficerAutoGrowth && !s_growthSettingApplied) {
+          if (iAIOfficerGrowthSpeed < 1 || iAIOfficerGrowthSpeed > 3)
+            iAIOfficerGrowthSpeed = 2;
+          if (WriteOfficerGrowthGameSettings(iAIOfficerGrowthSpeed)) {
+            s_growthSettingApplied = true;
+          }
+        }
+        if (!bAIOfficerAutoGrowth)
+          s_growthSettingApplied = false;
+
+        if (ImGui::Checkbox(u8"AI 무장 자동성장", &bAIOfficerAutoGrowth)) {
+          if (bAIOfficerAutoGrowth) {
+            const OfficerGrowthGameSettings current =
+                ReadOfficerGrowthGameSettings();
+
+            // 게임이 이미 느림/보통/빠름이면 그 값을 초기 속도로 존중한다.
+            // 둘 다 없음이면 보통으로 시작한다.
+            if (current.valid) {
+              if (current.otherForces >= 1 && current.otherForces <= 3)
+                iAIOfficerGrowthSpeed = current.otherForces;
+              else if (current.playerForce >= 1 && current.playerForce <= 3)
+                iAIOfficerGrowthSpeed = current.playerForce;
+              else
+                iAIOfficerGrowthSpeed = 2;
+            } else {
+              iAIOfficerGrowthSpeed = 2;
+            }
+
+            if (WriteOfficerGrowthGameSettings(iAIOfficerGrowthSpeed)) {
+              s_growthSettingApplied = true;
+              AddLog(u8"[AI성장] 자동성장 ON / 게임 능력성장=%s",
+                     OfficerGrowthSettingName(iAIOfficerGrowthSpeed));
+            } else {
+              AddLog(u8"[AI성장] 게임 능력성장 설정 적용 실패");
+            }
+          } else {
+            // OFF에서는 AI 자동성장만 중지하고 게임 원본 설정은 유지한다.
+            s_growthSettingApplied = false;
+            AddLog(u8"[AI성장] 자동성장 OFF / 게임 능력성장 설정은 유지");
+          }
+          SaveConfig();
+        }
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!bAIOfficerAutoGrowth);
+        ImGui::SetNextItemWidth(90.0f * scale);
+
+        const char *growthSpeedItems[] = {u8"느림", u8"보통", u8"빠름"};
+        int speedIndex = iAIOfficerGrowthSpeed - 1;
+        if (speedIndex < 0 || speedIndex > 2)
+          speedIndex = 1;
+
+        if (ImGui::Combo(u8"##AIOfficerGrowthSpeed",
+                         &speedIndex,
+                         growthSpeedItems,
+                         IM_ARRAYSIZE(growthSpeedItems))) {
+          iAIOfficerGrowthSpeed = speedIndex + 1;
+          if (WriteOfficerGrowthGameSettings(iAIOfficerGrowthSpeed)) {
+            s_growthSettingApplied = true;
+            AddLog(u8"[AI성장] 성장 속도 변경: %s",
+                   OfficerGrowthSettingName(iAIOfficerGrowthSpeed));
+          } else {
+            AddLog(u8"[AI성장] 성장 속도 적용 실패");
+          }
+          SaveConfig();
+        }
+        ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"AI 자동성장과 게임 원본 능력성장 속도를 한 번에 제어합니다.");
+          ImGui::TextUnformatted(
+              u8"- 게임 설정이 '없음'이면 기능을 켤 때 자동으로 '보통'으로 변경합니다.");
+          ImGui::TextUnformatted(
+              u8"- 기능을 꺼도 마지막으로 선택한 게임 능력성장 속도는 유지됩니다.");
+          ImGui::EndTooltip();
         }
       }
 
