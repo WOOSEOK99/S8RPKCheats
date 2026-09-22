@@ -4,8 +4,6 @@
 #include "../../showlog.h"
 #include "../../NotificationManager.h"
 #include "../System/SkillCountManager.h"
-#include "../System/SystemMonth.h"
-#include "../System/MonthCapture.h"
 #include "OfficerRosterResolve.h"
 #include "OfficerData.h"
 #include "SpecialAbilityAutoAssign.h"
@@ -22,7 +20,8 @@
 namespace DX11Base {
 namespace {
 
-constexpr int kOfficerCount = 1800;
+constexpr int kOfficerSlotCount = 1800;
+constexpr int kOfficerIdMax = 5102;
 constexpr uintptr_t kOfficerStride = 0x3D0;
 
 constexpr std::array<uintptr_t, 10> kAbilityOffsets = {
@@ -70,7 +69,7 @@ bool ReadOfficerProfile(uintptr_t base, OfficerProfile &out) {
 
   __try {
     const uint16_t id = *reinterpret_cast<uint16_t *>(base + 0x08);
-    if (id < 1 || id > kOfficerCount)
+    if (id < 1 || id > kOfficerIdMax)
       return false;
 
     out = {};
@@ -215,8 +214,8 @@ struct AutoAssignJob {
   bool annualMode = false;
   uintptr_t rosterBase = 0;
   size_t cursor = 0;
-  std::array<bool, kOfficerCount + 1> seenIds{};
-  std::array<bool, kOfficerCount + 1> excludedExistingIds{};
+  std::array<bool, kOfficerIdMax + 1> seenIds{};
+  std::array<bool, kOfficerIdMax + 1> excludedExistingIds{};
   std::vector<PendingAssignment> pending;
   int validOfficers = 0;
   int excludedExisting = 0;
@@ -227,12 +226,6 @@ struct AutoAssignJob {
 };
 
 AutoAssignJob g_autoAssignJob;
-bool g_annualAssignPending = false;
-uint16_t g_lastAnnualYear = 0;
-uint8_t g_lastAnnualMonth = 0;
-uint64_t g_lastAnnualMonthPollTick = 0;
-uint64_t g_annualDomesticStableSince = 0;
-
 bool IsAnnualAutoAssignSafeState() {
   static uint64_t s_lastProbeTick = 0;
   static bool s_lastSafe = false;
@@ -285,7 +278,7 @@ AutoAssignWorkerResult g_autoWorkerResult;
 void StartAutoAssignWorker(
     uintptr_t rosterBase,
     bool annualMode,
-    std::array<bool, kOfficerCount + 1> excludedExistingIds) {
+    std::array<bool, kOfficerIdMax + 1> excludedExistingIds) {
   g_autoWorkerRunning = true;
   g_autoWorkerDone = false;
   g_autoWorkerCancel = false;
@@ -301,9 +294,9 @@ void StartAutoAssignWorker(
       [rosterBase, annualMode, excludedExistingIds = std::move(excludedExistingIds)]() mutable {
         AutoAssignWorkerResult local;
         local.pending.reserve(annualMode ? 256 : 1024);
-        std::array<bool, kOfficerCount + 1> seenIds{};
+        std::array<bool, kOfficerIdMax + 1> seenIds{};
 
-        for (int i = 0; i < kOfficerCount; ++i) {
+        for (int i = 0; i < kOfficerSlotCount; ++i) {
           if (g_autoWorkerCancel.load()) {
             break;
           }
@@ -320,7 +313,7 @@ void StartAutoAssignWorker(
           const RosterStats stats = SafeReadRosterStats(base);
           g_autoWorkerProgress = static_cast<size_t>(i + 1);
 
-          if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerCount)
+          if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerIdMax)
             continue;
 
           if (seenIds[stats.id_08])
@@ -399,7 +392,7 @@ bool StartAutoAssignJob(bool annualMode) {
     // 무장을 worker 시작 전에 한 번만 스냅샷으로 제외합니다.
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
     for (const auto &[officerId, skills] : g_customSkillCounts) {
-      if (officerId < 1 || officerId > kOfficerCount)
+      if (officerId < 1 || officerId > kOfficerIdMax)
         continue;
 
       bool hasAny = false;
@@ -557,7 +550,7 @@ void TickSpecialAbilityAutoAssign() {
   g_autoAssignJob.status =
       std::string(g_autoAssignJob.annualMode ? u8"연말 자동 판정 중: " : u8"처리 중: ") +
       std::to_string(progress) + u8" / " +
-      std::to_string(kOfficerCount) + u8"명";
+      std::to_string(kOfficerSlotCount) + u8"명";
 
   if (!g_autoWorkerDone.load())
     return;
@@ -568,12 +561,12 @@ void TickSpecialAbilityAutoAssign() {
     g_autoAssignJob.resultLines.clear();
     g_autoAssignJob.status =
         std::string(u8"취소됨: ") + std::to_string(progress) +
-        u8" / " + std::to_string(kOfficerCount) +
+        u8" / " + std::to_string(kOfficerSlotCount) +
         u8"명 처리 (특수 능력 변경 없음)";
     g_autoWorkerDone = false;
     g_autoWorkerCancel = false;
     AddLog(u8"[특수능력/자동] 사용자 취소: %zu / %d명 처리, 변경 없음",
-           progress, kOfficerCount);
+           progress, kOfficerSlotCount);
     return;
   }
 
@@ -591,80 +584,14 @@ void TickSpecialAbilityAutoAssign() {
   FinishAutoAssignJob();
 }
 
-void TickAnnualSpecialAbilityAutoAssign(bool enabled) {
-  if (!enabled) {
-    g_annualAssignPending = false;
-    g_lastAnnualYear = 0;
-    g_lastAnnualMonth = 0;
-    g_lastAnnualMonthPollTick = 0;
-    g_annualDomesticStableSince = 0;
-    return;
-  }
+bool AutoAssignSpecialAbilitiesFromCouncil() {
+  if (!bAnnualSpecialAbilityAutoAssign)
+    return false;
+  if (g_autoAssignJob.running)
+    return false;
 
-  const uint64_t now = GetTickCount64();
-
-  // UI용 월 캡처가 아니라 실제 시나리오 연/월을 읽습니다.
-  if (now - g_lastAnnualMonthPollTick >= 100ull) {
-    g_lastAnnualMonthPollTick = now;
-
-    unsigned short currentYear = 0;
-    uint8_t currentMonth = 0;
-    if (ReadScenarioDate(&currentYear, &currentMonth) &&
-        currentYear > 0 &&
-        currentMonth >= 1 && currentMonth <= 12) {
-      if (g_lastAnnualYear == 0 || g_lastAnnualMonth == 0) {
-        g_lastAnnualYear = currentYear;
-        g_lastAnnualMonth = currentMonth;
-      } else {
-        const unsigned int previousSerial =
-            (unsigned int)g_lastAnnualYear * 12u +
-            (unsigned int)g_lastAnnualMonth;
-        const unsigned int currentSerial =
-            (unsigned int)currentYear * 12u +
-            (unsigned int)currentMonth;
-
-        const bool crossedIntoJanuary =
-            currentSerial > previousSerial &&
-            currentYear > g_lastAnnualYear &&
-            currentMonth == 1;
-
-        g_lastAnnualYear = currentYear;
-        g_lastAnnualMonth = currentMonth;
-
-        if (crossedIntoJanuary) {
-          g_annualAssignPending = true;
-          g_annualDomesticStableSince = 0;
-          AddLog(
-              u8"[특수능력/연말자동] 새해 1월 전환 감지 -> 내정 화면 안정 대기");
-        }
-      }
-    }
-  }
-
-  if (!g_annualAssignPending || g_autoAssignJob.running)
-    return;
-
-  // 평정 종료 후 검은 전환 화면을 완전히 지나서,
-  // 실제 내정 상태(0x07)가 2초 연속 유지된 뒤에만 대량 스캔을 시작합니다.
-  if (!IsAnnualAutoAssignSafeState()) {
-    g_annualDomesticStableSince = 0;
-    return;
-  }
-
-  if (g_annualDomesticStableSince == 0) {
-    g_annualDomesticStableSince = now;
-    return;
-  }
-
-  if (now - g_annualDomesticStableSince < 2000ull)
-    return;
-
-  if (StartAutoAssignJob(true)) {
-    g_annualAssignPending = false;
-    g_annualDomesticStableSince = 0;
-    AddLog(
-        u8"[특수능력/연말자동] 내정 상태 2초 안정 확인 -> 자동 판정 시작");
-  }
+  AddLog(u8"[특수능력/연말자동] 1월 평정 진입 감지 -> 자동 판정 시작");
+  return StartAutoAssignJob(true);
 }
 
 void CancelSpecialAbilityAutoAssign() {
@@ -679,10 +606,10 @@ bool IsSpecialAbilityAutoAssignRunning() {
 float GetSpecialAbilityAutoAssignProgress() {
   if (g_autoAssignJob.cursor == 0)
     return 0.0f;
-  if (g_autoAssignJob.cursor >= static_cast<size_t>(kOfficerCount))
+  if (g_autoAssignJob.cursor >= static_cast<size_t>(kOfficerSlotCount))
     return 1.0f;
   return static_cast<float>(g_autoAssignJob.cursor) /
-         static_cast<float>(kOfficerCount);
+         static_cast<float>(kOfficerSlotCount);
 }
 
 const char *GetSpecialAbilityAutoAssignStatus() {
