@@ -5,6 +5,7 @@
 #include "../../NotificationManager.h"
 #include "../System/SkillCountManager.h"
 #include "../System/SystemMonth.h"
+#include "../System/MonthCapture.h"
 #include "OfficerRosterResolve.h"
 #include "OfficerData.h"
 #include "SpecialAbilityAutoAssign.h"
