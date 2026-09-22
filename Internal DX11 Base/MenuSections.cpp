@@ -948,12 +948,14 @@ namespace DX11Base {
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                             u8"AI가 더 적극적으로 전쟁을 걸고 공백지도 더 잘 점령하도록 조정합니다.");
+                             u8"AI 세력의 공격 판단과 공백지 점령 관련 문제를 함께 보정합니다.");
           ImGui::TextUnformatted(u8"- 한 세력이 한 턴에 여러 세력을 공격할 수 있게 변경");
           ImGui::TextUnformatted(u8"- 주인공만 지나치게 공격하는 행동을 줄임");
+          ImGui::TextUnformatted(u8"- 주인공이 군주가 아닐 때 소속 도시의 별도 공격 대기 조건을 제거");
+          ImGui::TextUnformatted(u8"- 주인공 소속 도시도 일반 AI처럼 게임의 호전도 설정에 맞는 공격 기준을 사용");
           ImGui::TextUnformatted(u8"- 일부 군주가 빈 도시를 점령하지 않는 현상을 완화");
           ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 게임 버전이 달라 예상한 데이터와 다르면 적용하지 않습니다.");
+                             u8"※ 5개 패치 중 하나라도 예상한 원본 바이트와 다르면 전체를 적용하지 않습니다.");
           ImGui::EndTooltip();
         }
 
