@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Cheats/System/SkillCountManager.h"
+#include "Cheats/War/DeputyCaptureFix.h"
 
 namespace DX11Base {
 
@@ -174,6 +175,11 @@ namespace DX11Base {
 
         // 저장된 전법 횟수 설정 불러오기 (S8RPK_skill_counts.json)
         LoadSkillCounts();
+
+        // V2.0 포로 처리 개선 Step 1.
+        // 별도 UI 토글 없이 기본 적용하며, 원본 바이트가 맞지 않으면
+        // DeputyCaptureFix 내부에서 아무 것도 쓰지 않고 안전하게 보류합니다.
+        InstallDeputyCaptureFix();
 
         return (s_gameBasePtrAddr != 0);
     }
