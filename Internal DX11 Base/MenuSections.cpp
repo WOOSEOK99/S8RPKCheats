@@ -1594,8 +1594,8 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"5번 책략 광역힐 테스트", s_spell5HealProbe);
         }
       }
-      ImGui::TextDisabled(u8"신산화계의 +16/+18 실행 데이터를 유지한 채 효과20=치료 여부를 시험합니다.");
-      ImGui::TextDisabled(u8"아군 / 효과20 / 수치2000 / 범위5. 클릭 후 실제 병력 회복 여부를 확인하세요.");
+      ImGui::TextDisabled(u8"신산화계의 +16/+18을 유지하고, 효과1은 사기+40으로 고정한 채 효과2=20을 시험합니다.");
+      ImGui::TextDisabled(u8"아군 / 사기+40 + 효과2=20(2000) / 범위5. 먼저 책략 선택 메뉴가 정상 열리는지 확인하세요.");
 
       EndSection(); // 전쟁
     }
