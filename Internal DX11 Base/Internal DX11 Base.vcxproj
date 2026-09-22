@@ -169,6 +169,8 @@
     <ClInclude Include="Config.h" />
     <ClInclude Include="debug.h" />
     <ClInclude Include="Cheats\War\Defbuildingboost.h" />
+    <ClInclude Include="Cheats\War\AIHighHonorSurrenderFix.h" />
+    <ClInclude Include="Cheats\War\AIRefusalWarFix.h" />
     <ClInclude Include="Cheats\War\DeputyCaptureFix.h" />
     <ClInclude Include="Cheats\War\IsolatedCityCaptureFix.h" />
     <ClInclude Include="Cheats\War\PrisonerCaptureManagement.h" />
@@ -278,6 +280,8 @@
     <ClCompile Include="Config.cpp" />
     <ClCompile Include="debug.cpp" />
     <ClCompile Include="Cheats\War\Defbuildingboost.cpp" />
+    <ClCompile Include="Cheats\War\AIHighHonorSurrenderFix.cpp" />
+    <ClCompile Include="Cheats\War\AIRefusalWarFix.cpp" />
     <ClCompile Include="Cheats\War\DeputyCaptureFix.cpp" />
     <ClCompile Include="Cheats\War\IsolatedCityCaptureFix.cpp" />
     <ClCompile Include="Cheats\War\PrisonerCaptureManagement.cpp" />
