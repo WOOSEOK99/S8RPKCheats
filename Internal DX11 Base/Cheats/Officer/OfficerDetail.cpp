@@ -1061,6 +1061,51 @@ namespace DX11Base {
         RenderStatRow(pBase, u8"병과소양", 0xCD, 1, &v_Exp_War, scale);
         RenderStatRow(pBase, u8"군사소양", 0xCE, 1, &v_Exp_Mil, scale);
 
+        // --- [ 현재 능력 EXP / read-only ] ---
+        // GrowthM worker가 누적 EXP 바로 앞에서 읽는 5개 WORD 값.
+        // 게임 UI의 현재 경험치와 일치하는지 검증하기 위한 진단 표시입니다.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.25f, 0.50f, 0.45f, 0.25f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 1.0f, 0.80f, 1.0f));
+        ImGui::Selectable(u8" [ 현재 능력 EXP ]", true,
+                          ImGuiSelectableFlags_SpanAllColumns |
+                          ImGuiSelectableFlags_Disabled);
+        ImGui::PopStyleColor(2);
+
+        struct CurrentExpRow {
+          const char* label;
+          uintptr_t offset;
+        };
+        const CurrentExpRow currentExpRows[] = {
+            {u8"현재 통솔 EXP", 0xB0},
+            {u8"현재 무력 EXP", 0xB2},
+            {u8"현재 지력 EXP", 0xB4},
+            {u8"현재 정치 EXP", 0xB6},
+            {u8"현재 매력 EXP", 0xB8},
+        };
+
+        for (const auto &row : currentExpRows) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::AlignTextToFramePadding();
+          ImGui::TextUnformatted(row.label);
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::AlignTextToFramePadding();
+
+          if (IsValidPtr(pBase + row.offset, sizeof(uint16_t))) {
+            const uint16_t rawExp =
+                *reinterpret_cast<const uint16_t *>(pBase + row.offset);
+            ImGui::TextColored(
+                ImVec4(0.55f, 1.0f, 0.80f, 1.0f),
+                "%u",
+                static_cast<unsigned>(rawExp));
+          } else {
+            ImGui::TextDisabled("-");
+          }
+        }
+
         // --- [ 누적 능력 EXP / read-only ] ---
         // GrowthM이 AI 소양 계산의 원자료로 읽는 5개 WORD 값.
         // 현재 단계에서는 진단 목적이므로 절대 쓰지 않고 표시만 합니다.
