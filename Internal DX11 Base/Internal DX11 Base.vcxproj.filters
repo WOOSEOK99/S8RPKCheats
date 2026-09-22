@@ -218,6 +218,9 @@
     <ClInclude Include="Cheats\War\AIHighHonorSurrenderFix.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\AIExecutionConditionChange.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\AIRefusalWarFix.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -461,6 +464,9 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\AIHighHonorSurrenderFix.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\AIExecutionConditionChange.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\AIRefusalWarFix.cpp">
