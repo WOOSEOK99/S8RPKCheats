@@ -64,6 +64,8 @@ namespace DX11Base {
   extern bool bReinforcementArrivalAction;
   extern bool bReinforcementDefenderPlacement;
   extern bool bAnnualSpecialAbilityAutoAssign; // 매년 12월->1월 전환 시 특수 능력 자동 판정
+  extern bool bAIOfficerAutoGrowth;             // AI 무장 자동성장
+  extern int iAIOfficerGrowthSpeed;             // 1=느림, 2=보통, 3=빠름
 
   // 전투 환경 / 조건 설정
   extern bool bWeatherSkillSimple;
