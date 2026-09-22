@@ -9,6 +9,7 @@
 #include "OfficerDetail.h"
 #include "../../Cheats.h"
 #include "../../MenuState.h"
+#include "../../debug.h"
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
 #include "OfficerRosterResolve.h"
@@ -1062,6 +1063,8 @@ namespace DX11Base {
         RenderStatRow(pBase, u8"병과소양", 0xCD, 1, &v_Exp_War, scale);
         RenderStatRow(pBase, u8"군사소양", 0xCE, 1, &v_Exp_Mil, scale);
 
+        // 진단용 EXP/AI 성장 예상은 디버그 모드에서만 표시합니다.
+        if (bShowDebug) {
         // --- [ 현재 능력 EXP / read-only ] ---
         // GrowthM worker가 누적 EXP 바로 앞에서 읽는 5개 WORD 값.
         // 게임 UI의 현재 경험치와 일치하는지 검증하기 위한 진단 표시입니다.
@@ -1226,6 +1229,7 @@ namespace DX11Base {
                     : (growthPreview.speed == 3 ? u8"빠름" : u8"보통"),
                 growthPreview.growthFactor);
           }
+        }
         }
 
         ImGui::EndTable();
