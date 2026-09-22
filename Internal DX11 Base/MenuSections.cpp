@@ -91,6 +91,48 @@ namespace DX11Base {
     //
     // ─────────────────────────────────────────────────────────────
 
+    // GrowthM이 참조하는 게임 능력 성장 설정.
+    // EXE + 0x3BA9850 구조체의 +0x38 한 바이트에
+    // 플레이어 세력/타 세력 성장 속도가 각각 2bit로 저장되어 있다.
+    // Step 1에서는 읽기 전용 진단만 수행한다.
+    struct OfficerGrowthGameSettings {
+      bool valid = false;
+      uint8_t packed = 0;
+      int playerForce = 0; // bits 0..1
+      int otherForces = 0; // bits 2..3
+    };
+
+    static OfficerGrowthGameSettings ReadOfficerGrowthGameSettings() {
+      OfficerGrowthGameSettings result{};
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(nullptr);
+      if (!exe)
+        return result;
+
+      constexpr uintptr_t kGrowthSettingObjectOffset = 0x3BA9850;
+      constexpr uintptr_t kGrowthSettingPackedOffset = 0x38;
+      const uintptr_t addr =
+          exe + kGrowthSettingObjectOffset + kGrowthSettingPackedOffset;
+
+      if (!DX11Base::IsValidPtr(addr, 1))
+        return result;
+
+      result.packed = *(const uint8_t *)addr;
+      result.playerForce = (int)(result.packed & 0x03);
+      result.otherForces = (int)((result.packed >> 2) & 0x03);
+      result.valid = true;
+      return result;
+    }
+
+    static const char *OfficerGrowthSettingName(int raw) {
+      switch (raw) {
+      case 0: return u8"없음";
+      case 1: return u8"느림";
+      case 2: return u8"보통";
+      case 3: return u8"빠름";
+      default: return u8"알 수 없음";
+      }
+    }
+
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
                      float scale) {
       // 1. 현재 값 미리 읽기
@@ -1116,6 +1158,23 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
                            u8"실행 전 황금/녹색/적색 등급을 선택할 수 있습니다.");
         ImGui::EndTooltip();
+      }
+
+      // Step 1: 게임 원본 능력 성장 설정 read-only 확인.
+      // 최종 AI 성장 UI가 붙으면 이 진단 표시는 제거한다.
+      {
+        const OfficerGrowthGameSettings growthSettings =
+            ReadOfficerGrowthGameSettings();
+        if (growthSettings.valid) {
+          ImGui::TextDisabled(
+              u8"[AI성장DBG] 게임 능력성장: 플레이어 세력 %s / 타 세력 %s (raw=0x%02X)",
+              OfficerGrowthSettingName(growthSettings.playerForce),
+              OfficerGrowthSettingName(growthSettings.otherForces),
+              (unsigned int)growthSettings.packed);
+        } else {
+          ImGui::TextDisabled(
+              u8"[AI성장DBG] 게임 능력성장 설정을 읽지 못했습니다.");
+        }
       }
 
       if (ImGui::Checkbox(u8"자동 특수능력 부여", &bAnnualSpecialAbilityAutoAssign)) {
