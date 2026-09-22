@@ -1249,6 +1249,11 @@ namespace DX11Base {
           } else {
             s_growthSettingApplied = false;
 
+            if (bAnnualSpecialAbilityAutoAssign) {
+              bAnnualSpecialAbilityAutoAssign = false;
+              AddLog(u8"[AI성장] 자동성장 OFF -> 자동 특수능력 부여도 OFF");
+            }
+
             if (bAIOfficerGrowthRestoreNone) {
               if (WriteOfficerGrowthGameSettingsRaw(0, 0)) {
                 AddLog(u8"[AI성장] 자동성장 OFF / 원래 설정이 '없음'이어서 게임 능력성장도 '없음'으로 복귀");
@@ -1327,15 +1332,30 @@ namespace DX11Base {
         }
       }
 
+      if (!bAIOfficerAutoGrowth)
+        ImGui::BeginDisabled();
+
       if (ImGui::Checkbox(u8"자동 특수능력 부여", &bAnnualSpecialAbilityAutoAssign)) {
         NotifyFeatureToggle(u8"자동 특수능력 부여", bAnnualSpecialAbilityAutoAssign);
         SaveConfig();
       }
-      if (ImGui::IsItemHovered()) {
+      const bool annualSpecialHovered = ImGui::IsItemHovered();
+
+      if (!bAIOfficerAutoGrowth)
+        ImGui::EndDisabled();
+
+      if (annualSpecialHovered) {
         ImGui::BeginTooltip();
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 38.0f);
+        if (!bAIOfficerAutoGrowth) {
+          ImGui::TextColored(
+              ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+              u8"AI 무장 자동성장을 먼저 켜야 사용할 수 있습니다.");
+          ImGui::Separator();
+        }
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"체크 시 매년 12월에서 1월로 넘어갈 때 특수 능력을 자동 판정합니다.");
+                           u8"매년 1월 평정에서 AI 자동성장이 끝난 뒤 특수 능력을 자동 판정합니다.");
+        ImGui::TextUnformatted(u8"- AI 자동성장 결과로 상승한 전법/능력치를 반영한 뒤 판정합니다.");
         ImGui::TextUnformatted(u8"- 이미 특수 능력을 하나라도 보유한 무장은 자동 판정에서 제외합니다.");
         ImGui::TextUnformatted(u8"- 전체 무장 공간(1~5102)는 백그라운드 worker에서 판정합니다.");
         ImGui::TextUnformatted(u8"- 새로 부여된 무장이 있을 때만 상단 알림과 알림 내역에 표시합니다.");
