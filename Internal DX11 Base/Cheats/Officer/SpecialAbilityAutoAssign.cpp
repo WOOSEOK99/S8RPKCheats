@@ -585,8 +585,6 @@ void TickSpecialAbilityAutoAssign() {
 }
 
 bool AutoAssignSpecialAbilitiesFromCouncil() {
-  if (!bAnnualSpecialAbilityAutoAssign)
-    return false;
   if (g_autoAssignJob.running)
     return false;
 
