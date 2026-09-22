@@ -978,12 +978,12 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        if (ImGui::Checkbox(u8"포로 관리", &bPrisonerCaptureManagement)) {
+        if (ImGui::Checkbox(u8"포로 및 처형 개선", &bPrisonerCaptureManagement)) {
           const bool requested = bPrisonerCaptureManagement;
           if (!DX11Base::SetPrisonerCaptureManagement(requested))
             bPrisonerCaptureManagement =
                 DX11Base::IsPrisonerCaptureManagementApplied();
-          NotifyFeatureToggle(u8"포로 관리", bPrisonerCaptureManagement);
+          NotifyFeatureToggle(u8"포로 및 처형 개선", bPrisonerCaptureManagement);
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
@@ -1017,9 +1017,6 @@ namespace DX11Base {
                              u8"도독이 통치권 내 도시의 정규군 전투에서 승리했을 때 포로를 직접 처분할지 선택할 수 있게 합니다.");
           ImGui::TextUnformatted(u8"- 조건을 만족하면 포로 처분 전에 예/아니오 질문이 표시됩니다.");
           ImGui::TextUnformatted(u8"- 아니오를 선택하면 원래 게임의 포로 처분 흐름을 그대로 따릅니다.");
-          ImGui::TextUnformatted(u8"- 체크 상태와 특권 소비 옵션은 설정 파일에 저장됩니다.");
-          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                             u8"※ 게임 버전의 후킹 지점 바이트가 다르면 안전을 위해 적용하지 않습니다.");
           ImGui::EndTooltip();
         }
 
