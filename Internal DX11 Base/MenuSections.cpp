@@ -1128,7 +1128,7 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
                            u8"체크 시 매년 12월에서 1월로 넘어갈 때 특수 능력을 자동 판정합니다.");
         ImGui::TextUnformatted(u8"- 이미 특수 능력을 하나라도 보유한 무장은 자동 판정에서 제외합니다.");
-        ImGui::TextUnformatted(u8"- 전체 무장을 한 번에 처리하지 않고 프레임 단위로 나누어 검사합니다.");
+        ImGui::TextUnformatted(u8"- 실사용 무장 범위(1~1800)는 백그라운드 worker에서 판정합니다.");
         ImGui::TextUnformatted(u8"- 새로 부여된 무장이 있을 때만 상단 알림과 알림 내역에 표시합니다.");
         ImGui::TextDisabled(u8"※ 수동 '모든 무장 특수 능력 자동 부여' 버튼과는 별도로 작동합니다.");
         ImGui::PopTextWrapPos();
@@ -1149,7 +1149,7 @@ namespace DX11Base {
         ImGui::BeginTooltip();
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 42.0f);
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                           u8"모든 유효 무장의 실제 전법/특기/능력치를 분석하여 특수 능력을 자동으로 추가합니다.");
+                           u8"실사용 무장 1~1800의 실제 전법/특기/능력치를 분석하여 특수 능력을 자동으로 추가합니다.");
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
                            u8"기존에 수동으로 부여한 특수 능력은 삭제하지 않습니다.");
         ImGui::Separator();
@@ -1196,7 +1196,7 @@ namespace DX11Base {
         if (popupRunning) {
           ImGui::Spacing();
           ImGui::TextDisabled(
-              u8"게임/UI가 멈추지 않도록 전체 무장을 프레임 단위로 나누어 분석하고 있습니다.");
+              u8"실사용 무장 1~1800 범위를 백그라운드 worker에서 분석하고 있습니다.");
           ImGui::TextDisabled(
               u8"완료 전에는 실제 특수 능력 설정을 변경하지 않습니다.");
 
