@@ -188,6 +188,9 @@
     <ClInclude Include="Cheats\War\StratagemGaugeMax.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\Spell5HealProbe.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\ShortBattleCooldown.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -437,6 +440,9 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\StratagemGaugeMax.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\Spell5HealProbe.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\ShortBattleCooldown.cpp">
