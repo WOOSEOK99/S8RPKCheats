@@ -12,25 +12,15 @@
 
 namespace DX11Base {
   namespace {
-    constexpr uintptr_t kSideOffset = 0x18;
-    constexpr uintptr_t kGaugeOffset = 0x154;
-    constexpr uint16_t kGaugeMax = 10000;
+    constexpr uint32_t kGaugeMax = 10000;
 
     static uintptr_t g_hookAddr = 0;
     static uintptr_t g_caveAddr = 0;
-    static uint8_t g_original[5] = {};
+    static uint8_t g_original[7] = {};
     static bool g_hookApplied = false;
 
-    // Written by the generated code cave. These are only consumed while
-    // BattleMonitor reports an active battle.
-    static volatile uintptr_t g_attackInfo = 0;
-    static volatile uintptr_t g_defenseInfo = 0;
-
-    static uintptr_t g_lastLoggedAttack = 0;
-    static uintptr_t g_lastLoggedDefense = 0;
-
-    static bool BuildCaptureCave(uintptr_t hookAddr) {
-      g_caveAddr = AllocNear(hookAddr, 128);
+    static bool BuildGaugeSideCave(uintptr_t hookAddr) {
+      g_caveAddr = AllocNear(hookAddr, 160);
       if (!g_caveAddr)
         return false;
 
@@ -38,39 +28,60 @@ namespace DX11Base {
       int idx = 0;
 
       auto emit8 = [&](uint8_t v) { cave[idx++] = v; };
+      auto emit32 = [&](uint32_t v) {
+        *reinterpret_cast<uint32_t *>(&cave[idx]) = v;
+        idx += 4;
+      };
       auto emit64 = [&](uintptr_t v) {
         *reinterpret_cast<uintptr_t *>(&cave[idx]) = v;
         idx += 8;
       };
 
-      // Preserve RDX. The original tiny getter only changes EAX.
-      emit8(0x52); // push rdx
+      // Preserve RAX. The final original CMP restores the flags exactly as the
+      // unpatched game code would have produced them.
+      emit8(0x50); // push rax
 
-      // cmp byte ptr [rax+18], 0
-      emit8(0x80); emit8(0x78); emit8(0x18); emit8(0x00);
-      emit8(0x75); const int jneDefenseDisp = idx++; // jne checkDefense
+      // cmp byte ptr [rbx-0xD8], 0  ; battle side: 0=attack
+      emit8(0x80); emit8(0xBB); emit32(0xFFFFFF28u); emit8(0x00);
+      emit8(0x75); const int jneDefense = idx++;
 
-      // attack: mov rdx, &g_attackInfo / mov [rdx], rax
-      emit8(0x48); emit8(0xBA); emit64(reinterpret_cast<uintptr_t>(&g_attackInfo));
-      emit8(0x48); emit8(0x89); emit8(0x02);
-      emit8(0xEB); const int jmpDoneFromAttackDisp = idx++;
+      // if (bMaxAttackStratagemGauge) [rbx+0x64] = 10000
+      emit8(0x48); emit8(0xB8); emit64(reinterpret_cast<uintptr_t>(&bMaxAttackStratagemGauge));
+      emit8(0x80); emit8(0x38); emit8(0x00);
+      emit8(0x74); const int jeOriginalFromAttack = idx++;
+      emit8(0xC7); emit8(0x43); emit8(0x64); emit32(kGaugeMax);
+      emit8(0xEB); const int jmpOriginalFromAttack = idx++;
 
       const int checkDefense = idx;
 
-      // cmp byte ptr [rax+18], 1
-      emit8(0x80); emit8(0x78); emit8(0x18); emit8(0x01);
-      emit8(0x75); const int jneDoneDisp = idx++; // jne done
+      // cmp byte ptr [rbx-0xD8], 1  ; battle side: 1=defense
+      emit8(0x80); emit8(0xBB); emit32(0xFFFFFF28u); emit8(0x01);
+      emit8(0x75); const int jneOriginalFromDefense = idx++;
 
-      // defense: mov rdx, &g_defenseInfo / mov [rdx], rax
-      emit8(0x48); emit8(0xBA); emit64(reinterpret_cast<uintptr_t>(&g_defenseInfo));
-      emit8(0x48); emit8(0x89); emit8(0x02);
+      // if (bMaxDefenseStratagemGauge) [rbx+0x64] = 10000
+      emit8(0x48); emit8(0xB8); emit64(reinterpret_cast<uintptr_t>(&bMaxDefenseStratagemGauge));
+      emit8(0x80); emit8(0x38); emit8(0x00);
+      emit8(0x74); const int jeOriginalFromDefense = idx++;
+      emit8(0xC7); emit8(0x43); emit8(0x64); emit32(kGaugeMax);
 
-      const int done = idx;
+      const int runOriginal = idx;
 
-      // Restore RDX, then execute the original getter and its RET.
-      emit8(0x5A);                         // pop rdx
-      emit8(0x0F); emit8(0xB6); emit8(0x40); emit8(0x18); // movzx eax,byte ptr [rax+18]
-      emit8(0xC3);                         // ret
+      emit8(0x58); // pop rax
+
+      // Original instruction: cmp dword ptr [rbx+64], 00002710
+      emit8(0x81); emit8(0x7B); emit8(0x64); emit32(kGaugeMax);
+
+      // jmp hookAddr+7
+      const uintptr_t jmpFrom = g_caveAddr + static_cast<uintptr_t>(idx);
+      const uintptr_t backTo = hookAddr + 7;
+      const int64_t rel64 = static_cast<int64_t>(backTo) - static_cast<int64_t>(jmpFrom + 5);
+      if (rel64 < INT32_MIN || rel64 > INT32_MAX) {
+        VirtualFree(reinterpret_cast<LPVOID>(g_caveAddr), 0, MEM_RELEASE);
+        g_caveAddr = 0;
+        return false;
+      }
+      emit8(0xE9);
+      emit32(static_cast<uint32_t>(static_cast<int32_t>(rel64)));
 
       auto patchRel8 = [&](int dispIndex, int target) -> bool {
         const int rel = target - (dispIndex + 1);
@@ -80,55 +91,18 @@ namespace DX11Base {
         return true;
       };
 
-      if (!patchRel8(jneDefenseDisp, checkDefense) ||
-          !patchRel8(jmpDoneFromAttackDisp, done) ||
-          !patchRel8(jneDoneDisp, done)) {
+      if (!patchRel8(jneDefense, checkDefense) ||
+          !patchRel8(jeOriginalFromAttack, runOriginal) ||
+          !patchRel8(jmpOriginalFromAttack, runOriginal) ||
+          !patchRel8(jneOriginalFromDefense, runOriginal) ||
+          !patchRel8(jeOriginalFromDefense, runOriginal)) {
         VirtualFree(reinterpret_cast<LPVOID>(g_caveAddr), 0, MEM_RELEASE);
         g_caveAddr = 0;
         return false;
       }
 
       FlushInstructionCache(GetCurrentProcess(), cave, idx);
-      return ApplyJmp(hookAddr, g_caveAddr, 5);
-    }
-
-    static bool ValidateSideInfo(uintptr_t ptr, uint8_t expectedSide, uint16_t *outGauge) {
-      if (!ptr)
-        return false;
-      if (!IsValidPtr(ptr + kSideOffset, 1) || !IsValidPtr(ptr + kGaugeOffset, sizeof(uint16_t)))
-        return false;
-
-      const uint8_t side = *reinterpret_cast<const uint8_t *>(ptr + kSideOffset);
-      if (side != expectedSide)
-        return false;
-
-      const uint16_t gauge = *reinterpret_cast<const uint16_t *>(ptr + kGaugeOffset);
-      // The old CT documents 10000 as the maximum. Values above that are treated
-      // as a stale/wrong object instead of being overwritten blindly.
-      if (gauge > kGaugeMax)
-        return false;
-
-      if (outGauge)
-        *outGauge = gauge;
-      return true;
-    }
-
-    static bool WriteGaugeMax(uintptr_t ptr, uint8_t expectedSide) {
-      uint16_t gauge = 0;
-      if (!ValidateSideInfo(ptr, expectedSide, &gauge))
-        return false;
-      if (gauge == kGaugeMax)
-        return true;
-
-      const uintptr_t addr = ptr + kGaugeOffset;
-      DWORD oldProtect = 0;
-      DWORD tmpProtect = 0;
-      if (!VirtualProtect(reinterpret_cast<LPVOID>(addr), sizeof(uint16_t), PAGE_READWRITE, &oldProtect))
-        return false;
-
-      *reinterpret_cast<uint16_t *>(addr) = kGaugeMax;
-      VirtualProtect(reinterpret_cast<LPVOID>(addr), sizeof(uint16_t), oldProtect, &tmpProtect);
-      return *reinterpret_cast<const uint16_t *>(addr) == kGaugeMax;
+      return ApplyJmp(hookAddr, g_caveAddr, 7);
     }
   }
 
@@ -147,44 +121,39 @@ namespace DX11Base {
 
       const uintptr_t imageEnd = exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
 
-      // Old CT getter:
-      // mov rax,[rcx+08]
-      // mov rcx,[rax+30]
-      // mov rax,[rcx]
-      // movzx eax,byte ptr [rax+18]
-      // ret
-      const char *pattern = "48 8B 41 08 48 8B 48 30 48 8B 01 0F B6 40 18 C3";
+      // Legacy CT's actual gauge processing point:
+      //   cmp dword ptr [rbx+64], 00002710
+      // where rbx == battle-side object + 0xF0, so:
+      //   [rbx-D8] == object+0x18 (0=attack, 1=defense)
+      //   [rbx+64] == object+0x154 (stratagem gauge)
+      const char *pattern = "81 7B 64 10 27 00 00 74 ? B0 ? 48 8B";
       const uintptr_t found = FindPattern(exeBase, imageEnd, pattern);
       if (!found) {
-        AddLog(u8"[책략게이지] 전장 진영 getter 패턴을 찾지 못했습니다. (구 CT 패턴 불일치)");
+        AddLog(u8"[책략게이지] 진영별 게이지 처리 패턴을 찾지 못했습니다. (구 CT 패턴 불일치)");
         return false;
       }
 
-      g_hookAddr = found + 0x0B; // movzx eax,byte ptr [rax+18]
-      static const uint8_t expected[5] = {0x0F, 0xB6, 0x40, 0x18, 0xC3};
+      g_hookAddr = found;
+      static const uint8_t expected[7] = {0x81, 0x7B, 0x64, 0x10, 0x27, 0x00, 0x00};
       if (!IsValidPtr(g_hookAddr, sizeof(expected)) ||
           std::memcmp(reinterpret_cast<const void *>(g_hookAddr), expected, sizeof(expected)) != 0) {
-        AddLog(u8"[책략게이지] getter 검증 실패: hook=%p", reinterpret_cast<void *>(g_hookAddr));
+        AddLog(u8"[책략게이지] 게이지 처리 지점 검증 실패: hook=%p",
+               reinterpret_cast<void *>(g_hookAddr));
         g_hookAddr = 0;
         return false;
       }
 
       std::memcpy(g_original, reinterpret_cast<const void *>(g_hookAddr), sizeof(g_original));
-      if (!BuildCaptureCave(g_hookAddr)) {
-        AddLog(u8"[책략게이지] 전장 진영 포인터 캡처 훅 설치 실패.");
+      if (!BuildGaugeSideCave(g_hookAddr)) {
+        AddLog(u8"[책략게이지] 진영별 게이지 훅 설치 실패.");
         g_hookAddr = 0;
         g_caveAddr = 0;
         return false;
       }
 
       g_hookApplied = true;
-      g_attackInfo = 0;
-      g_defenseInfo = 0;
-      g_lastLoggedAttack = 0;
-      g_lastLoggedDefense = 0;
-
-      AddLog(u8"[책략게이지] 캡처 훅 설치 완료: getter=%p", reinterpret_cast<void *>(g_hookAddr));
-      AddLog(u8"[책략게이지] CT 기준 구조: +18 진영(0=공격/1=수비), +154 게이지(uint16, max=10000)");
+      AddLog(u8"[책략게이지] 진영별 처리 훅 설치 완료: %p", reinterpret_cast<void *>(g_hookAddr));
+      AddLog(u8"[책략게이지] 공격/수비 체크 상태를 각각 독립 적용합니다. 미체크 진영은 원본 로직을 그대로 둡니다.");
       return true;
     }
 
@@ -198,44 +167,14 @@ namespace DX11Base {
     g_hookAddr = 0;
     g_caveAddr = 0;
     g_hookApplied = false;
-    g_attackInfo = 0;
-    g_defenseInfo = 0;
-    g_lastLoggedAttack = 0;
-    g_lastLoggedDefense = 0;
     std::memset(g_original, 0, sizeof(g_original));
 
-    AddLog(u8"[책략게이지] 캡처 훅 해제 완료.");
+    AddLog(u8"[책략게이지] 진영별 처리 훅 해제 완료.");
     return true;
   }
 
   void UpdateStratagemGaugeMax() {
-    if (!g_hookApplied)
-      return;
-
-    if (bMaxAttackStratagemGauge) {
-      const uintptr_t ptr = g_attackInfo;
-      uint16_t gauge = 0;
-      if (ptr && ValidateSideInfo(ptr, 0, &gauge)) {
-        if (ptr != g_lastLoggedAttack) {
-          AddLog(u8"[책략게이지] 공격측 포인터 확인: %p / 현재=%u",
-                 reinterpret_cast<void *>(ptr), static_cast<unsigned>(gauge));
-          g_lastLoggedAttack = ptr;
-        }
-        WriteGaugeMax(ptr, 0);
-      }
-    }
-
-    if (bMaxDefenseStratagemGauge) {
-      const uintptr_t ptr = g_defenseInfo;
-      uint16_t gauge = 0;
-      if (ptr && ValidateSideInfo(ptr, 1, &gauge)) {
-        if (ptr != g_lastLoggedDefense) {
-          AddLog(u8"[책략게이지] 수비측 포인터 확인: %p / 현재=%u",
-                 reinterpret_cast<void *>(ptr), static_cast<unsigned>(gauge));
-          g_lastLoggedDefense = ptr;
-        }
-        WriteGaugeMax(ptr, 1);
-      }
-    }
+    // The current implementation works at the game's own side-specific gauge
+    // processing point, so BattleMonitor no longer needs to rewrite +0x154.
   }
 } // namespace DX11Base
