@@ -6,6 +6,7 @@
 #include "../../pch.h"
 #include "../../showlog.h"
 #include "AIHighHonorSurrenderFix.h"
+#include "AIRefusalWarFix.h"
 #include <psapi.h>
 
 namespace DX11Base {
@@ -17,14 +18,13 @@ namespace DX11Base {
 
   // ───────────────────────────────────────────────
   //  AI 전투 개선
-  //  5개의 AI 전쟁 관련 static 패치 + V2.0 항복권고 hook을
+  //  4개의 AI 전쟁 관련 static 패치 + V2.0 공격/항복권고 hook을
   //  하나의 토글로 함께 적용합니다.
-  //  V2.0의 주인공 소속 도시 공격 유예/임계값 보정 2개와
-  //  고의리 군주 항복 억제를 포함합니다.
+  //  기존 +144D24C 2-byte 분기는 V2.0 +144D248 공격 cave가 대체합니다.
+  //  주인공 소속 도시 보정, 고의리 군주 항복 억제,
+  //  항복권고 실패 후 3개월 공격 우선/재권고 차단을 포함합니다.
   //  모든 주소가 원본/패치 바이트 중 하나와 일치하는지 먼저 검증한 뒤 적용합니다.
   // ───────────────────────────────────────────────
-  static const unsigned char kAIWarMultiAttackOriginal[] = {0x74, 0x0A};
-  static const unsigned char kAIWarMultiAttackEnabled[] = {0xEB, 0x0A};
   static const unsigned char kAIWarHeroAggroOriginal[] = {0x75, 0x1E};
   static const unsigned char kAIWarHeroAggroEnabled[] = {0x90, 0x90};
 
@@ -49,7 +49,6 @@ namespace DX11Base {
   };
 
   static const AIWarPatchSpec kAIWarPatches[] = {
-      {0x144D24C, kAIWarMultiAttackOriginal, kAIWarMultiAttackEnabled, sizeof(kAIWarMultiAttackOriginal)},
       {0x1464B91, kAIWarHeroAggroOriginal, kAIWarHeroAggroEnabled, sizeof(kAIWarHeroAggroOriginal)},
       {0x1464B83, kAIWarPlayerForceGraceOriginal, kAIWarPlayerForceGraceEnabled, sizeof(kAIWarPlayerForceGraceOriginal)},
       {0x145AEE6, kAIWarPlayerCityThresholdOriginal, kAIWarPlayerCityThresholdEnabled, sizeof(kAIWarPlayerCityThresholdOriginal)},
@@ -107,11 +106,19 @@ namespace DX11Base {
       return;
     }
 
-    // OFF 요청에서는 항복 hook부터 안전하게 해제합니다.
-    // 해제가 실패하면 static patch는 건드리지 않아 상태 불일치를 막습니다.
-    if (!enable && IsAIHighHonorSurrenderFixApplied()) {
-      if (!SetAIHighHonorSurrenderFix(false)) {
-        AddLog(u8"[AI전투] 항복권고 hook 해제 실패 - 기존 ON 상태 유지");
+    // OFF 요청에서는 복합 hook부터 안전하게 해제합니다.
+    // 하나라도 실패하면 static patch는 건드리지 않아 상태 불일치를 막습니다.
+    if (!enable) {
+      if (IsAIRefusalWarFixApplied() && !SetAIRefusalWarFix(false)) {
+        AddLog(u8"[AI전투] 항복권고 공격전환 hook 해제 실패 - 기존 ON 상태 유지");
+        bAIWarImprove = true;
+        return;
+      }
+
+      if (IsAIHighHonorSurrenderFixApplied() &&
+          !SetAIHighHonorSurrenderFix(false)) {
+        AddLog(u8"[AI전투] 고의리 항복 hook 해제 실패 - 기존 ON 상태 복구 시도");
+        SetAIRefusalWarFix(true);
         bAIWarImprove = true;
         return;
       }
@@ -119,7 +126,7 @@ namespace DX11Base {
 
     AIWarPatchSnapshot snapshots[_countof(kAIWarPatches)]{};
 
-    // 먼저 5개 static 주소를 모두 검증합니다. 하나라도 예상과 다르면 아무 것도 쓰지 않습니다.
+    // 먼저 4개 static 주소를 모두 검증합니다. 하나라도 예상과 다르면 아무 것도 쓰지 않습니다.
     for (size_t i = 0; i < _countof(kAIWarPatches); ++i) {
       const AIWarPatchSpec &spec = kAIWarPatches[i];
       AIWarPatchSnapshot &snapshot = snapshots[i];
@@ -163,8 +170,12 @@ namespace DX11Base {
 
         // OFF 요청에서 static 복구가 실패했다면 앞서 해제한 항복 hook도
         // 가능한 경우 다시 활성화하여 기존 ON 상태를 복원합니다.
-        if (!enable && !IsAIHighHonorSurrenderFixApplied())
-          SetAIHighHonorSurrenderFix(true);
+        if (!enable) {
+          if (!IsAIHighHonorSurrenderFixApplied())
+            SetAIHighHonorSurrenderFix(true);
+          if (!IsAIRefusalWarFixApplied())
+            SetAIRefusalWarFix(true);
+        }
 
         bAIWarImprove = !enable;
         return;
@@ -172,9 +183,9 @@ namespace DX11Base {
     }
 
     if (enable) {
-      if (!SetAIHighHonorSurrenderFix(true)) {
-        // 항복 hook까지 모두 성공해야 AI 전투 개선을 ON으로 인정합니다.
-        // 이번 호출에서 변경한 static patch는 호출 전 상태로 되돌립니다.
+      // 먼저 공격/항복권고 실패 처리 cave를 설치합니다.
+      // 이 hook이 +144D248을 소유하므로 기존 +144D24C 2-byte 패치는 사용하지 않습니다.
+      if (!SetAIRefusalWarFix(true)) {
         for (size_t i = 0; i < _countof(kAIWarPatches); ++i) {
           if (snapshots[i].needsWrite)
             WriteAIWarPatchBytes(snapshots[i].address,
@@ -182,14 +193,29 @@ namespace DX11Base {
                                  kAIWarPatches[i].size);
         }
 
-        AddLog(u8"[AI전투] 항복권고 hook 적용 실패 (static 변경분 롤백)");
+        AddLog(u8"[AI전투] 항복권고 공격전환 hook 적용 실패 (static 변경분 롤백)");
         bAIWarImprove = false;
         return;
       }
 
-      AddLog(u8"[AI전투] 전투 개선 활성화: +144D24C, +1464B91, +1464B83, +145AEE6, +145BDAB, 항복권고");
+      if (!SetAIHighHonorSurrenderFix(true)) {
+        SetAIRefusalWarFix(false);
+
+        for (size_t i = 0; i < _countof(kAIWarPatches); ++i) {
+          if (snapshots[i].needsWrite)
+            WriteAIWarPatchBytes(snapshots[i].address,
+                                 snapshots[i].bytes,
+                                 kAIWarPatches[i].size);
+        }
+
+        AddLog(u8"[AI전투] 고의리 항복 hook 적용 실패 (전체 변경분 롤백)");
+        bAIWarImprove = false;
+        return;
+      }
+
+      AddLog(u8"[AI전투] 전투 개선 활성화: +144D248 공격 cave, +1464B91, +1464B83, +145AEE6, +145BDAB, 항복권고");
     } else {
-      AddLog(u8"[AI전투] 전투 개선 비활성화: 5개 주소 + 항복권고 hook 원본 복구");
+      AddLog(u8"[AI전투] 전투 개선 비활성화: 4개 static + 공격/항복권고 hook 원본 복구");
     }
   }
 
@@ -208,14 +234,15 @@ namespace DX11Base {
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
       ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"AI 세력의 전쟁 행동과 항복권고 판단을 함께 조정합니다.");
-      ImGui::TextUnformatted(u8"- 한 세력의 복수 공격 분기");
+      ImGui::TextUnformatted(u8"- 공격 후보 확장 및 기존 목표 우선도 보정");
       ImGui::TextUnformatted(u8"- 주인공 대상 호전성 증가 분기 제거");
       ImGui::TextUnformatted(u8"- 주인공이 군주가 아닐 때 소속 도시의 별도 공격 유예 조건 제거");
       ImGui::TextUnformatted(u8"- 주인공 소속 도시의 공격 임계값을 일반 AI와 같은 경로로 보정");
       ImGui::TextUnformatted(u8"- 일부 군주의 공백지 점령 제한 플래그 무력화");
       ImGui::TextUnformatted(u8"- 의리가 높은 AI 군주는 항복권고를 더 잘 거부하도록 보정");
+      ImGui::TextUnformatted(u8"- 항복권고 실패 후 3개월 동안 같은 대상 재권고를 막고 공격 우선도 상승");
       ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
-                         u8"※ 5개 static 패치 또는 항복권고 hook이 예상 상태와 다르면 전체 적용을 보류합니다.");
+                         u8"※ static 패치 또는 관련 hook이 예상 상태와 다르면 전체 적용을 보류합니다.");
       ImGui::EndTooltip();
     }
 
