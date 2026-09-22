@@ -3,6 +3,7 @@
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
 #include "Cheats/Officer/SpecialAbilityAutoAssign.h"
+#include "Cheats/Officer/AIOfficerGrowth.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SkillCountManager.h"
 #include "Cheats/System/SystemMonth.h"
@@ -573,16 +574,27 @@ namespace DX11Base {
         // 연 1회 자동 특수능력은 실제 시나리오 날짜가 1월인 평정에 들어온 순간 시작합니다.
         // GetSystemMonthValue()는 평정 전환 순간 0일 수 있으므로 연말 판정에는 사용하지 않습니다.
         if (bAnnualSpecialAbilityAutoAssign &&
+            bAIOfficerAutoGrowth &&
             hasScenarioDate &&
-            scenarioMonth == 1) {
+            scenarioMonth == 1 &&
+            DX11Base::WasAIOfficerGrowthAppliedForYear(scenarioYear)) {
           AddLog(
-              u8"[특수능력/연말자동/DBG] %u년 1월 평정 조건 통과 -> AutoAssignSpecialAbilitiesFromCouncil 호출",
+              u8"[특수능력/연말자동/DBG] %u년 AI 성장 완료 확인 -> AutoAssignSpecialAbilitiesFromCouncil 호출",
               (unsigned)scenarioYear);
           DX11Base::AutoAssignSpecialAbilitiesFromCouncil();
         } else if (bAnnualSpecialAbilityAutoAssign) {
-          AddLog(
-              u8"[특수능력/연말자동/DBG] 자동 ON이지만 실제 시나리오 월=%u -> 1월 자동 판정 미실행",
-              (unsigned)scenarioMonth);
+          if (!bAIOfficerAutoGrowth) {
+            AddLog(
+                u8"[특수능력/연말자동/DBG] AI 자동성장 OFF -> 특수능력 자동 판정 미실행");
+          } else if (!hasScenarioDate || scenarioMonth != 1) {
+            AddLog(
+                u8"[특수능력/연말자동/DBG] 자동 ON이지만 실제 시나리오 월=%u -> 1월 자동 판정 미실행",
+                (unsigned)scenarioMonth);
+          } else {
+            AddLog(
+                u8"[특수능력/연말자동/DBG] %u년 AI 성장 완료가 확인되지 않아 특수능력 자동 판정 미실행",
+                (unsigned)scenarioYear);
+          }
         }
 
         DX11Base::RunAutoCityExchange();
