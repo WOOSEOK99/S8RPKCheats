@@ -7,6 +7,7 @@
 
 #include "Cheats/System/SkillCountManager.h"
 #include "Cheats/War/DeputyCaptureFix.h"
+#include "Cheats/War/IsolatedCityCaptureFix.h"
 
 namespace DX11Base {
 
@@ -180,6 +181,7 @@ namespace DX11Base {
         // 별도 UI 토글 없이 기본 적용하며, 원본 바이트가 맞지 않으면
         // DeputyCaptureFix 내부에서 아무 것도 쓰지 않고 안전하게 보류합니다.
         InstallDeputyCaptureFix();
+        InstallIsolatedCityCaptureFix();
 
         return (s_gameBasePtrAddr != 0);
     }
