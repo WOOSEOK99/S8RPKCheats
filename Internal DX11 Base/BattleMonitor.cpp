@@ -19,6 +19,7 @@
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/SpecialAbility.h"
+#include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/Terrainignore.h"
 #include "MenuState.h"
 #include "pch.h"
@@ -452,6 +453,13 @@ namespace DX11Base {
           __try {
             UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
+
+      // 책략 게이지 테스트: 캡처된 진영 객체가 유효할 때만 +0x154를 10000으로 유지합니다.
+      if (bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge) {
+        __try {
+          DX11Base::UpdateStratagemGaugeMax();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
 
       // [환경/공성전] 2-phase 분산 (100ms 틱 기준)

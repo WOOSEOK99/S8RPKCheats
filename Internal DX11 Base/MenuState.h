@@ -56,6 +56,8 @@ namespace DX11Base {
   extern bool bAllAggressive;
   extern bool bBattleUnit;
   extern bool bBattleMapShuffle;
+  extern bool bMaxAttackStratagemGauge;   // 공격측 책략 게이지 10000 유지 (진단용)
+  extern bool bMaxDefenseStratagemGauge;  // 수비측 책략 게이지 10000 유지 (진단용)
   extern bool bPrisonerCaptureManagement;      // 포획/AI 처형조건 통합 관리 (기본 ON)
   extern bool bShortBattleCooldownEnabled;
   extern int iShortBattleCooldownDays;

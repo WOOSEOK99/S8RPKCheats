@@ -13,6 +13,7 @@
 #include "Cheats/War/PrisonerCaptureManagement.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
+#include "Cheats/War/StratagemGaugeMax.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -177,6 +178,8 @@ namespace DX11Base {
     UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
     UpsertBoolConfigValue("bReinforcementDefenderPlacement", bReinforcementDefenderPlacement);
+    UpsertBoolConfigValue("bMaxAttackStratagemGauge", bMaxAttackStratagemGauge);
+    UpsertBoolConfigValue("bMaxDefenseStratagemGauge", bMaxDefenseStratagemGauge);
     UpsertBoolConfigValue("bOfficerChangeNotify", bOfficerChangeNotify);
     UpsertBoolConfigValue("bAnnualSpecialAbilityAutoAssign", bAnnualSpecialAbilityAutoAssign);
     UpsertBoolConfigValue("bAIOfficerAutoGrowth", bAIOfficerAutoGrowth);
@@ -244,6 +247,26 @@ namespace DX11Base {
 
       AddLog(u8"[Config] 원군 도착 턴 즉시 행동 설정 로드: %s",
              bReinforcementArrivalAction ? "ON" : "OFF");
+    }
+
+    bool savedMaxAttackStratagemGauge = false;
+    LoadBoolConfigValue("bMaxAttackStratagemGauge", savedMaxAttackStratagemGauge);
+    bMaxAttackStratagemGauge = savedMaxAttackStratagemGauge;
+
+    bool savedMaxDefenseStratagemGauge = false;
+    LoadBoolConfigValue("bMaxDefenseStratagemGauge", savedMaxDefenseStratagemGauge);
+    bMaxDefenseStratagemGauge = savedMaxDefenseStratagemGauge;
+
+    if (bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge) {
+      if (!SetStratagemGaugeCapture(true)) {
+        bMaxAttackStratagemGauge = false;
+        bMaxDefenseStratagemGauge = false;
+        AddLog(u8"[Config] 책략 게이지 최대 설정 적용 실패 - 두 설정을 OFF 처리");
+      } else {
+        AddLog(u8"[Config] 책략 게이지 최대 설정 로드: 공격=%s / 수비=%s",
+               bMaxAttackStratagemGauge ? "ON" : "OFF",
+               bMaxDefenseStratagemGauge ? "ON" : "OFF");
+      }
     }
 
     bool savedOfficerChangeNotify = false;

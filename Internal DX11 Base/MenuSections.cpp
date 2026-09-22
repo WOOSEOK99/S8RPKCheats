@@ -44,6 +44,7 @@
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
+#include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
@@ -1548,6 +1549,38 @@ namespace DX11Base {
         NotifyFeatureToggle(u8"방어 건물 강화", bDefBuilding);
         SaveConfig();
       }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 책략 ]");
+
+      if (ImGui::Checkbox(u8"공격측 책략 게이지 최대", &bMaxAttackStratagemGauge)) {
+        const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
+        if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
+          bMaxAttackStratagemGauge = !bMaxAttackStratagemGauge;
+          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"공격측 책략 게이지 최대", bMaxAttackStratagemGauge);
+          SaveConfig();
+        }
+      }
+
+      ImGui::SameLine();
+
+      if (ImGui::Checkbox(u8"수비측 책략 게이지 최대", &bMaxDefenseStratagemGauge)) {
+        const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
+        if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
+          bMaxDefenseStratagemGauge = !bMaxDefenseStratagemGauge;
+          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"수비측 책략 게이지 최대", bMaxDefenseStratagemGauge);
+          SaveConfig();
+        }
+      }
+
+      ImGui::TextDisabled(u8"전투 중 선택한 진영의 책략 게이지를 최대치(10000)로 유지합니다.");
 
       EndSection(); // 전쟁
     }
