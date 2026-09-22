@@ -12,6 +12,7 @@
 #include "OfficerData.h"
 #include "SelectOfficercapture.h"
 #include "OfficerRosterResolve.h"
+#include "AIOfficerGrowth.h"
 #include "CustomTraitDisplay.h"
 #include "../Civilian/CityData.h"
 #include "../../Framework/imgui.h"
@@ -1148,6 +1149,82 @@ namespace DX11Base {
                 static_cast<unsigned>(rawExp));
           } else {
             ImGui::TextDisabled("-");
+          }
+        }
+
+        // --- [ AI 자동성장 예상 / read-only ] ---
+        // Step 3 검증용. GrowthM 원본 계산 결과를 표시만 하며 게임 메모리는 수정하지 않는다.
+        AIOfficerGrowthPreview growthPreview{};
+        if (BuildAIOfficerGrowthPreview(
+                pBase, iAIOfficerGrowthSpeed, &growthPreview)) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::PushStyleColor(
+              ImGuiCol_Header, ImVec4(0.45f, 0.25f, 0.65f, 0.25f));
+          ImGui::PushStyleColor(
+              ImGuiCol_Text, ImVec4(0.82f, 0.65f, 1.0f, 1.0f));
+          ImGui::Selectable(
+              u8" [ AI 자동성장 예상 ]",
+              true,
+              ImGuiSelectableFlags_SpanAllColumns |
+                  ImGuiSelectableFlags_Disabled);
+          ImGui::PopStyleColor(2);
+
+          if (!growthPreview.eligible) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled(u8"대상");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextDisabled(
+                u8"AI 성장 대상 아님 (주인공/무세력/ID 1801 이상)");
+          } else {
+            for (std::size_t category = 0;
+                 category < kAIOfficerGrowthCategoryCount;
+                 ++category) {
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::AlignTextToFramePadding();
+              ImGui::Text(
+                  u8"%s 예상",
+                  GetAIOfficerGrowthCategoryName(category));
+
+              ImGui::TableSetColumnIndex(1);
+              ImGui::AlignTextToFramePadding();
+              ImGui::Text(
+                  u8"%u + %d → %u  | 전법 +%dLv",
+                  (unsigned)growthPreview.aptitudeBefore[category],
+                  growthPreview.aptitudeGain[category],
+                  (unsigned)growthPreview.aptitudeAfter[category],
+                  growthPreview.tacticLevelUps[category]);
+            }
+
+            static const char *statNames[] = {
+                u8"통솔", u8"무력", u8"지력", u8"정치", u8"매력"};
+            for (int stat = 0; stat < 5; ++stat) {
+              if (growthPreview.currentExpAfter[stat] ==
+                  growthPreview.currentExpBefore[stat])
+                continue;
+
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::Text(u8"%s EXP 예상", statNames[stat]);
+              ImGui::TableSetColumnIndex(1);
+              ImGui::Text(
+                  u8"%u → %u",
+                  (unsigned)growthPreview.currentExpBefore[stat],
+                  (unsigned)growthPreview.currentExpAfter[stat]);
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled(u8"속도");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextDisabled(
+                u8"%s (GrowthM 배율 %d)",
+                growthPreview.speed == 1
+                    ? u8"느림"
+                    : (growthPreview.speed == 3 ? u8"빠름" : u8"보통"),
+                growthPreview.growthFactor);
           }
         }
 
