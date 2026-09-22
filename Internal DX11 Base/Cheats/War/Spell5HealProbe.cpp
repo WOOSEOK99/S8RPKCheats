@@ -39,6 +39,7 @@ namespace DX11Base {
     constexpr uintptr_t kUnitYOffset = 0x4C;
     constexpr uintptr_t kUnitMoraleOffset = 0x80;
     constexpr uintptr_t kUnitStateOffset = 0x238;
+    constexpr uint16_t kSpell5HealAmount = 2000;
 
     struct UnitDiagSnapshot {
       uintptr_t unit = 0;
@@ -168,8 +169,9 @@ namespace DX11Base {
 
       // Known working carrier:
       // - effect1=10 / +40 is confirmed to work as an ally morale effect.
-      // - effect2=20 / 2000 is retained only as a negative control: it did not
-      //   heal troops in the previous real-game test.
+      // - effect2=20 was confirmed NOT to heal troops in real-game testing,
+      //   so keep secondary effect disabled. Healing is injected separately
+      //   after the affected unit is identified from the +40 morale change.
       clone.code1 = 5;
       clone.code2 = 5;
       clone.code3 = 5;
@@ -177,8 +179,8 @@ namespace DX11Base {
       clone.effect1 = 10;
       clone.power1 = 40;
       clone.duration1 = 0;
-      clone.effect2 = 20;
-      clone.power2 = 2000;
+      clone.effect2 = 0;
+      clone.power2 = 0;
       clone.duration2 = 0;
       clone.range = 5;
 
@@ -198,11 +200,11 @@ namespace DX11Base {
       g_applied = true;
       ResetDiagnostics();
 
-      AddLog(u8"[책략5DBG] 적용: 아군 / 효과1 사기+40 / 효과2=20(비치료 확인용) / 범위5");
+      AddLog(u8"[책략5DBG] 적용: 아군 / 효과1 사기+40 / 효과2 없음 / 범위5");
       AddLog(u8"[책략5DBG] table=%p selector4=%p canonical5=%p source2=%p",
              reinterpret_cast<void *>(table), reinterpret_cast<void *>(spell4),
              reinterpret_cast<void *>(spell5), reinterpret_cast<void *>(spell2));
-      AddLog(u8"[책략5DBG] 대상 진단도 활성화됨: 전의 +40(또는 100 상한) 변화 부대를 읽기 전용으로 기록합니다.");
+      AddLog(u8"[책략5DBG] 광역힐 2차 테스트 활성화: 전의 +40(또는 100 상한) 변화 부대에 병력 +2000(최대병력 상한) 적용.");
       return true;
     }
 
@@ -277,17 +279,49 @@ namespace DX11Base {
             (morale == 100 && before < 100 && ((int)before + 40) >= 100);
 
         if (exactPlus40 || cappedPlus40) {
-          const uint16_t troops =
-              *reinterpret_cast<const uint16_t *>(unit + kUnitTroopsOffset);
+          const uintptr_t troopsAddr = unit + kUnitTroopsOffset;
+          uint16_t troopsBefore = 0;
+          uint16_t troopsAfter = 0;
+          uint16_t maxTroops = 0;
+          bool healed = false;
+
+          if (IsValidPtr(troopsAddr, sizeof(uint16_t)) &&
+              IsValidPtr(unit + 0x18, sizeof(uintptr_t))) {
+            const uintptr_t maxTroopsAddr =
+                *reinterpret_cast<const uintptr_t *>(unit + 0x18);
+
+            if (maxTroopsAddr &&
+                IsValidPtr(maxTroopsAddr, sizeof(uint16_t))) {
+              troopsBefore =
+                  *reinterpret_cast<const uint16_t *>(troopsAddr);
+              maxTroops =
+                  *reinterpret_cast<const uint16_t *>(maxTroopsAddr);
+
+              uint32_t next = (uint32_t)troopsBefore + kSpell5HealAmount;
+              if (next > maxTroops)
+                next = maxTroops;
+
+              troopsAfter = (uint16_t)next;
+              if (troopsAfter != troopsBefore) {
+                *reinterpret_cast<uint16_t *>(troopsAddr) = troopsAfter;
+                healed =
+                    (*reinterpret_cast<const uint16_t *>(troopsAddr) ==
+                     troopsAfter);
+              }
+            }
+          }
+
           const uint8_t x = *reinterpret_cast<const uint8_t *>(unit + kUnitXOffset);
           const uint8_t y = *reinterpret_cast<const uint8_t *>(unit + kUnitYOffset);
           const uint32_t state =
               *reinterpret_cast<const uint32_t *>(unit + kUnitStateOffset);
 
-          AddLog(u8"[책략5대상DBG] 후보[%d] unit=%p 전의=%u->%u(+%d) 병력=%u 좌표=(%u,%u) 상태=%u",
+          AddLog(u8"[책략5힐DBG] 후보[%d] unit=%p 전의=%u->%u(+%d) 병력=%u->%u / 최대=%u / 회복=%s 좌표=(%u,%u) 상태=%u",
                  i, reinterpret_cast<void *>(unit),
                  (unsigned)before, (unsigned)morale, delta,
-                 (unsigned)troops, (unsigned)x, (unsigned)y, (unsigned)state);
+                 (unsigned)troopsBefore, (unsigned)troopsAfter,
+                 (unsigned)maxTroops, healed ? "YES" : "NO",
+                 (unsigned)x, (unsigned)y, (unsigned)state);
         }
       }
 
@@ -298,7 +332,7 @@ namespace DX11Base {
 
     if (!g_diagPrimed && validCount > 0) {
       g_diagPrimed = true;
-      AddLog(u8"[책략5대상DBG] 전투부대 %d개 기준값 저장 완료. 이제 5번 책략을 사용하세요.", validCount);
+      AddLog(u8"[책략5힐DBG] 전투부대 %d개 기준값 저장 완료. 사기 60 이하의 부대를 범위에 두고 5번 책략을 사용하세요.", validCount);
     }
 
     for (int i = unitCount; i < kMaxTrackedUnits; ++i)
