@@ -1060,6 +1060,52 @@ namespace DX11Base {
         RenderStatRow(pBase, u8"지모소양", 0xCC, 1, &v_Exp_Intel, scale);
         RenderStatRow(pBase, u8"병과소양", 0xCD, 1, &v_Exp_War, scale);
         RenderStatRow(pBase, u8"군사소양", 0xCE, 1, &v_Exp_Mil, scale);
+
+        // --- [ 누적 능력 EXP / read-only ] ---
+        // GrowthM이 AI 소양 계산의 원자료로 읽는 5개 WORD 값.
+        // 현재 단계에서는 진단 목적이므로 절대 쓰지 않고 표시만 합니다.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.35f, 0.35f, 0.75f, 0.25f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.65f, 0.75f, 1.0f, 1.0f));
+        ImGui::Selectable(u8" [ 누적 능력 EXP ]", true,
+                          ImGuiSelectableFlags_SpanAllColumns |
+                          ImGuiSelectableFlags_Disabled);
+        ImGui::PopStyleColor(2);
+
+        struct CumulativeExpRow {
+          const char* label;
+          uintptr_t offset;
+        };
+        const CumulativeExpRow cumulativeExpRows[] = {
+            {u8"누적 통솔 EXP", 0xBA},
+            {u8"누적 무력 EXP", 0xBC},
+            {u8"누적 지력 EXP", 0xBE},
+            {u8"누적 정치 EXP", 0xC0},
+            {u8"누적 매력 EXP", 0xC2},
+        };
+
+        for (const auto &row : cumulativeExpRows) {
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(0);
+          ImGui::AlignTextToFramePadding();
+          ImGui::TextUnformatted(row.label);
+
+          ImGui::TableSetColumnIndex(1);
+          ImGui::AlignTextToFramePadding();
+
+          if (IsValidPtr(pBase + row.offset, sizeof(uint16_t))) {
+            const uint16_t rawExp =
+                *reinterpret_cast<const uint16_t *>(pBase + row.offset);
+            ImGui::TextColored(
+                ImVec4(0.55f, 0.85f, 1.0f, 1.0f),
+                "%u",
+                static_cast<unsigned>(rawExp));
+          } else {
+            ImGui::TextDisabled("-");
+          }
+        }
+
         ImGui::EndTable();
     }
   }
