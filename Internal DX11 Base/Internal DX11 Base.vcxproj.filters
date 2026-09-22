@@ -218,6 +218,9 @@
     <ClInclude Include="Cheats\War\DeputyCaptureFix.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\IsolatedCityCaptureFix.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\Civilian\Techpointcave.h">
       <Filter>Cheats\Civilian</Filter>
     </ClInclude>
@@ -449,6 +452,9 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\DeputyCaptureFix.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\IsolatedCityCaptureFix.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\Civilian\NonggyeongCity.cpp">
