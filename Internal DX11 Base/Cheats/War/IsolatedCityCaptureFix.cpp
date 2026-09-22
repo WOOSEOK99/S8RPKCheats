@@ -4,6 +4,7 @@
 #include "../../showlog.h"
 #include "IsolatedCityCaptureFix.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <vector>
