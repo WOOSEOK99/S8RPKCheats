@@ -10,7 +10,7 @@
 namespace DX11Base {
   namespace {
 #pragma pack(push, 1)
-    struct SpellPrefix {
+    struct SpellRecord {
       int16_t code1;       // +00
       int16_t code2;       // +02
       int16_t code3;       // +04
@@ -22,10 +22,12 @@ namespace DX11Base {
       int16_t power2;      // +10
       int16_t duration2;   // +12
       int16_t range;       // +14
+      int16_t unknown16;   // +16
+      uint64_t unknownPtr; // +18 - semantics unknown; preserved/copied only
     };
 #pragma pack(pop)
 
-    static_assert(sizeof(SpellPrefix) == 0x16, "SpellPrefix layout mismatch");
+    static_assert(sizeof(SpellRecord) == 0x20, "SpellRecord layout mismatch");
 
     constexpr uintptr_t kSpellRootOffset = 0x034C8630;
     constexpr uintptr_t kSpellTableOffset = 0x0D38;
@@ -34,8 +36,8 @@ namespace DX11Base {
     static bool g_applied = false;
     static uintptr_t g_spell4Addr = 0;
     static uintptr_t g_spell5Addr = 0;
-    static SpellPrefix g_spell4Original{};
-    static SpellPrefix g_spell5Original{};
+    static SpellRecord g_spell4Original{};
+    static SpellRecord g_spell5Original{};
 
     static bool Deref(uintptr_t base, uintptr_t offset, uintptr_t &out) {
       const uintptr_t addr = base + offset;
@@ -46,8 +48,8 @@ namespace DX11Base {
       return IsValidPtr(out, sizeof(uintptr_t));
     }
 
-    static const SpellPrefix *Entry(uintptr_t table, int index) {
-      return reinterpret_cast<const SpellPrefix *>(table + (uintptr_t)index * kSpellStride);
+    static const SpellRecord *Entry(uintptr_t table, int index) {
+      return reinterpret_cast<const SpellRecord *>(table + (uintptr_t)index * kSpellStride);
     }
 
     static bool ValidateSpellTable(uintptr_t table) {
@@ -55,16 +57,16 @@ namespace DX11Base {
         return false;
 
       for (int i = 0; i < 5; ++i) {
-        const SpellPrefix *s = Entry(table, i);
+        const SpellRecord *s = Entry(table, i);
         const int16_t expected = (int16_t)(i + 1);
         if (s->code1 != expected || s->code2 != expected || s->code3 != expected)
           return false;
       }
 
-      const SpellPrefix *s1 = Entry(table, 0);
-      const SpellPrefix *s2 = Entry(table, 1);
-      const SpellPrefix *s3 = Entry(table, 2);
-      const SpellPrefix *s4 = Entry(table, 3);
+      const SpellRecord *s1 = Entry(table, 0);
+      const SpellRecord *s2 = Entry(table, 1);
+      const SpellRecord *s3 = Entry(table, 2);
+      const SpellRecord *s4 = Entry(table, 3);
 
       return s1->target == 2 && s1->effect1 == 10 && s1->power1 == -40 && s1->range == 8 &&
              s2->target == 2 && s2->effect1 == 11 && s2->power1 == 200 &&
@@ -99,17 +101,17 @@ namespace DX11Base {
       return table;
     }
 
-    static bool WritePrefix(uintptr_t addr, const SpellPrefix &value) {
-      if (!IsValidPtr(addr, sizeof(SpellPrefix)))
+    static bool WriteRecord(uintptr_t addr, const SpellRecord &value) {
+      if (!IsValidPtr(addr, sizeof(SpellRecord)))
         return false;
 
       DWORD oldProtect = 0;
       DWORD tmpProtect = 0;
-      if (!VirtualProtect(reinterpret_cast<LPVOID>(addr), sizeof(SpellPrefix), PAGE_READWRITE, &oldProtect))
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(addr), sizeof(SpellRecord), PAGE_READWRITE, &oldProtect))
         return false;
 
       std::memcpy(reinterpret_cast<void *>(addr), &value, sizeof(value));
-      VirtualProtect(reinterpret_cast<LPVOID>(addr), sizeof(SpellPrefix), oldProtect, &tmpProtect);
+      VirtualProtect(reinterpret_cast<LPVOID>(addr), sizeof(SpellRecord), oldProtect, &tmpProtect);
       return true;
     }
   }
@@ -125,44 +127,40 @@ namespace DX11Base {
         return false;
       }
 
-      // Step 2:
-      // The first probe only rewrote entry #4 to code 5. That was enough for the
-      // battle-preparation picker to show/select code 5, but the in-battle list
-      // dropped it. The likely lookup path is: selected ID 5 -> canonical entry #5.
-      // Therefore keep the real #5 record populated as well, while using #4 as the
-      // temporary selector surrogate. Only the confirmed 22-byte prefix is touched.
+      // Step 3:
+      // Clone the entire known-good 신산화계 (#2) 0x20-byte record into code #5.
+      // Only code1/code2/code3 are changed to 5. This deliberately carries the
+      // +16/+18 tail as-is so we can test whether the previously-zero tail is
+      // required for the actual in-battle effect dispatcher.
+      const uintptr_t spell2 = table + 1 * kSpellStride;
       const uintptr_t spell4 = table + 3 * kSpellStride;
       const uintptr_t spell5 = table + 4 * kSpellStride;
-      if (!IsValidPtr(spell4, sizeof(SpellPrefix)) || !IsValidPtr(spell5, sizeof(SpellPrefix))) {
-        AddLog(u8"[책략5DBG] 4/5번 책략 레코드 주소가 유효하지 않습니다.");
+      if (!IsValidPtr(spell2, sizeof(SpellRecord)) ||
+          !IsValidPtr(spell4, sizeof(SpellRecord)) ||
+          !IsValidPtr(spell5, sizeof(SpellRecord))) {
+        AddLog(u8"[책략5DBG] 2/4/5번 책략 레코드 주소가 유효하지 않습니다.");
         return false;
       }
 
       std::memcpy(&g_spell4Original, reinterpret_cast<const void *>(spell4), sizeof(g_spell4Original));
       std::memcpy(&g_spell5Original, reinterpret_cast<const void *>(spell5), sizeof(g_spell5Original));
 
-      // Probe profile:
-      // - code 5 / ally target
-      // - effect1=10 / power1=+40: known-good strategy effect, cast anchor
-      // - effect2=20 / power2=2000: healing candidate (confirmed only in tactics so far)
-      // - range=5
-      const SpellPrefix probe{
-          5, 5, 5,
-          1,
-          10, 40, 0,
-          20, 2000, 0,
-          5,
-      };
+      SpellRecord clone{};
+      std::memcpy(&clone, reinterpret_cast<const void *>(spell2), sizeof(clone));
+      clone.code1 = 5;
+      clone.code2 = 5;
+      clone.code3 = 5;
 
-      // Populate the canonical #5 definition first.
-      if (!WritePrefix(spell5, probe)) {
-        AddLog(u8"[책략5DBG] 실제 5번 책략 레코드 쓰기 실패.");
+      // Populate canonical #5 first with an exact #2 clone except for the IDs.
+      if (!WriteRecord(spell5, clone)) {
+        AddLog(u8"[책략5DBG] 실제 5번 레코드에 신산화계 전체 복제 실패.");
         return false;
       }
 
-      // Then expose code 5 through the existing 4th selectable slot.
-      if (!WritePrefix(spell4, probe)) {
-        WritePrefix(spell5, g_spell5Original);
+      // Keep using the existing 4th selectable slot only as the route to pick ID 5.
+      // It receives the exact same full record for this controlled test.
+      if (!WriteRecord(spell4, clone)) {
+        WriteRecord(spell5, g_spell5Original);
         AddLog(u8"[책략5DBG] 4번 선택 슬롯 치환 실패 - 5번 레코드는 원복했습니다.");
         return false;
       }
@@ -171,12 +169,15 @@ namespace DX11Base {
       g_spell5Addr = spell5;
       g_applied = true;
 
-      AddLog(u8"[책략5DBG] Step2 적용: table=%p, selector4=%p, canonical5=%p",
+      AddLog(u8"[책략5DBG] Step3 적용: 신산화계 0x20 전체 복제 -> 코드5");
+      AddLog(u8"[책략5DBG] table=%p selector4=%p canonical5=%p source2=%p",
              reinterpret_cast<void *>(table), reinterpret_cast<void *>(spell4),
-             reinterpret_cast<void *>(spell5));
-      AddLog(u8"[책략5DBG] 4번 선택 슬롯과 실제 5번 정의를 동일하게 설정: 아군 / 사기+40 / 효과2=20 / 2000 / 범위5");
-      AddLog(u8"[책략5DBG] 전투 준비에서 5번 선택 후, 실제 전투 책략 목록에 유지되는지 먼저 확인하세요.");
-      AddLog(u8"[책략5DBG] 목록에 남으면 그 다음으로 병력 +2000 여부를 확인하세요.");
+             reinterpret_cast<void *>(spell5), reinterpret_cast<void *>(spell2));
+      AddLog(u8"[책략5DBG] clone: target=%d effect1=%d power1=%d effect2=%d power2=%d range=%d +16=%d +18=%p",
+             (int)clone.target, (int)clone.effect1, (int)clone.power1,
+             (int)clone.effect2, (int)clone.power2, (int)clone.range,
+             (int)clone.unknown16, reinterpret_cast<void *>((uintptr_t)clone.unknownPtr));
+      AddLog(u8"[책략5DBG] 기대값: 적군 / 직접피해200 / 화계100 / 범위5. 실제 발동 효과가 신산화계와 같은지 확인하세요.");
       return true;
     }
 
@@ -186,10 +187,10 @@ namespace DX11Base {
     bool restored4 = false;
     bool restored5 = false;
 
-    if (g_spell4Addr && IsValidPtr(g_spell4Addr, sizeof(SpellPrefix)))
-      restored4 = WritePrefix(g_spell4Addr, g_spell4Original);
-    if (g_spell5Addr && IsValidPtr(g_spell5Addr, sizeof(SpellPrefix)))
-      restored5 = WritePrefix(g_spell5Addr, g_spell5Original);
+    if (g_spell4Addr && IsValidPtr(g_spell4Addr, sizeof(SpellRecord)))
+      restored4 = WriteRecord(g_spell4Addr, g_spell4Original);
+    if (g_spell5Addr && IsValidPtr(g_spell5Addr, sizeof(SpellRecord)))
+      restored5 = WriteRecord(g_spell5Addr, g_spell5Original);
 
     if (restored4 && restored5)
       AddLog(u8"[책략5DBG] 원복 완료: 4번 사모위계 + 실제 5번 더미 레코드 복구.");
