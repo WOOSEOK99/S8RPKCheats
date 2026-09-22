@@ -38,4 +38,8 @@ bool BuildAIOfficerGrowthPreview(
     AIOfficerGrowthPreview *out,
     uint32_t randomSeed = 0);
 
+// 매년 12월 -> 1월 전환을 감지한 뒤 평정 상태에서 AI 성장 1회를 적용합니다.
+// 1월 세이브를 단순히 불러온 경우에는 즉시 실행하지 않습니다.
+void TickAIOfficerAutoGrowth();
+
 } // namespace DX11Base
