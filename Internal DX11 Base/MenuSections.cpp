@@ -1551,17 +1551,19 @@ namespace DX11Base {
       }
 
       ImGui::Spacing();
-      ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 게이지 진단 ]");
+      ImGui::Separator();
+      ImGui::Spacing();
 
-      bool gaugeCaptureRequested = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
+      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 책략 ]");
 
       if (ImGui::Checkbox(u8"공격측 책략 게이지 최대", &bMaxAttackStratagemGauge)) {
         const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
         if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
           bMaxAttackStratagemGauge = !bMaxAttackStratagemGauge;
-          AddNotification(u8"책략 게이지 캡처 훅 적용 실패 - 로그 확인");
+          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
         } else {
           NotifyFeatureToggle(u8"공격측 책략 게이지 최대", bMaxAttackStratagemGauge);
+          SaveConfig();
         }
       }
 
@@ -1571,15 +1573,14 @@ namespace DX11Base {
         const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
         if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
           bMaxDefenseStratagemGauge = !bMaxDefenseStratagemGauge;
-          AddNotification(u8"책략 게이지 캡처 훅 적용 실패 - 로그 확인");
+          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
         } else {
           NotifyFeatureToggle(u8"수비측 책략 게이지 최대", bMaxDefenseStratagemGauge);
+          SaveConfig();
         }
       }
 
-      (void)gaugeCaptureRequested;
-      ImGui::TextDisabled(u8"구 CT 구조(+18 진영, +154 게이지)를 현재 버전에서 검증하며 10000으로 유지합니다.");
-      ImGui::TextDisabled(u8"플레이어가 공격이면 공격측, 수비면 수비측만 켜서 테스트하세요. 설정에는 아직 저장하지 않습니다.");
+      ImGui::TextDisabled(u8"전투 중 선택한 진영의 책략 게이지를 최대치(10000)로 유지합니다.");
 
       EndSection(); // 전쟁
     }
