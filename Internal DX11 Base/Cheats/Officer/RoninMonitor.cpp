@@ -1,11 +1,11 @@
 // =============================================================================
-// RoninMonitor.cpp  –  재야 장수 자동 감시 모듈
+// RoninMonitor.cpp  –  재야 장수 / 장수 변동 자동 감시 모듈
 //
 // [작동 방식]
-//   1. 기능 활성화 후 현재 재야 상태를 기준선으로 1회 저장합니다. (알림 없음)
-//   2. 이후 월 변경이 아니라 내정(0x07) -> 평정(0x05) 전환 시점에만 5102명을 다시 검사합니다.
-//   3. 직전 기준선에서는 재야가 아니었지만 현재 0x58(재야)이 된 장수만 이름/도시 리스트로 표시합니다.
-//   4. 검사 결과를 다음 평정 비교용 기준선으로 저장합니다.
+//   1. 내정(0x07) -> 평정(0x05): 기존 재야 장수 등장 알림.
+//   2. 평정 시작 시 전체 장수의 상태/세력/도시를 장수 변동 기준선으로 저장.
+//   3. 평정(0x05) -> 내정(0x07): 기준선과 비교해 새 사망 및 세력 변경 장수를 알림.
+//   4. 모든 팝업은 기존 RoninMonitor ImGui 창 하나를 공용으로 사용.
 // =============================================================================
 
 #include "RoninMonitor.h"
@@ -15,6 +15,7 @@
 #include "../../Config.h"
 #include "../../Framework/imgui.h"
 #include "../../MenuState.h"
+#include "../../NotificationManager.h"
 #include "OfficerData.h"
 #include "OfficerRosterResolve.h"
 #include "../../pch.h"
@@ -32,6 +33,7 @@ namespace DX11Base {
   namespace {
     constexpr uint8_t kStateCouncil = 0x05;
     constexpr uint8_t kStateDomestic = 0x07;
+    constexpr uint8_t kStatusDead = 0x88;
 
     struct RoninNotification {
       std::string name;
@@ -39,26 +41,51 @@ namespace DX11Base {
       float timeRemaining;
     };
 
+    struct OfficerChangeSnapshot {
+      bool valid = false;
+      uint8_t status = 0;
+      uintptr_t forcePtr = 0;
+      uintptr_t cityPtr = 0;
+    };
+
+    struct OfficerChangeDisplayRow {
+      std::string officerName;
+      std::string previousForce;
+      std::string currentForce;
+    };
+
+    struct SharedPopup {
+      enum class Kind {
+        Generic,
+        OfficerChange
+      };
+
+      Kind kind = Kind::Generic;
+      std::string title;
+      std::vector<std::string> lines;
+      std::vector<OfficerChangeDisplayRow> recruitRows;
+      std::vector<OfficerChangeDisplayRow> deadRows;
+      float timeRemaining = 12.f;
+    };
+
     static uintptr_t s_lastHeroAddr = 0;
     static uintptr_t s_arrayBase = 0;
     static uintptr_t s_cityBase = 0;
     static bool s_baseResolved = false;
     static bool s_initialized = false;
+    static bool s_changeBaselineInitialized = false;
     static bool s_wasEnabled = false;
     static uint8_t s_lastRelevantGameState = 0;
 
     // ID 1~5102의 직전 평정 기준 재야 여부
     static bool s_isRonin[5103] = {false};
 
+    // 평정 시작 시점 기준 상태/세력/도시
+    static OfficerChangeSnapshot s_changeBaseline[5103]{};
+
     static std::mutex s_notifMtx;
     static std::vector<RoninNotification> s_notifications;
-
-    struct SpecialAbilityPopup {
-      std::vector<std::string> lines;
-      float timeRemaining = 12.f;
-    };
-
-    static std::vector<SpecialAbilityPopup> s_specialAbilityQueue;
+    static std::vector<SharedPopup> s_sharedPopupQueue;
   } // namespace
 
   void RoninMonitor_UpdatePrevStatus(int id, uint8_t st) {
@@ -68,15 +95,18 @@ namespace DX11Base {
 
   static void ResetRoninMonitorState(bool clearNotifications) {
     s_initialized = false;
+    s_changeBaselineInitialized = false;
     s_baseResolved = false;
     s_arrayBase = 0;
     s_cityBase = 0;
     s_lastRelevantGameState = 0;
     std::memset(s_isRonin, 0, sizeof(s_isRonin));
+    std::memset(s_changeBaseline, 0, sizeof(s_changeBaseline));
 
     if (clearNotifications) {
       std::lock_guard<std::mutex> lk(s_notifMtx);
       s_notifications.clear();
+      s_sharedPopupQueue.clear();
     }
   }
 
@@ -98,21 +128,45 @@ namespace DX11Base {
     return false;
   }
 
-  // SEH는 C++ 소멸자가 있는 함수(예: std::vector를 가진 ScanRonins) 안에서 사용할 수 없으므로
-  // 원시 메모리 읽기만 별도 헬퍼로 분리합니다.
-  static bool SafeReadOfficerScanFields(uintptr_t addr, uint16_t* outId, uint8_t* outStatus, uintptr_t* outCityPtr) {
-    if (!outId || !outStatus || !outCityPtr)
+  // SEH는 C++ 소멸자가 있는 함수 안에서 사용할 수 없으므로 원시 읽기만 별도 헬퍼로 분리합니다.
+  static bool SafeReadOfficerScanFields(
+      uintptr_t addr,
+      uint16_t* outId,
+      uint8_t* outStatus,
+      uintptr_t* outForcePtr,
+      uintptr_t* outCityPtr) {
+    if (!outId || !outStatus || !outForcePtr || !outCityPtr)
       return false;
 
     __try {
       *outId = *(uint16_t *)(addr + 0x08);
       *outStatus = *(uint8_t *)(addr + 0x10);
+      *outForcePtr = *(uintptr_t *)(addr + 0x18);
       *outCityPtr = *(uintptr_t *)(addr + 0x20);
       return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       *outId = 0;
       *outStatus = 0;
+      *outForcePtr = 0;
       *outCityPtr = 0;
+      return false;
+    }
+  }
+
+  static bool SafeReadForceLordId(uintptr_t forcePtr, uint16_t* outLordId) {
+    if (!outLordId || forcePtr <= 0x10000)
+      return false;
+
+    __try {
+      uintptr_t lordPtr = *(uintptr_t *)(forcePtr + 0xC0);
+      if (lordPtr <= 0x10000)
+        return false;
+      uint16_t id = *(uint16_t *)(lordPtr + 0x08);
+      if (id < 1 || id > 5102)
+        return false;
+      *outLordId = id;
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return false;
     }
   }
@@ -160,13 +214,42 @@ namespace DX11Base {
     }
   }
 
+  static std::string OfficerName(uint16_t id) {
+    auto it = g_officerNames.find((int)id);
+    if (it != g_officerNames.end() && !it->second.empty())
+      return it->second;
+    return u8"미등록 무장(ID:" + std::to_string((int)id) + u8")";
+  }
+
+  static std::string CityName(uintptr_t cityPtr) {
+    uintptr_t cityBase = ResolveCityBaseOnce();
+    if (cityBase > 0x10000 && cityPtr >= cityBase) {
+      uintptr_t diff = cityPtr - cityBase;
+      if ((diff % 0x2A0) == 0) {
+        int idx = (int)(diff / 0x2A0);
+        if (idx >= 0 && idx < g_CityCount)
+          return g_CityList[idx].cityname;
+      }
+    }
+    return u8"도시 미확인";
+  }
+
+  static std::string ForceName(uintptr_t forcePtr) {
+    if (forcePtr <= 0x10000)
+      return u8"무소속";
+
+    uint16_t lordId = 0;
+    if (SafeReadForceLordId(forcePtr, &lordId))
+      return OfficerName(lordId) + u8" 세력";
+
+    return u8"세력 미확인";
+  }
+
   static void ScanRonins(bool notifyNew) {
     if (s_arrayBase <= 0x10000)
       return;
 
     std::vector<RoninNotification> found;
-    uintptr_t cityBase = ResolveCityBaseOnce();
-
     uintptr_t lastPage = 0;
     bool pageOk = false;
     bool seenThisTick[5103] = {false};
@@ -190,8 +273,9 @@ namespace DX11Base {
 
       uint16_t realID = 0;
       uint8_t status = 0;
+      uintptr_t forcePtr = 0;
       uintptr_t cityPtr = 0;
-      if (!SafeReadOfficerScanFields(addr, &realID, &status, &cityPtr))
+      if (!SafeReadOfficerScanFields(addr, &realID, &status, &forcePtr, &cityPtr))
         continue;
 
       if (realID == 0 || realID > 5102 || seenThisTick[realID])
@@ -202,25 +286,10 @@ namespace DX11Base {
       currentRonin[realID] = isRonin;
 
       if (notifyNew && isRonin && !s_isRonin[realID]) {
-        std::string name = g_officerNames.count(realID)
-                               ? g_officerNames[realID]
-                               : (u8"미등록 무장(ID:" + std::to_string(realID) + u8")");
-        std::string city = u8"알 수 없는 장소";
-
-        if (cityBase > 0x10000 && cityPtr >= cityBase) {
-          uintptr_t diff = cityPtr - cityBase;
-          if ((diff % 0x2A0) == 0) {
-            int idx = (int)(diff / 0x2A0);
-            if (idx >= 0 && idx < g_CityCount)
-              city = g_CityList[idx].cityname;
-          }
-        }
-
-        found.push_back({name, city, 12.f});
+        found.push_back({OfficerName(realID), CityName(cityPtr), 12.f});
       }
     }
 
-    // 이번 검사 결과가 다음 평정 비교 기준선이 됩니다.
     std::memcpy(s_isRonin, currentRonin, sizeof(s_isRonin));
     s_initialized = true;
 
@@ -239,30 +308,215 @@ namespace DX11Base {
     }
   }
 
-  void RoninMonitor_QueueSpecialAbilityNotice(const std::vector<std::string>& lines) {
+  static void CaptureOfficerChangeBaseline() {
+    if (s_arrayBase <= 0x10000)
+      return;
+
+    OfficerChangeSnapshot next[5103]{};
+    bool seenThisTick[5103] = {false};
+    uintptr_t lastPage = 0;
+    bool pageOk = false;
+
+    for (int i = 1; i <= 5102; ++i) {
+      uintptr_t addr = s_arrayBase + (uintptr_t)(i - 1) * 0x3D0;
+      uintptr_t page = addr & ~0xFFFull;
+
+      if (page != lastPage) {
+        lastPage = page;
+        pageOk = IsValidPtr(page, 0x1000);
+      }
+      if (!pageOk)
+        continue;
+
+      if ((addr + 0x60) > (page + 0xFFF)) {
+        if (!IsValidPtr(page + 0x1000, 0x1000))
+          continue;
+      }
+
+      uint16_t id = 0;
+      uint8_t status = 0;
+      uintptr_t forcePtr = 0;
+      uintptr_t cityPtr = 0;
+      if (!SafeReadOfficerScanFields(addr, &id, &status, &forcePtr, &cityPtr))
+        continue;
+      if (id < 1 || id > 5102 || seenThisTick[id])
+        continue;
+
+      seenThisTick[id] = true;
+      next[id].valid = true;
+      next[id].status = status;
+      next[id].forcePtr = forcePtr;
+      next[id].cityPtr = cityPtr;
+    }
+
+    std::memcpy(s_changeBaseline, next, sizeof(s_changeBaseline));
+    s_changeBaselineInitialized = true;
+    AddLog(u8"[장수변동] 평정 시작 기준선 저장 완료");
+  }
+
+  static void ScanOfficerChangesAndNotify() {
+    if (s_arrayBase <= 0x10000 || !s_changeBaselineInitialized)
+      return;
+
+    LoadOfficerNames();
+
+    std::vector<OfficerChangeDisplayRow> deadRows;
+    std::vector<OfficerChangeDisplayRow> recruitRows;
+    OfficerChangeSnapshot next[5103]{};
+    bool seenThisTick[5103] = {false};
+    uintptr_t lastPage = 0;
+    bool pageOk = false;
+
+    for (int i = 1; i <= 5102; ++i) {
+      uintptr_t addr = s_arrayBase + (uintptr_t)(i - 1) * 0x3D0;
+      uintptr_t page = addr & ~0xFFFull;
+
+      if (page != lastPage) {
+        lastPage = page;
+        pageOk = IsValidPtr(page, 0x1000);
+      }
+      if (!pageOk)
+        continue;
+
+      if ((addr + 0x60) > (page + 0xFFF)) {
+        if (!IsValidPtr(page + 0x1000, 0x1000))
+          continue;
+      }
+
+      uint16_t id = 0;
+      uint8_t status = 0;
+      uintptr_t forcePtr = 0;
+      uintptr_t cityPtr = 0;
+      if (!SafeReadOfficerScanFields(addr, &id, &status, &forcePtr, &cityPtr))
+        continue;
+      if (id < 1 || id > 5102 || seenThisTick[id])
+        continue;
+
+      seenThisTick[id] = true;
+      next[id].valid = true;
+      next[id].status = status;
+      next[id].forcePtr = forcePtr;
+      next[id].cityPtr = cityPtr;
+
+      const OfficerChangeSnapshot &before = s_changeBaseline[id];
+      if (!before.valid)
+        continue;
+
+      if (before.status != kStatusDead && status == kStatusDead) {
+        deadRows.push_back({
+            OfficerName(id),
+            ForceName(before.forcePtr),
+            std::string()});
+        AddLog(u8"[장수변동] 사망: %s / 직전 %s / %s",
+               OfficerName(id).c_str(),
+               ForceName(before.forcePtr).c_str(),
+               CityName(before.cityPtr).c_str());
+        continue;
+      }
+
+      // 사망자는 세력 포인터가 0으로 바뀌는 경우가 있으므로 위에서 제외합니다.
+      if (status != kStatusDead &&
+          before.forcePtr != forcePtr &&
+          forcePtr > 0x10000) {
+        recruitRows.push_back({
+            OfficerName(id),
+            ForceName(before.forcePtr),
+            ForceName(forcePtr)});
+        AddLog(u8"[장수변동] 등용/세력변경: %s / %s -> %s / %s",
+               OfficerName(id).c_str(),
+               ForceName(before.forcePtr).c_str(),
+               ForceName(forcePtr).c_str(),
+               CityName(cityPtr).c_str());
+      }
+    }
+
+    std::memcpy(s_changeBaseline, next, sizeof(s_changeBaseline));
+    s_changeBaselineInitialized = true;
+
+    if (deadRows.empty() && recruitRows.empty()) {
+      AddLog(u8"[장수변동] 평정 종료 확인: 사망/등용 변동 없음");
+      return;
+    }
+
+    {
+      std::lock_guard<std::mutex> lk(s_notifMtx);
+
+      SharedPopup popup;
+      popup.kind = SharedPopup::Kind::OfficerChange;
+      popup.title = u8" [ 사망장수 및 등용장수 ]";
+
+      const size_t recruitLimit =
+          (std::min<size_t>)(recruitRows.size(), 16);
+      const size_t deadLimit =
+          (std::min<size_t>)(deadRows.size(), 16);
+      popup.recruitRows.assign(
+          recruitRows.begin(), recruitRows.begin() + recruitLimit);
+      popup.deadRows.assign(
+          deadRows.begin(), deadRows.begin() + deadLimit);
+
+      // 장수 변동 표는 읽을 항목이 많아 기존 공용 알림(12초)보다 길게 표시합니다.
+      popup.timeRemaining = 20.f;
+      s_sharedPopupQueue.push_back(std::move(popup));
+
+      if (s_sharedPopupQueue.size() > 4)
+        s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
+    }
+
+    AddLog(u8"[장수변동] 평정 종료 알림 큐 등록: 등용 %zu명 / 사망 %zu명 / 표시 20초",
+           recruitRows.size(), deadRows.size());
+
+    // 팝업은 20초 후 사라지므로, 알림 확인 창에서도 다시 볼 수 있게
+    // 장수별 결과를 최근 알림 기록에 별도로 남깁니다.
+    for (const auto &row : recruitRows) {
+      g_notificationHistory.push_back(
+          std::string(u8"[등용] ") + row.officerName +
+          u8" | " + row.previousForce +
+          u8" → " + row.currentForce);
+    }
+    for (const auto &row : deadRows) {
+      g_notificationHistory.push_back(
+          std::string(u8"[사망] ") + row.officerName +
+          u8" | " + row.previousForce);
+    }
+
+    // 연말 특수능력 기록과 동일하게 최대 200개까지 유지합니다.
+    if (g_notificationHistory.size() > 200) {
+      g_notificationHistory.erase(
+          g_notificationHistory.begin(),
+          g_notificationHistory.begin() +
+              (g_notificationHistory.size() - 200));
+    }
+  }
+
+  void RoninMonitor_QueueSharedNotice(
+      const std::string& title,
+      const std::vector<std::string>& lines) {
     if (lines.empty())
       return;
 
     std::lock_guard<std::mutex> lk(s_notifMtx);
 
-    // 한 번의 연말 판정 결과를 한 팝업 묶음으로 보관합니다.
-    // 너무 많은 행으로 화면이 커지는 것을 막기 위해 최대 24행까지만 표시하고,
-    // 전체 내역은 기존 알림 기록에 그대로 남습니다.
-    SpecialAbilityPopup popup;
+    SharedPopup popup;
+    popup.title = title;
     const size_t limit = (std::min<size_t>)(lines.size(), 24);
     popup.lines.assign(lines.begin(), lines.begin() + limit);
     popup.timeRemaining = 12.f;
-    s_specialAbilityQueue.push_back(std::move(popup));
+    s_sharedPopupQueue.push_back(std::move(popup));
 
-    if (s_specialAbilityQueue.size() > 4)
-      s_specialAbilityQueue.erase(s_specialAbilityQueue.begin());
+    if (s_sharedPopupQueue.size() > 4)
+      s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
+  }
+
+  void RoninMonitor_QueueSpecialAbilityNotice(const std::vector<std::string>& lines) {
+    RoninMonitor_QueueSharedNotice(u8" [ 특수 능력 부여!! ]", lines);
   }
 
   // ---------------------------------------------------------------------------
   // Tick – 백그라운드 스레드
   // ---------------------------------------------------------------------------
   void RoninMonitor_Tick(uintptr_t p1) {
-    if (!bMonitorRonin) {
+    const bool anyMonitorEnabled = bMonitorRonin || bOfficerChangeNotify;
+    if (!anyMonitorEnabled) {
       if (s_wasEnabled) {
         ResetRoninMonitorState(true);
         s_wasEnabled = false;
@@ -296,14 +550,29 @@ namespace DX11Base {
     if (gameState == 0)
       return;
 
+    // 개별 체크박스를 끈 동안에는 해당 기준선을 무효화합니다.
+    // 같은 세션에서 다시 켰을 때 과거 상태를 소급 비교하지 않고 현재 상태부터 새로 시작합니다.
+    if (!bMonitorRonin)
+      s_initialized = false;
+    if (!bOfficerChangeNotify)
+      s_changeBaselineInitialized = false;
+
     // 기능을 켠 직후에는 현재 상태를 기준선으로만 저장합니다.
-    // 평정에서 켰더라도 신규 재야 알림을 소급해서 띄우지 않습니다.
     if (s_lastRelevantGameState == 0) {
       s_lastRelevantGameState = gameState;
-      if (!s_initialized)
+      if (bMonitorRonin && !s_initialized)
         ScanRonins(false);
+      if (bOfficerChangeNotify && !s_changeBaselineInitialized)
+        CaptureOfficerChangeBaseline();
       return;
     }
+
+    // 다른 모니터가 이미 동작 중인 상태에서 체크박스를 새로 켠 경우도
+    // 현재 상태를 즉시 기준선으로 잡아 다음 전환부터 정상 비교합니다.
+    if (bMonitorRonin && !s_initialized)
+      ScanRonins(false);
+    if (bOfficerChangeNotify && !s_changeBaselineInitialized)
+      CaptureOfficerChangeBaseline();
 
     if (gameState == s_lastRelevantGameState)
       return;
@@ -311,9 +580,25 @@ namespace DX11Base {
     const uint8_t prevState = s_lastRelevantGameState;
     s_lastRelevantGameState = gameState;
 
-    // 실제 목적: 내정 -> 평정 전환 시에만 전체 무장을 비교하고 리스트를 표시합니다.
     if (prevState == kStateDomestic && gameState == kStateCouncil) {
-      ScanRonins(s_initialized);
+      // 기존 재야 장수 알림.
+      if (bMonitorRonin)
+        ScanRonins(s_initialized);
+
+      // 이번 평정 동안 발생할 사망/등용 비교용 기준선.
+      if (bOfficerChangeNotify)
+        CaptureOfficerChangeBaseline();
+      else
+        s_changeBaselineInitialized = false;
+
+      return;
+    }
+
+    if (prevState == kStateCouncil && gameState == kStateDomestic) {
+      if (bOfficerChangeNotify)
+        ScanOfficerChangesAndNotify();
+      else
+        s_changeBaselineInitialized = false;
     }
   }
 
@@ -326,9 +611,13 @@ namespace DX11Base {
       dt = 0.1f;
 
     std::vector<RoninNotification> roninSnap;
-    std::vector<std::string> specialLines;
+    std::vector<std::string> sharedLines;
+    std::vector<OfficerChangeDisplayRow> recruitRows;
+    std::vector<OfficerChangeDisplayRow> deadRows;
+    std::string sharedTitle;
     bool showRonin = false;
-    bool showSpecial = false;
+    bool showShared = false;
+    bool showOfficerChange = false;
 
     {
       std::lock_guard<std::mutex> lk(s_notifMtx);
@@ -350,40 +639,41 @@ namespace DX11Base {
 
       showRonin = bMonitorRonin && !roninSnap.empty();
 
-      // 특수능력 알림은 재야 체크박스와 무관합니다.
-      // 실제 재야 팝업이 떠 있는 동안에는 타이머를 줄이지 않고 그대로 대기합니다.
-      if (!showRonin && !s_specialAbilityQueue.empty()) {
-        SpecialAbilityPopup &popup = s_specialAbilityQueue.front();
+      // 공용 알림은 재야 팝업이 떠 있는 동안 타이머를 줄이지 않고 뒤에서 대기합니다.
+      if (!showRonin && !s_sharedPopupQueue.empty()) {
+        SharedPopup &popup = s_sharedPopupQueue.front();
         popup.timeRemaining -= dt;
         if (popup.timeRemaining <= 0.f) {
-          s_specialAbilityQueue.erase(s_specialAbilityQueue.begin());
+          s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
         } else {
-          specialLines = popup.lines;
-          showSpecial = true;
+          sharedTitle = popup.title;
+          sharedLines = popup.lines;
+          recruitRows = popup.recruitRows;
+          deadRows = popup.deadRows;
+          showOfficerChange =
+              popup.kind == SharedPopup::Kind::OfficerChange;
+          showShared = true;
         }
       }
     }
 
-    if (!showRonin && !showSpecial)
+    if (!showRonin && !showShared)
       return;
 
     float sc = ImGui::GetIO().FontGlobalScale;
     ImVec2 disp = ImGui::GetIO().DisplaySize;
 
-    // 특수능력 알림은 줄바꿈하지 않고 가장 긴 문자열에 맞춰 창 폭을 자동 확장합니다.
-    float specialColumnWidth = 360.f * sc;
-    if (showSpecial) {
-      float maxTextWidth =
-          ImGui::CalcTextSize(u8" [ 특수 능력 부여!! ]").x * 1.8f;
-      for (const std::string &line : specialLines) {
+    float sharedColumnWidth = 360.f * sc;
+    if (showShared && !showOfficerChange) {
+      float maxTextWidth = ImGui::CalcTextSize(sharedTitle.c_str()).x * 1.8f;
+      for (const std::string &line : sharedLines) {
         const float w = ImGui::CalcTextSize(line.c_str()).x * 1.8f;
         if (w > maxTextWidth)
           maxTextWidth = w;
       }
 
-      // 좌우 패딩/테이블 여유분을 더하되 화면 밖으로 나가지는 않게 제한합니다.
       const float maxAllowed = (std::max)(360.f * sc, disp.x - 100.f * sc);
-      specialColumnWidth =
+      sharedColumnWidth =
           (std::min)(maxTextWidth + 30.f * sc, maxAllowed);
     }
 
@@ -421,7 +711,7 @@ namespace DX11Base {
       ImGui::TextUnformatted(
           showRonin
               ? u8" [ 재야 장수 발견!! ]"
-              : u8" [ 특수 능력 부여!! ]");
+              : sharedTitle.c_str());
       ImGui::PopStyleColor();
       ImGui::Separator();
 
@@ -464,17 +754,118 @@ namespace DX11Base {
           }
           ImGui::EndTable();
         }
+      } else if (showOfficerChange) {
+        if (!recruitRows.empty()) {
+          ImGui::Spacing();
+          ImGui::TextColored(
+              ImVec4(0.35f, 1.f, 0.45f, 1.f),
+              u8"[등용]");
+          if (ImGui::BeginTable(
+                  "##OfficerRecruitTable",
+                  3,
+                  ImGuiTableFlags_BordersInnerV |
+                      ImGuiTableFlags_BordersInnerH |
+                      ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn(
+                u8"장수명",
+                ImGuiTableColumnFlags_WidthFixed,
+                150.f * sc);
+            ImGui::TableSetupColumn(
+                u8"이전 세력",
+                ImGuiTableColumnFlags_WidthFixed,
+                180.f * sc);
+            ImGui::TableSetupColumn(
+                u8"현재 세력",
+                ImGuiTableColumnFlags_WidthFixed,
+                180.f * sc);
+            ImGui::TableHeadersRow();
+
+            for (const auto &row : recruitRows) {
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::TextColored(
+                  ImVec4(0.35f, 1.f, 1.f, 1.f),
+                  u8"%s",
+                  row.officerName.c_str());
+              ImGui::TableSetColumnIndex(1);
+              ImGui::TextUnformatted(row.previousForce.c_str());
+              ImGui::TableSetColumnIndex(2);
+              ImGui::TextColored(
+                  ImVec4(1.f, 1.f, 0.55f, 1.f),
+                  u8"%s",
+                  row.currentForce.c_str());
+            }
+            ImGui::EndTable();
+          }
+        }
+
+        if (!deadRows.empty()) {
+          if (!recruitRows.empty())
+            ImGui::Spacing();
+          ImGui::TextColored(
+              ImVec4(1.f, 0.4f, 0.4f, 1.f),
+              u8"[사망]");
+          if (ImGui::BeginTable(
+                  "##OfficerDeathTable",
+                  2,
+                  ImGuiTableFlags_BordersInnerV |
+                      ImGuiTableFlags_BordersInnerH |
+                      ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn(
+                u8"장수명",
+                ImGuiTableColumnFlags_WidthFixed,
+                150.f * sc);
+            ImGui::TableSetupColumn(
+                u8"세력",
+                ImGuiTableColumnFlags_WidthFixed,
+                180.f * sc);
+            ImGui::TableHeadersRow();
+
+            for (const auto &row : deadRows) {
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::TextColored(
+                  ImVec4(1.f, 0.55f, 0.55f, 1.f),
+                  u8"%s",
+                  row.officerName.c_str());
+              ImGui::TableSetColumnIndex(1);
+              ImGui::TextUnformatted(row.previousForce.c_str());
+            }
+            ImGui::EndTable();
+          }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        const float closeButtonWidth = 120.f * sc;
+        const float closeAvail = ImGui::GetContentRegionAvail().x;
+        if (closeAvail > closeButtonWidth)
+          ImGui::SetCursorPosX(
+              ImGui::GetCursorPosX() + (closeAvail - closeButtonWidth) * 0.5f);
+
+        if (ImGui::Button(
+                u8"닫기",
+                ImVec2(closeButtonWidth, 0.f))) {
+          std::lock_guard<std::mutex> lk(s_notifMtx);
+          if (!s_sharedPopupQueue.empty() &&
+              s_sharedPopupQueue.front().kind ==
+                  SharedPopup::Kind::OfficerChange) {
+            s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
+          }
+        }
       } else {
         if (ImGui::BeginTable(
-                "##SpecialAbilityTable",
+                "##SharedNotificationTable",
                 1,
                 ImGuiTableFlags_SizingFixedFit)) {
           ImGui::TableSetupColumn(
-              u8"부여 내역",
+              u8"내역",
               ImGuiTableColumnFlags_WidthFixed,
-              specialColumnWidth);
+              sharedColumnWidth);
 
-          for (const std::string &line : specialLines) {
+          for (const std::string &line : sharedLines) {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::TextColored(

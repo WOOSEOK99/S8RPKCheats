@@ -1083,7 +1083,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        // 4행: 병력수 공방 반영 / 빈칸
+        // 4행: 병력수 공방 반영 / 사망장수 및 등용장수 알림
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(u8"병력수 공방 반영", &bTroopCountCombatScaling)) {
@@ -1112,6 +1112,22 @@ namespace DX11Base {
           ImGui::TextColored(
               ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
               u8"※ 체크 해제 시 원래 계산 분기로 복구합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"사망장수 및 등용장수 알림", &bOfficerChangeNotify)) {
+          NotifyFeatureToggle(u8"사망장수 및 등용장수 알림", bOfficerChangeNotify);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"평정이 끝나고 내정으로 넘어갈 때 장수 변동을 기존 알림창으로 보여줍니다.");
+          ImGui::TextUnformatted(u8"- 새로 사망 상태가 된 장수는 직전 소속 세력/도시를 함께 표시합니다.");
+          ImGui::TextUnformatted(u8"- 소속 세력이 새로 생기거나 다른 세력으로 바뀐 장수는 현재 세력/도시를 표시합니다.");
+          ImGui::TextUnformatted(u8"- 사망 원인이나 세력 변경 원인까지는 구분하지 않고 최종 상태를 기준으로 판정합니다.");
+          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장됩니다.");
           ImGui::EndTooltip();
         }
 
