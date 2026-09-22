@@ -195,6 +195,7 @@ namespace DX11Base {
     // 도시 오프셋 상수 (거주도시 포인터 기준, 즉 arr + 0x28 기준)
     static constexpr uintptr_t OFF_GOLD = 0xBC;     // 금 uint32
     static constexpr uintptr_t OFF_GRAIN = 0xC0;    // 군량 uint32
+    static constexpr uintptr_t OFF_TROOPS = 0xC4;   // 현재 병사 uint32
     static constexpr uintptr_t OFF_DEV_MAX = 0xA8;  // 개발한도 uint16 (이전 0xD0 - 0x28)
     static constexpr uintptr_t OFF_COM_MAX = 0xAC;  // 상업한도 uint16 (이전 0xD4 - 0x28)
     static constexpr uintptr_t OFF_DEF_MAX = 0xB0;  // 방어한도 uint16 (이전 0xD8 - 0x28)
@@ -338,7 +339,7 @@ namespace DX11Base {
 
     // ── 도시 스냅샷 캐시 (창 열 때 / 새로고침 버튼 클릭 시에만 읽음) ─────────
     struct CitySnap {
-      int gold = 0, grain = 0, soldier = 0;
+      int gold = 0, grain = 0, troops = 0, soldier = 0;
       int devMax = 0, comMax = 0, defMax = 0, tecMax = 0;
       int revolt = 0;
       bool valid = false;
@@ -351,7 +352,7 @@ namespace DX11Base {
       for (int i = 0; i < g_CityCount; i++) {
         uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
         uint16_t dv = 0, cm = 0, df = 0, tc = 0;
-        uint32_t gd = 0, gr = 0, sl = 0;
+        uint32_t gd = 0, gr = 0, tr = 0, sl = 0;
         uint8_t rv = 0;
         SafeRead16(ca + OFF_DEV_MAX, &dv);
         SafeRead16(ca + OFF_COM_MAX, &cm);
@@ -359,9 +360,10 @@ namespace DX11Base {
         SafeRead16(ca + OFF_TEC_MAX, &tc);
         SafeRead32(ca - 0x28 + OFF_GOLD, &gd);
         SafeRead32(ca - 0x28 + OFF_GRAIN, &gr);
+        SafeRead32(ca - 0x28 + OFF_TROOPS, &tr);
         SafeRead32(ca - 0x28 + OFF_SOL_MAX, &sl);
         SafeRead8(ca - 0x28 + OFF_REVOLT_RAW, &rv);
-        s_snap[i] = {(int)gd, (int)gr, (int)sl, dv, cm, df, tc, (int)rv, true};
+        s_snap[i] = {(int)gd, (int)gr, (int)tr, (int)sl, dv, cm, df, tc, (int)rv, true};
       }
       s_snapDirty = false;
     }
@@ -393,7 +395,7 @@ namespace DX11Base {
       static ImGuiTableFlags tf = ImGuiTableFlags_BordersInner | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
                                   ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings;
 
-      if (!ImGui::BeginTable("##CityTbl", 10, tf))
+      if (!ImGui::BeginTable("##CityTbl", 11, tf))
         return;
 
       ImGui::TableSetupScrollFreeze(2, 1);
@@ -401,6 +403,7 @@ namespace DX11Base {
       ImGui::TableSetupColumn(u8"도시명", ImGuiTableColumnFlags_WidthFixed, 72.f * sc);
       ImGui::TableSetupColumn(u8"금", ImGuiTableColumnFlags_WidthFixed, 85.f * sc);
       ImGui::TableSetupColumn(u8"군량", ImGuiTableColumnFlags_WidthFixed, 85.f * sc);
+      ImGui::TableSetupColumn(u8"병사", ImGuiTableColumnFlags_WidthFixed, 85.f * sc);
       ImGui::TableSetupColumn(u8"개발한도", ImGuiTableColumnFlags_WidthFixed, 75.f * sc);
       ImGui::TableSetupColumn(u8"상업한도", ImGuiTableColumnFlags_WidthFixed, 75.f * sc);
       ImGui::TableSetupColumn(u8"방어한도", ImGuiTableColumnFlags_WidthFixed, 75.f * sc);
@@ -438,7 +441,7 @@ namespace DX11Base {
 
         // 금
         ImGui::TableSetColumnIndex(2);
-        ImGui::PushID(i * 7 + 0);
+        ImGui::PushID(i * 8 + 0);
         ImGui::SetNextItemWidth(80.f * sc);
         if (ImGui::InputInt("##gd", &snap.gold, 0, 0)) {
           snap.gold = snap.gold < 0 ? 0 : snap.gold;
@@ -454,7 +457,7 @@ namespace DX11Base {
 
         // 군량
         ImGui::TableSetColumnIndex(3);
-        ImGui::PushID(i * 7 + 1);
+        ImGui::PushID(i * 8 + 1);
         ImGui::SetNextItemWidth(80.f * sc);
         if (ImGui::InputInt("##gr", &snap.grain, 0, 0)) {
           snap.grain = snap.grain < 0 ? 0 : snap.grain;
@@ -468,9 +471,25 @@ namespace DX11Base {
         // }
         ImGui::PopID();
 
-        // 개발한도
+        // 병사
         ImGui::TableSetColumnIndex(4);
-        ImGui::PushID(i * 7 + 2);
+        ImGui::PushID(i * 8 + 2);
+        ImGui::SetNextItemWidth(80.f * sc);
+        if (ImGui::InputInt("##tr", &snap.troops, 0, 0)) {
+          if (snap.troops < 0)
+            snap.troops = 0;
+          if (snap.soldier >= 0 && snap.troops > snap.soldier)
+            snap.troops = snap.soldier;
+          if (SafeWrite32(ca - 0x28 + OFF_TROOPS, (uint32_t)snap.troops)) {
+            AddLog(u8"[도시] %s 병사 → %d", g_CityList[i].cityname, snap.troops);
+            s_frontierDirty = true;
+          }
+        }
+        ImGui::PopID();
+
+        // 개발한도
+        ImGui::TableSetColumnIndex(5);
+        ImGui::PushID(i * 8 + 3);
         ImGui::SetNextItemWidth(70.f * sc);
         if (ImGui::InputInt("##dv", &snap.devMax, 0, 0)) {
           snap.devMax = snap.devMax < 0 ? 0 : (snap.devMax > 30000 ? 30000 : snap.devMax);
@@ -480,8 +499,8 @@ namespace DX11Base {
         ImGui::PopID();
 
         // 상업한도
-        ImGui::TableSetColumnIndex(5);
-        ImGui::PushID(i * 7 + 3);
+        ImGui::TableSetColumnIndex(6);
+        ImGui::PushID(i * 8 + 4);
         ImGui::SetNextItemWidth(70.f * sc);
         if (ImGui::InputInt("##cm", &snap.comMax, 0, 0)) {
           snap.comMax = snap.comMax < 0 ? 0 : (snap.comMax > 30000 ? 30000 : snap.comMax);
@@ -491,8 +510,8 @@ namespace DX11Base {
         ImGui::PopID();
 
         // 방어한도
-        ImGui::TableSetColumnIndex(6);
-        ImGui::PushID(i * 7 + 4);
+        ImGui::TableSetColumnIndex(7);
+        ImGui::PushID(i * 8 + 5);
         ImGui::SetNextItemWidth(70.f * sc);
         if (ImGui::InputInt("##df", &snap.defMax, 0, 0)) {
           snap.defMax = snap.defMax < 0 ? 0 : (snap.defMax > 30000 ? 30000 : snap.defMax);
@@ -502,8 +521,8 @@ namespace DX11Base {
         ImGui::PopID();
 
         // 기술한도
-        ImGui::TableSetColumnIndex(7);
-        ImGui::PushID(i * 7 + 5);
+        ImGui::TableSetColumnIndex(8);
+        ImGui::PushID(i * 8 + 6);
         ImGui::SetNextItemWidth(70.f * sc);
         if (ImGui::InputInt("##tc", &snap.tecMax, 0, 0)) {
           snap.tecMax = snap.tecMax < 0 ? 0 : (snap.tecMax > 30000 ? 30000 : snap.tecMax);
@@ -513,8 +532,8 @@ namespace DX11Base {
         ImGui::PopID();
 
         // 병사한도
-        ImGui::TableSetColumnIndex(8);
-        ImGui::PushID(i * 7 + 6);
+        ImGui::TableSetColumnIndex(9);
+        ImGui::PushID(i * 8 + 7);
         ImGui::SetNextItemWidth(80.f * sc);
         if (ImGui::InputInt("##sl", &snap.soldier, 0, 0)) {
           snap.soldier = snap.soldier < 0 ? 0 : snap.soldier;
@@ -529,7 +548,7 @@ namespace DX11Base {
         ImGui::PopID();
 
         // 반란 카운트 (CT: CityData + 0x105)
-        ImGui::TableSetColumnIndex(9);
+        ImGui::TableSetColumnIndex(10);
         ImGui::Text("%d", snap.revolt);
 
         // 주소
@@ -548,7 +567,7 @@ namespace DX11Base {
     static constexpr uintptr_t OFF_CITY_CORPS_RAW = 0x90;      // 군단 포인터 후보 (구버전 구조 -0x08 패턴 검증용)
     static constexpr uintptr_t OFF_CITY_FORCE_LINK_RAW = 0x98; // 현재 확인상 태수 OfficerData*
     static constexpr uintptr_t OFF_CITY_CONNECTION_RAW = 0x20;
-    static constexpr uintptr_t OFF_CITY_TROOPS_RAW = 0xC4;
+    static constexpr uintptr_t OFF_CITY_TROOPS_RAW = OFF_TROOPS;
     static constexpr int CITY_CONNECTION_SLOTS = 6;
     static constexpr uintptr_t CITY_STRIDE = 0x2A0;
 
