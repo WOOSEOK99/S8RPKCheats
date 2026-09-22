@@ -59,6 +59,7 @@ namespace DX11Base {
   bool bGovernorPrisonerConsumePrivilege = false;
   bool bReinforcementArrivalAction = false;
   bool bReinforcementDefenderPlacement = false;
+  bool bOfficerChangeNotify = false;
   bool bAnnualSpecialAbilityAutoAssign = false;
   bool bAIOfficerAutoGrowth = false;
   int iAIOfficerGrowthSpeed = 2; // 기본: 보통
