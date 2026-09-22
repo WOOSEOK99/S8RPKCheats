@@ -254,8 +254,9 @@ bool IsAnnualAutoAssignSafeState() {
     return false;
   }
 
-  // 0x05=평정, 0x07=내정. 검은 화면/전환 중간 상태에서는 절대 스캔하지 않습니다.
-  s_lastSafe = (gameState == 0x07);
+  // 0x05=평정, 0x07=내정. 두 정상 전략 상태에서는 읽기 허용.
+  // 0x00/0x02/0x04/0x06/0x08 등 화면 전환 중간 상태에서는 worker를 멈춥니다.
+  s_lastSafe = (gameState == 0x05 || gameState == 0x07);
   return s_lastSafe;
 }
 
@@ -295,6 +296,7 @@ void StartAutoAssignWorker(
         AutoAssignWorkerResult local;
         local.pending.reserve(annualMode ? 256 : 1024);
         std::array<bool, kOfficerIdMax + 1> seenIds{};
+        bool debugId5Found = false;
 
         for (int i = 0; i < kOfficerSlotCount; ++i) {
           if (g_autoWorkerCancel.load()) {
@@ -316,26 +318,59 @@ void StartAutoAssignWorker(
           if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kOfficerIdMax)
             continue;
 
+          if (annualMode && stats.id_08 == 5) {
+            debugId5Found = true;
+            AddLog(u8"[특수능력/연말자동/DBG] ID5 슬롯 발견: slot=%d base=%p",
+                   i + 1, (void *)base);
+          }
+
           if (seenIds[stats.id_08])
             continue;
 
           if (annualMode && excludedExistingIds[stats.id_08]) {
+            if (stats.id_08 == 5)
+              AddLog(u8"[특수능력/연말자동/DBG] ID5 탈락: 기존 특수능력 보유로 연말 자동 대상 제외");
             seenIds[stats.id_08] = true;
             ++local.excludedExisting;
             continue;
           }
 
           OfficerProfile profile;
-          if (!ReadOfficerProfile(base, profile))
+          if (!ReadOfficerProfile(base, profile)) {
+            if (annualMode && stats.id_08 == 5)
+              AddLog(u8"[특수능력/연말자동/DBG] ID5 탈락: OfficerProfile 읽기 실패");
             continue;
-          if (profile.id != static_cast<int>(stats.id_08))
+          }
+          if (profile.id != static_cast<int>(stats.id_08)) {
+            if (annualMode && stats.id_08 == 5)
+              AddLog(u8"[특수능력/연말자동/DBG] ID5 탈락: stats ID=%u / profile ID=%d 불일치",
+                     (unsigned)stats.id_08, profile.id);
             continue;
+          }
 
           seenIds[profile.id] = true;
           ++local.validOfficers;
 
           const std::array<bool, 10> matches =
               EvaluateSpecialAbilities(profile);
+
+          if (annualMode && profile.id == 5) {
+            const int cavalrySum =
+                profile.cavalry[0] + profile.cavalry[1] + profile.cavalry[2] +
+                profile.cavalry[3] + profile.cavalry[4];
+            const int cavalryScore =
+                cavalrySum + profile.branchTraits[1] * 2;
+            AddLog(
+                u8"[특수능력/연말자동/DBG] ID5 판정: 무력=%d / 기병=%d,%d,%d,%d,%d / 기장=%d / 합=%d / 점수=%d / 연격>=2=%d / 기사>=2=%d / 불꽃기병=%s",
+                profile.war,
+                profile.cavalry[0], profile.cavalry[1], profile.cavalry[2],
+                profile.cavalry[3], profile.cavalry[4],
+                profile.branchTraits[1],
+                cavalrySum, cavalryScore,
+                profile.cavalry[0] >= 2 ? 1 : 0,
+                profile.cavalry[3] >= 2 ? 1 : 0,
+                matches[2] ? "YES" : "NO");
+          }
 
           bool any = false;
           for (int a = 0; a < static_cast<int>(matches.size()); ++a) {
@@ -350,6 +385,10 @@ void StartAutoAssignWorker(
 
           ++local.matchedOfficers;
           local.pending.push_back({profile.id, matches});
+        }
+
+        if (annualMode && !debugId5Found) {
+          AddLog(u8"[특수능력/연말자동/DBG] ID5 탈락: 1~5102 스캔에서 ID5 슬롯을 찾지 못함");
         }
 
         {
@@ -387,6 +426,9 @@ bool StartAutoAssignJob(bool annualMode) {
       ? u8"연말 자동 판정 시작: 0 / 5102명"
       : u8"처리 시작: 0 / 5102명";
 
+  if (annualMode)
+    AddLog(u8"[특수능력/연말자동/DBG] 작업 생성: rosterBase=%p", (void *)rosterBase);
+
   if (annualMode) {
     // 연말 자동 판정은 이미 특수 능력(0x1000~0x1009)을 하나라도 가진
     // 무장을 worker 시작 전에 한 번만 스냅샷으로 제외합니다.
@@ -408,6 +450,8 @@ bool StartAutoAssignJob(bool annualMode) {
         g_autoAssignJob.excludedExistingIds[officerId] = true;
     }
 
+    AddLog(u8"[특수능력/연말자동/DBG] ID5 기존능력 제외 상태=%s",
+           g_autoAssignJob.excludedExistingIds[5] ? "YES" : "NO");
     AddLog(u8"[특수능력/연말자동] 1~5102 전체 무장 공간 worker 판정 시작");
   } else {
     AddLog(u8"[특수능력/자동] 1~5102 전체 무장 공간 worker 판정 시작");
@@ -432,6 +476,9 @@ void FinishAutoAssignJob() {
       auto &skills = g_customSkillCounts[item.officerId];
       std::string assigned;
 
+      if (g_autoAssignJob.annualMode && item.officerId == 5)
+        AddLog(u8"[특수능력/연말자동/DBG] ID5 저장 단계 진입");
+
       for (int a = 0; a < static_cast<int>(item.abilities.size()); ++a) {
         if (!item.abilities[a])
           continue;
@@ -448,6 +495,11 @@ void FinishAutoAssignJob() {
         if (!assigned.empty())
           assigned += ", ";
         assigned += kAbilityNames[a];
+      }
+
+      if (g_autoAssignJob.annualMode && item.officerId == 5) {
+        AddLog(u8"[특수능력/연말자동/DBG] ID5 저장 결과: %s",
+               assigned.empty() ? u8"신규 부여 없음" : assigned.c_str());
       }
 
       if (!assigned.empty()) {
@@ -585,11 +637,16 @@ void TickSpecialAbilityAutoAssign() {
 }
 
 bool AutoAssignSpecialAbilitiesFromCouncil() {
-  if (g_autoAssignJob.running)
+  if (g_autoAssignJob.running) {
+    AddLog(u8"[특수능력/연말자동/DBG] 시작 실패: 이미 특수능력 작업이 실행 중");
     return false;
+  }
 
   AddLog(u8"[특수능력/연말자동] 12월 평정 진입 감지 -> 자동 판정 시작");
-  return StartAutoAssignJob(true);
+  const bool started = StartAutoAssignJob(true);
+  AddLog(u8"[특수능력/연말자동/DBG] StartAutoAssignJob 결과=%s",
+         started ? "SUCCESS" : "FAIL");
+  return started;
 }
 
 void CancelSpecialAbilityAutoAssign() {
