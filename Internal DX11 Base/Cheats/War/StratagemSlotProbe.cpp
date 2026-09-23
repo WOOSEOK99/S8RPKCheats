@@ -122,12 +122,6 @@ namespace DX11Base {
     static volatile LONG g_fifthUiOnSelectAnyHits = 0;
     static bool g_fifthUiSignalCallsitesLogged = false;
 
-    static uintptr_t g_fifthUiSetTrickIdHookAddr = 0;
-    static uintptr_t g_fifthUiSetTrickIdCaveAddr = 0;
-    static uint8_t g_fifthUiSetTrickIdOriginal[6] = {};
-    static bool g_fifthUiSetTrickIdHookApplied = false;
-    static volatile LONG g_fifthUiSetTrickIdLogCount = 0;
-
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -1264,133 +1258,6 @@ namespace DX11Base {
       }
     }
 
-
-    static void LogFifthUiSetTrickIdRuntime(uintptr_t button,
-                                            uint32_t trickId) {
-      const LONG hit=InterlockedIncrement(&g_fifthUiSetTrickIdLogCount);
-      if(hit>32)
-        return;
-
-      uint32_t uiId=0xFFFFFFFFu;
-      uint32_t state=0xFFFFFFFFu;
-      if(button && IsValidPtr(button,0x90)) {
-        SafeCopySeh(button+0x88,&uiId,sizeof(uiId));
-        SafeCopySeh(button+0x8C,&state,sizeof(state));
-      }
-
-      AddLog(u8"[책략5UIID] SetTrickID #%ld: button=%p uiId=%u state=%u trickId=%u sidecar=%d",
-             (long)hit,
-             reinterpret_cast<void *>(button),
-             (unsigned)uiId,
-             (unsigned)state,
-             (unsigned)trickId,
-             button && button==g_fifthUiSidecarButton ? 1 : 0);
-    }
-
-    static bool EnsureFifthUiSetTrickIdTraceHook() {
-      if(g_fifthUiSetTrickIdHookApplied)
-        return true;
-
-      const uintptr_t exeBase=
-          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-      if(!exeBase || !IsSupportedTrickUiBuild(exeBase))
-        return false;
-
-      constexpr uintptr_t kSetTrickIdRva=0x01E7FD90;
-      const uintptr_t hookAddr=exeBase+kSetTrickIdRva;
-      static const uint8_t expected[6]={
-        0x48,0x89,0x5C,0x24,0x08,0x57
-      };
-      if(!IsValidPtr(hookAddr,sizeof(expected)) ||
-         std::memcmp(reinterpret_cast<const void *>(hookAddr),
-                     expected,sizeof(expected))!=0) {
-        AddLog(u8"[책략5UIID] SetTrickID entry 바이트 검증 실패.");
-        return false;
-      }
-
-      const uintptr_t caveAddr=AllocNear(hookAddr,256);
-      if(!caveAddr)
-        return false;
-
-      uint8_t *c=reinterpret_cast<uint8_t *>(caveAddr);
-      int i=0;
-      auto e8=[&](uint8_t v){c[i++]=v;};
-      auto e32=[&](int32_t v){std::memcpy(c+i,&v,4);i+=4;};
-      auto e64=[&](uintptr_t v){std::memcpy(c+i,&v,8);i+=8;};
-
-      // Preserve all volatile state; helper only observes RCX/EDX.
-      e8(0x9C);
-      e8(0x50); e8(0x51); e8(0x52);
-      e8(0x41); e8(0x50);
-      e8(0x41); e8(0x51);
-      e8(0x41); e8(0x52);
-      e8(0x41); e8(0x53);
-      e8(0x48); e8(0x81); e8(0xEC); e32(0x80);
-
-      const uint8_t xmmStores[][6]={
-        {0xF3,0x0F,0x7F,0x44,0x24,0x20},
-        {0xF3,0x0F,0x7F,0x4C,0x24,0x30},
-        {0xF3,0x0F,0x7F,0x54,0x24,0x40},
-        {0xF3,0x0F,0x7F,0x5C,0x24,0x50},
-        {0xF3,0x0F,0x7F,0x64,0x24,0x60},
-        {0xF3,0x0F,0x7F,0x6C,0x24,0x70}
-      };
-      for(const auto &b:xmmStores){
-        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
-      }
-
-      e8(0x48); e8(0xB8);
-      e64(reinterpret_cast<uintptr_t>(&LogFifthUiSetTrickIdRuntime));
-      e8(0xFF); e8(0xD0);
-
-      const uint8_t xmmLoads[][6]={
-        {0xF3,0x0F,0x6F,0x44,0x24,0x20},
-        {0xF3,0x0F,0x6F,0x4C,0x24,0x30},
-        {0xF3,0x0F,0x6F,0x54,0x24,0x40},
-        {0xF3,0x0F,0x6F,0x5C,0x24,0x50},
-        {0xF3,0x0F,0x6F,0x64,0x24,0x60},
-        {0xF3,0x0F,0x6F,0x6C,0x24,0x70}
-      };
-      for(const auto &b:xmmLoads){
-        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
-      }
-
-      e8(0x48); e8(0x81); e8(0xC4); e32(0x80);
-      e8(0x41); e8(0x5B);
-      e8(0x41); e8(0x5A);
-      e8(0x41); e8(0x59);
-      e8(0x41); e8(0x58);
-      e8(0x5A); e8(0x59); e8(0x58);
-      e8(0x9D);
-
-      std::memcpy(c+i,expected,sizeof(expected));
-      i+=(int)sizeof(expected);
-
-      e8(0xE9);
-      const intptr_t rel=
-          static_cast<intptr_t>(hookAddr+sizeof(expected))-
-          static_cast<intptr_t>(caveAddr+i+4);
-      if(rel<INT32_MIN||rel>INT32_MAX){
-        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
-        return false;
-      }
-      e32(static_cast<int32_t>(rel));
-
-      FlushInstructionCache(GetCurrentProcess(),c,i);
-      std::memcpy(g_fifthUiSetTrickIdOriginal,
-                  reinterpret_cast<const void *>(hookAddr),
-                  sizeof(g_fifthUiSetTrickIdOriginal));
-      if(!ApplyJmp(hookAddr,caveAddr,sizeof(expected))){
-        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
-        return false;
-      }
-
-      g_fifthUiSetTrickIdHookAddr=hookAddr;
-      g_fifthUiSetTrickIdCaveAddr=caveAddr;
-      g_fifthUiSetTrickIdHookApplied=true;
-      AddLog(u8"[책략5UIID] SetTrickID 런타임 추적 훅 설치 완료.");
-      return true;
-    }
 
     static void LogFifthUiSignalCallsites() {
       if(g_fifthUiSignalCallsitesLogged)
@@ -3195,19 +3062,16 @@ namespace DX11Base {
     const bool resetCompactReady = EnsureFifthUiResetCompactHook();
     const bool onSelectReady = EnsureFifthUiOnTrickSelectBoundHook();
     const bool onSelectRuntimeReady = EnsureFifthUiOnTrickSelectRuntimeHook();
-    const bool setTrickIdTraceReady = EnsureFifthUiSetTrickIdTraceHook();
     LogFifthUiSignalCallsites();
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
     const bool ready = initReady && layoutPostReady && resetCompactReady &&
                        onSelectReady && onSelectRuntimeReady &&
-                       setTrickIdTraceReady &&
                        preCallbackReady && callbackLoopReady;
     if (!ready && reportFailure) {
-      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d reset=%d onSelect=%d onSelectRT=%d setID=%d preCallback=%d callbackLoop=%d",
+      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d reset=%d onSelect=%d onSelectRT=%d preCallback=%d callbackLoop=%d",
              initReady?1:0, layoutPostReady?1:0, resetCompactReady?1:0,
              onSelectReady?1:0, onSelectRuntimeReady?1:0,
-             setTrickIdTraceReady?1:0,
              preCallbackReady?1:0, callbackLoopReady?1:0);
     }
     return ready;

@@ -2236,3 +2236,23 @@ button signal component(+0x78)에 AddSig하는 것이 확인됐다.
 - Open에서 sidecar에 4가 정상 전달되는데도 그림/설명이 틀리면 hover callback/model 쪽 문제
 - sidecar signal state가 기존 버튼과 현저히 다르면 callback 등록 자체가 완성되지 않은 것
 - signal state가 유사한데 hover range만 없으면 focus callback 내부의 index4/model count 제한을 추적
+
+
+---
+
+## 42. 2026-09-23 SetTrickID entry trace 즉시 폐기 — 책략 메뉴 프리징
+
+`test: trace fifth hover and trick id binding`에서 추가한
+`TrickSelectButton::SetTrickID` 함수 entry detour는 실게임에서 책략 메뉴를 누르는 순간
+프리징을 일으켰다.
+
+이 경로는 즉시 탈락 처리한다.
+
+- SetTrickID entry detour 전부 제거
+- startup hook 목록에서도 제거
+- 기존에 정상 동작하던 5번째 생성/ID7/Open/callback/reset 훅은 유지
+- read-only `AddSig` callsite 분석과 live signal-state 비교만 유지
+
+앞으로 SetTrickID는 함수 entry를 직접 가로채지 않는다.
+필요한 ID 확인은 이미 안전하게 제어하고 있는 Dialog::Open index4 우회 지점이나
+sidecar 객체의 상태를 통해 좁게 확인한다.
