@@ -5151,6 +5151,36 @@ namespace DX11Base {
     g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
   }
 
+  bool SetStratagemFiveFeature(bool enable) {
+    if (enable) {
+      // One user action raises every persistent request. Individual setters may
+      // still report "not ready yet", but they store the request before that
+      // point; readiness is owned by AdvanceFifthRuntimeStateSeh().
+      PrepareStratagemFiveUiBridge(false);
+      SetSpell5HealProbe(true);
+      SetStratagemFiveMetadataTest(true);
+      SetStratagemFiveCountTest(true);
+
+      const uintptr_t dialog = g_trickUiDialog;
+      if (dialog && IsValidPtr(dialog, 0x40))
+        AdvanceFifthRuntimeStateSeh(dialog);
+
+      AddLog(u8"[책략5STATE] 통합 기능 ON: data/count/metadata 요청 동시 유지 / stage=%u",
+             (unsigned)g_fifthRuntimeStage.load());
+      return true;
+    }
+
+    // Unwind in dependency order: remove model/Camp publication first, then
+    // the available-use entry, and finally restore the canonical ID5 data.
+    const bool metadataOk = SetStratagemFiveMetadataTest(false);
+    const bool countOk = SetStratagemFiveCountTest(false);
+    const bool dataOk = SetSpell5HealProbe(false);
+
+    g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
+    AddLog(u8"[책략5STATE] 통합 기능 OFF: metadata/count/data 순서로 해제.");
+    return metadataOk && countOk && dataOk;
+  }
+
   void ResetStratagemFiveBattleRuntime() {
     // Same-game battles can reuse the same TrickCommandDialogLayout object.
     // Manual metadata OFF->ON also keeps the registered sidecar and only hides
