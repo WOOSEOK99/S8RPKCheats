@@ -1685,6 +1685,23 @@ namespace DX11Base {
              (unsigned long long)kFocusClosureRva,
              (unsigned long long)sizeof(code));
 
+      // The first 0x140 bytes cover the four calls that run after the
+      // model entry is selected. Keeping the dump bounded lets us recover the
+      // exact RCX/RDX/R8/R9 setup for each call without executing anything.
+      constexpr size_t kFocusDetailSize = 0x140;
+      for (size_t off = 0; off < kFocusDetailSize; off += 0x20) {
+        char line[256] = {};
+        int pos = 0;
+        const size_t chunk =
+            (off + 0x20 <= kFocusDetailSize) ? 0x20 : (kFocusDetailSize - off);
+        for (size_t j = 0; j < chunk && pos < (int)sizeof(line) - 4; ++j) {
+          pos += sprintf_s(line + pos, sizeof(line) - pos,
+                           "%02X ", (unsigned)code[off + j]);
+        }
+        AddLog(u8"[책략5UITEXT2] focus +%03llX : %s",
+               (unsigned long long)off, line);
+      }
+
       uintptr_t directTargets[64] = {};
       unsigned directCount = 0;
 
@@ -1739,29 +1756,40 @@ namespace DX11Base {
         if (!IsExecutableAddress(target))
           continue;
 
-        uint8_t head[0x80] = {};
-        if (!SafeCopySeh(target, head, sizeof(head)))
+        const uintptr_t targetRva = target - exeBase;
+        const bool detailTarget =
+            targetRva == 0x01DAD890 ||
+            targetRva == 0x01D8F150 ||
+            targetRva == 0x01D8F560 ||
+            targetRva == 0x01E12D90;
+        const size_t dumpSize = detailTarget ? 0x180 : 0x80;
+
+        uint8_t head[0x180] = {};
+        if (!SafeCopySeh(target, head, dumpSize))
           continue;
 
         AddLog(u8"[책략5UITEXT] target%u RVA=+%llX",
                i + 1,
-               (unsigned long long)(target - exeBase));
+               (unsigned long long)targetRva);
 
-        for (size_t off = 0; off < sizeof(head); off += 0x20) {
+        for (size_t off = 0; off < dumpSize; off += 0x20) {
           char line[256] = {};
           int pos = 0;
-          for (size_t j = 0; j < 0x20 &&
+          const size_t chunk =
+              (off + 0x20 <= dumpSize) ? 0x20 : (dumpSize - off);
+          for (size_t j = 0; j < chunk &&
                              pos < (int)sizeof(line) - 4; ++j) {
             pos += sprintf_s(line + pos, sizeof(line) - pos,
                              "%02X ", (unsigned)head[off + j]);
           }
-          AddLog(u8"[책략5UITEXT] target%u +%02llX : %s",
+          AddLog(detailTarget ? u8"[책략5UITEXT2] target%u +%03llX : %s"
+                              : u8"[책략5UITEXT] target%u +%02llX : %s",
                  i + 1,
                  (unsigned long long)off,
                  line);
         }
 
-        for (size_t off = 0; off + 5 <= sizeof(head); ++off) {
+        for (size_t off = 0; off + 5 <= dumpSize; ++off) {
           if (head[off] != 0xE8 && head[off] != 0xE9)
             continue;
           int32_t rel = 0;
