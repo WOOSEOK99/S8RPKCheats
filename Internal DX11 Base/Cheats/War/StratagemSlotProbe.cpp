@@ -148,6 +148,19 @@ namespace DX11Base {
     static bool g_fifthUiModelEntryApplied = false;
     static uint32_t g_fifthRuntimeOriginalCount = 0;
 
+    // Must be defined before the pre-callback hook helpers below reference it.
+    enum class FifthRuntimeStage : uint8_t {
+      WaitingOwner = 0,
+      WaitingTable,
+      WaitingData,
+      WaitingCount,
+      WaitingCamp,
+      WaitingModel,
+      Ready
+    };
+    static std::atomic<FifthRuntimeStage> g_fifthRuntimeStage{
+        FifthRuntimeStage::WaitingOwner};
+
     static bool AdvanceFifthRuntimeStateSeh(uintptr_t dialog);
     static void SetFifthUiSidecarVisibleSeh(bool visible);
 
@@ -3812,19 +3825,6 @@ namespace DX11Base {
                reinterpret_cast<void *>(owner));
       }
     }
-
-    enum class FifthRuntimeStage : uint8_t {
-      WaitingOwner = 0,
-      WaitingTable,
-      WaitingData,
-      WaitingCount,
-      WaitingCamp,
-      WaitingModel,
-      Ready
-    };
-
-    static std::atomic<FifthRuntimeStage> g_fifthRuntimeStage{
-        FifthRuntimeStage::WaitingOwner};
 
     static bool AdvanceFifthRuntimeStateSeh(uintptr_t dialog) {
       if (!g_id5CountRequested.load() ||
