@@ -1618,6 +1618,12 @@ namespace DX11Base {
       ImGui::TextDisabled(u8"ID1~4가 정확히 1/2/1/1인 진영에만 ID5(+14C)=1을 씁니다.");
       ImGui::TextDisabled(u8"5번 데이터 활성화와 함께 켠 뒤, 전투 책략 UI에 1~5가 동시에 보이는지 확인하세요.");
 
+      if (ImGui::Button(u8"책략 4개 제한 코드 진단", ImVec2(-1.0f, 0.0f))) {
+        DX11Base::ScanStratagemFourLimitCodeCandidates();
+        AddNotification(u8"책략 4개 제한 코드 진단 완료 - 로그 확인");
+      }
+      ImGui::TextDisabled(u8"읽기 전용입니다. 로그의 [책략4제한DBG] 후보/bytes를 보내주세요.");
+
       EndSection(); // 전쟁
     }
 
