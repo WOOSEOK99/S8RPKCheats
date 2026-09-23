@@ -1982,6 +1982,36 @@ namespace DX11Base {
       }
     }
 
+
+    static void RefreshFifthUiAtResetSeh(uintptr_t layout) {
+      const uintptr_t dialog = g_trickUiDialog;
+      if (dialog && layout &&
+          IsValidPtr(dialog, 0x40) &&
+          IsValidPtr(layout, 0x2A8)) {
+        uintptr_t dialogLayout = 0;
+        const bool layoutMatches =
+            SafeReadPtrSeh(dialog + 0x08, &dialogLayout) &&
+            dialogLayout == layout;
+
+        if (layoutMatches &&
+            g_id5CountRequested.load() &&
+            g_fiveMetadataRequested.load()) {
+          const FifthRuntimeStage before = g_fifthRuntimeStage.load();
+          const bool ready = AdvanceFifthRuntimeStateSeh(dialog);
+          const FifthRuntimeStage after = g_fifthRuntimeStage.load();
+
+          AddLog(u8"[책략5STATE] ResetBtnPos 첫 오픈 진행: %u -> %u ready=%d dialog=%p layout=%p",
+                 (unsigned)before, (unsigned)after, ready ? 1 : 0,
+                 reinterpret_cast<void *>(dialog),
+                 reinterpret_cast<void *>(layout));
+        }
+      }
+
+      // Preserve the already-proven positioning/diagnostic behavior regardless
+      // of whether the battle model was ready at this exact Open.
+      CompactFifthUiButtonsAfterResetSeh(layout);
+    }
+
     static bool EnsureFifthUiResetCompactHook() {
       if(g_fifthUiResetCompactHookApplied)
         return true;
@@ -2015,9 +2045,11 @@ namespace DX11Base {
       auto e64=[&](uintptr_t v){std::memcpy(c+i,&v,8);i+=8;};
 
       // At this point RSI == layout+0x200 because the original 4-button loop
-      // started at layout+0x1E0 and advanced four qwords.
+      // started at layout+0x1E0 and advanced four qwords. This event is also
+      // the first proven user-visible Open boundary, so retry the ordered ID5
+      // state here before preserving the existing five-button compaction.
       e8(0x48); e8(0x8D); e8(0x8E); e32(-0x200); // lea rcx,[rsi-200]
-      e8(0x48); e8(0xB8); e64(reinterpret_cast<uintptr_t>(&CompactFifthUiButtonsAfterResetSeh));
+      e8(0x48); e8(0xB8); e64(reinterpret_cast<uintptr_t>(&RefreshFifthUiAtResetSeh));
       e8(0xFF); e8(0xD0);
 
       std::memcpy(c+i,expected,sizeof(expected));
