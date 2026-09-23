@@ -25,6 +25,10 @@ namespace DX11Base {
     static volatile uintptr_t g_attackInfo = 0;
     static volatile uintptr_t g_defenseInfo = 0;
 
+    static bool g_id5CountApplied = false;
+    static uintptr_t g_id5CountAddr = 0;
+    static uint8_t g_id5CountOriginal = 0;
+
     static bool BuildCaptureCave(uintptr_t hookAddr) {
       g_caveAddr = AllocNear(hookAddr, 128);
       if (!g_caveAddr)
@@ -197,6 +201,111 @@ namespace DX11Base {
           "ID1=+10C ID2=+11C ID3=+12C ID4=+13C "
           "ID5후보=+14C ID6=+15C ... ID10=+19C");
     }
+  }
+
+  bool SetStratagemFiveCountTest(bool enable) {
+    if (enable) {
+      if (g_id5CountApplied)
+        return true;
+
+      if (!EnsureCaptureHook())
+        return false;
+
+      struct Candidate {
+        uintptr_t ptr;
+        uint8_t side;
+        const char *name;
+      };
+
+      const Candidate candidates[] = {
+          {g_attackInfo, 0, u8"공격측"},
+          {g_defenseInfo, 1, u8"수비측"},
+      };
+
+      uintptr_t chosen = 0;
+      const char *chosenName = nullptr;
+
+      for (const auto &candidate : candidates) {
+        if (!ValidateInfo(candidate.ptr, candidate.side))
+          continue;
+
+        const uint8_t c1 = *reinterpret_cast<const uint8_t *>(
+            candidate.ptr + kFirstStratagemCountOffset + 0 * kStratagemCountStride);
+        const uint8_t c2 = *reinterpret_cast<const uint8_t *>(
+            candidate.ptr + kFirstStratagemCountOffset + 1 * kStratagemCountStride);
+        const uint8_t c3 = *reinterpret_cast<const uint8_t *>(
+            candidate.ptr + kFirstStratagemCountOffset + 2 * kStratagemCountStride);
+        const uint8_t c4 = *reinterpret_cast<const uint8_t *>(
+            candidate.ptr + kFirstStratagemCountOffset + 3 * kStratagemCountStride);
+        const uint8_t c5 = *reinterpret_cast<const uint8_t *>(
+            candidate.ptr + kFirstStratagemCountOffset + 4 * kStratagemCountStride);
+
+        if (c1 == 1 && c2 == 2 && c3 == 1 && c4 == 1 && c5 == 0) {
+          if (chosen) {
+            AddLog(u8"[책략5슬롯DBG] 공격/수비 양쪽이 모두 1/2/1/1이라 자동 선택할 수 없습니다.");
+            return false;
+          }
+          chosen = candidate.ptr;
+          chosenName = candidate.name;
+        }
+      }
+
+      if (!chosen) {
+        AddLog(u8"[책략5슬롯DBG] ID1~4=1/2/1/1, ID5=0인 플레이어측 후보를 찾지 못했습니다.");
+        AddLog(u8"[책략5슬롯DBG] 전투 시작 직후 기존 책략을 쓰기 전에 다시 시도하세요.");
+        return false;
+      }
+
+      const uintptr_t id5Addr =
+          chosen + kFirstStratagemCountOffset + 4 * kStratagemCountStride;
+
+      if (!IsValidPtr(id5Addr, 1))
+        return false;
+
+      g_id5CountOriginal = *reinterpret_cast<const uint8_t *>(id5Addr);
+
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1, PAGE_READWRITE, &oldProtect)) {
+        AddLog(u8"[책략5슬롯DBG] ID5 수량 슬롯 쓰기 권한 변경 실패: %p",
+               reinterpret_cast<void *>(id5Addr));
+        return false;
+      }
+
+      *reinterpret_cast<uint8_t *>(id5Addr) = 1;
+      VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1, oldProtect, &tmpProtect);
+
+      if (*reinterpret_cast<const uint8_t *>(id5Addr) != 1) {
+        AddLog(u8"[책략5슬롯DBG] ID5 수량 1 쓰기 검증 실패.");
+        return false;
+      }
+
+      g_id5CountAddr = id5Addr;
+      g_id5CountApplied = true;
+
+      AddLog(u8"[책략5슬롯DBG] %s ID5 후보(+14C) 수량 0 -> 1 적용 성공: %p",
+             chosenName, reinterpret_cast<void *>(id5Addr));
+      AddLog(u8"[책략5슬롯DBG] 이제 전투 책략 UI에 기존 4개와 별도로 5번이 나타나는지 확인하세요.");
+      return true;
+    }
+
+    if (!g_id5CountApplied)
+      return true;
+
+    if (g_id5CountAddr && IsValidPtr(g_id5CountAddr, 1)) {
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1, PAGE_READWRITE, &oldProtect)) {
+        *reinterpret_cast<uint8_t *>(g_id5CountAddr) = g_id5CountOriginal;
+        VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1, oldProtect, &tmpProtect);
+      }
+    }
+
+    AddLog(u8"[책략5슬롯DBG] ID5 수량 테스트 원복.");
+    g_id5CountApplied = false;
+    g_id5CountAddr = 0;
+    g_id5CountOriginal = 0;
+    return true;
   }
 
   void ScanStratagemFiveSlotCandidates() {
