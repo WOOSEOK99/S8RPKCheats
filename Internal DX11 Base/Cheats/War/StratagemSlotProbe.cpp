@@ -148,6 +148,21 @@ namespace DX11Base {
     static bool g_fifthUiModelEntryApplied = false;
     static uint32_t g_fifthRuntimeOriginalCount = 0;
 
+    // AI capability probe: do not expand the AI list. Temporarily replace one
+    // existing AI-side TrickData row with row5 and preserve that slot's native
+    // index/available count. This isolates whether the AI selector can consume
+    // ID5 without mixing the result with N->N+1 UI work.
+    static bool g_fifthAiProbeApplied = false;
+    static uintptr_t g_fifthAiProbeOwner = 0;
+    static uintptr_t g_fifthAiProbeEntryAddr = 0;
+    static uintptr_t g_fifthAiProbeCampSlotAddr = 0;
+    static uintptr_t g_fifthAiProbeOriginalData = 0;
+    static uintptr_t g_fifthAiProbeOriginalCampRow = 0;
+    static uint8_t g_fifthAiProbeInitialAvailable = 0;
+    static uint8_t g_fifthAiProbeLastAvailable = 0;
+    static uint32_t g_fifthAiProbeIndex = UINT32_MAX;
+    static bool g_fifthAiProbeConsumptionLogged = false;
+
     // Must be defined before the pre-callback hook helpers below reference it.
     enum class FifthRuntimeStage : uint8_t {
       WaitingOwner = 0,
@@ -3929,6 +3944,284 @@ namespace DX11Base {
       }
     }
 
+    static void DiscardFifthAiProbeState() {
+      g_fifthAiProbeApplied = false;
+      g_fifthAiProbeOwner = 0;
+      g_fifthAiProbeEntryAddr = 0;
+      g_fifthAiProbeCampSlotAddr = 0;
+      g_fifthAiProbeOriginalData = 0;
+      g_fifthAiProbeOriginalCampRow = 0;
+      g_fifthAiProbeInitialAvailable = 0;
+      g_fifthAiProbeLastAvailable = 0;
+      g_fifthAiProbeIndex = UINT32_MAX;
+      g_fifthAiProbeConsumptionLogged = false;
+    }
+
+    static bool RestoreFifthAiProbeSeh() {
+      if (!g_fifthAiProbeApplied)
+        return true;
+
+      bool entryRestored = false;
+      bool campRestored = false;
+
+      __try {
+        if (g_fifthAiProbeEntryAddr &&
+            IsValidPtr(g_fifthAiProbeEntryAddr, sizeof(uintptr_t))) {
+          DWORD oldProtect = 0;
+          DWORD tmpProtect = 0;
+          if (VirtualProtect(
+                  reinterpret_cast<LPVOID>(g_fifthAiProbeEntryAddr),
+                  sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
+            *reinterpret_cast<uintptr_t *>(g_fifthAiProbeEntryAddr) =
+                g_fifthAiProbeOriginalData;
+            VirtualProtect(
+                reinterpret_cast<LPVOID>(g_fifthAiProbeEntryAddr),
+                sizeof(uintptr_t), oldProtect, &tmpProtect);
+            entryRestored =
+                *reinterpret_cast<const uintptr_t *>(
+                    g_fifthAiProbeEntryAddr) ==
+                g_fifthAiProbeOriginalData;
+          }
+        }
+
+        if (g_fifthAiProbeCampSlotAddr &&
+            IsValidPtr(g_fifthAiProbeCampSlotAddr, sizeof(uintptr_t))) {
+          DWORD oldProtect = 0;
+          DWORD tmpProtect = 0;
+          if (VirtualProtect(
+                  reinterpret_cast<LPVOID>(g_fifthAiProbeCampSlotAddr),
+                  sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
+            *reinterpret_cast<uintptr_t *>(g_fifthAiProbeCampSlotAddr) =
+                g_fifthAiProbeOriginalCampRow;
+            VirtualProtect(
+                reinterpret_cast<LPVOID>(g_fifthAiProbeCampSlotAddr),
+                sizeof(uintptr_t), oldProtect, &tmpProtect);
+            campRestored =
+                *reinterpret_cast<const uintptr_t *>(
+                    g_fifthAiProbeCampSlotAddr) ==
+                g_fifthAiProbeOriginalCampRow;
+          }
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        entryRestored = false;
+        campRestored = false;
+      }
+
+      AddLog(u8"[책략5AIPROBE] 원복: entry=%d camp=%d owner=%p slot=%u",
+             entryRestored ? 1 : 0, campRestored ? 1 : 0,
+             reinterpret_cast<void *>(g_fifthAiProbeOwner),
+             (unsigned)g_fifthAiProbeIndex);
+
+      DiscardFifthAiProbeState();
+      return entryRestored && campRestored;
+    }
+
+    static bool TryArmFifthAiProbeSeh() {
+      if (g_fifthAiProbeApplied)
+        return true;
+      if (!g_fiveMetadataAddr || !g_fiveMetadataTable)
+        return false;
+
+      uintptr_t playerOwner = 0;
+      if (!TryGetDialogCampOwnerSeh(&playerOwner) || !playerOwner)
+        return false;
+
+      uintptr_t aiOwner = 0;
+      uint8_t aiSide = 0xFF;
+      const uintptr_t attack = static_cast<uintptr_t>(g_attackInfo);
+      const uintptr_t defense = static_cast<uintptr_t>(g_defenseInfo);
+
+      if (attack && attack != playerOwner && ValidateInfo(attack, 0)) {
+        aiOwner = attack;
+        aiSide = 0;
+      }
+      if (defense && defense != playerOwner && ValidateInfo(defense, 1)) {
+        if (aiOwner && aiOwner != defense)
+          return false;
+        aiOwner = defense;
+        aiSide = 1;
+      }
+      if (!aiOwner)
+        return false;
+
+      uintptr_t campData = 0;
+      uintptr_t modelBase = aiOwner + 0xF0;
+      uint32_t count = 0;
+      StratagemFiveModel::Entry entries[5] = {};
+      uintptr_t campRows[5] = {};
+      uintptr_t tricksAddr = 0;
+
+      __try {
+        if (!IsValidPtr(modelBase + 0x10, sizeof(entries)) ||
+            !IsValidPtr(modelBase + 0x60, sizeof(count)) ||
+            !SafeCopySeh(modelBase + 0x10, entries, sizeof(entries)) ||
+            !SafeCopySeh(modelBase + 0x60, &count, sizeof(count)) ||
+            count < 1 || count > 4 ||
+            !SafeReadPtrSeh(aiOwner + 0x10, &campData) ||
+            !campData)
+          return false;
+
+        tricksAddr = campData + 0x68;
+        if (!IsValidPtr(tricksAddr, sizeof(campRows)) ||
+            !SafeCopySeh(tricksAddr, campRows, sizeof(campRows)))
+          return false;
+
+        for (uint32_t i = 0; i < count; ++i) {
+          if (entries[i].data == g_fiveMetadataAddr) {
+            AddLog(u8"[책략5AIPROBE] AI측에 이미 ID5 존재: side=%u owner=%p slot=%u available=%u",
+                   (unsigned)aiSide, reinterpret_cast<void *>(aiOwner),
+                   (unsigned)i, (unsigned)entries[i].available);
+            return false;
+          }
+        }
+
+        uint32_t probeIndex = UINT32_MAX;
+        for (uint32_t i = count; i > 0; --i) {
+          const uint32_t idx = i - 1;
+          if (entries[idx].available > 0 &&
+              entries[idx].data &&
+              campRows[idx] == entries[idx].data) {
+            probeIndex = idx;
+            break;
+          }
+        }
+        if (probeIndex == UINT32_MAX) {
+          AddLog(u8"[책략5AIPROBE] AI측 교체 가능한 가용 슬롯 없음: side=%u owner=%p count=%u",
+                 (unsigned)aiSide, reinterpret_cast<void *>(aiOwner),
+                 (unsigned)count);
+          return false;
+        }
+
+        const uintptr_t entryAddr =
+            modelBase + 0x10 +
+            static_cast<uintptr_t>(probeIndex) *
+                sizeof(StratagemFiveModel::Entry);
+        const uintptr_t campSlotAddr =
+            tricksAddr +
+            static_cast<uintptr_t>(probeIndex) * sizeof(uintptr_t);
+
+        if (!IsValidPtr(entryAddr, sizeof(StratagemFiveModel::Entry)) ||
+            !IsValidPtr(campSlotAddr, sizeof(uintptr_t)))
+          return false;
+
+        const uintptr_t originalData = entries[probeIndex].data;
+        const uintptr_t originalCampRow = campRows[probeIndex];
+        uint32_t originalRowId = 0;
+        const bool originalRowOk =
+            StratagemFiveModel::RowId(
+                originalData, g_fiveMetadataTable, originalRowId);
+
+        DWORD entryProtect = 0;
+        DWORD entryTmp = 0;
+        if (!VirtualProtect(
+                reinterpret_cast<LPVOID>(entryAddr), sizeof(uintptr_t),
+                PAGE_READWRITE, &entryProtect))
+          return false;
+        *reinterpret_cast<uintptr_t *>(entryAddr) = g_fiveMetadataAddr;
+        VirtualProtect(reinterpret_cast<LPVOID>(entryAddr), sizeof(uintptr_t),
+                       entryProtect, &entryTmp);
+        if (*reinterpret_cast<const uintptr_t *>(entryAddr) !=
+            g_fiveMetadataAddr)
+          return false;
+
+        DWORD campProtect = 0;
+        DWORD campTmp = 0;
+        if (!VirtualProtect(
+                reinterpret_cast<LPVOID>(campSlotAddr), sizeof(uintptr_t),
+                PAGE_READWRITE, &campProtect)) {
+          DWORD restoreProtect = 0;
+          DWORD restoreTmp = 0;
+          if (VirtualProtect(
+                  reinterpret_cast<LPVOID>(entryAddr), sizeof(uintptr_t),
+                  PAGE_READWRITE, &restoreProtect)) {
+            *reinterpret_cast<uintptr_t *>(entryAddr) = originalData;
+            VirtualProtect(reinterpret_cast<LPVOID>(entryAddr),
+                           sizeof(uintptr_t), restoreProtect, &restoreTmp);
+          }
+          return false;
+        }
+        *reinterpret_cast<uintptr_t *>(campSlotAddr) = g_fiveMetadataAddr;
+        VirtualProtect(reinterpret_cast<LPVOID>(campSlotAddr),
+                       sizeof(uintptr_t), campProtect, &campTmp);
+
+        if (*reinterpret_cast<const uintptr_t *>(campSlotAddr) !=
+            g_fiveMetadataAddr) {
+          DWORD restoreProtect = 0;
+          DWORD restoreTmp = 0;
+          if (VirtualProtect(
+                  reinterpret_cast<LPVOID>(entryAddr), sizeof(uintptr_t),
+                  PAGE_READWRITE, &restoreProtect)) {
+            *reinterpret_cast<uintptr_t *>(entryAddr) = originalData;
+            VirtualProtect(reinterpret_cast<LPVOID>(entryAddr),
+                           sizeof(uintptr_t), restoreProtect, &restoreTmp);
+          }
+          return false;
+        }
+
+        g_fifthAiProbeApplied = true;
+        g_fifthAiProbeOwner = aiOwner;
+        g_fifthAiProbeEntryAddr = entryAddr;
+        g_fifthAiProbeCampSlotAddr = campSlotAddr;
+        g_fifthAiProbeOriginalData = originalData;
+        g_fifthAiProbeOriginalCampRow = originalCampRow;
+        g_fifthAiProbeInitialAvailable = entries[probeIndex].available;
+        g_fifthAiProbeLastAvailable = entries[probeIndex].available;
+        g_fifthAiProbeIndex = probeIndex;
+        g_fifthAiProbeConsumptionLogged = false;
+
+        AddLog(u8"[책략5AIPROBE] AI측 슬롯을 ID5로 치환: side=%u owner=%p count=%u slot=%u originalRow=%s%u available=%u -> row5",
+               (unsigned)aiSide, reinterpret_cast<void *>(aiOwner),
+               (unsigned)count, (unsigned)probeIndex,
+               originalRowOk ? "" : "INVALID/",
+               originalRowOk ? (unsigned)originalRowId : 0u,
+               (unsigned)entries[probeIndex].available);
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    static void UpdateFifthAiProbeSeh() {
+      if (!g_fifthAiProbeApplied ||
+          !g_fifthAiProbeEntryAddr ||
+          g_fifthAiProbeIndex >= 5)
+        return;
+
+      __try {
+        if (!IsValidPtr(g_fifthAiProbeEntryAddr,
+                        sizeof(StratagemFiveModel::Entry)))
+          return;
+
+        StratagemFiveModel::Entry current{};
+        if (!SafeCopySeh(g_fifthAiProbeEntryAddr,
+                         &current, sizeof(current)))
+          return;
+
+        if (current.data != g_fiveMetadataAddr) {
+          AddLog(u8"[책략5AIPROBE] AI측 probe 슬롯 데이터가 변경됨: owner=%p slot=%u data=%p",
+                 reinterpret_cast<void *>(g_fifthAiProbeOwner),
+                 (unsigned)g_fifthAiProbeIndex,
+                 reinterpret_cast<void *>(current.data));
+          return;
+        }
+
+        const uint8_t available = current.available;
+        if (available != g_fifthAiProbeLastAvailable) {
+          AddLog(u8"[책략5AIPROBE] AI측 ID5 available 변화: slot=%u %u -> %u",
+                 (unsigned)g_fifthAiProbeIndex,
+                 (unsigned)g_fifthAiProbeLastAvailable,
+                 (unsigned)available);
+          if (available < g_fifthAiProbeLastAvailable &&
+              !g_fifthAiProbeConsumptionLogged) {
+            g_fifthAiProbeConsumptionLogged = true;
+            AddLog(u8"[책략5AIPROBE] AI가 ID5 슬롯을 소비한 정황 확인. 실제 사기/효과 발생 여부도 확인하세요.");
+          }
+          g_fifthAiProbeLastAvailable = available;
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+      }
+    }
+
     static void LogFifthPlanSnapshotSeh(
         uintptr_t owner, const char *reason) {
       static uintptr_t s_lastOwner = 0;
@@ -5386,6 +5679,7 @@ namespace DX11Base {
     g_fifthUiModelEntryOriginal[1] = 0;
     g_fifthUiModelEntryApplied = false;
     g_fifthRuntimeOriginalCount = 0;
+    DiscardFifthAiProbeState();
     g_fifthUiActiveLayout.store(0);
     g_fifthUiActiveButton.store(0);
 
@@ -5432,15 +5726,16 @@ namespace DX11Base {
       return true;
     }
 
-    // Unwind in dependency order: remove model/Camp publication first, then
-    // the available-use entry, and finally restore the canonical ID5 data.
+    // Unwind in dependency order. The AI probe reuses a native slot, so
+    // restore that slot while the battle objects are still known-live.
+    const bool aiProbeOk = RestoreFifthAiProbeSeh();
     const bool metadataOk = SetStratagemFiveMetadataTest(false);
     const bool countOk = SetStratagemFiveCountTest(false);
     const bool dataOk = SetSpell5HealProbe(false);
 
     g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
     AddLog(u8"[책략5STATE] 통합 기능 OFF: metadata/count/data 순서로 해제.");
-    return metadataOk && countOk && dataOk;
+    return aiProbeOk && metadataOk && countOk && dataOk;
   }
 
   void ResetStratagemFiveBattleRuntime() {
@@ -5496,6 +5791,13 @@ namespace DX11Base {
           g_trickUiLayout &&
           ValidateFifthUiRegistrySeh(g_trickUiLayout))
         TryExtendFifthDialogModelCountSeh(dialog);
+
+      // Experimental capability probe only. The AI list length and its native
+      // available count stay unchanged; one existing slot is represented by
+      // row5 so we can see whether the original AI selector can consume ID5.
+      if (!g_fifthAiProbeApplied)
+        TryArmFifthAiProbeSeh();
+      UpdateFifthAiProbeSeh();
     }
   }
 
