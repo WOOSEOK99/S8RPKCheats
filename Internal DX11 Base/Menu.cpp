@@ -21,6 +21,8 @@
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/SiegeWarfare.h"
+#include "Cheats/War/Spell5HealProbe.h"
+#include "Cheats/War/StratagemSlotProbe.h"
 #include "Config.h"
 #include "Engine.h"
 #include "Menu.h"
@@ -382,6 +384,25 @@ namespace DX11Base {
 
     const bool p1Ready = s_loopP1Ready;
     const bool gameBaseReady = s_loopGameBaseReady;
+
+    // 저장게임/새 게임 로드 시 p1은 새 세대 주소로 교체되거나 잠시 0이 됩니다.
+    // 전투/평정 모니터가 이전 전투 UI 포인터를 만지기 전에 5번 책략의
+    // object-bound 상태를 먼저 폐기합니다. 체크 의도는 유지되므로 다음 전투에서 재적용됩니다.
+    static uintptr_t s_stratagem5SessionP1 = 0;
+    if (s_stratagem5SessionP1 != 0 && p1 != s_stratagem5SessionP1) {
+      // Important: consume the transition immediately, including p1->0.
+      // Otherwise the 30ms loop repeats the same reset/log while a save or
+      // battle transition is in progress and can contend with the UI thread.
+      const uintptr_t oldSessionP1 = s_stratagem5SessionP1;
+      DX11Base::ResetStratagemFiveSessionRuntime(oldSessionP1, p1);
+      DX11Base::ResetSpell5HealProbeSession(oldSessionP1, p1);
+      s_stratagem5SessionP1 = p1Ready ? p1 : 0;
+    } else if (s_stratagem5SessionP1 == 0 && p1Ready) {
+      // First stable p1 after startup/load. The old generation was already
+      // abandoned when it went to zero, so only attach the new generation.
+      s_stratagem5SessionP1 = p1;
+      AddLog(u8"[책략5수명] 새 p1 세대 연결: %p", reinterpret_cast<void *>(p1));
+    }
 
     // 초기 설정 지연 로드 (안정성을 위해 GameBase가 최초로 사용 가능해진 시점에 로드)
     static bool s_configLoaded = false;

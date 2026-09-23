@@ -14,6 +14,7 @@
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
 #include "Cheats/War/StratagemGaugeMax.h"
+#include "Cheats/War/Spell5HealProbe.h"
 
 namespace DX11Base {
   static void UpsertBoolConfigValue(const char *name, bool value) {
@@ -180,6 +181,18 @@ namespace DX11Base {
     UpsertBoolConfigValue("bReinforcementDefenderPlacement", bReinforcementDefenderPlacement);
     UpsertBoolConfigValue("bMaxAttackStratagemGauge", bMaxAttackStratagemGauge);
     UpsertBoolConfigValue("bMaxDefenseStratagemGauge", bMaxDefenseStratagemGauge);
+    {
+      const Spell5CustomSettings s = GetSpell5CustomSettings();
+      UpsertIntConfigValue("iStratagem5Target", s.target);
+      UpsertIntConfigValue("iStratagem5Effect1", s.effect1);
+      UpsertIntConfigValue("iStratagem5Power1", s.power1);
+      UpsertIntConfigValue("iStratagem5Duration1", s.duration1);
+      UpsertIntConfigValue("iStratagem5Effect2", s.effect2);
+      UpsertIntConfigValue("iStratagem5Power2", s.power2);
+      UpsertIntConfigValue("iStratagem5Duration2", s.duration2);
+      UpsertIntConfigValue("iStratagem5Range", s.range);
+      UpsertIntConfigValue("iStratagem5HealAmount", s.healAmount);
+    }
     UpsertBoolConfigValue("bOfficerChangeNotify", bOfficerChangeNotify);
     UpsertBoolConfigValue("bAnnualSpecialAbilityAutoAssign", bAnnualSpecialAbilityAutoAssign);
     UpsertBoolConfigValue("bAIOfficerAutoGrowth", bAIOfficerAutoGrowth);
@@ -256,6 +269,26 @@ namespace DX11Base {
     bool savedMaxDefenseStratagemGauge = false;
     LoadBoolConfigValue("bMaxDefenseStratagemGauge", savedMaxDefenseStratagemGauge);
     bMaxDefenseStratagemGauge = savedMaxDefenseStratagemGauge;
+
+    {
+      Spell5CustomSettings s = GetSpell5CustomSettings();
+      LoadIntConfigValue("iStratagem5Target", s.target);
+      LoadIntConfigValue("iStratagem5Effect1", s.effect1);
+      LoadIntConfigValue("iStratagem5Power1", s.power1);
+      LoadIntConfigValue("iStratagem5Duration1", s.duration1);
+      LoadIntConfigValue("iStratagem5Effect2", s.effect2);
+      LoadIntConfigValue("iStratagem5Power2", s.power2);
+      LoadIntConfigValue("iStratagem5Duration2", s.duration2);
+      LoadIntConfigValue("iStratagem5Range", s.range);
+      LoadIntConfigValue("iStratagem5HealAmount", s.healAmount);
+      SetSpell5CustomSettings(s);
+      const Spell5CustomSettings applied = GetSpell5CustomSettings();
+      AddLog(u8"[Config] 5번 책략 설정 로드: 대상=%d 효과1=%d/%d/%d 효과2=%d/%d/%d 범위=%d 추가병력=%d",
+             applied.target,
+             applied.effect1, applied.power1, applied.duration1,
+             applied.effect2, applied.power2, applied.duration2,
+             applied.range, applied.healAmount);
+    }
 
     if (bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge) {
       if (!SetStratagemGaugeCapture(true)) {

@@ -19,6 +19,8 @@
 #include "Cheats/War/Selfheal.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/SpecialAbility.h"
+#include "Cheats/War/Spell5HealProbe.h"
+#include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/Terrainignore.h"
 #include "MenuState.h"
@@ -453,7 +455,27 @@ namespace DX11Base {
           __try {
             UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+          // 5번 책략 대상 진단: 읽기 전용으로 전의 변화를 추적합니다.
+          __try {
+            UpdateSpell5TargetDiagnostics((int)unitCountTotal, unitListBase);
+          } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
+
+      // 5번 책략 데이터는 세이브/게임 세대가 바뀌면 새 TrickData 테이블에 재적용합니다.
+      __try {
+        DX11Base::RefreshSpell5HealProbe();
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+      // 5번 책략: 체크 의도는 유지하되 현재 전투 세대의 포인터에만 붙입니다.
+      __try {
+        DX11Base::RefreshStratagemFiveBattleRuntime();
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+      // 5번 책략 UI: ResetBtnPos 훅이 잡은 live layout을 한 번만 읽기 진단합니다.
+      __try {
+        DX11Base::UpdateStratagemFiveUiRuntimeProbe();
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
       // 책략 게이지 테스트: 캡처된 진영 객체가 유효할 때만 +0x154를 10000으로 유지합니다.
       if (bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge) {
@@ -523,6 +545,13 @@ namespace DX11Base {
           DX11Base::ClearBattleEnvCache();
         } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
+        // 전투가 끝나면 5번 책략의 전투 인스턴스 상태도 함께 폐기합니다.
+        // 사용자 ON 요청과 process-wide hook은 유지하므로 다음 전투에서 자동 재결합됩니다.
+        __try {
+          DX11Base::ResetStratagemFiveBattleRuntime();
+          DX11Base::ResetSpell5HealProbeBattleRuntime();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
         // 전투가 끝나면 특수능력 룰을 원래 데이터(normal)로 안전하게 복구합니다.
         UpdateSpecialAbilities(0, 0, (uintptr_t)GetModuleHandle(NULL));
       }
