@@ -1414,7 +1414,7 @@ namespace DX11Base {
       EndSection(); // 전쟁
     }
 
-    void DrawOfficerEditSection(float scale) {
+    void DrawOfficerEditSection(uintptr_t p1, float scale) {
       BeginSection();
       ImGui::TextColored(ImVec4(0.75f, 0.6f, 1.0f, 1.0f), u8"[ 무장편집 ]");
       ImGui::TextDisabled(u8"전법 / 특기 / 기재 / 특수능력 / 기술 편집");
@@ -1422,7 +1422,29 @@ namespace DX11Base {
 
       float btnHeight = 26.0f * scale;
 
-      if (ImGui::Button(u8"모든 무장 일괄 편집", ImVec2(-1, 30 * scale))) {
+      if (ImGui::BeginTable("OfficerEditOpenRow", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (p1 != 0) {
+          if (ImGui::Button(u8"주인공", ImVec2(-FLT_MIN, btnHeight))) {
+            bShowOfficerDetail = !bShowOfficerDetail;
+          }
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Button(u8"모든 무장", ImVec2(-FLT_MIN, btnHeight))) {
+          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+        }
+
+        ImGui::EndTable();
+      }
+
+      ImGui::Spacing();
+
+      if (ImGui::Button(u8"전법 및 특기 일괄 변경", ImVec2(-1, 30 * scale))) {
         bShowBatchOfficerEditWin = !bShowBatchOfficerEditWin;
       }
 
@@ -1961,32 +1983,10 @@ namespace DX11Base {
 
       ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 정보 ]");
 
-      // 1행: 명품 / 주인공 / 모든 무장 - 3열 균등 배치
-      if (ImGui::BeginTable("InfoTopRow", 3,
-                            ImGuiTableFlags_SizingStretchSame |
-                            ImGuiTableFlags_NoSavedSettings)) {
-        ImGui::TableNextRow();
-
-        ImGui::TableSetColumnIndex(0);
-        if (p1 != 0) {
-          if (ImGui::Button(u8"명품", ImVec2(-FLT_MIN, btnHeight))) {
-            bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
-          }
+      if (p1 != 0) {
+        if (ImGui::Button(u8"명품", ImVec2(-FLT_MIN, btnHeight))) {
+          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
         }
-
-        ImGui::TableSetColumnIndex(1);
-        if (p1 != 0) {
-          if (ImGui::Button(u8"주인공", ImVec2(-FLT_MIN, btnHeight))) {
-            bShowOfficerDetail = !bShowOfficerDetail;
-          }
-        }
-
-        ImGui::TableSetColumnIndex(2);
-        if (ImGui::Button(u8"모든 무장", ImVec2(-FLT_MIN, btnHeight))) {
-          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
-        }
-
-        ImGui::EndTable();
       }
 
       ImGui::Spacing();
