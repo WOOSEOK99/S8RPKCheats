@@ -2,6 +2,7 @@
 #include "Cheats.h"
 #include "Cheats/System/SpeedHack.h"
 #include "Cheats/War/StratagemSlotProbe.h"
+#include "Cheats/War/Spell5HealProbe.h"
 #include "Config.h"
 #include "Engine.h"
 #include "Menu.h"
@@ -279,6 +280,16 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   // Install outside loader lock, before battle UI creation and the D3D delay.
   DX11Base::AddLog("[Stratagem5UI] early bridge preparation before startup delay");
   bool stratagemUiBridgeReady = DX11Base::PrepareStratagemFiveUiBridge();
+
+  // This experiment is intentionally armed before any battle UI can be
+  // initialized. The setters persist the ON request even when game/Camp data
+  // is not ready yet; the guarded battle/UI hooks complete the wiring later.
+  // This removes the old "open/close the trick dialog several times" timing
+  // dependency while keeping all actual writes behind the existing guards.
+  DX11Base::SetSpell5HealProbe(true);
+  DX11Base::SetStratagemFiveMetadataTest(true);
+  DX11Base::SetStratagemFiveCountTest(true);
+  DX11Base::AddLog("[Stratagem5UI] ID5 experiment requests armed before battle UI");
 
   // ���� DLL ���ϸ� Ȯ��
   char dllPath[MAX_PATH];
