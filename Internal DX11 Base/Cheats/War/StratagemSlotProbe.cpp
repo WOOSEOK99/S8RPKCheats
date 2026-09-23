@@ -1033,6 +1033,26 @@ namespace DX11Base {
       }
     }
 
+    static void RefreshFifthUiAtOpenDisplaySeh() {
+      if (!g_id5CountRequested.load() ||
+          !g_fiveMetadataRequested.load())
+        return;
+
+      const uintptr_t dialog = g_trickUiDialog;
+      if (!dialog || !IsValidPtr(dialog, 0x40))
+        return;
+
+      const FifthRuntimeStage before = g_fifthRuntimeStage.load();
+      if (before == FifthRuntimeStage::Ready)
+        return;
+
+      const bool ready = AdvanceFifthRuntimeStateSeh(dialog);
+      const FifthRuntimeStage after = g_fifthRuntimeStage.load();
+      AddLog(u8"[책략5STATE] Dialog::Open 첫 버튼 진행: %u -> %u ready=%d dialog=%p",
+             (unsigned)before, (unsigned)after, ready ? 1 : 0,
+             reinterpret_cast<void *>(dialog));
+    }
+
     static bool EnsureFifthUiOpenDisplayHook() {
       if (g_fifthUiOpenDisplayHookApplied)
         return true;
@@ -1126,7 +1146,7 @@ namespace DX11Base {
         return false;
       }
 
-      const uintptr_t caveAddr = AllocNear(loadAddr, 128);
+      const uintptr_t caveAddr = AllocNear(loadAddr, 512);
       if (!caveAddr)
         return false;
 
@@ -1163,7 +1183,60 @@ namespace DX11Base {
       };
 
       // Preserve flags because the replaced MOV does not alter them.
+      // On the first native button only, advance ID5 at the earliest already
+      // proven Dialog::Open UI point. ResetBtnPos is later than this and can
+      // make the model ready only after the current Open has chosen its buttons.
       emit8(0x9C);                                      // pushfq
+      emit8(0x85); emit8(0xFF);                         // test edi,edi
+      emit8(0x0F); emit8(0x85);                         // jne skip-open-refresh
+      const int jneSkipOpenRefreshDisp = idx; emit32(0);
+
+      emit8(0x50); emit8(0x51); emit8(0x52);            // push rax,rcx,rdx
+      emit8(0x41); emit8(0x50);                         // push r8
+      emit8(0x41); emit8(0x51);                         // push r9
+      emit8(0x41); emit8(0x52);                         // push r10
+      emit8(0x41); emit8(0x53);                         // push r11
+      emit8(0x48); emit8(0x81); emit8(0xEC); emit32(0x80);
+
+      const uint8_t openXmmStores[][6] = {
+        {0xF3,0x0F,0x7F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x7F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x7F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x7F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x7F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x7F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : openXmmStores) {
+        std::memcpy(cave + idx, b, sizeof(b));
+        idx += (int)sizeof(b);
+      }
+
+      emit8(0x48); emit8(0xB8);
+      emit64(reinterpret_cast<uintptr_t>(&RefreshFifthUiAtOpenDisplaySeh));
+      emit8(0xFF); emit8(0xD0);                         // call rax
+
+      const uint8_t openXmmLoads[][6] = {
+        {0xF3,0x0F,0x6F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x6F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x6F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x6F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x6F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x6F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : openXmmLoads) {
+        std::memcpy(cave + idx, b, sizeof(b));
+        idx += (int)sizeof(b);
+      }
+
+      emit8(0x48); emit8(0x81); emit8(0xC4); emit32(0x80);
+      emit8(0x41); emit8(0x5B);                         // pop r11
+      emit8(0x41); emit8(0x5A);                         // pop r10
+      emit8(0x41); emit8(0x59);                         // pop r9
+      emit8(0x41); emit8(0x58);                         // pop r8
+      emit8(0x5A); emit8(0x59); emit8(0x58);            // pop rdx,rcx,rax
+
+      const int skipOpenRefreshLabel = idx;
+
       emit8(0x83); emit8(0xFF); emit8(0x04);            // cmp edi,4
       emit8(0x0F); emit8(0x85);                         // jne original-load
       const int jneOriginalDisp = idx; emit32(0);
@@ -1206,7 +1279,8 @@ namespace DX11Base {
         return false;
       }
 
-      if (!patchRel32(jneOriginalDisp, originalLoadLabel) ||
+      if (!patchRel32(jneSkipOpenRefreshDisp, skipOpenRefreshLabel) ||
+          !patchRel32(jneOriginalDisp, originalLoadLabel) ||
           !patchRel32(jneLayoutSkipDisp, originalSkipLabel) ||
           !patchRel32(jzSkipDisp, originalSkipLabel)) {
         VirtualFree(reinterpret_cast<LPVOID>(caveAddr), 0, MEM_RELEASE);
