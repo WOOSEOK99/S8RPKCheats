@@ -1137,3 +1137,58 @@ void(maker,id,control,type,flag)
 
 이번 수정에서는 기존 ID0~6 재등록과 ID7 등록 모두 5번째 인자 `1`을 전달한다.
 stage=6에서 어느 ID에서 문제가 생기는지도 바로 확인할 수 있도록 재등록 직전 로그를 추가했다.
+
+
+---
+
+## 24. 2026-09-23 stage=6 재분석: synthetic maker 폐기, live maker 내부 상태 보존
+
+5번째 인자를 추가한 뒤에도:
+
+```text
+기존 UI ID0 재등록 시작
+stage=6 예외
+```
+
+가 발생했다.
+
+따라서 5번째 인자 누락은 수정해야 했던 문제지만,
+stage=6의 핵심 원인은 **synthetic/temp maker가 실제 CUIMaker의 전체 내부 상태를 갖고 있지 않다는 것**으로 확정한다.
+
+`CUIMaker::RegisterLayout`는 maker의 첫 0x28 bytes뿐 아니라
+내부 helper/list/container 상태를 간접 호출 경로에서 사용한다.
+그러므로 새 maker를 얕게 구성하고 기존 ID0~6을 재등록하는 방식은 폐기한다.
+
+### 새 방식
+
+정상 생성된 live maker 자체는 보존한다.
+
+변경하는 것은:
+
+- `maker+0x00` descriptor storage pointer
+- `maker+0x08` per-ID helper pointer table
+- `maker+0x10` count: 7 -> 8
+
+뿐이다.
+
+새 storage:
+
+- descriptors: 기존 7개 복사 + ID7=ID5 clone
+- pointer table: 기존 7개 포인터 그대로 복사
+- ID7 pointer helper는 ID5 슬롯을 clone(기존 값이 null이면 null)
+
+maker의 `+0x18 owner`와 `+0x28 이후 내부 상태`는 전혀 건드리지 않는다.
+
+그 다음 기존 ID0~6은 재등록하지 않고,
+**새 ID7 하나만 원래 live maker에 RegisterLayout(..., flag=1)** 한다.
+
+성공 후 기존 4개와 새 버튼을:
+
+```text
+386, 606, 826, 1046, 1266 / y=364
+```
+
+으로 실제 virtual set-position을 호출해 압축 배치한다.
+
+이 방식은 기존 registry container/list를 그대로 유지하기 때문에
+이전 temp-maker 실험보다 원본 UI 수명 구조에 훨씬 가깝다.

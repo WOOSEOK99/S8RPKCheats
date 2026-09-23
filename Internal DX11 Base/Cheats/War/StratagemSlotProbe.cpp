@@ -394,14 +394,7 @@ namespace DX11Base {
           return false;
         }
 
-        uintptr_t buttons[4] = {};
-        if (!SafeCopySeh(layout + 0x1E0, buttons, sizeof(buttons)))
-          return false;
-
         using LookupLayoutFn = uintptr_t(__fastcall *)(uintptr_t, int);
-        // Original call site passes a fifth argument at [rsp+20] = 1.
-        // RegisterLayout also reads it at runtime (+0xC8), so this must be part
-        // of the real x64 call signature.
         using RegisterLayoutFn =
             void(__fastcall *)(uintptr_t, int, uintptr_t, int, int);
         using GetMemoryManagerFn = uintptr_t(__fastcall *)();
@@ -413,32 +406,41 @@ namespace DX11Base {
         const auto registerLayout =
             reinterpret_cast<RegisterLayoutFn>(exeBase + kRegisterLayoutRva);
 
-        uintptr_t registered[7] = {};
-        stage = 3;
-        for (int id = 0; id < 7; ++id)
-          registered[id] = lookup(maker, id);
+        uintptr_t buttons[4] = {};
+        if (!SafeCopySeh(layout + 0x1E0, buttons, sizeof(buttons)))
+          return false;
 
-        bool buttonMapOk = true;
+        stage = 3;
         for (int i = 0; i < 4; ++i) {
-          if (registered[i + 2] != buttons[i])
-            buttonMapOk = false;
+          if (lookup(maker, i + 2) != buttons[i]) {
+            AddLog(u8"[책략5UITEST] 기존 버튼 lookup 검증 실패: id=%d", i + 2);
+            return false;
+          }
         }
 
         uintptr_t id6Control = 0;
         SafeReadPtrSeh(layout + 0x290, &id6Control);
-        if (!buttonMapOk ||
-            !id6Control ||
-            registered[6] != id6Control) {
-          AddLog(u8"[책략5UITEST] registry lookup 검증 실패: id2..5/button 또는 id6 불일치.");
+        if (!id6Control || lookup(maker, 6) != id6Control) {
+          AddLog(u8"[책략5UITEST] 기존 ID6 lookup 검증 실패.");
           return false;
         }
 
-        // Clone the already-proven 7 descriptors; never call InitLayouts again.
+        if (lookup(maker, 7)) {
+          AddLog(u8"[책략5UITEST] ID7이 이미 점유되어 있어 중단.");
+          return false;
+        }
+
         alignas(16) uint8_t descriptors[8 * 0x60] = {};
+        uintptr_t oldPointerSlots[7] = {};
         stage = 4;
         std::memcpy(descriptors,
                     reinterpret_cast<const void *>(descBase),
                     7 * 0x60);
+        std::memcpy(oldPointerSlots,
+                    reinterpret_cast<const void *>(pointerBase),
+                    sizeof(oldPointerSlots));
+
+        // ID7 starts from the proven TrickSelectButton descriptor (UI ID5).
         std::memcpy(descriptors + 7 * 0x60,
                     descriptors + 5 * 0x60,
                     0x60);
@@ -488,7 +490,7 @@ namespace DX11Base {
         }
 
         if (xField < 0 || yField < 0) {
-          AddLog(u8"[책략5UITEST] descriptor 좌표 필드 검증 실패. registry 쓰기 중단.");
+          AddLog(u8"[책략5UITEST] descriptor 좌표 필드 검증 실패.");
           return false;
         }
 
@@ -509,17 +511,13 @@ namespace DX11Base {
                       descriptors + id * 0x60,
                       sizeof(types[id]));
 
-        if (types[2] != 0x14 ||
-            types[3] != 0x14 ||
-            types[4] != 0x14 ||
-            types[5] != 0x14 ||
-            types[7] != 0x14) {
-          AddLog(u8"[책략5UITEST] 버튼 descriptor type 검증 실패.");
+        if (types[7] != 0x14) {
+          AddLog(u8"[책략5UITEST] ID7 descriptor type 검증 실패: %d", types[7]);
           return false;
         }
 
-        // Use the same game allocator, but construct only the two CUIMaker
-        // storage blocks that RegisterLayout actually needs.
+        // Allocate only expanded descriptor/pointer arrays. Keep the *live*
+        // CUIMaker object and all of its internal containers untouched.
         stage = 5;
         const auto getMemoryManager =
             reinterpret_cast<GetMemoryManagerFn>(
@@ -569,35 +567,60 @@ namespace DX11Base {
 
         std::memcpy(reinterpret_cast<void *>(newDesc),
                     descriptors, sizeof(descriptors));
-        std::memset(reinterpret_cast<void *>(newPointers),
-                    0, 8 * sizeof(uintptr_t));
+        std::memcpy(reinterpret_cast<void *>(newPointers),
+                    oldPointerSlots, sizeof(oldPointerSlots));
 
-        alignas(16) uint8_t tempMakerStorage[0x28] = {};
-        const uintptr_t tempMaker =
-            reinterpret_cast<uintptr_t>(tempMakerStorage);
-        *reinterpret_cast<uintptr_t *>(tempMaker + 0x00) = newDesc;
-        *reinterpret_cast<uintptr_t *>(tempMaker + 0x08) = newPointers;
-        *reinterpret_cast<uint32_t *>(tempMaker + 0x10) = 8;
-        *reinterpret_cast<uintptr_t *>(tempMaker + 0x18) = layout;
-        *reinterpret_cast<uint32_t *>(tempMaker + 0x20) = 0;
+        // The per-ID layout helper table may legally contain nulls. For ID7,
+        // clone ID5's helper pointer when present; otherwise keep null.
+        *reinterpret_cast<uintptr_t *>(newPointers + 7 * sizeof(uintptr_t)) =
+            oldPointerSlots[5];
 
+        AddLog(u8"[책략5UITEST] 기존 pointer slots=%p,%p,%p,%p,%p,%p,%p / ID7 clone=%p",
+               reinterpret_cast<void *>(oldPointerSlots[0]),
+               reinterpret_cast<void *>(oldPointerSlots[1]),
+               reinterpret_cast<void *>(oldPointerSlots[2]),
+               reinterpret_cast<void *>(oldPointerSlots[3]),
+               reinterpret_cast<void *>(oldPointerSlots[4]),
+               reinterpret_cast<void *>(oldPointerSlots[5]),
+               reinterpret_cast<void *>(oldPointerSlots[6]),
+               reinterpret_cast<void *>(oldPointerSlots[5]));
+
+        // Snapshot the live maker header, then swap only storage pointers/count.
+        // Everything after +0x28 remains the original, fully initialized maker.
         stage = 6;
-        for (int id = 0; id < 7; ++id) {
-          if (!registered[id])
-            continue;
-          AddLog(u8"[책략5UITEST] 기존 UI ID%d 재등록: control=%p type=%d flag=1",
-                 id,
-                 reinterpret_cast<void *>(registered[id]),
-                 types[id]);
-          registerLayout(tempMaker, id, registered[id], types[id], 1);
+        std::memcpy(g_fifthUiMakerOriginal,
+                    reinterpret_cast<const void *>(maker),
+                    sizeof(g_fifthUiMakerOriginal));
+        g_fifthUiMakerAddr = maker;
+
+        *reinterpret_cast<uintptr_t *>(maker + 0x00) = newDesc;
+        *reinterpret_cast<uintptr_t *>(maker + 0x08) = newPointers;
+        *reinterpret_cast<uint32_t *>(maker + 0x10) = 8;
+
+        uint32_t expandedCount = 0;
+        uintptr_t expandedOwner = 0;
+        SafeCopySeh(maker + 0x10, &expandedCount, sizeof(expandedCount));
+        SafeReadPtrSeh(maker + 0x18, &expandedOwner);
+        if (expandedCount != 8 || expandedOwner != layout) {
+          std::memcpy(reinterpret_cast<void *>(maker),
+                      g_fifthUiMakerOriginal,
+                      sizeof(g_fifthUiMakerOriginal));
+          g_fifthUiMakerAddr = 0;
+          AddLog(u8"[책략5UITEST] live maker header 7->8 교체 검증 실패.");
+          return false;
         }
 
+        // Existing ID0..6 registrations are intentionally preserved.
+        // Add only the new ID7 entry to the original live maker.
         stage = 7;
-        registerLayout(tempMaker, 7,
+        AddLog(u8"[책략5UITEST] live maker에 ID7 단독 등록 시작: control=%p type=%d flag=1",
+               reinterpret_cast<void *>(g_fifthUiSidecarButton),
+               types[7]);
+        registerLayout(maker, 7,
                        g_fifthUiSidecarButton, types[7], 1);
 
         stage = 8;
-        const uintptr_t check7 = lookup(tempMaker, 7);
+        const uintptr_t check7 = lookup(maker, 7);
         uint32_t sidecarId = 0;
         uint32_t sidecarState = 0;
         SafeCopySeh(g_fifthUiSidecarButton + 0x88,
@@ -608,39 +631,19 @@ namespace DX11Base {
         if (check7 != g_fifthUiSidecarButton ||
             sidecarId != 7 ||
             sidecarState != 1) {
-          AddLog(u8"[책략5UITEST] 임시 maker ID7 등록 검증 실패: lookup=%p id=%u state=%u",
+          std::memcpy(reinterpret_cast<void *>(maker),
+                      g_fifthUiMakerOriginal,
+                      sizeof(g_fifthUiMakerOriginal));
+          g_fifthUiMakerAddr = 0;
+          AddLog(u8"[책략5UITEST] ID7 등록 검증 실패: lookup=%p id=%u state=%u. header 원복.",
                  reinterpret_cast<void *>(check7),
                  (unsigned)sidecarId,
                  (unsigned)sidecarState);
           return false;
         }
 
+        // Reposition the actual controls after registration.
         stage = 9;
-        std::memcpy(g_fifthUiMakerOriginal,
-                    reinterpret_cast<const void *>(maker),
-                    sizeof(g_fifthUiMakerOriginal));
-        g_fifthUiMakerAddr = maker;
-
-        std::memcpy(reinterpret_cast<void *>(maker),
-                    tempMakerStorage,
-                    sizeof(g_fifthUiMakerOriginal));
-
-        uint32_t finalCount = 0;
-        uintptr_t finalOwner = 0;
-        SafeCopySeh(maker + 0x10, &finalCount, sizeof(finalCount));
-        SafeReadPtrSeh(maker + 0x18, &finalOwner);
-        if (finalCount != 8 || finalOwner != layout) {
-          std::memcpy(reinterpret_cast<void *>(maker),
-                      g_fifthUiMakerOriginal,
-                      sizeof(g_fifthUiMakerOriginal));
-          g_fifthUiMakerAddr = 0;
-          AddLog(u8"[책략5UITEST] live maker 교체 검증 실패. 원복.");
-          return false;
-        }
-
-        // Move actual control objects too; descriptor changes alone do not
-        // reposition already-created controls.
-        stage = 10;
         for (int i = 0; i < 4; ++i) {
           const uintptr_t button = buttons[i];
           if (!button || !IsValidPtr(button, sizeof(uintptr_t)))
@@ -668,7 +671,7 @@ namespace DX11Base {
         }
 
         g_fifthUiMakerExpanded = true;
-        AddLog(u8"[책략5UITEST] CUIMaker 7->8 수동 확장 및 ID7 등록 성공.");
+        AddLog(u8"[책략5UITEST] live CUIMaker header 7->8 + ID7 등록 성공.");
         AddLog(u8"[책략5UITEST] 5버튼 압축 배치 적용: x=%d,%d,%d,%d,%d y=%d",
                compactX[0], compactX[1], compactX[2],
                compactX[3], compactX[4], y);
@@ -684,7 +687,7 @@ namespace DX11Base {
         }
         g_fifthUiMakerExpanded = false;
         g_fifthUiMakerAddr = 0;
-        AddLog(u8"[책략5UITEST] registry 수동 확장 중 예외: stage=%d. 기존 상태 유지/복귀.",
+        AddLog(u8"[책략5UITEST] live registry 확장 중 예외: stage=%d. maker header 원복.",
                (int)stage);
         return false;
       }
