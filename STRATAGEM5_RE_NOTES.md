@@ -2102,3 +2102,62 @@ direct+1E0=0 getButtonCalls=0 cmp4=0
 
 다음 패치는 이 direct-call chain에서 실제 index 4를 거부하거나
 현재 선택/설명 갱신을 0..3으로 제한하는 작은 함수만 정확히 건드린다.
+
+
+---
+
+## 39. 2026-09-23 OnTrickSelect 실제 의미 확정 — 하드코딩 4가 아니라 런타임 count 검사
+
+0x4C raw bytes를 역어셈블한 결과:
+
+```asm
+mov  r8,[rcx+20]
+test r8,r8
+je   ret
+cmp  qword ptr [rcx+08],0
+je   ret
+cmp  dword ptr [rcx+18],1
+jne  ret
+mov  r8,[r8]
+add  r8,0F0h
+cmp  edx,[r8+60h]        ; <-- 클릭 index vs 런타임 count
+jae  reject
+mov  eax,edx
+inc  rax
+shl  rax,4
+add  rax,r8              ; selected = base + (index+1)*0x10
+...
+mov  [rcx+28],rax
+...
+jmp  RVA +1DF3C20
+```
+
+따라서 이전의 "OnTrickSelect 내부 하드코딩 4" 가정은 완전히 탈락한다.
+
+매우 중요한 구조 힌트:
+
+- entry stride = 0x10
+- index 0..4의 물리 슬롯은 base+0x10 .. base+0x50
+- count는 정확히 그 뒤 base+0x60에 존재
+
+즉 **5번째 물리 entry 공간 자체는 이미 구조 안에 있다.**
+현재 가장 유력한 병목은 런타임 count가 4이거나, entry4(base+0x50)가 초기화되지 않은 것이다.
+
+이번 커밋은 OnTrickSelect entry를 build-guarded하게 후킹하되 동작은 바꾸지 않는다.
+사용자가 실제 5번째를 클릭하는 순간 딱 한 번:
+
+- self / state / holder / inner / base
+- 런타임 count
+- entry0..4 각각 16 bytes
+- base+0x60..0x7F
+- native TrickData row1..5 주소
+
+를 `[책략5UISELRT]`로 기록한다.
+
+이 결과에서:
+
+1. count=4 + entry4 유효 -> selection bounds만 안전하게 5로 확장 가능
+2. count=4 + entry4 비어있음 -> 모델 생성/refresh에서 5번째 entry를 채워야 함
+3. count=5인데 선택 실패 -> +1DF3C20 후속 상태 갱신 경로 확인
+
+으로 다음 수정이 즉시 결정된다.

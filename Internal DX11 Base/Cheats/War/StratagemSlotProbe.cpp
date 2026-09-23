@@ -114,6 +114,12 @@ namespace DX11Base {
     static bool g_fifthUiOnSelectBoundHookApplied = false;
     static bool g_fifthUiOnSelectProbeDone = false;
 
+    static uintptr_t g_fifthUiOnSelectRuntimeHookAddr = 0;
+    static uintptr_t g_fifthUiOnSelectRuntimeCaveAddr = 0;
+    static uint8_t g_fifthUiOnSelectRuntimeOriginal[7] = {};
+    static bool g_fifthUiOnSelectRuntimeHookApplied = false;
+    static volatile LONG g_fifthUiOnSelectRuntimeLogged = 0;
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -1181,6 +1187,188 @@ namespace DX11Base {
     }
 
 
+
+
+    static void ProbeFifthOnTrickSelectRuntimeSeh(uintptr_t self,
+                                                  uint32_t index) {
+      if (index != 4)
+        return;
+      if (InterlockedCompareExchange(&g_fifthUiOnSelectRuntimeLogged,1,0) != 0)
+        return;
+
+      __try {
+        uintptr_t p8=0, holder=0, inner=0, selected=0;
+        uint32_t state=0, count=0;
+        if(!SafeReadPtrSeh(self+0x08,&p8) ||
+           !SafeCopySeh(self+0x18,&state,sizeof(state)) ||
+           !SafeReadPtrSeh(self+0x20,&holder) ||
+           !SafeReadPtrSeh(self+0x28,&selected) ||
+           !holder || !IsValidPtr(holder,sizeof(uintptr_t)) ||
+           !SafeReadPtrSeh(holder,&inner) ||
+           !inner || !IsValidPtr(inner+0xF0,0x80)) {
+          AddLog(u8"[책략5UISELRT] index4 런타임 모델 읽기 실패: self=%p p8=%p holder=%p inner=%p state=%u selected=%p",
+                 reinterpret_cast<void *>(self),
+                 reinterpret_cast<void *>(p8),
+                 reinterpret_cast<void *>(holder),
+                 reinterpret_cast<void *>(inner),
+                 (unsigned)state,
+                 reinterpret_cast<void *>(selected));
+          return;
+        }
+
+        const uintptr_t base=inner+0xF0;
+        SafeCopySeh(base+0x60,&count,sizeof(count));
+
+        AddLog(u8"[책략5UISELRT] index4 click: self=%p p8=%p state=%u holder=%p inner=%p base=%p count=%u selected(before)=%p",
+               reinterpret_cast<void *>(self),
+               reinterpret_cast<void *>(p8),
+               (unsigned)state,
+               reinterpret_cast<void *>(holder),
+               reinterpret_cast<void *>(inner),
+               reinterpret_cast<void *>(base),
+               (unsigned)count,
+               reinterpret_cast<void *>(selected));
+
+        for(int n=0;n<5;++n){
+          uint64_t q0=0,q1=0;
+          const uintptr_t e=base+0x10+(uintptr_t)n*0x10;
+          SafeCopySeh(e,&q0,sizeof(q0));
+          SafeCopySeh(e+8,&q1,sizeof(q1));
+          AddLog(u8"[책략5UISELRT] entry%d @%p = %016llX %016llX",
+                 n,
+                 reinterpret_cast<void *>(e),
+                 (unsigned long long)q0,
+                 (unsigned long long)q1);
+        }
+
+        uint64_t tail[4]={};
+        SafeCopySeh(base+0x60,tail,sizeof(tail));
+        AddLog(u8"[책략5UISELRT] base+60..7F = %016llX %016llX %016llX %016llX",
+               (unsigned long long)tail[0],
+               (unsigned long long)tail[1],
+               (unsigned long long)tail[2],
+               (unsigned long long)tail[3]);
+
+        if(g_fiveMetadataTable && g_fiveMetadataAddr){
+          AddLog(u8"[책략5UISELRT] native rows=%p,%p,%p,%p,%p",
+                 reinterpret_cast<void *>(g_fiveMetadataTable+0x00),
+                 reinterpret_cast<void *>(g_fiveMetadataTable+0x20),
+                 reinterpret_cast<void *>(g_fiveMetadataTable+0x40),
+                 reinterpret_cast<void *>(g_fiveMetadataTable+0x60),
+                 reinterpret_cast<void *>(g_fiveMetadataAddr));
+        }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5UISELRT] index4 런타임 모델 probe 예외.");
+      }
+    }
+
+    static bool EnsureFifthUiOnTrickSelectRuntimeHook() {
+      if(g_fifthUiOnSelectRuntimeHookApplied)
+        return true;
+
+      const uintptr_t exeBase=
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if(!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kOnTrickSelectRva=0x01DF37B0;
+      const uintptr_t hookAddr=exeBase+kOnTrickSelectRva;
+      static const uint8_t expected[7]={
+          0x4C,0x8B,0x41,0x20, // mov r8,[rcx+20]
+          0x4D,0x85,0xC0       // test r8,r8
+      };
+
+      if(!IsValidPtr(hookAddr,sizeof(expected)) ||
+         std::memcmp(reinterpret_cast<const void *>(hookAddr),
+                     expected,sizeof(expected))!=0){
+        AddLog(u8"[책략5UISELRT] OnTrickSelect entry 바이트 검증 실패.");
+        return false;
+      }
+
+      const uintptr_t caveAddr=AllocNear(hookAddr,256);
+      if(!caveAddr)
+        return false;
+
+      uint8_t *c=reinterpret_cast<uint8_t *>(caveAddr);
+      int i=0;
+      auto e8=[&](uint8_t v){c[i++]=v;};
+      auto e32=[&](int32_t v){std::memcpy(c+i,&v,4);i+=4;};
+      auto e64=[&](uintptr_t v){std::memcpy(c+i,&v,8);i+=8;};
+
+      // Preserve every caller-saved GPR and XMM0..5 before calling the logger.
+      e8(0x9C);                         // pushfq
+      e8(0x50); e8(0x51); e8(0x52);   // push rax,rcx,rdx
+      e8(0x41); e8(0x50);              // push r8
+      e8(0x41); e8(0x51);              // push r9
+      e8(0x41); e8(0x52);              // push r10
+      e8(0x41); e8(0x53);              // push r11
+      e8(0x48); e8(0x81); e8(0xEC); e32(0x80); // sub rsp,80
+
+      const uint8_t xmmStores[][6]={
+        {0xF3,0x0F,0x7F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x7F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x7F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x7F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x7F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x7F,0x6C,0x24,0x70}
+      };
+      for(const auto &b:xmmStores){
+        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      // RCX/EDX still hold original self/index.
+      e8(0x48); e8(0xB8);
+      e64(reinterpret_cast<uintptr_t>(&ProbeFifthOnTrickSelectRuntimeSeh));
+      e8(0xFF); e8(0xD0);
+
+      const uint8_t xmmLoads[][6]={
+        {0xF3,0x0F,0x6F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x6F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x6F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x6F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x6F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x6F,0x6C,0x24,0x70}
+      };
+      for(const auto &b:xmmLoads){
+        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      e8(0x48); e8(0x81); e8(0xC4); e32(0x80);
+      e8(0x41); e8(0x5B);
+      e8(0x41); e8(0x5A);
+      e8(0x41); e8(0x59);
+      e8(0x41); e8(0x58);
+      e8(0x5A); e8(0x59); e8(0x58);
+      e8(0x9D);
+
+      std::memcpy(c+i,expected,sizeof(expected));
+      i+=(int)sizeof(expected);
+
+      e8(0xE9);
+      const intptr_t rel=
+          static_cast<intptr_t>(hookAddr+sizeof(expected))-
+          static_cast<intptr_t>(caveAddr+i+4);
+      if(rel<INT32_MIN||rel>INT32_MAX){
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+      e32(static_cast<int32_t>(rel));
+
+      FlushInstructionCache(GetCurrentProcess(),c,i);
+      std::memcpy(g_fifthUiOnSelectRuntimeOriginal,
+                  reinterpret_cast<const void *>(hookAddr),
+                  sizeof(g_fifthUiOnSelectRuntimeOriginal));
+      if(!ApplyJmp(hookAddr,caveAddr,sizeof(expected))){
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      g_fifthUiOnSelectRuntimeHookAddr=hookAddr;
+      g_fifthUiOnSelectRuntimeCaveAddr=caveAddr;
+      g_fifthUiOnSelectRuntimeHookApplied=true;
+      AddLog(u8"[책략5UISELRT] OnTrickSelect index4 모델 probe 훅 설치 완료.");
+      return true;
+    }
 
     static bool EnsureFifthUiOnTrickSelectBoundHook() {
       if (g_fifthUiOnSelectBoundHookApplied || g_fifthUiOnSelectProbeDone)
@@ -2828,14 +3016,17 @@ namespace DX11Base {
     const bool layoutPostReady = EnsureFifthUiLayoutPostButtonsHook();
     const bool resetCompactReady = EnsureFifthUiResetCompactHook();
     const bool onSelectReady = EnsureFifthUiOnTrickSelectBoundHook();
+    const bool onSelectRuntimeReady = EnsureFifthUiOnTrickSelectRuntimeHook();
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
     const bool ready = initReady && layoutPostReady && resetCompactReady &&
-                       onSelectReady && preCallbackReady && callbackLoopReady;
+                       onSelectReady && onSelectRuntimeReady &&
+                       preCallbackReady && callbackLoopReady;
     if (!ready && reportFailure) {
-      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d reset=%d onSelect=%d preCallback=%d callbackLoop=%d",
+      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d reset=%d onSelect=%d onSelectRT=%d preCallback=%d callbackLoop=%d",
              initReady?1:0, layoutPostReady?1:0, resetCompactReady?1:0,
-             onSelectReady?1:0, preCallbackReady?1:0, callbackLoopReady?1:0);
+             onSelectReady?1:0, onSelectRuntimeReady?1:0,
+             preCallbackReady?1:0, callbackLoopReady?1:0);
     }
     return ready;
   }
