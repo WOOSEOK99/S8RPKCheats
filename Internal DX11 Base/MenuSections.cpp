@@ -1540,10 +1540,6 @@ namespace DX11Base {
         }
       }
 
-      ImGui::TextDisabled(u8"전투 중 해당 진영의 책략 게이지 처리 시 최대치(10000)로 한 번 채웁니다.");
-
-      ImGui::Spacing();
-      ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
       static bool s_stratagemFiveEnabled = true;
       if (ImGui::Checkbox(u8"5번 책략 활성화", &s_stratagemFiveEnabled)) {
         const bool enable = s_stratagemFiveEnabled;
@@ -1563,8 +1559,6 @@ namespace DX11Base {
         s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
         ImGui::OpenPopup(u8"5번 책략 설정###Stratagem5SettingsPopup");
       }
-
-      ImGui::TextDisabled(u8"기본값: 아군 / 사기 +40 / 효과2 없음 / 범위 5 / 추가 병력회복 +2000 / 사용횟수 1회");
 
       ImGui::SetNextWindowSize(ImVec2(590.0f * scale, 570.0f * scale),
                                ImGuiCond_Appearing);
@@ -1744,8 +1738,6 @@ namespace DX11Base {
 
         ImGui::EndPopup();
       }
-
-      ImGui::TextDisabled(u8"데이터/횟수/내부등록은 한 기능으로 묶여 단계 순서대로 자동 처리됩니다.");
 
       EndSection(); // 전쟁
     }
