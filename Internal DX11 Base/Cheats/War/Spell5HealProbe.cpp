@@ -248,6 +248,20 @@ namespace DX11Base {
     return true;
   }
 
+  bool IsSpell5HealProbeReady() {
+    if (!g_requested || !g_applied || !g_spell5Addr ||
+        !IsValidPtr(g_spell5Addr, sizeof(SpellRecord)))
+      return false;
+
+    const SpellRecord *cur =
+        reinterpret_cast<const SpellRecord *>(g_spell5Addr);
+    return cur->code1 == 5 && cur->code2 == 5 && cur->code3 == 5 &&
+           cur->target == 1 &&
+           cur->effect1 == 10 && cur->power1 == 40 &&
+           cur->effect2 == 0 && cur->power2 == 0 &&
+           cur->range == 5;
+  }
+
   void ResetSpell5HealProbeBattleRuntime() {
     // The TrickData table belongs to the current game/save generation and may
     // remain valid across battles. Only the unit-list/morale snapshots are
