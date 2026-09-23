@@ -4654,8 +4654,9 @@ namespace DX11Base {
       AddLog(u8"[책략5수명] 새 전투 객체에 ID5 수량 자동 재적용 완료.");
     }
 
+    bool metadataCurrent = false;
     if (g_fiveMetadataRequested) {
-      const bool metadataCurrent =
+      metadataCurrent =
           g_fiveMetadataApplied &&
           g_fiveRuntimeSlotApplied &&
           g_fiveRuntimeOwner == g_id5CountOwner &&
@@ -4664,8 +4665,51 @@ namespace DX11Base {
           IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
           *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
               g_fiveMetadataAddr;
-      if (!metadataCurrent && SetStratagemFiveMetadataTest(true))
+      if (!metadataCurrent && SetStratagemFiveMetadataTest(true)) {
         AddLog(u8"[책략5수명] 새 전투 객체에 ID5 내부등록 자동 재적용 완료.");
+        metadataCurrent =
+            g_fiveMetadataApplied &&
+            g_fiveRuntimeSlotApplied &&
+            g_fiveRuntimeOwner == g_id5CountOwner &&
+            g_fiveRuntimeSlotAddr &&
+            g_fiveMetadataAddr &&
+            IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
+            *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
+                g_fiveMetadataAddr;
+      }
+    }
+
+    // The dialog/model is created slightly later than the battle Camp/UI shell.
+    // On a second battle after loading another save, the first probe can see a
+    // valid dialog/layout while dialog+0x20 (model holder) is still NULL. Do not
+    // treat that one early miss as final: once the native model becomes ready,
+    // synthesize entry4 exactly as in the first successful battle.
+    if (metadataCurrent &&
+        !g_fifthUiModelCountApplied &&
+        !g_fifthUiModelEntryApplied) {
+      const uintptr_t dialog = g_trickUiDialog;
+      const uintptr_t layout = g_trickUiLayout;
+      if (dialog && layout &&
+          g_fifthUiId7Registered &&
+          g_fifthUiSidecarLayout == layout &&
+          g_fifthUiSidecarButton &&
+          IsValidPtr(dialog, 0x40) &&
+          IsValidPtr(layout, 0x2A8)) {
+        uintptr_t dialogLayout = 0;
+        uintptr_t holder = 0;
+        uintptr_t inner = 0;
+        if (SafeReadPtrSeh(dialog + 0x08, &dialogLayout) &&
+            dialogLayout == layout &&
+            SafeReadPtrSeh(dialog + 0x20, &holder) &&
+            holder &&
+            IsValidPtr(holder, sizeof(uintptr_t)) &&
+            SafeReadPtrSeh(holder, &inner) &&
+            inner &&
+            IsValidPtr(inner + 0xF0, 0x80)) {
+          if (TryExtendFifthDialogModelCountSeh(dialog))
+            AddLog(u8"[책략5수명] dialog model 준비 완료 후 fifth entry/count 자동 적용.");
+        }
+      }
     }
   }
 
