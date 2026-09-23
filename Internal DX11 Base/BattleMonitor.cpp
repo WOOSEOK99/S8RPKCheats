@@ -345,6 +345,29 @@ namespace DX11Base {
     // 전투 활성화 조건: 훅 포착 OR 올바른 날짜 유효 OR 올바른 부대 리스트 유효
     bool battleActive = (addr1 != 0 || addr2 != 0) || isDateValid || isUnitListValid;
 
+    // 5번 책략은 평정(0x05)/내정(0x07)처럼 확실한 비전투 상태에서만
+    // pending ON/OFF를 실제 런타임 요청으로 동기화합니다. 로딩 중간값이나
+    // 전투 중 세이브 로드 직후에는 현재 전투 세대를 절대 수정하지 않습니다.
+    uint8_t lifecycleGameState = 0xFF;
+    bool safeNonBattleForStratagem5 = false;
+    __try {
+      if (IsValidPtr(gameBase + 0xD0, 1)) {
+        lifecycleGameState = *(uint8_t *)(gameBase + 0xD0);
+        safeNonBattleForStratagem5 =
+            !battleActive &&
+            (lifecycleGameState == 0x05 || lifecycleGameState == 0x07);
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      lifecycleGameState = 0xFF;
+      safeNonBattleForStratagem5 = false;
+    }
+
+    if (battleActive) {
+      DX11Base::UpdateStratagemFiveBattleLifecycle(true, false);
+    } else if (safeNonBattleForStratagem5) {
+      DX11Base::UpdateStratagemFiveBattleLifecycle(false, true);
+    }
+
     if (bShowDebug) {
       uint8_t gameState = 0xFF;
       __try {
@@ -456,26 +479,29 @@ namespace DX11Base {
             UpdateSpecialAbilities(unitCountTotal, unitListBase, exeBase);
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-          // 5번 책략 대상 진단: 읽기 전용으로 전의 변화를 추적합니다.
-          __try {
-            UpdateSpell5TargetDiagnostics((int)unitCountTotal, unitListBase);
-          } __except (EXCEPTION_EXECUTE_HANDLER) {}
+          // 현재 전투가 deferred 세대가 아닐 때만 5번 책략의 추가 회복
+          // 진단/주입을 수행합니다.
+          if (!DX11Base::ShouldSkipStratagemFiveCurrentBattle()) {
+            __try {
+              UpdateSpell5TargetDiagnostics((int)unitCountTotal, unitListBase);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+          }
       }
 
-      // 5번 책략 데이터는 세이브/게임 세대가 바뀌면 새 TrickData 테이블에 재적용합니다.
-      __try {
-        DX11Base::RefreshSpell5HealProbe();
-      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      if (!DX11Base::ShouldSkipStratagemFiveCurrentBattle()) {
+        // 정상적으로 전투 전에 arm된 세대만 현재 TrickData/model/UI에 결합합니다.
+        __try {
+          DX11Base::RefreshSpell5HealProbe();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-      // 5번 책략: 체크 의도는 유지하되 현재 전투 세대의 포인터에만 붙입니다.
-      __try {
-        DX11Base::RefreshStratagemFiveBattleRuntime();
-      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        __try {
+          DX11Base::RefreshStratagemFiveBattleRuntime();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-      // 5번 책략 UI: ResetBtnPos 훅이 잡은 live layout을 한 번만 읽기 진단합니다.
-      __try {
-        DX11Base::UpdateStratagemFiveUiRuntimeProbe();
-      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        __try {
+          DX11Base::UpdateStratagemFiveUiRuntimeProbe();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
 
       // 책략 게이지 테스트: 캡처된 진영 객체가 유효할 때만 +0x154를 10000으로 유지합니다.
       if (bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge) {
@@ -550,6 +576,8 @@ namespace DX11Base {
         __try {
           DX11Base::ResetStratagemFiveBattleRuntime();
           DX11Base::ResetSpell5HealProbeBattleRuntime();
+          if (safeNonBattleForStratagem5)
+            DX11Base::UpdateStratagemFiveBattleLifecycle(false, true);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         // 전투가 끝나면 특수능력 룰을 원래 데이터(normal)로 안전하게 복구합니다.
