@@ -42,6 +42,19 @@ namespace DX11Base {
     static uintptr_t g_fiveRuntimeSlotAddr = 0;
     static uintptr_t g_fiveRuntimeSlotOriginal = 0;
 
+    static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
+      if (!addr || !outValue)
+        return false;
+
+      __try {
+        *outValue = *reinterpret_cast<const uintptr_t *>(addr);
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *outValue = 0;
+        return false;
+      }
+    }
+
     static bool SafeCallGetTricks(GetTricksFn fn, uintptr_t object,
                                   TrickRangeProbe *outRange) {
       if (!fn || !object || !outRange)
@@ -796,12 +809,7 @@ namespace DX11Base {
       for (uintptr_t off = 0; off + sizeof(uintptr_t) <= 0x300;
            off += sizeof(uintptr_t)) {
         uintptr_t p = 0;
-        __try {
-          p = *reinterpret_cast<const uintptr_t *>(
-              g_id5CountOwner + off);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-          p = 0;
-        }
+        SafeReadPtrSeh(g_id5CountOwner + off, &p);
         addObject(p);
       }
     }
