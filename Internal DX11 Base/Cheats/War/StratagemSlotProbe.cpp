@@ -2377,7 +2377,7 @@ namespace DX11Base {
       // Replay the original first load so RAX is the current dialog layout.
       e8(0x48); e8(0x8B); e8(0x46); e8(0x08); // mov rax,[rsi+8]
       e8(0x48); e8(0xBB);              // mov rbx,&layout-global
-      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarLayout));
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiActiveLayout));
       e8(0x48); e8(0x3B); e8(0x03);    // cmp rax,[rbx]
       e8(0x0F); e8(0x85);              // jne no-sidecar
       const int jneLayoutExit=i; e32(0);
@@ -2388,7 +2388,7 @@ namespace DX11Base {
       e8(0xF0); e8(0xFF); e8(0x00);    // lock inc dword ptr [rax]
       e8(0x58);                         // pop rax
       e8(0x48); e8(0xBB);              // mov rbx,&button-global
-      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiActiveButton));
       e8(0x48); e8(0x8B); e8(0x1B);   // mov rbx,[rbx]
       e8(0x48); e8(0x85); e8(0xDB);   // test rbx,rbx
       e8(0x0F); e8(0x84);             // jz no-sidecar
