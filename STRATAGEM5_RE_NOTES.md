@@ -673,3 +673,68 @@ callback 등록 대상 함수는 PDB 기준:
 - `TrickSelectButton` 생성자 및 `Initialize`가 요구하는 eTYPE/레이아웃 인자
 
 다음 코드는 이 부분만 추가로 읽는 **write 없는 3차 진단**으로 진행한다.
+
+
+---
+
+## 16. 2026-09-23 3차 로그: 버튼 클래스 자체는 ID5를 지원
+
+실게임 로그에서 다음이 확인됨.
+
+### TrickSelectButton::SetTrickID
+
+RVA `0x01E7FD90` 런타임 코드에서 ID 범위를 10/11 기준으로 검사한다.
+따라서 버튼 객체 자체가 `ID5`를 거부하는 구조는 아니다.
+
+### TrickSelectButton 생성자
+
+RVA `0x01E7FEC0`.
+
+`Layout::Initialize`의 호출부를 다시 대조하면 생성자 호출 직전 EDX를
+별도 설정하지 않는다. 따라서 과거 메모의 “ctor(eTYPE)” 해석은 사용하지 않는다.
+현재 확인된 호출 형태는 **기본 생성자 `TrickSelectButton(this)`** 로 취급한다.
+
+### TrickSelectButton::Initialize
+
+RVA `0x01E7FF40`.
+
+함수 시작에서:
+
+- EDX -> 첫 번째 int
+- R8D -> 두 번째 int
+- R9 -> parent/control pointer
+
+를 보존한 뒤 base 초기화에 전달한다.
+즉 기존 버튼 생성 루프의 호출은 실질적으로:
+
+```text
+button->Initialize(layoutX, layoutY, TrickCommandDialogLayout*)
+```
+
+형태로 볼 수 있다.
+
+### 기존 4개 UI 등록 ID
+
+`Layout::Initialize`가 참조하는 static dword[4]가 실게임에서:
+
+```text
+2, 3, 4, 5
+```
+
+로 확인됨.
+
+이 값은 Trick ID가 아니라 `CUIMaker::RegisterLayout`에 전달되는 UI/control ID다.
+
+### 다음 단계
+
+실제 sidecar 생성 전에 live `TrickCommandDialogLayout*`와 기존 4개 버튼의:
+
+- 실제 UI ID `+0x88`
+- layout control count `+0x150`
+- 주요 상태값
+- ResetBtnPos가 사용하는 실제 좌표 세트
+
+를 한 번 캡처한다.
+
+이를 위해 `ResetBtnPos +0x1C8`의 확정 명령
+`add rsi,0x1E0`에서 RSI(layout)를 저장하는 build-guarded read-only capture hook을 사용한다.

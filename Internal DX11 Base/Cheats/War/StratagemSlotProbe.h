@@ -24,4 +24,8 @@ namespace DX11Base {
   // [[gameBase]+troopTypePointerOffset]+0x9D30, stride 0x20.
   // Reversible test: clone a valid row into row 5 and set ID/name/desc IDs to 5.
   bool SetStratagemFiveMetadataTest(bool enable);
+
+  // Runtime read-only UI probe. A build-guarded ResetBtnPos hook captures the
+  // live TrickCommandDialogLayout pointer; this logs it once per layout.
+  void UpdateStratagemFiveUiRuntimeProbe();
 }

@@ -42,6 +42,15 @@ namespace DX11Base {
     static uintptr_t g_fiveRuntimeSlotAddr = 0;
     static uintptr_t g_fiveRuntimeSlotOriginal = 0;
 
+    // Runtime UI instance capture. The hook is build-guarded and only records
+    // TrickCommandDialogLayout* when ResetBtnPos runs; it does not change UI data.
+    static uintptr_t g_uiLayoutHookAddr = 0;
+    static uintptr_t g_uiLayoutCaveAddr = 0;
+    static uint8_t g_uiLayoutOriginal[7] = {};
+    static bool g_uiLayoutHookApplied = false;
+    static volatile uintptr_t g_trickUiLayout = 0;
+    static uintptr_t g_lastLoggedUiLayout = 0;
+
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
         return false;
@@ -65,6 +74,104 @@ namespace DX11Base {
       } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
       }
+    }
+
+
+    static bool BuildTrickUiLayoutCaptureCave(uintptr_t hookAddr) {
+      g_uiLayoutCaveAddr = AllocNear(hookAddr, 64);
+      if (!g_uiLayoutCaveAddr)
+        return false;
+
+      uint8_t *cave = reinterpret_cast<uint8_t *>(g_uiLayoutCaveAddr);
+      int idx = 0;
+
+      auto emit8 = [&](uint8_t v) { cave[idx++] = v; };
+      auto emit32 = [&](int32_t v) {
+        std::memcpy(cave + idx, &v, sizeof(v));
+        idx += 4;
+      };
+      auto emit64 = [&](uintptr_t v) {
+        std::memcpy(cave + idx, &v, sizeof(v));
+        idx += 8;
+      };
+
+      // Preserve RAX, store the live TrickCommandDialogLayout* held in RSI,
+      // then execute the original "add rsi, 0x1E0".
+      emit8(0x50);                         // push rax
+      emit8(0x48); emit8(0xB8);            // mov rax, imm64
+      emit64(reinterpret_cast<uintptr_t>(&g_trickUiLayout));
+      emit8(0x48); emit8(0x89); emit8(0x30); // mov [rax], rsi
+      emit8(0x58);                         // pop rax
+
+      static const uint8_t originalAdd[7] = {
+          0x48, 0x81, 0xC6, 0xE0, 0x01, 0x00, 0x00
+      };
+      std::memcpy(cave + idx, originalAdd, sizeof(originalAdd));
+      idx += (int)sizeof(originalAdd);
+
+      // jmp back to the instruction after the 7-byte patch.
+      emit8(0xE9);
+      const intptr_t rel =
+          static_cast<intptr_t>(hookAddr + 7) -
+          static_cast<intptr_t>(g_uiLayoutCaveAddr + idx + 4);
+      if (rel < INT32_MIN || rel > INT32_MAX) {
+        VirtualFree(reinterpret_cast<LPVOID>(g_uiLayoutCaveAddr), 0, MEM_RELEASE);
+        g_uiLayoutCaveAddr = 0;
+        return false;
+      }
+      emit32(static_cast<int32_t>(rel));
+
+      FlushInstructionCache(GetCurrentProcess(), cave, idx);
+      if (!ApplyJmp(hookAddr, g_uiLayoutCaveAddr, 7)) {
+        VirtualFree(reinterpret_cast<LPVOID>(g_uiLayoutCaveAddr), 0, MEM_RELEASE);
+        g_uiLayoutCaveAddr = 0;
+        return false;
+      }
+      return true;
+    }
+
+    static bool EnsureTrickUiLayoutCaptureHook() {
+      if (g_uiLayoutHookApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase)
+        return false;
+
+      // PDB/runtime-confirmed:
+      // TrickCommandDialogLayout::ResetBtnPos RVA 0x01DAE9F0
+      // +0x1C8 = "add rsi, 0x1E0", where RSI is the live layout object.
+      constexpr uintptr_t kResetBtnPosRva = 0x01DAE9F0;
+      constexpr uintptr_t kCaptureOffset = 0x1C8;
+      const uintptr_t hookAddr = exeBase + kResetBtnPosRva + kCaptureOffset;
+
+      static const uint8_t expected[7] = {
+          0x48, 0x81, 0xC6, 0xE0, 0x01, 0x00, 0x00
+      };
+      if (!IsValidPtr(hookAddr, sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(hookAddr),
+                      expected, sizeof(expected)) != 0) {
+        AddLog(u8"[책략5UICAP] ResetBtnPos 캡처 지점 검증 실패: %p",
+               reinterpret_cast<void *>(hookAddr));
+        return false;
+      }
+
+      std::memcpy(g_uiLayoutOriginal,
+                  reinterpret_cast<const void *>(hookAddr),
+                  sizeof(g_uiLayoutOriginal));
+
+      if (!BuildTrickUiLayoutCaptureCave(hookAddr)) {
+        AddLog(u8"[책략5UICAP] layout 캡처 훅 설치 실패.");
+        return false;
+      }
+
+      g_uiLayoutHookAddr = hookAddr;
+      g_uiLayoutHookApplied = true;
+      g_trickUiLayout = 0;
+      g_lastLoggedUiLayout = 0;
+      AddLog(u8"[책략5UICAP] layout 캡처 훅 설치 완료. 책략창을 한 번 여세요.");
+      return true;
     }
 
     static void LogUiProbeWindow(const char *name,
@@ -903,6 +1010,8 @@ namespace DX11Base {
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
+      g_trickUiLayout = 0;
+      g_lastLoggedUiLayout = 0;
       AddLog(u8"[책략5메타DBG] 5번 내부 등록 해제.");
       return true;
     }
@@ -1111,6 +1220,8 @@ namespace DX11Base {
       AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터가 이미 row5입니다: camp=%p slot5=%p",
              reinterpret_cast<void *>(matchedObject),
              reinterpret_cast<void *>(matchedSlot));
+      if (!EnsureTrickUiLayoutCaptureHook())
+        AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
       DumpTrickUiPdbProbe();
       return true;
     }
@@ -1147,8 +1258,104 @@ namespace DX11Base {
            reinterpret_cast<void *>(matchedSlot),
            reinterpret_cast<void *>(matchedOld5),
            reinterpret_cast<void *>(row5));
+    if (!EnsureTrickUiLayoutCaptureHook())
+      AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
     DumpTrickUiPdbProbe();
     return true;
+  }
+
+  void UpdateStratagemFiveUiRuntimeProbe() {
+    if (!g_fiveMetadataApplied || !g_uiLayoutHookApplied)
+      return;
+
+    const uintptr_t layout = g_trickUiLayout;
+    if (!layout || layout == g_lastLoggedUiLayout)
+      return;
+
+    // Confirm the full PDB-known object range before reading fixed fields.
+    if (!IsValidPtr(layout, 0x2A8))
+      return;
+
+    uintptr_t buttons[4] = {};
+    uint32_t controlCount = 0;
+    if (!SafeCopySeh(layout + 0x1E0, buttons, sizeof(buttons)) ||
+        !SafeCopySeh(layout + 0x150, &controlCount, sizeof(controlCount)))
+      return;
+
+    AddLog(u8"[책략5UICAP] Layout=%p controlCount(+150)=%u / buttons=%p,%p,%p,%p",
+           reinterpret_cast<void *>(layout),
+           (unsigned)controlCount,
+           reinterpret_cast<void *>(buttons[0]),
+           reinterpret_cast<void *>(buttons[1]),
+           reinterpret_cast<void *>(buttons[2]),
+           reinterpret_cast<void *>(buttons[3]));
+
+    const uintptr_t exeBase =
+        reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    if (exeBase) {
+      int32_t ax1 = 0, ay = 0, ax2 = 0;
+      int32_t bx1 = 0, by = 0, bx2 = 0;
+      const bool aOk =
+          SafeCopySeh(exeBase + 0x02C3D300, &ax1, 4) &&
+          SafeCopySeh(exeBase + 0x02C3D304, &ay, 4) &&
+          SafeCopySeh(exeBase + 0x02C3D320, &ax2, 4);
+      const bool bOk =
+          SafeCopySeh(exeBase + 0x02C37E30, &bx1, 4) &&
+          SafeCopySeh(exeBase + 0x02C37E34, &by, 4) &&
+          SafeCopySeh(exeBase + 0x02C37E50, &bx2, 4);
+      if (aOk)
+        AddLog(u8"[책략5UICAP] ResetPos A: x1=%d y=%d x2=%d step=%d",
+               ax1, ay, ax2, ax2 - ax1);
+      if (bOk)
+        AddLog(u8"[책략5UICAP] ResetPos B: x1=%d y=%d x2=%d step=%d",
+               bx1, by, bx2, bx2 - bx1);
+    }
+
+    for (int i = 0; i < 4; ++i) {
+      const uintptr_t button = buttons[i];
+      if (!button || !IsValidPtr(button, 0x1D8)) {
+        AddLog(u8"[책략5UICAP] btn%d=%p 범위 무효",
+               i, reinterpret_cast<void *>(button));
+        continue;
+      }
+
+      uintptr_t vtable = 0;
+      uint32_t flags40 = 0;
+      uint32_t fields50[16] = {};
+      uint32_t state1C8 = 0;
+      uint8_t tail[3] = {};
+      SafeReadPtrSeh(button, &vtable);
+      SafeCopySeh(button + 0x40, &flags40, sizeof(flags40));
+      SafeCopySeh(button + 0x50, fields50, sizeof(fields50));
+      SafeCopySeh(button + 0x1C8, &state1C8, sizeof(state1C8));
+      SafeCopySeh(button + 0x1D4, tail, sizeof(tail));
+
+      AddLog(u8"[책략5UICAP] btn%d=%p vtbl=%p flags40=%08X id(+88)=%u state(+8C)=%u +1C8=%u tailD4/D5/D6=%u/%u/%u",
+             i,
+             reinterpret_cast<void *>(button),
+             reinterpret_cast<void *>(vtable),
+             (unsigned)flags40,
+             (unsigned)fields50[14],
+             (unsigned)fields50[15],
+             (unsigned)state1C8,
+             (unsigned)tail[0],
+             (unsigned)tail[1],
+             (unsigned)tail[2]);
+
+      AddLog(u8"[책략5UICAP] btn%d +50..8C = %d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+             i,
+             (int32_t)fields50[0], (int32_t)fields50[1],
+             (int32_t)fields50[2], (int32_t)fields50[3],
+             (int32_t)fields50[4], (int32_t)fields50[5],
+             (int32_t)fields50[6], (int32_t)fields50[7],
+             (int32_t)fields50[8], (int32_t)fields50[9],
+             (int32_t)fields50[10], (int32_t)fields50[11],
+             (int32_t)fields50[12], (int32_t)fields50[13],
+             (int32_t)fields50[14], (int32_t)fields50[15]);
+    }
+
+    g_lastLoggedUiLayout = layout;
+    AddLog(u8"[책략5UICAP] live layout 캡처 완료. 이 로그로 5번째 sidecar 버튼 생성 조건을 확정합니다.");
   }
 
   void ScanStratagemFiveSlotCandidates() {

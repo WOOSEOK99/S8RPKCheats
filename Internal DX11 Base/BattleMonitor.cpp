@@ -20,6 +20,7 @@
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/SpecialAbility.h"
 #include "Cheats/War/Spell5HealProbe.h"
+#include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/Terrainignore.h"
 #include "MenuState.h"
@@ -460,6 +461,11 @@ namespace DX11Base {
             UpdateSpell5TargetDiagnostics((int)unitCountTotal, unitListBase);
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
+
+      // 5번 책략 UI: ResetBtnPos 훅이 잡은 live layout을 한 번만 읽기 진단합니다.
+      __try {
+        DX11Base::UpdateStratagemFiveUiRuntimeProbe();
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
       // 책략 게이지 테스트: 캡처된 진영 객체가 유효할 때만 +0x154를 10000으로 유지합니다.
       if (bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge) {
