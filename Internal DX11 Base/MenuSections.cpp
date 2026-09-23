@@ -1599,12 +1599,12 @@ namespace DX11Base {
       ImGui::TextDisabled(u8"병력은 최대병력을 넘지 않습니다. 로그의 [책략5힐DBG] 전/후 병력과 최대값을 확인하세요.");
 
       ImGui::Spacing();
-      if (ImGui::Button(u8"책략 5슬롯 구조 스캔", ImVec2(-1.0f, 0.0f))) {
+      if (ImGui::Button(u8"책략 수량/5번 슬롯 확인", ImVec2(-1.0f, 0.0f))) {
         DX11Base::ScanStratagemFiveSlotCandidates();
-        AddNotification(u8"책략 5슬롯 후보 스캔 완료 - 로그 확인");
+        AddNotification(u8"책략 수량 슬롯 확인 - 로그 확인");
       }
-      ImGui::TextDisabled(u8"전투 준비 화면에서 기본 책략 1,2,3,4를 모두 선택한 상태로 누르세요.");
-      ImGui::TextDisabled(u8"읽기 전용입니다. 로그의 [책략5슬롯DBG] 후보 주소/bytes를 보내주세요.");
+      ImGui::TextDisabled(u8"의기저상/신산화계/초목개병/사모위계 수량을 1/2/1/1로 둔 뒤 누르세요.");
+      ImGui::TextDisabled(u8"첫 클릭은 캡처 훅 설치일 수 있습니다. 책략 화면에서 수량을 한 번 바꾼 뒤 다시 눌러 로그를 확인하세요.");
 
       EndSection(); // 전쟁
     }
