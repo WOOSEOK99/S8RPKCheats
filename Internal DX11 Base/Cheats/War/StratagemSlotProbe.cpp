@@ -108,6 +108,7 @@ namespace DX11Base {
     static uint8_t g_fifthUiResetCompactOriginal[5] = {};
     static bool g_fifthUiResetCompactHookApplied = false;
     static bool g_fifthUiCompactLogged = false;
+    static bool g_fifthUiResetSignalDumped = false;
 
     static uintptr_t g_fifthUiOnSelectCmpImmAddr = 0;
     static uint8_t g_fifthUiOnSelectCmpOriginal = 0;
@@ -1630,6 +1631,59 @@ namespace DX11Base {
           g_fifthUiCompactLogged=true;
           AddLog(u8"[책략5UIRESET] ResetBtnPos 후 5버튼 재배치 완료: %d,%d,%d,%d,%d / y=%d",
                  compactX[0],compactX[1],compactX[2],compactX[3],compactX[4],y);
+        }
+
+        // Automatic read-only comparison after the proven ResetBtnPos hook.
+        // This avoids asking the user to re-toggle the three experiment boxes
+        // merely to reach UpdateStratagemFiveUiRuntimeProbe().
+        if(!g_fifthUiResetSignalDumped){
+          g_fifthUiResetSignalDumped=true;
+          const uintptr_t sample[3]={buttons[0],buttons[3],g_fifthUiSidecarButton};
+          const char *name[3]={"btn0","btn3","sidecar"};
+          for(int s=0;s<3;++s){
+            const uintptr_t b=sample[s];
+            if(!b || !IsValidPtr(b,0x1D8)){
+              AddLog(u8"[책략5UIAUTO] %s button invalid: %p",
+                     name[s],reinterpret_cast<void *>(b));
+              continue;
+            }
+
+            uint64_t sig[12]={};
+            uint64_t tail[6]={};
+            const bool sigOk=SafeCopySeh(b+0x78,sig,sizeof(sig));
+            const bool tailOk=SafeCopySeh(b+0x1A8,tail,sizeof(tail));
+
+            uint32_t uiId=0xFFFFFFFFu,state=0xFFFFFFFFu;
+            SafeCopySeh(b+0x88,&uiId,sizeof(uiId));
+            SafeCopySeh(b+0x8C,&state,sizeof(state));
+
+            AddLog(u8"[책략5UIAUTO] %s button=%p uiId=%u state=%u sigOk=%d tailOk=%d",
+                   name[s],reinterpret_cast<void *>(b),
+                   (unsigned)uiId,(unsigned)state,sigOk?1:0,tailOk?1:0);
+
+            if(sigOk){
+              AddLog(u8"[책략5UIAUTO] %s +78..A7 = %016llX %016llX %016llX %016llX %016llX %016llX",
+                     name[s],
+                     (unsigned long long)sig[0],(unsigned long long)sig[1],
+                     (unsigned long long)sig[2],(unsigned long long)sig[3],
+                     (unsigned long long)sig[4],(unsigned long long)sig[5]);
+              AddLog(u8"[책략5UIAUTO] %s +A8..D7 = %016llX %016llX %016llX %016llX %016llX %016llX",
+                     name[s],
+                     (unsigned long long)sig[6],(unsigned long long)sig[7],
+                     (unsigned long long)sig[8],(unsigned long long)sig[9],
+                     (unsigned long long)sig[10],(unsigned long long)sig[11]);
+            }
+
+            if(tailOk){
+              AddLog(u8"[책략5UIAUTO] %s +1A8..1D7 = %016llX %016llX %016llX %016llX %016llX %016llX",
+                     name[s],
+                     (unsigned long long)tail[0],(unsigned long long)tail[1],
+                     (unsigned long long)tail[2],(unsigned long long)tail[3],
+                     (unsigned long long)tail[4],(unsigned long long)tail[5]);
+            }
+          }
+          AddLog(u8"[책략5UIAUTO] callback index4Hits=%ld / 자동 비교 완료",
+                 (long)g_fifthUiCallbackIndex4Hits);
         }
       } __except(EXCEPTION_EXECUTE_HANDLER) {
       }

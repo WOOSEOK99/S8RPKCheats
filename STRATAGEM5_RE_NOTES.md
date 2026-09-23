@@ -2256,3 +2256,35 @@ button signal component(+0x78)에 AddSig하는 것이 확인됐다.
 앞으로 SetTrickID는 함수 entry를 직접 가로채지 않는다.
 필요한 ID 확인은 이미 안전하게 제어하고 있는 Dialog::Open index4 우회 지점이나
 sidecar 객체의 상태를 통해 좁게 확인한다.
+
+
+---
+
+## 43. 2026-09-23 반복 테스트 제거 — ResetBtnPos에서 자동 signal/data 비교
+
+사용자가 이미 동일한 3개 실험 체크와 hover 테스트를 수행했는데,
+기존 `[책략5UISIGSTATE]` 출력은 `UpdateStratagemFiveUiRuntimeProbe()`의
+metadata/layout 상태 조건에 묶여 있어 최신 실행에서 나오지 않았다.
+
+같은 테스트를 다시 요구하지 않도록 변경한다.
+
+이미 안정적으로 동작하는 `ResetBtnPos` 종료 훅의 C++ helper 안에서,
+책략 메뉴가 열릴 때 딱 한 번 자동으로 다음을 read-only 기록한다.
+
+- btn0
+- btn3
+- sidecar
+
+각 객체의:
+
+- UI ID / state
+- +0x78..+0xD7 signal component 주변 0x60 bytes
+- +0x1A8..+0x1D7 후반 상태 0x30 bytes
+- callback index4Hits
+
+로그 키:
+
+`[책략5UIAUTO]`
+
+새 코드 detour는 추가하지 않는다.
+기존 안정적인 ResetBtnPos hook 내부의 읽기 진단만 추가한다.
