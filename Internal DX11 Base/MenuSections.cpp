@@ -1598,6 +1598,195 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"5번 책략 활성화", s_stratagemFiveEnabled);
         }
       }
+
+      static DX11Base::Spell5CustomSettings s_stratagem5Edit{};
+      ImGui::SameLine();
+      if (ImGui::Button(u8"5번 책략 설정")) {
+        s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
+        ImGui::OpenPopup(u8"5번 책략 설정###Stratagem5SettingsPopup");
+      }
+
+      ImGui::TextDisabled(u8"기본값: 아군 / 사기 +40 / 효과2 없음 / 범위 5 / 추가 병력회복 +2000 / 사용횟수 1회");
+
+      ImGui::SetNextWindowSize(ImVec2(590.0f * scale, 570.0f * scale),
+                               ImGuiCond_Appearing);
+      if (ImGui::BeginPopupModal(
+              u8"5번 책략 설정###Stratagem5SettingsPopup",
+              nullptr,
+              ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f),
+                           u8"[ 5번 책략 사용자 설정 ]");
+        ImGui::Separator();
+        ImGui::TextDisabled(u8"책략 ID 5/5/5와 사용횟수 1회는 고정합니다.");
+
+        const char *targetNames[] = {u8"아군", u8"적군", u8"피아불문"};
+        int targetIndex = s_stratagem5Edit.target - 1;
+        if (targetIndex < 0 || targetIndex > 2)
+          targetIndex = 0;
+        ImGui::SetNextItemWidth(180.0f * scale);
+        if (ImGui::Combo(u8"대상", &targetIndex,
+                         targetNames, IM_ARRAYSIZE(targetNames))) {
+          s_stratagem5Edit.target = targetIndex + 1;
+        }
+
+        static const int effectCodes[] = {0, 3, 10, 11, 12};
+        const char *effectNames[] = {
+            u8"없음", u8"상태이상", u8"사기 증감", u8"직접 데미지", u8"화계"};
+
+        auto effectIndexFromCode = [&](int code) {
+          for (int i = 0; i < IM_ARRAYSIZE(effectCodes); ++i)
+            if (effectCodes[i] == code)
+              return i;
+          return 0;
+        };
+
+        auto drawEffectEditor = [&](const char *title, const char *idPrefix,
+                                    int &effect, int &power, int &duration) {
+          ImGui::Spacing();
+          ImGui::TextColored(ImVec4(0.55f, 0.9f, 1.0f, 1.0f), "%s", title);
+
+          int effectIndex = effectIndexFromCode(effect);
+          char comboId[64] = {};
+          sprintf_s(comboId, "%s_effect", idPrefix);
+          ImGui::SetNextItemWidth(180.0f * scale);
+          if (ImGui::Combo(comboId, &effectIndex,
+                           effectNames, IM_ARRAYSIZE(effectNames))) {
+            effect = effectCodes[effectIndex];
+            if (effect == 0) {
+              power = 0;
+              duration = 0;
+            } else if (effect == 3) {
+              if (power < 1 || power > 3)
+                power = 1;
+              if (duration < 0)
+                duration = 0;
+            } else if (effect == 12) {
+              if (power < 0 || power > 100)
+                power = 100;
+              duration = 0;
+            } else {
+              duration = 0;
+            }
+          }
+
+          if (effect == 3) {
+            const char *statusNames[] = {u8"저지", u8"혼란", u8"공황"};
+            int statusIndex = power - 1;
+            if (statusIndex < 0 || statusIndex > 2)
+              statusIndex = 0;
+
+            char statusId[64] = {};
+            sprintf_s(statusId, "%s_status", idPrefix);
+            ImGui::SetNextItemWidth(180.0f * scale);
+            if (ImGui::Combo(statusId, &statusIndex,
+                             statusNames, IM_ARRAYSIZE(statusNames))) {
+              power = statusIndex + 1;
+            }
+
+            char durationId[64] = {};
+            sprintf_s(durationId, "%s_duration", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(durationId, &duration, 1, 3)) {
+              if (duration < 0) duration = 0;
+              if (duration > 30) duration = 30;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"지속일");
+          } else if (effect == 10) {
+            char powerId[64] = {};
+            sprintf_s(powerId, "%s_morale", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(powerId, &power, 5, 10)) {
+              if (power < -100) power = -100;
+              if (power > 100) power = 100;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"사기 증감");
+          } else if (effect == 11) {
+            char powerId[64] = {};
+            sprintf_s(powerId, "%s_damage", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(powerId, &power, 50, 100)) {
+              if (power < 0) power = 0;
+              if (power > 10000) power = 10000;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"위력");
+          } else if (effect == 12) {
+            char powerId[64] = {};
+            sprintf_s(powerId, "%s_fire", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(powerId, &power, 5, 10)) {
+              if (power < 0) power = 0;
+              if (power > 100) power = 100;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"발동 확률(%)");
+          } else {
+            ImGui::TextDisabled(u8"추가 설정 없음");
+          }
+        };
+
+        drawEffectEditor(u8"효과 1", "##S5E1",
+                         s_stratagem5Edit.effect1,
+                         s_stratagem5Edit.power1,
+                         s_stratagem5Edit.duration1);
+
+        drawEffectEditor(u8"효과 2", "##S5E2",
+                         s_stratagem5Edit.effect2,
+                         s_stratagem5Edit.power2,
+                         s_stratagem5Edit.duration2);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::SetNextItemWidth(120.0f * scale);
+        if (ImGui::InputInt(u8"범위##S5Range",
+                            &s_stratagem5Edit.range, 1, 1)) {
+          if (s_stratagem5Edit.range < 1) s_stratagem5Edit.range = 1;
+          if (s_stratagem5Edit.range > 100) s_stratagem5Edit.range = 100;
+        }
+
+        ImGui::SetNextItemWidth(140.0f * scale);
+        if (ImGui::InputInt(u8"추가 병력 회복##S5Heal",
+                            &s_stratagem5Edit.healAmount, 100, 500)) {
+          if (s_stratagem5Edit.healAmount < 0)
+            s_stratagem5Edit.healAmount = 0;
+          if (s_stratagem5Edit.healAmount > 65535)
+            s_stratagem5Edit.healAmount = 65535;
+        }
+        ImGui::TextDisabled(
+            u8"※ 추가 병력 회복은 우리가 별도로 넣은 기능이며, 효과1이 '사기 증가'일 때만 적용됩니다.");
+        ImGui::TextDisabled(
+            u8"※ 첫 번째 효과가 직접 데미지/화계 계통이면 원본 게임의 지형 판정 영향을 받을 수 있습니다.");
+
+        ImGui::Spacing();
+        if (ImGui::Button(u8"현재 기본값 복원",
+                          ImVec2(150.0f * scale, 30.0f * scale))) {
+          s_stratagem5Edit = DX11Base::Spell5CustomSettings{};
+        }
+
+        ImGui::Separator();
+
+        if (ImGui::Button(u8"적용 및 저장",
+                          ImVec2(180.0f * scale, 34.0f * scale))) {
+          DX11Base::SetSpell5CustomSettings(s_stratagem5Edit);
+          s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
+          SaveConfig();
+          AddNotification(u8"5번 책략 설정 적용 완료");
+          ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button(u8"취소",
+                          ImVec2(100.0f * scale, 34.0f * scale))) {
+          ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+      }
+
       ImGui::TextDisabled(u8"데이터/횟수/내부등록은 한 기능으로 묶여 단계 순서대로 자동 처리됩니다.");
 
       EndSection(); // 전쟁
