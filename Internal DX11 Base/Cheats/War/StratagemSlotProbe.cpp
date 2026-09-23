@@ -49,6 +49,9 @@ namespace DX11Base {
     static uint8_t g_uiLayoutOriginal[7] = {};
     static bool g_uiLayoutHookApplied = false;
     static volatile uintptr_t g_trickUiLayout = 0;
+    static volatile int32_t g_trickUiStartX = 0;
+    static volatile int32_t g_trickUiY = 0;
+    static volatile int32_t g_trickUiStep = 0;
     static uintptr_t g_lastLoggedUiLayout = 0;
     static uintptr_t g_uiDialogHookAddr = 0;
     static uintptr_t g_uiDialogCaveAddr = 0;
@@ -83,7 +86,7 @@ namespace DX11Base {
 
 
     static bool BuildTrickUiLayoutCaptureCave(uintptr_t hookAddr) {
-      g_uiLayoutCaveAddr = AllocNear(hookAddr, 64);
+      g_uiLayoutCaveAddr = AllocNear(hookAddr, 128);
       if (!g_uiLayoutCaveAddr)
         return false;
 
@@ -106,6 +109,18 @@ namespace DX11Base {
       emit8(0x48); emit8(0xB8);            // mov rax, imm64
       emit64(reinterpret_cast<uintptr_t>(&g_trickUiLayout));
       emit8(0x48); emit8(0x89); emit8(0x30); // mov [rax], rsi
+
+      emit8(0x48); emit8(0xB8);
+      emit64(reinterpret_cast<uintptr_t>(&g_trickUiStartX));
+      emit8(0x89); emit8(0x38);            // mov [rax], edi
+
+      emit8(0x48); emit8(0xB8);
+      emit64(reinterpret_cast<uintptr_t>(&g_trickUiY));
+      emit8(0x44); emit8(0x89); emit8(0x30); // mov [rax], r14d
+
+      emit8(0x48); emit8(0xB8);
+      emit64(reinterpret_cast<uintptr_t>(&g_trickUiStep));
+      emit8(0x89); emit8(0x18);            // mov [rax], ebx
       emit8(0x58);                         // pop rax
 
       static const uint8_t originalAdd[7] = {
@@ -174,6 +189,9 @@ namespace DX11Base {
       g_uiLayoutHookAddr = hookAddr;
       g_uiLayoutHookApplied = true;
       g_trickUiLayout = 0;
+      g_trickUiStartX = 0;
+      g_trickUiY = 0;
+      g_trickUiStep = 0;
       g_trickUiDialog = 0;
       g_lastLoggedUiLayout = 0;
       AddLog(u8"[책략5UICAP] layout 캡처 훅 설치 완료. 책략창을 한 번 여세요.");
@@ -1111,6 +1129,10 @@ namespace DX11Base {
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
       g_trickUiLayout = 0;
+      g_trickUiDialog = 0;
+      g_trickUiStartX = 0;
+      g_trickUiY = 0;
+      g_trickUiStep = 0;
       g_lastLoggedUiLayout = 0;
       AddLog(u8"[책략5메타DBG] 5번 내부 등록 해제.");
       return true;
@@ -1393,7 +1415,11 @@ namespace DX11Base {
            reinterpret_cast<void *>(buttons[1]),
            reinterpret_cast<void *>(buttons[2]),
            reinterpret_cast<void *>(buttons[3]));
-
+    AddLog(u8"[책략5UICAP] ResetBtnPos live regs: startX=%d y=%d step=%d / fifthX=%d",
+           (int)g_trickUiStartX,
+           (int)g_trickUiY,
+           (int)g_trickUiStep,
+           (int)(g_trickUiStartX + g_trickUiStep * 4));
 
     const uintptr_t dialog = g_trickUiDialog;
     if (dialog && IsValidPtr(dialog, 0x40)) {
@@ -1447,6 +1473,32 @@ namespace DX11Base {
       }
     }
 
+    const uintptr_t extraOffsets[] = {0x280, 0x288, 0x290, 0x2A0};
+    for (uintptr_t off : extraOffsets) {
+      uintptr_t control = 0;
+      if (!SafeReadPtrSeh(layout + off, &control) || !control) {
+        AddLog(u8"[책략5UICTRL] layout+%03llX = null",
+               (unsigned long long)off);
+        continue;
+      }
+
+      uintptr_t vtable = 0;
+      uint32_t id = 0xFFFFFFFFu;
+      uint32_t state = 0xFFFFFFFFu;
+      if (IsValidPtr(control, 0x90)) {
+        SafeReadPtrSeh(control, &vtable);
+        SafeCopySeh(control + 0x88, &id, sizeof(id));
+        SafeCopySeh(control + 0x8C, &state, sizeof(state));
+      }
+
+      AddLog(u8"[책략5UICTRL] layout+%03llX=%p vtbl=%p id(+88)=%u state(+8C)=%u",
+             (unsigned long long)off,
+             reinterpret_cast<void *>(control),
+             reinterpret_cast<void *>(vtable),
+             (unsigned)id,
+             (unsigned)state);
+    }
+
     const uintptr_t exeBase =
         reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
     if (exeBase) {
@@ -1461,10 +1513,10 @@ namespace DX11Base {
           SafeCopySeh(exeBase + 0x02C37E34, &by, 4) &&
           SafeCopySeh(exeBase + 0x02C37E50, &bx2, 4);
       if (aOk)
-        AddLog(u8"[책략5UICAP] ResetPos A: x1=%d y=%d x2=%d step=%d",
+        AddLog(u8"[책략5UICAP] ResetPos static A: first=%d second=%d alt=%d delta=%d",
                ax1, ay, ax2, ax2 - ax1);
       if (bOk)
-        AddLog(u8"[책략5UICAP] ResetPos B: x1=%d y=%d x2=%d step=%d",
+        AddLog(u8"[책략5UICAP] ResetPos static B: first=%d second=%d alt=%d delta=%d",
                bx1, by, bx2, bx2 - bx1);
     }
 
