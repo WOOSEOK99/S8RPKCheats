@@ -78,6 +78,11 @@ namespace DX11Base {
     static uint8_t g_fifthUiOpenOriginalLoad[8] = {};
     static bool g_fifthUiOpenDisplayHookApplied = false;
 
+    static uintptr_t g_fifthUiGetButtonHookAddr = 0;
+    static uintptr_t g_fifthUiGetButtonCaveAddr = 0;
+    static uint8_t g_fifthUiGetButtonOriginal[5] = {};
+    static bool g_fifthUiGetButtonHookApplied = false;
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -784,6 +789,143 @@ namespace DX11Base {
     }
 
 
+    static bool EnsureFifthUiGetTrickButtonHook() {
+      if (g_fifthUiGetButtonHookApplied)
+        return true;
+      if (!g_fifthUiId7Registered ||
+          !g_fifthUiSidecarButton ||
+          !IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
+        return false;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kGetTrickButtonRva = 0x01DAF060;
+      const uintptr_t addr = exeBase + kGetTrickButtonRva;
+
+      // Entire 0x13-byte function from this exact supported build:
+      // cmp edx,4 / jae out / mov eax,edx /
+      // mov rax,[rcx+rax*8+1E0] / ret / xor eax,eax / ret
+      static const uint8_t expected[0x13] = {
+          0x83,0xFA,0x04,
+          0x73,0x0B,
+          0x8B,0xC2,
+          0x48,0x8B,0x84,0xC1,0xE0,0x01,0x00,0x00,
+          0xC3,
+          0x33,0xC0,
+          0xC3
+      };
+      if (!IsValidPtr(addr, sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(addr),
+                      expected, sizeof(expected)) != 0) {
+        AddLog(u8"[책략5UIGET] GetTrickButton 전체 바이트 검증 실패.");
+        return false;
+      }
+
+      const uintptr_t caveAddr = AllocNear(addr, 96);
+      if (!caveAddr)
+        return false;
+
+      uint8_t *c = reinterpret_cast<uint8_t *>(caveAddr);
+      int i=0;
+      auto e8=[&](uint8_t v){ c[i++]=v; };
+      auto e32=[&](int32_t v){ std::memcpy(c+i,&v,4); i+=4; };
+      auto e64=[&](uintptr_t v){ std::memcpy(c+i,&v,8); i+=8; };
+      auto patchRel32=[&](int at,int target){
+        const int64_t rel=(int64_t)target-(int64_t)(at+4);
+        if(rel<INT32_MIN||rel>INT32_MAX) return false;
+        const int32_t v=(int32_t)rel;
+        std::memcpy(c+at,&v,4);
+        return true;
+      };
+
+      e8(0x83); e8(0xFA); e8(0x04);             // cmp edx,4
+      e8(0x0F); e8(0x84);                      // je sidecar
+      const int jeSide=i; e32(0);
+      e8(0x0F); e8(0x87);                      // ja out
+      const int jaOut=i; e32(0);
+
+      // indices 0..3: exact original access
+      e8(0x8B); e8(0xC2);                      // mov eax,edx
+      const uint8_t loadOrig[8]=
+          {0x48,0x8B,0x84,0xC1,0xE0,0x01,0x00,0x00};
+      std::memcpy(c+i,loadOrig,sizeof(loadOrig)); i+=(int)sizeof(loadOrig);
+      e8(0xC3);                                // ret
+
+      const int sideLabel=i;
+      e8(0x48); e8(0xB8);                      // mov rax,&global
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
+      e8(0x48); e8(0x8B); e8(0x00);            // mov rax,[rax]
+      e8(0xC3);                                // ret
+
+      const int outLabel=i;
+      e8(0x33); e8(0xC0);                      // xor eax,eax
+      e8(0xC3);                                // ret
+
+      if(!patchRel32(jeSide,sideLabel) ||
+         !patchRel32(jaOut,outLabel)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      FlushInstructionCache(GetCurrentProcess(),c,i);
+      std::memcpy(g_fifthUiGetButtonOriginal,
+                  reinterpret_cast<const void *>(addr),
+                  sizeof(g_fifthUiGetButtonOriginal));
+      if(!ApplyJmp(addr,caveAddr,5)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      g_fifthUiGetButtonHookAddr=addr;
+      g_fifthUiGetButtonCaveAddr=caveAddr;
+      g_fifthUiGetButtonHookApplied=true;
+      AddLog(u8"[책략5UIGET] GetTrickButton 완전 대체 성공: index4 -> sidecar.");
+      return true;
+    }
+
+    static void LogFifthUiCallbackLoopCandidate() {
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if(!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return;
+
+      constexpr uintptr_t kDialogInitializeRva=0x01DF3F20;
+      constexpr size_t kSize=0x4C9;
+      const uintptr_t fn=exeBase+kDialogInitializeRva;
+      uint8_t bytes[kSize]={};
+      if(!SafeCopySeh(fn,bytes,sizeof(bytes)))
+        return;
+
+      // Proven loop tail from prior RE:
+      // inc edi ; add r14,8 ; cmp edi,4 ; jb loop
+      static const uint8_t prefix[]={
+          0xFF,0xC7,0x49,0x83,0xC6,0x08,0x83,0xFF,0x04
+      };
+      unsigned found=0;
+      size_t hit=0;
+      for(size_t p=0;p+sizeof(prefix)+2<=sizeof(bytes);++p){
+        if(std::memcmp(bytes+p,prefix,sizeof(prefix))==0){
+          ++found; hit=p;
+        }
+      }
+      AddLog(u8"[책략5UICB] Dialog::Initialize callback-tail candidates=%u",found);
+      if(found==1){
+        const size_t from=hit>0x50?hit-0x50:0;
+        const size_t to=(hit+0x30<sizeof(bytes))?hit+0x30:sizeof(bytes);
+        for(size_t p=from;p<to;p+=0x20){
+          const size_t chunk=(to-p>0x20)?0x20:(to-p);
+          char line[256]={}; int pos=0;
+          for(size_t j=0;j<chunk && pos<(int)sizeof(line)-4;++j)
+            pos+=sprintf_s(line+pos,sizeof(line)-pos,"%02X ",(unsigned)bytes[p+j]);
+          AddLog(u8"[책략5UICB] Dialog::Initialize +%llX : %s",
+                 (unsigned long long)p,line);
+        }
+      }
+    }
+
     static bool EnsureFifthUiOpenDisplayHook() {
       if (g_fifthUiOpenDisplayHookApplied)
         return true;
@@ -1211,13 +1353,17 @@ namespace DX11Base {
           }
         }
 
+        const bool getButtonHookReady = EnsureFifthUiGetTrickButtonHook();
         const bool openHookReady = EnsureFifthUiOpenDisplayHook();
+        LogFifthUiCallbackLoopCandidate();
         AddLog(u8"[책략5UITEST] ID7 정식 등록 성공. helper7 소모 및 5버튼 압축 배치 완료.");
+        AddLog(u8"[책략5UITEST] GetTrickButton index4 sidecar 훅=%s.",
+               getButtonHookReady ? "READY" : "FAILED");
         AddLog(u8"[책략5UITEST] 5버튼 위치: %d,%d,%d,%d,%d / y=%d",
                compactX[0],compactX[1],compactX[2],compactX[3],compactX[4],y);
         AddLog(u8"[책략5UITEST] Dialog::Open index4 sidecar 표시 훅=%s. 책략창을 닫았다가 다시 여세요.",
                openHookReady ? "READY" : "FAILED");
-        AddLog(u8"[책략5UITEST] callback은 아직 미연결입니다. 5번째 버튼이 보여도 클릭하지 마세요.");
+        AddLog(u8"[책략5UITEST] callback은 아직 미연결입니다. 이번 빌드는 5번째 hover/마우스 인식 변화만 확인하세요.");
         return true;
       } __except(EXCEPTION_EXECUTE_HANDLER) {
         AddLog(u8"[책략5UITEST] ID7 등록 중 예외: stage=%d",(int)stage);

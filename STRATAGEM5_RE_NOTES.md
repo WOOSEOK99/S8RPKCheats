@@ -1780,3 +1780,56 @@ ID7 등록 후:
 목표는 다섯 번째 카드가 화면에 보이는지만 확인하는 것이다.
 callback / GetTrickButton(4) / 실제 선택·사용은 아직 연결하지 않는다.
 따라서 다섯 번째가 보여도 클릭하지 않는다.
+
+
+---
+
+## 32. 2026-09-23 마우스가 4개만 인식 — GetTrickButton 완전 대체 1차
+
+ID7 registry와 Dialog::Open index4 sidecar 우회는 성공했고 화면에도 다섯 번째 자리 흔적이 생겼다.
+그러나 마우스 반응은 기존 4개뿐이었다.
+
+이번 단계부터 조각별 단순 count 확장보다 작은 함수는 완전 대체한다.
+
+### GetTrickButton 완전 대체
+
+원본은 0x13 bytes뿐이다.
+
+```asm
+cmp edx,4
+jae out
+mov eax,edx
+mov rax,[rcx+rax*8+1E0]
+ret
+out:
+xor eax,eax
+ret
+```
+
+지원 빌드의 전체 0x13 bytes가 정확히 일치할 때만 entry를 near-JMP cave로 바꾼다.
+
+새 동작:
+
+- index 0..3: 원본 배열 접근 그대로
+- index 4: `g_fifthUiSidecarButton`
+- index >4: null
+
+따라서 +0x200을 절대 읽지 않는다.
+
+### callback 다음 단계 준비
+
+실제 마우스 select/focus callback은 `Dialog::Initialize`에서 4회만 연결된다.
+이번 빌드는 해당 함수 안에서 이미 RE로 확인한 loop tail:
+
+```asm
+inc edi
+add r14,8
+cmp edi,4
+jb loop
+```
+
+의 정확한 런타임 후보 수와 주변 바이트를 `[책략5UICB]`로 함께 출력한다.
+
+이 결과로 다음 패치에서는 loop의 5번째 iteration에서 r14를 +0x200으로 보내지 않고
+`&g_fifthUiSidecarButton` 슬롯으로 돌려 게임 원본 callback body를 그대로 한 번 더 실행시키는
+tail detour를 설치한다.
