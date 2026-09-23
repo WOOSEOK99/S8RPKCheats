@@ -48,9 +48,7 @@ namespace DX11Base {
     };
 
     static bool g_applied = false;
-    static uintptr_t g_spell4Addr = 0;
     static uintptr_t g_spell5Addr = 0;
-    static SpellRecord g_spell4Original{};
     static SpellRecord g_spell5Original{};
 
     static UnitDiagSnapshot g_diag[kMaxTrackedUnits]{};
@@ -152,16 +150,13 @@ namespace DX11Base {
       }
 
       const uintptr_t spell2 = table + 1 * kSpellStride;
-      const uintptr_t spell4 = table + 3 * kSpellStride;
       const uintptr_t spell5 = table + 4 * kSpellStride;
       if (!IsValidPtr(spell2, sizeof(SpellRecord)) ||
-          !IsValidPtr(spell4, sizeof(SpellRecord)) ||
           !IsValidPtr(spell5, sizeof(SpellRecord))) {
-        AddLog(u8"[책략5DBG] 2/4/5번 책략 레코드 주소가 유효하지 않습니다.");
+        AddLog(u8"[책략5DBG] 2/5번 책략 레코드 주소가 유효하지 않습니다.");
         return false;
       }
 
-      std::memcpy(&g_spell4Original, reinterpret_cast<const void *>(spell4), sizeof(g_spell4Original));
       std::memcpy(&g_spell5Original, reinterpret_cast<const void *>(spell5), sizeof(g_spell5Original));
 
       SpellRecord clone{};
@@ -189,20 +184,16 @@ namespace DX11Base {
         return false;
       }
 
-      if (!WriteRecord(spell4, clone)) {
-        WriteRecord(spell5, g_spell5Original);
-        AddLog(u8"[책략5DBG] 4번 선택 슬롯 치환 실패 - 5번 레코드는 원복했습니다.");
-        return false;
-      }
-
-      g_spell4Addr = spell4;
+      // 이번 단계에서는 4번 사모위계를 절대 치환하지 않습니다.
+      // 실제 5번 횟수 슬롯(+14C)을 켰을 때 5번째 책략이 독립적으로
+      // 노출되는지 확인하기 위한 테스트입니다.
       g_spell5Addr = spell5;
       g_applied = true;
       ResetDiagnostics();
 
       AddLog(u8"[책략5DBG] 적용: 아군 / 효과1 사기+40 / 효과2 없음 / 범위5");
-      AddLog(u8"[책략5DBG] table=%p selector4=%p canonical5=%p source2=%p",
-             reinterpret_cast<void *>(table), reinterpret_cast<void *>(spell4),
+      AddLog(u8"[책략5DBG] table=%p canonical5=%p source2=%p / 4번 사모위계 유지",
+             reinterpret_cast<void *>(table),
              reinterpret_cast<void *>(spell5), reinterpret_cast<void *>(spell2));
       AddLog(u8"[책략5DBG] 광역힐 2차 테스트 활성화: 전의 +40(또는 100 상한) 변화 부대에 병력 +2000(최대병력 상한) 적용.");
       return true;
@@ -211,23 +202,18 @@ namespace DX11Base {
     if (!g_applied)
       return true;
 
-    bool restored4 = false;
     bool restored5 = false;
 
-    if (g_spell4Addr && IsValidPtr(g_spell4Addr, sizeof(SpellRecord)))
-      restored4 = WriteRecord(g_spell4Addr, g_spell4Original);
     if (g_spell5Addr && IsValidPtr(g_spell5Addr, sizeof(SpellRecord)))
       restored5 = WriteRecord(g_spell5Addr, g_spell5Original);
 
-    if (restored4 && restored5)
-      AddLog(u8"[책략5DBG] 원복 완료: 4번 사모위계 + 실제 5번 더미 레코드 복구.");
+    if (restored5)
+      AddLog(u8"[책략5DBG] 원복 완료: 실제 5번 더미 레코드 복구. 4번은 처음부터 건드리지 않았습니다.");
     else
-      AddLog(u8"[책략5DBG] 일부 원복 주소가 더 이상 유효하지 않습니다. 전투/화면 전환으로 테이블이 재생성되었을 수 있습니다.");
+      AddLog(u8"[책략5DBG] 5번 원복 주소가 더 이상 유효하지 않습니다. 전투/화면 전환으로 테이블이 재생성되었을 수 있습니다.");
 
     g_applied = false;
-    g_spell4Addr = 0;
     g_spell5Addr = 0;
-    g_spell4Original = {};
     g_spell5Original = {};
     ResetDiagnostics();
     return true;
