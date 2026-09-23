@@ -1198,6 +1198,43 @@ namespace DX11Base {
 
       ImGui::Spacing();
 
+      // 기재 관련 공통 편집
+      if (ImGui::BeginTable("WarTraitRow", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"기재 3슬롯 활성화", &DX11Base::bTraitViewer)) {
+          const bool requested = DX11Base::bTraitViewer;
+          if (!DX11Base::SetTraitViewerFeature(requested))
+            DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
+          NotifyFeatureToggle(u8"기재 3슬롯 활성화", DX11Base::bTraitViewer);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"기재 슬롯을 2개에서 3개로 확장합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"편집 메뉴에서 3번째 기재를 부여할 수 있습니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Button(u8"기재 이름 편집", ImVec2(-FLT_MIN, btnHeight))) {
+          DX11Base::OpenTraitTextEditorWindow();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"기본 기재 이름및 설명을 편집할수 있습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"적용후 저장까지 하면 게임실행시 자동으로 적용이 됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
+      }
+
+      ImGui::Spacing();
+
       if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여", ImVec2(-1, 30 * scale))) {
         DX11Base::OpenBatchRandomTraitAssignmentWindow();
       }
@@ -1980,41 +2017,6 @@ namespace DX11Base {
       }
 
       ImGui::Spacing();
-
-      // 2행: 기재 3슬롯 / 기재 이름 편집 - 2열 균등 배치
-      if (ImGui::BeginTable("InfoTraitRow", 2,
-                            ImGuiTableFlags_SizingStretchSame |
-                            ImGuiTableFlags_NoSavedSettings)) {
-        ImGui::TableNextRow();
-
-        ImGui::TableSetColumnIndex(0);
-        if (ImGui::Checkbox(u8"기재 3슬롯 활성화", &DX11Base::bTraitViewer)) {
-          const bool requested = DX11Base::bTraitViewer;
-          if (!DX11Base::SetTraitViewerFeature(requested))
-            DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
-          NotifyFeatureToggle(u8"기재 3슬롯 활성화", DX11Base::bTraitViewer);
-          SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"기재 슬롯을 2개에서 3개로 확장합니다.");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"편집 메뉴에서 3번째 기재를 부여할 수 있습니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::TableSetColumnIndex(1);
-        if (ImGui::Button(u8"기재 이름 편집", ImVec2(-FLT_MIN, btnHeight))) {
-          DX11Base::OpenTraitTextEditorWindow();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"기본 기재 이름및 설명을 편집할수 있습니다.");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"적용후 저장까지 하면 게임실행시 자동으로 적용이 됩니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::EndTable();
-      }
 
       ImGui::Spacing();
 
