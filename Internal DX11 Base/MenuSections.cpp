@@ -1607,12 +1607,12 @@ namespace DX11Base {
       }
 
       static bool s_spell5MetadataTest = false;
-      if (ImGui::Checkbox(u8"5번 책략 메타데이터", &s_spell5MetadataTest)) {
+      if (ImGui::Checkbox(u8"5번 책략 내부등록", &s_spell5MetadataTest)) {
         if (!DX11Base::SetStratagemFiveMetadataTest(s_spell5MetadataTest)) {
           s_spell5MetadataTest = !s_spell5MetadataTest;
-          AddNotification(u8"5번 책략 메타데이터 적용 실패 - 로그 확인");
+          AddNotification(u8"5번 책략 내부등록 적용 실패 - 로그 확인");
         } else {
-          NotifyFeatureToggle(u8"5번 책략 메타데이터", s_spell5MetadataTest);
+          NotifyFeatureToggle(u8"5번 책략 내부등록", s_spell5MetadataTest);
         }
       }
 
