@@ -286,10 +286,8 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   // is not ready yet; the guarded battle/UI hooks complete the wiring later.
   // This removes the old "open/close the trick dialog several times" timing
   // dependency while keeping all actual writes behind the existing guards.
-  DX11Base::SetSpell5HealProbe(true);
-  DX11Base::SetStratagemFiveMetadataTest(true);
-  DX11Base::SetStratagemFiveCountTest(true);
-  DX11Base::AddLog("[Stratagem5UI] ID5 experiment requests armed before battle UI");
+  DX11Base::SetStratagemFiveFeature(true);
+  DX11Base::AddLog("[Stratagem5UI] unified ID5 experiment armed before battle UI");
 
   // ���� DLL ���ϸ� Ȯ��
   char dllPath[MAX_PATH];
