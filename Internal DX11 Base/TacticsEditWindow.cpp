@@ -22,6 +22,56 @@ namespace DX11Base {
 
       ImGui::SetNextWindowSize(ImVec2(950 * scale, 700 * scale), ImGuiCond_FirstUseEver);
       if (ImGui::Begin(u8"전법 세부 수정###TacticsEditWin", &bShowTacticsEditWin, ImGuiWindowFlags_NoCollapse)) {
+        ImGui::TextColored(ImVec4(0.75f, 0.75f, 0.25f, 1.0f), u8"[ 공통 활성화 ]");
+
+        if (ImGui::Checkbox(u8"치료", &bSelfHeal)) {
+          SetSelfHeal(bSelfHeal);
+          NotifyFeatureToggle(u8"치료", bSelfHeal);
+          SaveConfig();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Checkbox(u8"동토", &bDongto)) {
+          SetDongto(bDongto);
+          NotifyFeatureToggle(u8"동토", bDongto);
+          SaveConfig();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Checkbox(u8"천계", &bCelestial)) {
+          SetCelestialMod(bCelestial);
+          NotifyFeatureToggle(u8"천계", bCelestial);
+          SaveConfig();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Checkbox(u8"투석", &bCatapult)) {
+          SetCatapultCheat(bCatapult);
+          NotifyFeatureToggle(u8"투석", bCatapult);
+          SaveConfig();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Checkbox(u8"격류/낙석", &bTerrainIgnore)) {
+          SetTerrainIgnore(bTerrainIgnore);
+          NotifyFeatureToggle(u8"격류/낙석", bTerrainIgnore);
+          SaveConfig();
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Checkbox(u8"방어 건물 강화", &bDefBuilding)) {
+          SetDefBuildingBoost(bDefBuilding);
+          NotifyFeatureToggle(u8"방어 건물 강화", bDefBuilding);
+          SaveConfig();
+        }
+
+        ImGui::Separator();
+
         if (ImGui::BeginTabBar("TacticsTabs")) {
           if (ImGui::BeginTabItem(u8"치료")) {
             ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"[ 치료 전법 설정 ]");
@@ -162,7 +212,6 @@ namespace DX11Base {
           }
           if (ImGui::BeginTabItem(u8"천계")) {
             ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"[ 천계 전법 설정 ]");
-            ImGui::Checkbox(u8"천계 전법 강화 활성화", &bCelestial);
             ImGui::Separator();
 
             // Level 1
