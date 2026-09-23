@@ -2077,6 +2077,10 @@ namespace DX11Base {
 
 
     static void RefreshFifthUiAtResetSeh(uintptr_t layout) {
+      if (g_fifthSkipCurrentBattle.load() ||
+          !g_fifthEffectiveEnabled.load())
+        return;
+
       const uintptr_t dialog = g_trickUiDialog;
       if (dialog && layout &&
           IsValidPtr(dialog, 0x40) &&
@@ -2852,6 +2856,9 @@ namespace DX11Base {
     }
 
     static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout) {
+      if (g_fifthSkipCurrentBattle.load() ||
+          !g_fifthEffectiveEnabled.load())
+        return false;
       if (!layout ||
           !g_fifthUiSidecarButton ||
           g_fifthUiSidecarLayout != layout ||
@@ -3037,6 +3044,9 @@ namespace DX11Base {
     }
 
     static bool CreateFifthUiSidecarDisplayOnlySeh(uintptr_t layout) {
+      if (g_fifthSkipCurrentBattle.load() ||
+          !g_fifthEffectiveEnabled.load())
+        return false;
       if (!layout || !IsValidPtr(layout, 0x2A8))
         return false;
 
@@ -5021,6 +5031,9 @@ namespace DX11Base {
   }
 
   static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog) {
+    if (g_fifthSkipCurrentBattle.load() ||
+        !g_fifthEffectiveEnabled.load())
+      return false;
     if (!dialog || !g_fiveRuntimeSlotApplied ||
         !g_fiveMetadataAddr || !g_fiveMetadataTable)
       return false;
