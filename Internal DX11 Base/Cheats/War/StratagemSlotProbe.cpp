@@ -33,6 +33,10 @@ namespace DX11Base {
     static uintptr_t g_fiveLoopImmAddr = 0;
     static uint8_t g_fiveLoopOriginal = 0;
 
+    static bool g_fiveMetadataApplied = false;
+    static uintptr_t g_fiveMetadataAddr = 0;
+    static uint8_t g_fiveMetadataOriginal[0x20] = {};
+
     static bool BuildCaptureCave(uintptr_t hookAddr) {
       g_caveAddr = AllocNear(hookAddr, 128);
       if (!g_caveAddr)
@@ -536,6 +540,130 @@ namespace DX11Base {
     g_fiveLoopApplied = false;
     g_fiveLoopImmAddr = 0;
     g_fiveLoopOriginal = 0;
+    return true;
+  }
+
+  bool SetStratagemFiveMetadataTest(bool enable) {
+    constexpr uintptr_t kTroopTypePointerOffset = 0x46BF10;
+    constexpr uintptr_t kStratagemMetadataOffset = 0x9D30;
+    constexpr uintptr_t kRecordStride = 0x20;
+    constexpr uintptr_t kId1 = 0x08;
+    constexpr uintptr_t kId2 = 0x0A;
+    constexpr uintptr_t kId3 = 0x0C;
+    constexpr uintptr_t kFlag = 0x0E;
+
+    if (enable) {
+      if (g_fiveMetadataApplied)
+        return true;
+
+      const uintptr_t gameBase = GetGameBase();
+      if (!gameBase ||
+          !IsValidPtr(gameBase + kTroopTypePointerOffset, sizeof(uintptr_t))) {
+        AddLog(u8"[책략5메타DBG] gameBase/troopType 포인터가 유효하지 않습니다.");
+        return false;
+      }
+
+      const uintptr_t troopTypeBase =
+          *reinterpret_cast<const uintptr_t *>(
+              gameBase + kTroopTypePointerOffset);
+      if (!troopTypeBase) {
+        AddLog(u8"[책략5메타DBG] troopType base가 0입니다.");
+        return false;
+      }
+
+      const uintptr_t table = troopTypeBase + kStratagemMetadataOffset;
+      if (!IsValidPtr(table, kRecordStride * 5)) {
+        AddLog(u8"[책략5메타DBG] 책략 메타 테이블 범위가 유효하지 않습니다: %p",
+               reinterpret_cast<void *>(table));
+        return false;
+      }
+
+      // Strong validation from the CT layout: rows 1..4 must carry
+      // ID/name/description IDs 1,2,3,4 at +08/+0A/+0C.
+      for (int i = 0; i < 4; ++i) {
+        const uintptr_t row = table + (uintptr_t)i * kRecordStride;
+        const uint8_t expected = (uint8_t)(i + 1);
+        const uint8_t a = *reinterpret_cast<const uint8_t *>(row + kId1);
+        const uint8_t b = *reinterpret_cast<const uint8_t *>(row + kId2);
+        const uint8_t d = *reinterpret_cast<const uint8_t *>(row + kId3);
+        if (a != expected || b != expected || d != expected) {
+          AddLog(u8"[책략5메타DBG] 메타 테이블 검증 실패 row=%d IDs=%u/%u/%u",
+                 i + 1, (unsigned)a, (unsigned)b, (unsigned)d);
+          return false;
+        }
+      }
+
+      const uintptr_t source = table + 3 * kRecordStride; // valid row 4
+      const uintptr_t row5 = table + 4 * kRecordStride;
+
+      std::memcpy(g_fiveMetadataOriginal,
+                  reinterpret_cast<const void *>(row5),
+                  sizeof(g_fiveMetadataOriginal));
+
+      uint8_t clone[0x20] = {};
+      std::memcpy(clone, reinterpret_cast<const void *>(source), sizeof(clone));
+      clone[kId1] = 5;
+      clone[kId2] = 5;
+      clone[kId3] = 5;
+
+      const uint8_t sourceFlag =
+          *reinterpret_cast<const uint8_t *>(source + kFlag);
+      clone[kFlag] = sourceFlag;
+
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(row5), sizeof(clone),
+                          PAGE_READWRITE, &oldProtect)) {
+        AddLog(u8"[책략5메타DBG] 5번 메타 행 쓰기 권한 변경 실패.");
+        return false;
+      }
+
+      std::memcpy(reinterpret_cast<void *>(row5), clone, sizeof(clone));
+      VirtualProtect(reinterpret_cast<LPVOID>(row5), sizeof(clone),
+                     oldProtect, &tmpProtect);
+
+      if (*reinterpret_cast<const uint8_t *>(row5 + kId1) != 5 ||
+          *reinterpret_cast<const uint8_t *>(row5 + kId2) != 5 ||
+          *reinterpret_cast<const uint8_t *>(row5 + kId3) != 5 ||
+          *reinterpret_cast<const uint8_t *>(row5 + kFlag) != sourceFlag) {
+        AddLog(u8"[책략5메타DBG] 5번 메타 행 쓰기 검증 실패.");
+        return false;
+      }
+
+      g_fiveMetadataAddr = row5;
+      g_fiveMetadataApplied = true;
+
+      AddLog(u8"[책략5메타DBG] 적용 성공 table=%p row5=%p IDs=5/5/5 flag=%u",
+             reinterpret_cast<void *>(table),
+             reinterpret_cast<void *>(row5),
+             (unsigned)sourceFlag);
+      AddLog(u8"[책략5메타DBG] 4번 메타 행을 복제하고 ID/이름/설명 ID만 5로 변경했습니다.");
+      return true;
+    }
+
+    if (!g_fiveMetadataApplied)
+      return true;
+
+    if (g_fiveMetadataAddr &&
+        IsValidPtr(g_fiveMetadataAddr, sizeof(g_fiveMetadataOriginal))) {
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (VirtualProtect(reinterpret_cast<LPVOID>(g_fiveMetadataAddr),
+                         sizeof(g_fiveMetadataOriginal),
+                         PAGE_READWRITE, &oldProtect)) {
+        std::memcpy(reinterpret_cast<void *>(g_fiveMetadataAddr),
+                    g_fiveMetadataOriginal,
+                    sizeof(g_fiveMetadataOriginal));
+        VirtualProtect(reinterpret_cast<LPVOID>(g_fiveMetadataAddr),
+                       sizeof(g_fiveMetadataOriginal),
+                       oldProtect, &tmpProtect);
+      }
+    }
+
+    AddLog(u8"[책략5메타DBG] 5번 메타 행 원복 완료.");
+    g_fiveMetadataApplied = false;
+    g_fiveMetadataAddr = 0;
+    std::memset(g_fiveMetadataOriginal, 0, sizeof(g_fiveMetadataOriginal));
     return true;
   }
 
