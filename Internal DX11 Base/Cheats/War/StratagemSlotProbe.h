@@ -38,9 +38,20 @@ namespace DX11Base {
   // but abandons Camp/UI/model/sidecar pointers from the battle that just ended.
   void ResetStratagemFiveBattleRuntime();
 
-  // Explicit game/save generation reset. Keeps user-requested ON state but
-  // abandons all battle/UI object pointers from the previous p1 generation.
+  // Explicit game/save generation reset. Keeps the user's desired checkbox
+  // state, abandons all previous battle/UI pointers, and marks the newly loaded
+  // generation unsafe for ID5 injection until a stable non-battle phase is seen.
   void ResetStratagemFiveSessionRuntime(uintptr_t oldP1, uintptr_t newP1);
+
+  // Battle lifecycle gate. During an active battle the effective state is frozen:
+  // checkbox changes are remembered but are applied only after safeNonBattle=true.
+  // This prevents save-loaded/mid-battle UI generations from being modified.
+  void UpdateStratagemFiveBattleLifecycle(bool battleActive,
+                                          bool safeNonBattle);
+
+  // True when the current battle generation must not receive any ID5 data/UI
+  // mutation. BattleMonitor uses this to suppress data refresh and UI probes.
+  bool ShouldSkipStratagemFiveCurrentBattle();
 
   // Keeps the requested ID5 count/metadata attached to the current battle
   // generation. Old pointers are abandoned across save/load transitions.
