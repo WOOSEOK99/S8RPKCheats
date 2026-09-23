@@ -1510,48 +1510,6 @@ namespace DX11Base {
         bShowTacticsEditWin = !bShowTacticsEditWin;
       }
 
-      if (ImGui::Checkbox(u8"치료", &bSelfHeal)) {
-        DX11Base::SetSelfHeal(bSelfHeal);
-        NotifyFeatureToggle(u8"치료", bSelfHeal);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-
-      if (ImGui::Checkbox(u8"동토", &bDongto)) {
-        DX11Base::SetDongto(bDongto);
-        NotifyFeatureToggle(u8"동토", bDongto);
-        SaveConfig();
-      }
-      ImGui::SameLine();
-
-      if (ImGui::Checkbox(u8"천계", &bCelestial)) {
-        DX11Base::SetCelestialMod(bCelestial);
-        NotifyFeatureToggle(u8"천계", bCelestial);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-
-      if (ImGui::Checkbox(u8"투석", &bCatapult)) {
-        DX11Base::SetCatapultCheat(bCatapult);
-        NotifyFeatureToggle(u8"투석", bCatapult);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"격류/낙석", &bTerrainIgnore)) {
-        DX11Base::SetTerrainIgnore(bTerrainIgnore);
-        NotifyFeatureToggle(u8"격류/낙석", bTerrainIgnore);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"방어 건물 강화", &bDefBuilding)) {
-        DX11Base::SetDefBuildingBoost(bDefBuilding);
-        NotifyFeatureToggle(u8"방어 건물 강화", bDefBuilding);
-        SaveConfig();
-      }
-
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::Spacing();
