@@ -8,7 +8,8 @@ namespace DX11Base {
                      float scale);
 
     // 섹션별 그리기 함수
-    void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale);
+    void DrawDomesticSection(uintptr_t p1, uintptr_t gameBase, float scale);
+    void DrawCouncilSection(uintptr_t p1, uintptr_t gameBase, float scale);
     void DrawScenarioSection(uintptr_t p1, float scale);
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale);
     void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale);
