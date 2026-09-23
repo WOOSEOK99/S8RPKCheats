@@ -143,6 +143,7 @@ namespace DX11Base {
     static bool g_fifthUiCallbackCodeTargetsLogged = false;
     static bool g_fifthUiTextPathLogged = false;
     static bool g_fifthTrickDataVtableLogged = false;
+    static bool g_fifthTrickDataTextVirtualsLogged = false;
     static std::atomic<uintptr_t> g_fifthTitleNameGetterOriginal{0};
     static std::atomic<bool> g_fifthTitleNameGetterProbeInstalled{false};
     static std::atomic<uintptr_t> g_fifthTitleSeenCallers[16]{};
@@ -2272,6 +2273,95 @@ namespace DX11Base {
         }
       }
     }
+
+    static void LogFifthTrickDataTextVirtuals(uintptr_t row5) {
+      if (g_fifthTrickDataTextVirtualsLogged || !row5 ||
+          !IsValidPtr(row5, sizeof(uintptr_t)))
+        return;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      MODULEINFO mi{};
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase) ||
+          !GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return;
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      uintptr_t vtable = 0;
+      if (!SafeReadPtrSeh(row5, &vtable) ||
+          !vtable || !IsValidPtr(vtable, 24 * sizeof(uintptr_t)))
+        return;
+
+      constexpr unsigned kSlots[] = {1,2,3,9,10,11,14,15,16,22,23};
+      g_fifthTrickDataTextVirtualsLogged = true;
+
+      for (unsigned slot : kSlots) {
+        uintptr_t fn = 0;
+        if (!SafeReadPtrSeh(vtable + slot * sizeof(uintptr_t), &fn) ||
+            fn < exeBase || fn >= imageEnd || !IsExecutableAddress(fn))
+          continue;
+
+        uint8_t code[0x120] = {};
+        if (!SafeCopySeh(fn, code, sizeof(code)))
+          continue;
+
+        AddLog(u8"[책략5VTEXT] vtbl[%u] RVA=+%llX size=0x%llX",
+               slot,
+               (unsigned long long)(fn - exeBase),
+               (unsigned long long)sizeof(code));
+
+        for (size_t off = 0; off < sizeof(code); off += 0x20) {
+          char line[256] = {};
+          int pos = 0;
+          const size_t chunk =
+              (off + 0x20 <= sizeof(code)) ? 0x20 : (sizeof(code) - off);
+          for (size_t j = 0; j < chunk &&
+                             pos < (int)sizeof(line) - 4; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos,
+                             "%02X ", (unsigned)code[off + j]);
+          }
+          AddLog(u8"[책략5VTEXT] slot%u +%03llX : %s",
+                 slot, (unsigned long long)off, line);
+        }
+
+        for (size_t off = 0; off + 7 <= sizeof(code); ++off) {
+          if (code[off] == 0xE8 || code[off] == 0xE9) {
+            int32_t rel = 0;
+            std::memcpy(&rel, code + off + 1, sizeof(rel));
+            const uintptr_t target =
+                fn + off + 5 + static_cast<intptr_t>(rel);
+            if (target >= exeBase && target < imageEnd) {
+              AddLog(u8"[책략5VTEXT] slot%u %s +%03llX -> RVA=+%llX",
+                     slot,
+                     code[off] == 0xE8 ? "CALL" : "JMP",
+                     (unsigned long long)off,
+                     (unsigned long long)(target - exeBase));
+            }
+          }
+
+          const uint8_t rex = code[off];
+          if ((rex == 0x48 || rex == 0x4C) &&
+              (code[off + 1] == 0x8D || code[off + 1] == 0x8B) &&
+              (code[off + 2] & 0xC7) == 0x05) {
+            int32_t disp = 0;
+            std::memcpy(&disp, code + off + 3, sizeof(disp));
+            const uintptr_t target =
+                fn + off + 7 + static_cast<intptr_t>(disp);
+            if (target >= exeBase && target < imageEnd) {
+              AddLog(u8"[책략5VTEXT] slot%u RIP-%s +%03llX -> RVA=+%llX",
+                     slot,
+                     code[off + 1] == 0x8D ? "LEA" : "MOV",
+                     (unsigned long long)off,
+                     (unsigned long long)(target - exeBase));
+            }
+          }
+        }
+      }
+    }
+
 
     static void LogFifthTrickDataVtableCandidates(uintptr_t row5) {
       if (g_fifthTrickDataVtableLogged || !row5 ||
@@ -5587,7 +5677,7 @@ namespace DX11Base {
     // method and do not patch the game; they only record executable targets.
     LogFifthUiTextPathCandidates();
     LogFifthTrickDataVtableCandidates(row5);
-    EnsureFifthVisibleTextProbe();
+    LogFifthTrickDataTextVirtuals(row5);
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
