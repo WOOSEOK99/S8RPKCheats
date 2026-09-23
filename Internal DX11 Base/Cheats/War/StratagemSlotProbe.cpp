@@ -12,6 +12,8 @@
 #include <cstring>
 
 namespace DX11Base {
+  static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog);
+
   namespace {
     constexpr uintptr_t kSideOffset = 0x18;
     constexpr uintptr_t kGaugeOffset = 0x154;
@@ -234,7 +236,6 @@ namespace DX11Base {
     static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout);
     static bool ValidatePreparedFifthUiHelper(
         uintptr_t layout, uint32_t *descriptorTag = nullptr);
-    static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog);
 
 
     // Read only PE headers and the bounded CodeView directory, never scan memory.
