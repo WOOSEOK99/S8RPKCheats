@@ -64,6 +64,16 @@ namespace DX11Base {
     static bool g_fifthUiMakerExpanded = false;
     static uintptr_t g_fifthUiMakerAddr = 0;
     static uint8_t g_fifthUiMakerOriginal[0x28] = {};
+    static bool g_fifthUiId7Registered = false;
+
+    // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
+    // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
+    // constructs the one-shot type20 helper for UI ID7.
+    static uintptr_t g_trickInitLayoutsCallAddr = 0;
+    static uintptr_t g_trickInitLayoutsCaveAddr = 0;
+    static uint8_t g_trickInitLayoutsOriginalCall[5] = {};
+    static bool g_trickInitLayoutsHookApplied = false;
+    static uintptr_t g_originalInitLayoutsAddr = 0;
 
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
@@ -96,6 +106,197 @@ namespace DX11Base {
                                 uintptr_t rva,
                                 size_t offset,
                                 size_t length);
+
+
+    static void __fastcall TrickUiInitLayoutsBridge(uintptr_t maker,
+                                                    const void *descriptors,
+                                                    int count,
+                                                    uintptr_t owner) {
+      using InitLayoutsFn =
+          void(__fastcall *)(uintptr_t, const void *, int, uintptr_t);
+
+      const auto original =
+          reinterpret_cast<InitLayoutsFn>(g_originalInitLayoutsAddr);
+      if (!original)
+        return;
+
+      if (count != 7 ||
+          !descriptors ||
+          !IsValidPtr(reinterpret_cast<uintptr_t>(descriptors), 7 * 0x60)) {
+        original(maker, descriptors, count, owner);
+        return;
+      }
+
+      alignas(16) uint8_t expanded[8 * 0x60] = {};
+      if (!SafeCopySeh(reinterpret_cast<uintptr_t>(descriptors),
+                       expanded, 7 * 0x60)) {
+        original(maker, descriptors, count, owner);
+        return;
+      }
+
+      // The existing stratagem buttons are UI IDs 2..5 and all use type 0x14.
+      // Clone ID5's descriptor into the new ID7 slot. Position is adjusted
+      // later on the actual controls after registration.
+      int32_t type2=0, type3=0, type4=0, type5=0;
+      std::memcpy(&type2, expanded + 2 * 0x60, 4);
+      std::memcpy(&type3, expanded + 3 * 0x60, 4);
+      std::memcpy(&type4, expanded + 4 * 0x60, 4);
+      std::memcpy(&type5, expanded + 5 * 0x60, 4);
+
+      if (type2 != 0x14 || type3 != 0x14 ||
+          type4 != 0x14 || type5 != 0x14) {
+        AddLog(u8"[책략5UIHELPER] 초기 7칸 descriptor type 검증 실패: %d/%d/%d/%d",
+               type2, type3, type4, type5);
+        original(maker, descriptors, count, owner);
+        return;
+      }
+
+      std::memcpy(expanded + 7 * 0x60,
+                  expanded + 5 * 0x60,
+                  0x60);
+
+      __try {
+        original(maker, expanded, 8, owner);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5UIHELPER] 원본 InitLayouts 7->8 확장 호출 중 예외. 원래 7칸으로 재시도.");
+        original(maker, descriptors, count, owner);
+        return;
+      }
+
+      uint32_t newCount = 0;
+      uintptr_t pointerTable = 0;
+      uintptr_t helper7 = 0;
+      SafeCopySeh(maker + 0x10, &newCount, sizeof(newCount));
+      SafeReadPtrSeh(maker + 0x08, &pointerTable);
+      if (pointerTable && IsValidPtr(pointerTable, 8 * sizeof(uintptr_t)))
+        SafeReadPtrSeh(pointerTable + 7 * sizeof(uintptr_t), &helper7);
+
+      AddLog(u8"[책략5UIHELPER] 초기 InitLayouts 7->8 완료: maker=%p owner=%p count=%u helper7=%p",
+             reinterpret_cast<void *>(maker),
+             reinterpret_cast<void *>(owner),
+             (unsigned)newCount,
+             reinterpret_cast<void *>(helper7));
+    }
+
+    static bool EnsureTrickUiInitLayoutsBridgeHook() {
+      if (g_trickInitLayoutsHookApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase)
+        return false;
+
+      constexpr uintptr_t kLayoutInitializeRva = 0x01DAF350;
+      constexpr uintptr_t kInitLayoutsRva = 0x01D13E60;
+      const uintptr_t originalTarget = exeBase + kInitLayoutsRva;
+      const uintptr_t scanStart =
+          exeBase + kLayoutInitializeRva + 0xB20;
+      const uintptr_t scanEnd =
+          exeBase + kLayoutInitializeRva + 0xB80;
+
+      uintptr_t callSite = 0;
+      for (uintptr_t p = scanStart; p + 5 <= scanEnd; ++p) {
+        if (!IsValidPtr(p, 5) ||
+            *reinterpret_cast<const uint8_t *>(p) != 0xE8)
+          continue;
+
+        int32_t rel = 0;
+        std::memcpy(&rel,
+                    reinterpret_cast<const void *>(p + 1),
+                    sizeof(rel));
+        const uintptr_t target =
+            static_cast<uintptr_t>(
+                static_cast<intptr_t>(p + 5) +
+                static_cast<intptr_t>(rel));
+        if (target == originalTarget) {
+          callSite = p;
+          break;
+        }
+      }
+
+      if (!callSite) {
+        AddLog(u8"[책략5UIHELPER] Layout::Initialize의 InitLayouts call을 찾지 못했습니다.");
+        return false;
+      }
+
+      // The original setup immediately before this call must contain
+      // "mov r8d,7"; otherwise do not patch this build.
+      bool countSevenFound = false;
+      const uintptr_t verifyStart =
+          (callSite >= scanStart + 24) ? callSite - 24 : scanStart;
+      for (uintptr_t p = verifyStart; p + 6 <= callSite; ++p) {
+        static const uint8_t movR8d7[6] =
+            {0x41,0xB8,0x07,0x00,0x00,0x00};
+        if (std::memcmp(reinterpret_cast<const void *>(p),
+                        movR8d7, sizeof(movR8d7)) == 0) {
+          countSevenFound = true;
+          break;
+        }
+      }
+      if (!countSevenFound) {
+        AddLog(u8"[책략5UIHELPER] InitLayouts call 직전 count=7 검증 실패.");
+        return false;
+      }
+
+      const uintptr_t cave = AllocNear(callSite, 64);
+      if (!cave)
+        return false;
+
+      uint8_t *c = reinterpret_cast<uint8_t *>(cave);
+      int i = 0;
+      auto emit8 = [&](uint8_t v) { c[i++] = v; };
+      auto emit64 = [&](uintptr_t v) {
+        std::memcpy(c + i, &v, sizeof(v));
+        i += 8;
+      };
+
+      // Called by the original CALL site, so preserve Win64 stack alignment,
+      // call our bridge with the exact RCX/RDX/R8/R9 arguments, then RET.
+      emit8(0x48); emit8(0x83); emit8(0xEC); emit8(0x28); // sub rsp,28
+      emit8(0x48); emit8(0xB8);                            // mov rax,imm64
+      emit64(reinterpret_cast<uintptr_t>(&TrickUiInitLayoutsBridge));
+      emit8(0xFF); emit8(0xD0);                            // call rax
+      emit8(0x48); emit8(0x83); emit8(0xC4); emit8(0x28); // add rsp,28
+      emit8(0xC3);                                         // ret
+      FlushInstructionCache(GetCurrentProcess(), c, i);
+
+      const intptr_t callRel =
+          static_cast<intptr_t>(cave) -
+          static_cast<intptr_t>(callSite + 5);
+      if (callRel < INT32_MIN || callRel > INT32_MAX) {
+        VirtualFree(reinterpret_cast<LPVOID>(cave), 0, MEM_RELEASE);
+        return false;
+      }
+
+      uint8_t patch[5] = {0xE8,0,0,0,0};
+      const int32_t rel32 = static_cast<int32_t>(callRel);
+      std::memcpy(patch + 1, &rel32, sizeof(rel32));
+
+      std::memcpy(g_trickInitLayoutsOriginalCall,
+                  reinterpret_cast<const void *>(callSite), 5);
+
+      DWORD oldProtect=0, tmpProtect=0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(callSite), 5,
+                          PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        VirtualFree(reinterpret_cast<LPVOID>(cave), 0, MEM_RELEASE);
+        return false;
+      }
+
+      std::memcpy(reinterpret_cast<void *>(callSite), patch, 5);
+      FlushInstructionCache(GetCurrentProcess(),
+                            reinterpret_cast<void *>(callSite), 5);
+      VirtualProtect(reinterpret_cast<LPVOID>(callSite), 5,
+                     oldProtect, &tmpProtect);
+
+      g_trickInitLayoutsCallAddr = callSite;
+      g_trickInitLayoutsCaveAddr = cave;
+      g_originalInitLayoutsAddr = originalTarget;
+      g_trickInitLayoutsHookApplied = true;
+
+      AddLog(u8"[책략5UIHELPER] 책략 UI 초기 InitLayouts 7->8 브리지 설치 완료.");
+      return true;
+    }
 
 
     static bool BuildTrickUiLayoutCaptureCave(uintptr_t hookAddr) {
@@ -347,65 +548,22 @@ namespace DX11Base {
           !IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
         return false;
 
-      if (g_fifthUiMakerExpanded &&
-          g_fifthUiMakerAddr == layout + 0x140)
+      if (g_fifthUiId7Registered)
         return true;
 
       volatile int stage = 0;
-
       __try {
         const uintptr_t exeBase =
             reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
         if (!exeBase)
           return false;
 
-        constexpr uintptr_t kMemoryManagerGetterRva = 0x00014ED0;
         constexpr uintptr_t kLookupLayoutRva = 0x01D15440;
         constexpr uintptr_t kRegisterLayoutRva = 0x01D16AA0;
-
-        static const uint8_t lookupExpected[] =
-            {0x48,0x89,0x5C,0x24,0x08};
-        static const uint8_t regExpected[] =
-            {0x48,0x89,0x6C,0x24,0x18,0x56};
-
-        stage = 1;
-        if (!IsValidPtr(exeBase + kLookupLayoutRva, sizeof(lookupExpected)) ||
-            !IsValidPtr(exeBase + kRegisterLayoutRva, sizeof(regExpected)) ||
-            std::memcmp(reinterpret_cast<const void *>(exeBase + kLookupLayoutRva),
-                        lookupExpected, sizeof(lookupExpected)) != 0 ||
-            std::memcmp(reinterpret_cast<const void *>(exeBase + kRegisterLayoutRva),
-                        regExpected, sizeof(regExpected)) != 0) {
-          AddLog(u8"[책략5UITEST] CUIMaker lookup/register 빌드 가드 불일치.");
-          return false;
-        }
-
-        const uintptr_t maker = layout + 0x140;
-        uintptr_t descBase = 0;
-        uintptr_t pointerBase = 0;
-        uint32_t count = 0;
-        uintptr_t owner = 0;
-
-        stage = 2;
-        if (!SafeReadPtrSeh(maker + 0x00, &descBase) ||
-            !SafeReadPtrSeh(maker + 0x08, &pointerBase) ||
-            !SafeCopySeh(maker + 0x10, &count, sizeof(count)) ||
-            !SafeReadPtrSeh(maker + 0x18, &owner) ||
-            count != 7 ||
-            owner != layout ||
-            !descBase || !pointerBase ||
-            !IsValidPtr(descBase, 7 * 0x60) ||
-            !IsValidPtr(pointerBase, 7 * sizeof(uintptr_t))) {
-          AddLog(u8"[책략5UITEST] 기존 CUIMaker 구조 검증 실패: count=%u owner=%p",
-                 (unsigned)count,
-                 reinterpret_cast<void *>(owner));
-          return false;
-        }
 
         using LookupLayoutFn = uintptr_t(__fastcall *)(uintptr_t, int);
         using RegisterLayoutFn =
             void(__fastcall *)(uintptr_t, int, uintptr_t, int, int);
-        using GetMemoryManagerFn = uintptr_t(__fastcall *)();
-        using GameAllocFn = uintptr_t(__fastcall *)(uintptr_t, size_t, void *);
         using SetXYFn = void(__fastcall *)(uintptr_t, int, int);
 
         const auto lookup =
@@ -413,356 +571,114 @@ namespace DX11Base {
         const auto registerLayout =
             reinterpret_cast<RegisterLayoutFn>(exeBase + kRegisterLayoutRva);
 
-        uintptr_t buttons[4] = {};
-        if (!SafeCopySeh(layout + 0x1E0, buttons, sizeof(buttons)))
-          return false;
+        const uintptr_t maker = layout + 0x140;
+        uintptr_t descBase=0, pointerBase=0, owner=0;
+        uint32_t count=0;
 
-        stage = 3;
-        for (int i = 0; i < 4; ++i) {
-          if (lookup(maker, i + 2) != buttons[i]) {
-            AddLog(u8"[책략5UITEST] 기존 버튼 lookup 검증 실패: id=%d", i + 2);
+        stage=1;
+        if (!SafeReadPtrSeh(maker+0x00,&descBase) ||
+            !SafeReadPtrSeh(maker+0x08,&pointerBase) ||
+            !SafeCopySeh(maker+0x10,&count,sizeof(count)) ||
+            !SafeReadPtrSeh(maker+0x18,&owner) ||
+            count != 8 || owner != layout ||
+            !descBase || !pointerBase ||
+            !IsValidPtr(descBase,8*0x60) ||
+            !IsValidPtr(pointerBase,8*sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UITEST] 초기 8칸 maker가 준비되지 않음: count=%u owner=%p. 책략창 최초 생성 전에 내부등록을 켜야 합니다.",
+                 (unsigned)count,
+                 reinterpret_cast<void *>(owner));
+          return false;
+        }
+
+        uintptr_t helper7=0;
+        SafeReadPtrSeh(pointerBase + 7*sizeof(uintptr_t), &helper7);
+        if (!helper7 || !IsValidPtr(helper7, sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UITEST] ID7 type20 helper가 없음. 초기 InitLayouts 브리지가 적용되지 않았습니다.");
+          return false;
+        }
+
+        int32_t type7=0;
+        SafeCopySeh(descBase + 7*0x60, &type7, sizeof(type7));
+        if (type7 != 0x14) {
+          AddLog(u8"[책략5UITEST] ID7 descriptor type 불일치: %d", type7);
+          return false;
+        }
+
+        uintptr_t buttons[4]={};
+        if (!SafeCopySeh(layout+0x1E0,buttons,sizeof(buttons)))
+          return false;
+        for(int i=0;i<4;++i) {
+          if (lookup(maker,i+2) != buttons[i]) {
+            AddLog(u8"[책략5UITEST] 기존 UI ID%d lookup 불일치.",i+2);
             return false;
           }
         }
 
-        uintptr_t id6Control = 0;
-        SafeReadPtrSeh(layout + 0x290, &id6Control);
-        if (!id6Control || lookup(maker, 6) != id6Control) {
-          AddLog(u8"[책략5UITEST] 기존 ID6 lookup 검증 실패.");
-          return false;
+        if (lookup(maker,7)) {
+          AddLog(u8"[책략5UITEST] ID7은 이미 등록되어 있습니다.");
+          g_fifthUiId7Registered=true;
+          return true;
         }
 
-        if (lookup(maker, 7)) {
-          AddLog(u8"[책략5UITEST] ID7이 이미 점유되어 있어 중단.");
-          return false;
-        }
-
-        alignas(16) uint8_t descriptors[8 * 0x60] = {};
-        uintptr_t oldPointerSlots[7] = {};
-        stage = 4;
-        std::memcpy(descriptors,
-                    reinterpret_cast<const void *>(descBase),
-                    7 * 0x60);
-        std::memcpy(oldPointerSlots,
-                    reinterpret_cast<const void *>(pointerBase),
-                    sizeof(oldPointerSlots));
-
-        // ID7 starts from the proven TrickSelectButton descriptor (UI ID5).
-        std::memcpy(descriptors + 7 * 0x60,
-                    descriptors + 5 * 0x60,
-                    0x60);
-
-        const int oldStart = (int)g_trickUiStartX;
-        const int oldStep = (int)g_trickUiStep;
-        const int y = (int)g_trickUiY;
-        if (oldStep <= 0)
-          return false;
-
-        const int compactStep = (oldStep * 11) / 14;
-        const int oldCenter = oldStart + (oldStep * 3) / 2;
-        const int compactStart = oldCenter - compactStep * 2;
-        const int compactX[5] = {
-            compactStart,
-            compactStart + compactStep,
-            compactStart + compactStep * 2,
-            compactStart + compactStep * 3,
-            compactStart + compactStep * 4
-        };
-
-        const int oldX[4] = {
-            oldStart,
-            oldStart + oldStep,
-            oldStart + oldStep * 2,
-            oldStart + oldStep * 3
-        };
-
-        int xField = -1;
-        int yField = -1;
-        const int candidateFields[] = {0x04, 0x08, 0x0C, 0x10};
-        for (int field : candidateFields) {
-          bool xMatch = true;
-          bool yMatch = true;
-          for (int i = 0; i < 4; ++i) {
-            int32_t v = 0;
-            std::memcpy(&v,
-                        descriptors + (i + 2) * 0x60 + field,
-                        sizeof(v));
-            if (v != oldX[i])
-              xMatch = false;
-            if (v != y)
-              yMatch = false;
-          }
-          if (xMatch) xField = field;
-          if (yMatch) yField = field;
-        }
-
-        if (xField < 0 || yField < 0) {
-          AddLog(u8"[책략5UITEST] descriptor 좌표 필드 검증 실패.");
-          return false;
-        }
-
-        for (int i = 0; i < 4; ++i) {
-          std::memcpy(descriptors + (i + 2) * 0x60 + xField,
-                      &compactX[i], sizeof(compactX[i]));
-          std::memcpy(descriptors + (i + 2) * 0x60 + yField,
-                      &y, sizeof(y));
-        }
-        std::memcpy(descriptors + 7 * 0x60 + xField,
-                    &compactX[4], sizeof(compactX[4]));
-        std::memcpy(descriptors + 7 * 0x60 + yField,
-                    &y, sizeof(y));
-
-        int32_t types[8] = {};
-        for (int id = 0; id < 8; ++id)
-          std::memcpy(&types[id],
-                      descriptors + id * 0x60,
-                      sizeof(types[id]));
-
-        if (types[7] != 0x14) {
-          AddLog(u8"[책략5UITEST] ID7 descriptor type 검증 실패: %d", types[7]);
-          return false;
-        }
-
-        // Allocate only expanded descriptor/pointer arrays. Keep the *live*
-        // CUIMaker object and all of its internal containers untouched.
-        stage = 5;
-        const auto getMemoryManager =
-            reinterpret_cast<GetMemoryManagerFn>(
-                exeBase + kMemoryManagerGetterRva);
-        const uintptr_t memoryManager = getMemoryManager();
-        if (!memoryManager ||
-            !IsValidPtr(memoryManager + 0x118, sizeof(uintptr_t)))
-          return false;
-
-        const uintptr_t allocator =
-            *reinterpret_cast<const uintptr_t *>(memoryManager + 0x118);
-        if (!allocator || !IsValidPtr(allocator, sizeof(uintptr_t)))
-          return false;
-
-        const uintptr_t allocatorVtable =
-            *reinterpret_cast<const uintptr_t *>(allocator);
-        if (!allocatorVtable ||
-            !IsValidPtr(allocatorVtable + 0x28, sizeof(uintptr_t)))
-          return false;
-
-        const uintptr_t allocAddr =
-            *reinterpret_cast<const uintptr_t *>(allocatorVtable + 0x28);
-        if (!allocAddr || !IsValidPtr(allocAddr, 1))
-          return false;
-
-        struct AllocTag {
-          uint32_t tag;
-          uint32_t reserved;
-          uintptr_t context;
-        };
-        AllocTag allocTag{0x37u, 0u, 0u};
-
-        const auto allocFn =
-            reinterpret_cast<GameAllocFn>(allocAddr);
-
-        const uintptr_t newDesc =
-            allocFn(allocator, 8 * 0x60, &allocTag);
-        const uintptr_t newPointers =
-            allocFn(allocator, 8 * sizeof(uintptr_t), &allocTag);
-
-        if (!newDesc || !newPointers ||
-            !IsValidPtr(newDesc, 8 * 0x60) ||
-            !IsValidPtr(newPointers, 8 * sizeof(uintptr_t))) {
-          AddLog(u8"[책략5UITEST] 새 registry storage 할당 실패.");
-          return false;
-        }
-
-        std::memcpy(reinterpret_cast<void *>(newDesc),
-                    descriptors, sizeof(descriptors));
-        std::memcpy(reinterpret_cast<void *>(newPointers),
-                    oldPointerSlots, sizeof(oldPointerSlots));
-
-        // The per-ID layout helper table may legally contain nulls. For ID7,
-        // clone ID5's helper pointer when present; otherwise keep null.
-        *reinterpret_cast<uintptr_t *>(newPointers + 7 * sizeof(uintptr_t)) =
-            oldPointerSlots[5];
-
-        AddLog(u8"[책략5UITEST] 기존 pointer slots=%p,%p,%p,%p,%p,%p,%p / ID7 clone=%p",
-               reinterpret_cast<void *>(oldPointerSlots[0]),
-               reinterpret_cast<void *>(oldPointerSlots[1]),
-               reinterpret_cast<void *>(oldPointerSlots[2]),
-               reinterpret_cast<void *>(oldPointerSlots[3]),
-               reinterpret_cast<void *>(oldPointerSlots[4]),
-               reinterpret_cast<void *>(oldPointerSlots[5]),
-               reinterpret_cast<void *>(oldPointerSlots[6]),
-               reinterpret_cast<void *>(oldPointerSlots[5]));
-
-        // RegisterLayout consumes a per-ID helper created by InitLayouts.
-        // At runtime all original slots are already null, which means those
-        // helpers are one-shot/moved during initial registration. Do not call
-        // RegisterLayout for ID7 until we know how to build the type-20 helper.
-        bool allHelpersConsumed = true;
-        for (int i = 0; i < 7; ++i) {
-          if (oldPointerSlots[i] != 0) {
-            allHelpersConsumed = false;
-            break;
-          }
-        }
-
-        if (allHelpersConsumed) {
-          MODULEINFO mi{};
-          if (GetModuleInformation(GetCurrentProcess(),
-                                   reinterpret_cast<HMODULE>(exeBase),
-                                   &mi, sizeof(mi))) {
-            const uintptr_t imageEnd =
-                exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
-
-            // InitLayouts switch:
-            //   lea rdx,[exeBase]
-            //   mov ecx,[rdx + rax*4 + 0x01D149E8]
-            //   add rcx,rdx
-            //   jmp rcx
-            // Descriptor type 0x14 is the TrickSelectButton layout type.
-            constexpr uintptr_t kInitLayoutsSwitchTableRva = 0x01D149E8;
-            int32_t switchEntries[21] = {};
-            if (SafeCopySeh(exeBase + kInitLayoutsSwitchTableRva,
-                            switchEntries, sizeof(switchEntries))) {
-              const int32_t rel20 = switchEntries[20];
-              const uintptr_t handler20 =
-                  exeBase + static_cast<intptr_t>(rel20);
-
-              AddLog(u8"[책략5UIHELPER] InitLayouts switch[20]=%08X -> handler RVA=+%llX addr=%p",
-                     (unsigned)rel20,
-                     (unsigned long long)(handler20 - exeBase),
-                     reinterpret_cast<void *>(handler20));
-
-              if (handler20 >= exeBase &&
-                  handler20 < imageEnd &&
-                  IsValidPtr(handler20, 0x180)) {
-                const uintptr_t handlerRva = handler20 - exeBase;
-                LogUiProbeRange(exeBase, imageEnd,
-                                u8"CUIMaker::InitLayouts TYPE20 exact handler",
-                                handlerRva, 0, 0x180);
-              } else {
-                AddLog(u8"[책략5UIHELPER] TYPE20 handler 범위 검증 실패.");
-              }
-
-              // Small summary of every switch target for future RE notes.
-              for (int type = 0; type <= 20; ++type) {
-                const uintptr_t target =
-                    exeBase + static_cast<intptr_t>(switchEntries[type]);
-                AddLog(u8"[책략5UIHELPER] switch type=%d -> RVA=+%llX",
-                       type,
-                       (unsigned long long)(target - exeBase));
-              }
-            } else {
-              AddLog(u8"[책략5UIHELPER] InitLayouts switch table 읽기 실패.");
-            }
-          }
-          AddLog(u8"[책략5UITEST] RegisterLayout helper가 초기 등록 후 소모됨. ID7 등록은 이번 실행에서 중단.");
-          AddLog(u8"[책략5UITEST] UIHELPER와 TYPE20 exact handler 로그를 보내주세요.");
-          return false;
-        }
-
-        // Snapshot the live maker header, then swap only storage pointers/count.
-        // Everything after +0x28 remains the original, fully initialized maker.
-        stage = 6;
-        std::memcpy(g_fifthUiMakerOriginal,
-                    reinterpret_cast<const void *>(maker),
-                    sizeof(g_fifthUiMakerOriginal));
-        g_fifthUiMakerAddr = maker;
-
-        *reinterpret_cast<uintptr_t *>(maker + 0x00) = newDesc;
-        *reinterpret_cast<uintptr_t *>(maker + 0x08) = newPointers;
-        *reinterpret_cast<uint32_t *>(maker + 0x10) = 8;
-
-        uint32_t expandedCount = 0;
-        uintptr_t expandedOwner = 0;
-        SafeCopySeh(maker + 0x10, &expandedCount, sizeof(expandedCount));
-        SafeReadPtrSeh(maker + 0x18, &expandedOwner);
-        if (expandedCount != 8 || expandedOwner != layout) {
-          std::memcpy(reinterpret_cast<void *>(maker),
-                      g_fifthUiMakerOriginal,
-                      sizeof(g_fifthUiMakerOriginal));
-          g_fifthUiMakerAddr = 0;
-          AddLog(u8"[책략5UITEST] live maker header 7->8 교체 검증 실패.");
-          return false;
-        }
-
-        // Existing ID0..6 registrations are intentionally preserved.
-        // Add only the new ID7 entry to the original live maker.
-        stage = 7;
-        AddLog(u8"[책략5UITEST] live maker에 ID7 단독 등록 시작: control=%p type=%d flag=1",
+        stage=2;
+        AddLog(u8"[책략5UITEST] 원본이 만든 helper7로 ID7 등록 시작: helper=%p button=%p type=%d",
+               reinterpret_cast<void *>(helper7),
                reinterpret_cast<void *>(g_fifthUiSidecarButton),
-               types[7]);
-        registerLayout(maker, 7,
-                       g_fifthUiSidecarButton, types[7], 1);
+               type7);
+        registerLayout(maker,7,g_fifthUiSidecarButton,type7,1);
 
-        stage = 8;
-        const uintptr_t check7 = lookup(maker, 7);
-        uint32_t sidecarId = 0;
-        uint32_t sidecarState = 0;
-        SafeCopySeh(g_fifthUiSidecarButton + 0x88,
-                    &sidecarId, sizeof(sidecarId));
-        SafeCopySeh(g_fifthUiSidecarButton + 0x8C,
-                    &sidecarState, sizeof(sidecarState));
-
-        if (check7 != g_fifthUiSidecarButton ||
-            sidecarId != 7 ||
-            sidecarState != 1) {
-          std::memcpy(reinterpret_cast<void *>(maker),
-                      g_fifthUiMakerOriginal,
-                      sizeof(g_fifthUiMakerOriginal));
-          g_fifthUiMakerAddr = 0;
-          AddLog(u8"[책략5UITEST] ID7 등록 검증 실패: lookup=%p id=%u state=%u. header 원복.",
+        stage=3;
+        const uintptr_t check7=lookup(maker,7);
+        uint32_t sidecarId=0,sidecarState=0;
+        SafeCopySeh(g_fifthUiSidecarButton+0x88,&sidecarId,sizeof(sidecarId));
+        SafeCopySeh(g_fifthUiSidecarButton+0x8C,&sidecarState,sizeof(sidecarState));
+        if(check7 != g_fifthUiSidecarButton ||
+           sidecarId != 7 || sidecarState != 1) {
+          AddLog(u8"[책략5UITEST] ID7 등록 검증 실패: lookup=%p id=%u state=%u",
                  reinterpret_cast<void *>(check7),
-                 (unsigned)sidecarId,
-                 (unsigned)sidecarState);
+                 (unsigned)sidecarId,(unsigned)sidecarState);
           return false;
         }
 
-        // Reposition the actual controls after registration.
-        stage = 9;
-        for (int i = 0; i < 4; ++i) {
-          const uintptr_t button = buttons[i];
-          if (!button || !IsValidPtr(button, sizeof(uintptr_t)))
+        // Compact the five actual button objects into the existing row.
+        const int oldStart=(int)g_trickUiStartX;
+        const int oldStep=(int)g_trickUiStep;
+        const int y=(int)g_trickUiY;
+        const int compactStep=(oldStep*11)/14;
+        const int oldCenter=oldStart+(oldStep*3)/2;
+        const int compactStart=oldCenter-compactStep*2;
+        const int compactX[5]={
+          compactStart,
+          compactStart+compactStep,
+          compactStart+compactStep*2,
+          compactStart+compactStep*3,
+          compactStart+compactStep*4
+        };
+
+        stage=4;
+        uintptr_t allButtons[5]={
+          buttons[0],buttons[1],buttons[2],buttons[3],g_fifthUiSidecarButton
+        };
+        for(int i=0;i<5;++i) {
+          const uintptr_t button=allButtons[i];
+          if(!button || !IsValidPtr(button,sizeof(uintptr_t)))
             continue;
-          const uintptr_t vt =
-              *reinterpret_cast<const uintptr_t *>(button);
-          if (!vt || !IsValidPtr(vt + 0x90, sizeof(uintptr_t)))
+          const uintptr_t vt=*reinterpret_cast<const uintptr_t *>(button);
+          if(!vt || !IsValidPtr(vt+0x90,sizeof(uintptr_t)))
             continue;
-          const uintptr_t setPos =
-              *reinterpret_cast<const uintptr_t *>(vt + 0x90);
-          if (setPos && IsValidPtr(setPos, 1))
-            reinterpret_cast<SetXYFn>(setPos)(
-                button, compactX[i], y);
+          const uintptr_t setPos=*reinterpret_cast<const uintptr_t *>(vt+0x90);
+          if(setPos && IsValidPtr(setPos,1))
+            reinterpret_cast<SetXYFn>(setPos)(button,compactX[i],y);
         }
 
-        const uintptr_t sidecarVt =
-            *reinterpret_cast<const uintptr_t *>(g_fifthUiSidecarButton);
-        if (sidecarVt &&
-            IsValidPtr(sidecarVt + 0x90, sizeof(uintptr_t))) {
-          const uintptr_t setPos =
-              *reinterpret_cast<const uintptr_t *>(sidecarVt + 0x90);
-          if (setPos && IsValidPtr(setPos, 1))
-            reinterpret_cast<SetXYFn>(setPos)(
-                g_fifthUiSidecarButton, compactX[4], y);
-        }
-
-        g_fifthUiMakerExpanded = true;
-        AddLog(u8"[책략5UITEST] live CUIMaker header 7->8 + ID7 등록 성공.");
-        AddLog(u8"[책략5UITEST] 5버튼 압축 배치 적용: x=%d,%d,%d,%d,%d y=%d",
-               compactX[0], compactX[1], compactX[2],
-               compactX[3], compactX[4], y);
-        AddLog(u8"[책략5UITEST] 아직 5번 callback은 미연결입니다. 버튼이 보여도 클릭하지 마세요.");
+        g_fifthUiId7Registered=true;
+        AddLog(u8"[책략5UITEST] ID7 정식 등록 성공. helper7 소모 및 5버튼 압축 배치 완료.");
+        AddLog(u8"[책략5UITEST] 5버튼 위치: %d,%d,%d,%d,%d / y=%d",
+               compactX[0],compactX[1],compactX[2],compactX[3],compactX[4],y);
+        AddLog(u8"[책략5UITEST] 아직 callback/Open index4 연결 전입니다. 5번째 버튼은 클릭하지 마세요.");
         return true;
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        if (g_fifthUiMakerAddr &&
-            IsValidPtr(g_fifthUiMakerAddr,
-                       sizeof(g_fifthUiMakerOriginal))) {
-          std::memcpy(reinterpret_cast<void *>(g_fifthUiMakerAddr),
-                      g_fifthUiMakerOriginal,
-                      sizeof(g_fifthUiMakerOriginal));
-        }
-        g_fifthUiMakerExpanded = false;
-        g_fifthUiMakerAddr = 0;
-        AddLog(u8"[책략5UITEST] live registry 확장 중 예외: stage=%d. maker header 원복.",
-               (int)stage);
+      } __except(EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5UITEST] ID7 등록 중 예외: stage=%d",(int)stage);
         return false;
       }
     }
@@ -785,6 +701,7 @@ namespace DX11Base {
         g_fifthUiSidecarLayout = layout;
         g_fifthUiSidecarButton = 0;
         g_fifthUiSidecarAttempted = false;
+        g_fifthUiId7Registered = false;
       }
 
       if (g_fifthUiSidecarAttempted)
@@ -1845,6 +1762,7 @@ namespace DX11Base {
       g_fifthUiSidecarLayout = 0;
       g_fifthUiSidecarButton = 0;
       g_fifthUiSidecarAttempted = false;
+      g_fifthUiId7Registered = false;
       AddLog(u8"[책략5메타DBG] 5번 내부 등록 해제.");
       return true;
     }
@@ -2053,6 +1971,8 @@ namespace DX11Base {
       AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터가 이미 row5입니다: camp=%p slot5=%p",
              reinterpret_cast<void *>(matchedObject),
              reinterpret_cast<void *>(matchedSlot));
+      if (!EnsureTrickUiInitLayoutsBridgeHook())
+        AddLog(u8"[책략5UIHELPER] 초기 InitLayouts 7->8 브리지 설치 실패.");
       if (!EnsureTrickUiLayoutCaptureHook())
         AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
       if (!EnsureTrickUiDialogCaptureHook())
@@ -2093,6 +2013,8 @@ namespace DX11Base {
            reinterpret_cast<void *>(matchedSlot),
            reinterpret_cast<void *>(matchedOld5),
            reinterpret_cast<void *>(row5));
+    if (!EnsureTrickUiInitLayoutsBridgeHook())
+      AddLog(u8"[책략5UIHELPER] 초기 InitLayouts 7->8 브리지 설치 실패.");
     if (!EnsureTrickUiLayoutCaptureHook())
       AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
     if (!EnsureTrickUiDialogCaptureHook())

@@ -1277,3 +1277,70 @@ jmp rcx
 
 이 결과에서 helper builder/constructor call을 확정한 뒤,
 ID7용 helper 하나만 생성한다.
+
+
+---
+
+## 27. 2026-09-23 type20 exact handler 확정 후 설계 전환: 최초 InitLayouts에서 ID7 helper 생성
+
+runtime jump table 직접 확인:
+
+```text
+switch[20] -> RVA 0x01D1445D
+```
+
+type20 exact handler는 시작하자마자:
+
+```asm
+mov ecx,0x140
+call <allocator>
+...
+call <type20 helper ctor>
+...
+helper virtual initialize/configure...
+```
+
+형태로 별도 helper 객체를 만든다.
+
+기존 UI가 완전히 초기화된 뒤에는 maker+0x08의 helper slots가 모두 0이므로
+이 helper는 RegisterLayout 과정에서 1회성으로 소모된다.
+
+### 새 방향
+
+helper 생성 로직을 DLL에서 수동 재현하지 않는다.
+
+대신 `TrickCommandDialogLayout::Initialize` 안의 원래
+`CUIMaker::InitLayouts(maker, descriptors, 7, layout)` 호출만
+near-call bridge로 가로챈다.
+
+bridge는:
+
+1. 원본 7 * 0x60 descriptor 복사
+2. UI ID5의 type20 descriptor를 ID7에 clone
+3. 원본 `CUIMaker::InitLayouts`를 count=8로 호출
+
+한다.
+
+따라서 ID0~6 helper와 함께 **ID7 type20 helper도 게임 원본 코드가 직접 생성**한다.
+
+기존 버튼 생성/등록 루프는 여전히 ID2~5만 처리하므로,
+초기화가 끝난 뒤 helper[0..6]은 소모되어 null이 되지만
+helper[7]만 남아 있어야 한다.
+
+그 시점에 sidecar TrickSelectButton을 만들고:
+
+```text
+RegisterLayout(maker, 7, sidecar, 0x14, 1)
+```
+
+을 한 번만 호출한다.
+
+성공 후 실제 5개 버튼은:
+
+```text
+386,606,826,1046,1266 / y=364
+```
+
+으로 압축 배치한다.
+
+이 단계에서도 callback / Dialog::Open index4 / GetTrickButton(4)는 아직 연결하지 않는다.
