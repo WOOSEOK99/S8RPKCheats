@@ -1242,3 +1242,38 @@ The goal is to isolate switch-case `type=0x14` and identify the exact helper con
 
 After that, construct only the one ID7 helper and call RegisterLayout once.
 No existing ID0~6 registration is touched.
+
+
+---
+
+## 26. 2026-09-23 type20 helper tail 확보, 다음은 switch[20] 직접 해석
+
+`InitLayouts +0x240..+0x500` 런타임 바이트는 확보했다.
+
+그러나 `InitLayouts`는 descriptor type을:
+
+```asm
+cmp eax, 0x14
+ja  default
+mov ecx, [rdx + rax*4 + 0x01D149E8]
+add rcx, rdx
+jmp rcx
+```
+
+형태의 jump table로 분기한다.
+
+여기서 `rdx = exeBase`이고 descriptor type `0x14`가
+기존 TrickSelectButton layout의 type임은 이미 확인됐다.
+
+따라서 tail 바이트만 보고 어느 handler가 type20인지 추측하지 않는다.
+다음 진단은 런타임에서:
+
+- jump table RVA `0x01D149E8`
+- entry[20]
+- `handler = exeBase + (int32_t)entry[20]`
+
+를 직접 읽고,
+**그 exact handler 0x180 bytes만** 덤프한다.
+
+이 결과에서 helper builder/constructor call을 확정한 뒤,
+ID7용 helper 하나만 생성한다.

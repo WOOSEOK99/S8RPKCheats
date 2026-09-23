@@ -611,12 +611,51 @@ namespace DX11Base {
                                    &mi, sizeof(mi))) {
             const uintptr_t imageEnd =
                 exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
-            LogUiProbeRange(exeBase, imageEnd,
-                            u8"CUIMaker::InitLayouts type20 helper tail",
-                            0x01D13E60, 0x240, 0x2C0);
+
+            // InitLayouts switch:
+            //   lea rdx,[exeBase]
+            //   mov ecx,[rdx + rax*4 + 0x01D149E8]
+            //   add rcx,rdx
+            //   jmp rcx
+            // Descriptor type 0x14 is the TrickSelectButton layout type.
+            constexpr uintptr_t kInitLayoutsSwitchTableRva = 0x01D149E8;
+            int32_t switchEntries[21] = {};
+            if (SafeCopySeh(exeBase + kInitLayoutsSwitchTableRva,
+                            switchEntries, sizeof(switchEntries))) {
+              const int32_t rel20 = switchEntries[20];
+              const uintptr_t handler20 =
+                  exeBase + static_cast<intptr_t>(rel20);
+
+              AddLog(u8"[책략5UIHELPER] InitLayouts switch[20]=%08X -> handler RVA=+%llX addr=%p",
+                     (unsigned)rel20,
+                     (unsigned long long)(handler20 - exeBase),
+                     reinterpret_cast<void *>(handler20));
+
+              if (handler20 >= exeBase &&
+                  handler20 < imageEnd &&
+                  IsValidPtr(handler20, 0x180)) {
+                const uintptr_t handlerRva = handler20 - exeBase;
+                LogUiProbeRange(exeBase, imageEnd,
+                                u8"CUIMaker::InitLayouts TYPE20 exact handler",
+                                handlerRva, 0, 0x180);
+              } else {
+                AddLog(u8"[책략5UIHELPER] TYPE20 handler 범위 검증 실패.");
+              }
+
+              // Small summary of every switch target for future RE notes.
+              for (int type = 0; type <= 20; ++type) {
+                const uintptr_t target =
+                    exeBase + static_cast<intptr_t>(switchEntries[type]);
+                AddLog(u8"[책략5UIHELPER] switch type=%d -> RVA=+%llX",
+                       type,
+                       (unsigned long long)(target - exeBase));
+              }
+            } else {
+              AddLog(u8"[책략5UIHELPER] InitLayouts switch table 읽기 실패.");
+            }
           }
           AddLog(u8"[책략5UITEST] RegisterLayout helper가 초기 등록 후 소모됨. ID7 등록은 이번 실행에서 중단.");
-          AddLog(u8"[책략5UITEST] UIRANGE의 InitLayouts type20 helper tail 로그를 보내주세요.");
+          AddLog(u8"[책략5UITEST] UIHELPER와 TYPE20 exact handler 로그를 보내주세요.");
           return false;
         }
 
