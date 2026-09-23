@@ -148,6 +148,9 @@ namespace DX11Base {
     static bool g_fifthUiModelEntryApplied = false;
     static uint32_t g_fifthRuntimeOriginalCount = 0;
 
+    static bool AdvanceFifthRuntimeStateSeh(uintptr_t dialog);
+    static void SetFifthUiSidecarVisibleSeh(bool visible);
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
