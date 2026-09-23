@@ -1588,31 +1588,46 @@ namespace DX11Base {
       ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
       static bool s_spell5HealProbe = false;
       if (ImGui::Checkbox(u8"5번 책략 데이터", &s_spell5HealProbe)) {
-        if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
-          s_spell5HealProbe = !s_spell5HealProbe;
-          AddNotification(u8"5번 책략 데이터 적용 실패 - 로그 확인");
+        const bool enable = s_spell5HealProbe;
+        const bool ok = DX11Base::SetSpell5HealProbe(enable);
+        if (!enable && !ok) {
+          // Disable is an immediate operation. If it really failed, reflect that
+          // by restoring the checkbox. Enable, however, is a persistent request
+          // and may legitimately remain pending until the game table is ready.
+          s_spell5HealProbe = true;
+          AddNotification(u8"5번 책략 데이터 해제 실패 - 로그 확인");
         } else {
           NotifyFeatureToggle(u8"5번 책략 데이터", s_spell5HealProbe);
+          if (enable && !ok)
+            AddNotification(u8"5번 책략 데이터 ON 요청 저장 - 자동 적용 대기");
         }
       }
 
       static bool s_spell5CountTest = false;
       if (ImGui::Checkbox(u8"5번 책략 횟수 1", &s_spell5CountTest)) {
-        if (!DX11Base::SetStratagemFiveCountTest(s_spell5CountTest)) {
-          s_spell5CountTest = !s_spell5CountTest;
-          AddNotification(u8"5번 책략 횟수 적용 실패 - 로그 확인");
+        const bool enable = s_spell5CountTest;
+        const bool ok = DX11Base::SetStratagemFiveCountTest(enable);
+        if (!enable && !ok) {
+          s_spell5CountTest = true;
+          AddNotification(u8"5번 책략 횟수 해제 실패 - 로그 확인");
         } else {
           NotifyFeatureToggle(u8"5번 책략 횟수 1", s_spell5CountTest);
+          if (enable && !ok)
+            AddNotification(u8"5번 책략 횟수 ON 요청 저장 - 자동 적용 대기");
         }
       }
 
       static bool s_spell5MetadataTest = false;
       if (ImGui::Checkbox(u8"5번 책략 내부등록", &s_spell5MetadataTest)) {
-        if (!DX11Base::SetStratagemFiveMetadataTest(s_spell5MetadataTest)) {
-          s_spell5MetadataTest = !s_spell5MetadataTest;
-          AddNotification(u8"5번 책략 내부등록 적용 실패 - 로그 확인");
+        const bool enable = s_spell5MetadataTest;
+        const bool ok = DX11Base::SetStratagemFiveMetadataTest(enable);
+        if (!enable && !ok) {
+          s_spell5MetadataTest = true;
+          AddNotification(u8"5번 책략 내부등록 해제 실패 - 로그 확인");
         } else {
           NotifyFeatureToggle(u8"5번 책략 내부등록", s_spell5MetadataTest);
+          if (enable && !ok)
+            AddNotification(u8"5번 책략 내부등록 ON 요청 저장 - 자동 적용 대기");
         }
       }
 
