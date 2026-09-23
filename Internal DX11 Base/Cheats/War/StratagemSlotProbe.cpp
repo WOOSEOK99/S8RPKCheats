@@ -238,6 +238,13 @@ namespace DX11Base {
     static bool ValidatePreparedFifthUiHelper(
         uintptr_t layout, uint32_t *descriptorTag = nullptr);
     static bool TryGetDialogCampOwnerSeh(uintptr_t *outOwner);
+    static bool TryReadFifthPlanForOwnerSeh(
+        uintptr_t owner,
+        StratagemFiveModel::Plan *outPlan,
+        StratagemFiveModel::Entry (*outEntries)[5],
+        uintptr_t (*outCampRows)[5],
+        uintptr_t *outModelBase,
+        uintptr_t *outTricksAddr);
 
 
     // Read only PE headers and the bounded CodeView directory, never scan memory.
@@ -3804,8 +3811,9 @@ namespace DX11Base {
     }
 
     enum class FifthRuntimeStage : uint8_t {
-      WaitingData = 0,
-      WaitingOwner,
+      WaitingOwner = 0,
+      WaitingTable,
+      WaitingData,
       WaitingCount,
       WaitingCamp,
       WaitingModel,
@@ -3813,31 +3821,12 @@ namespace DX11Base {
     };
 
     static std::atomic<FifthRuntimeStage> g_fifthRuntimeStage{
-        FifthRuntimeStage::WaitingData};
+        FifthRuntimeStage::WaitingOwner};
 
     static bool AdvanceFifthRuntimeStateSeh(uintptr_t dialog) {
-      // Idempotent, order-driven progression. No sleeps/ticks are involved:
-      // every caller advances only as far as the currently verified objects
-      // permit, and later lifecycle events can call it again.
       if (!g_id5CountRequested.load() ||
           !g_fiveMetadataRequested.load()) {
-        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingData);
-        return false;
-      }
-
-      if (!IsSpell5HealProbeReady()) {
-        SetSpell5HealProbe(true);
-        if (!IsSpell5HealProbeReady()) {
-          g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingData);
-          return false;
-        }
-      }
-
-      // Resolve/verify the canonical TrickData table before deriving N.
-      if (!g_fiveMetadataTable || !g_fiveMetadataAddr)
-        SetStratagemFiveMetadataTest(true);
-      if (!g_fiveMetadataTable || !g_fiveMetadataAddr) {
-        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingData);
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
         return false;
       }
 
@@ -3848,7 +3837,6 @@ namespace DX11Base {
         if (SafeReadPtrSeh(dialog + 0x08, &layout) &&
             layout && IsValidPtr(layout, 0x2A8))
           g_trickUiLayout = layout;
-
         TryGetDialogCampOwnerSeh(&owner);
       }
 
@@ -3857,8 +3845,21 @@ namespace DX11Base {
         return false;
       }
 
-      // Count selection is now deterministic because dialog identifies the
-      // current player-side Camp owner.
+      uintptr_t metadataTable = g_fiveMetadataTable;
+      if (!metadataTable &&
+          !TryResolveFifthMetadataTableFromOwnerSeh(owner, &metadataTable)) {
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingTable);
+        return false;
+      }
+
+      if (!IsSpell5HealProbeReady()) {
+        if (!SetSpell5HealProbeFromMetadataTable(metadataTable) ||
+            !IsSpell5HealProbeReady()) {
+          g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingData);
+          return false;
+        }
+      }
+
       SetStratagemFiveCountTest(true);
       if (!g_id5CountApplied ||
           g_id5CountOwner != owner ||
@@ -3867,12 +3868,7 @@ namespace DX11Base {
         return false;
       }
 
-      SetStratagemFiveMetadataTest(true);
-      if (!g_fiveRuntimeSlotApplied ||
-          g_fiveRuntimeOwner != owner ||
-          !g_fiveRuntimeSlotAddr ||
-          *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) !=
-              g_fiveMetadataAddr) {
+      if (!TryApplyFifthCampForOwnerSeh(owner)) {
         g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingCamp);
         return false;
       }
