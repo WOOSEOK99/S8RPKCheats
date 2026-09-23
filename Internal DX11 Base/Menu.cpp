@@ -21,6 +21,7 @@
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/SiegeWarfare.h"
+#include "Cheats/War/Spell5HealProbe.h"
 #include "Cheats/War/StratagemSlotProbe.h"
 #include "Config.h"
 #include "Engine.h"
@@ -394,6 +395,7 @@ namespace DX11Base {
       // battle transition is in progress and can contend with the UI thread.
       const uintptr_t oldSessionP1 = s_stratagem5SessionP1;
       DX11Base::ResetStratagemFiveSessionRuntime(oldSessionP1, p1);
+      DX11Base::ResetSpell5HealProbeSession(oldSessionP1, p1);
       s_stratagem5SessionP1 = p1Ready ? p1 : 0;
     } else if (s_stratagem5SessionP1 == 0 && p1Ready) {
       // First stable p1 after startup/load. The old generation was already
