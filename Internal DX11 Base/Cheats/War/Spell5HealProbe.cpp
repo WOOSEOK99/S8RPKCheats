@@ -23,11 +23,13 @@ namespace DX11Base {
       int16_t duration2;   // +12
       int16_t range;       // +14
       int16_t unknown16;   // +16
-      uint64_t unknownPtr; // +18 - semantics unknown; preserved/copied only
     };
 #pragma pack(pop)
 
-    static_assert(sizeof(SpellRecord) == 0x20, "SpellRecord layout mismatch");
+    // PDB 확인: 실제 TrickData 객체는 0x20 stride이며 +0x00에 8-byte vptr,
+    // payload는 +0x08부터 +0x1F까지 0x18 bytes입니다.
+    // 예전 +0x18 qword는 현재 레코드 tail이 아니라 다음 TrickData의 vptr이었습니다.
+    static_assert(sizeof(SpellRecord) == 0x18, "SpellRecord payload layout mismatch");
 
     constexpr uintptr_t kSpellRootOffset = 0x034C8630;
     constexpr uintptr_t kSpellTableOffset = 0x0D38;
