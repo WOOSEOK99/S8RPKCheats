@@ -3669,155 +3669,191 @@ namespace DX11Base {
       if (!g_id5CountApplied)
         return true;
 
-      // Restore only while the exact captured owner/slot still looks live.
-      // On save/load transition the old arena may already be gone or reused;
-      // in that case abandon the stale bookkeeping without touching it.
       const bool ownerStillCurrent =
-          (g_id5CountOwner == g_attackInfo && ValidateInfo(g_id5CountOwner, 0)) ||
-          (g_id5CountOwner == g_defenseInfo && ValidateInfo(g_id5CountOwner, 1));
+          (g_id5CountOwner == g_attackInfo &&
+           ValidateInfo(g_id5CountOwner, 0)) ||
+          (g_id5CountOwner == g_defenseInfo &&
+           ValidateInfo(g_id5CountOwner, 1));
+
+      const uintptr_t expectedAddr =
+          (g_id5CountEntryIndex < 5 && g_id5CountOwner)
+              ? g_id5CountOwner + 0xF0 + 0x10 +
+                    static_cast<uintptr_t>(g_id5CountEntryIndex) * 0x10 +
+                    0x0C
+              : 0;
+
       if (ownerStillCurrent &&
-          g_id5CountAddr ==
-              g_id5CountOwner + kFirstStratagemCountOffset +
-                  4 * kStratagemCountStride &&
+          expectedAddr &&
+          g_id5CountAddr == expectedAddr &&
           IsValidPtr(g_id5CountAddr, 1)) {
         DWORD oldProtect = 0;
         DWORD tmpProtect = 0;
         if (VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1,
                            PAGE_READWRITE, &oldProtect)) {
-          *reinterpret_cast<uint8_t *>(g_id5CountAddr) = g_id5CountOriginal;
+          *reinterpret_cast<uint8_t *>(g_id5CountAddr) =
+              g_id5CountOriginal;
           VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1,
                          oldProtect, &tmpProtect);
         }
-        AddLog(u8"[책략5슬롯DBG] ID5 수량 테스트 원복.");
+        AddLog(u8"[책략5슬롯DBG] ID5 가용횟수 원복: entry=%u addr=%p value=%u",
+               (unsigned)g_id5CountEntryIndex,
+               reinterpret_cast<void *>(g_id5CountAddr),
+               (unsigned)g_id5CountOriginal);
       } else {
-        AddLog(u8"[책략5수명] 이전 전투 ID5 수량 포인터는 더 이상 현재 객체가 아니므로 쓰지 않고 폐기.");
+        AddLog(u8"[책략5수명] 이전 전투 ID5 횟수 포인터는 현재 세대가 아니므로 쓰지 않고 폐기.");
       }
 
       g_id5CountApplied = false;
       g_id5CountAddr = 0;
       g_id5CountOwner = 0;
       g_id5CountOriginal = 0;
+      g_id5CountEntryIndex = UINT32_MAX;
       return true;
     }
 
-    // Checkbox ON means "keep ID5 count enabled", not "a live battle
-    // object must exist this exact frame". Preserve the user's intent first;
-    // RefreshStratagemFiveBattleRuntime() will apply +0x14C=1 as soon as the
-    // current Camp::Impl becomes available.
     g_id5CountRequested = true;
 
     if (!EnsureCaptureHook()) {
-      AddLog(u8"[책략5수명] ID5 수량 ON 요청 저장. 캡처 훅 준비 후 자동 적용 대기.");
+      AddLog(u8"[책략5수명] ID5 횟수 ON 요청 저장. Camp 캡처 훅 준비 후 자동 적용 대기.");
+      return true;
+    }
+
+    if (!g_fiveMetadataTable) {
+      AddLog(u8"[책략5수명] ID5 횟수 ON 요청 저장. native TrickData table 준비 후 자동 적용 대기.");
       return true;
     }
 
     if (!ValidateInfo(g_attackInfo, 0) &&
-        !ValidateInfo(g_defenseInfo, 1)) {
+        !ValidateInfo(g_defenseInfo, 1))
       TryRecaptureBattleInfoFromDialogSeh();
-    }
 
-    // If the remembered owner is still the exact current captured object and
-    // its fifth count is still 1, keep it. Otherwise this is a new battle/save
-    // generation: never restore through the stale pointer; simply forget it.
     if (g_id5CountApplied) {
       const bool ownerStillCurrent =
-          (g_id5CountOwner == g_attackInfo && ValidateInfo(g_id5CountOwner, 0)) ||
-          (g_id5CountOwner == g_defenseInfo && ValidateInfo(g_id5CountOwner, 1));
+          (g_id5CountOwner == g_attackInfo &&
+           ValidateInfo(g_id5CountOwner, 0)) ||
+          (g_id5CountOwner == g_defenseInfo &&
+           ValidateInfo(g_id5CountOwner, 1));
       const uintptr_t expectedAddr =
-          g_id5CountOwner + kFirstStratagemCountOffset +
-          4 * kStratagemCountStride;
-      if (ownerStillCurrent &&
-          g_id5CountAddr == expectedAddr &&
-          IsValidPtr(g_id5CountAddr, 1) &&
-          *reinterpret_cast<const uint8_t *>(g_id5CountAddr) == 1) {
-        g_id5CountRequested = true;
-        return true;
-      }
+          (g_id5CountEntryIndex < 5 && g_id5CountOwner)
+              ? g_id5CountOwner + 0xF0 + 0x10 +
+                    static_cast<uintptr_t>(g_id5CountEntryIndex) * 0x10 +
+                    0x0C
+              : 0;
 
-      AddLog(u8"[책략5수명] 새 전투/로드 세대 감지: 이전 ID5 수량 적용 상태 폐기.");
+      // Once injected for this battle generation, do not refill it merely
+      // because the player spent the one use and available became zero.
+      if (ownerStillCurrent &&
+          expectedAddr &&
+          g_id5CountAddr == expectedAddr &&
+          IsValidPtr(expectedAddr, 1))
+        return true;
+
+      AddLog(u8"[책략5수명] 새 전투/로드 세대 감지: 이전 ID5 횟수 적용 상태 폐기.");
       g_id5CountApplied = false;
       g_id5CountAddr = 0;
       g_id5CountOwner = 0;
       g_id5CountOriginal = 0;
+      g_id5CountEntryIndex = UINT32_MAX;
     }
-
-    struct Candidate {
-      uintptr_t ptr;
-      uint8_t side;
-      const char *name;
-    };
-
-    const Candidate candidates[] = {
-        {g_attackInfo, 0, u8"공격측"},
-        {g_defenseInfo, 1, u8"수비측"},
-    };
 
     uintptr_t chosen = 0;
     const char *chosenName = nullptr;
+    StratagemFiveModel::Plan chosenPlan{};
 
-    for (const auto &candidate : candidates) {
-      if (!ValidateInfo(candidate.ptr, candidate.side))
-        continue;
-
-      const uint8_t c1 = *reinterpret_cast<const uint8_t *>(
-          candidate.ptr + kFirstStratagemCountOffset + 0 * kStratagemCountStride);
-      const uint8_t c2 = *reinterpret_cast<const uint8_t *>(
-          candidate.ptr + kFirstStratagemCountOffset + 1 * kStratagemCountStride);
-      const uint8_t c3 = *reinterpret_cast<const uint8_t *>(
-          candidate.ptr + kFirstStratagemCountOffset + 2 * kStratagemCountStride);
-      const uint8_t c4 = *reinterpret_cast<const uint8_t *>(
-          candidate.ptr + kFirstStratagemCountOffset + 3 * kStratagemCountStride);
-      const uint8_t c5 = *reinterpret_cast<const uint8_t *>(
-          candidate.ptr + kFirstStratagemCountOffset + 4 * kStratagemCountStride);
-
-      if (c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 0) {
-        if (chosen) {
-          AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. 공격/수비 양쪽 후보가 동시에 유효해 현재 틱 적용 보류.");
-          return true;
-        }
-        chosen = candidate.ptr;
-        chosenName = candidate.name;
+    uintptr_t dialogOwner = 0;
+    if (TryGetDialogCampOwnerSeh(&dialogOwner)) {
+      StratagemFiveModel::Plan plan{};
+      if (TryReadFifthPlanForOwnerSeh(dialogOwner, &plan)) {
+        chosen = dialogOwner;
+        chosenName = u8"현재 dialog측";
+        chosenPlan = plan;
       }
     }
 
     if (!chosen) {
-      AddLog(u8"[책략5수명] ID5 수량 ON 요청 저장. 현재 전투 Camp::Impl 미준비 -> 자동 적용 대기.");
+      struct Candidate {
+        uintptr_t ptr;
+        uint8_t side;
+        const char *name;
+      };
+      const Candidate candidates[] = {
+          {g_attackInfo, 0, u8"공격측"},
+          {g_defenseInfo, 1, u8"수비측"},
+      };
+
+      for (const auto &candidate : candidates) {
+        if (!ValidateInfo(candidate.ptr, candidate.side))
+          continue;
+
+        StratagemFiveModel::Plan plan{};
+        if (!TryReadFifthPlanForOwnerSeh(candidate.ptr, &plan))
+          continue;
+
+        if (chosen && chosen != candidate.ptr) {
+          AddLog(u8"[책략5수명] ID5 횟수 ON 요청 유지. 공격/수비 모두 유효하여 dialog측 확정 대기.");
+          return true;
+        }
+
+        chosen = candidate.ptr;
+        chosenName = candidate.name;
+        chosenPlan = plan;
+      }
+    }
+
+    if (!chosen || chosenPlan.originalCount > 4) {
+      AddLog(u8"[책략5수명] ID5 횟수 ON 요청 저장. 현재 전투 원본 책략 목록 N을 아직 확정하지 못함.");
       return true;
     }
 
-    const uintptr_t id5Addr =
-        chosen + kFirstStratagemCountOffset + 4 * kStratagemCountStride;
-    if (!IsValidPtr(id5Addr, 1)) {
-      AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. +14C 주소가 아직 유효하지 않아 적용 보류.");
+    const uint32_t entryIndex = chosenPlan.originalCount;
+    const uintptr_t availableAddr =
+        chosen + 0xF0 + 0x10 +
+        static_cast<uintptr_t>(entryIndex) * 0x10 + 0x0C;
+    if (!IsValidPtr(availableAddr, 1)) {
+      AddLog(u8"[책략5수명] ID5 횟수 ON 요청 유지. entry%u available 주소 미준비.",
+             (unsigned)entryIndex);
       return true;
     }
 
-    g_id5CountOriginal = *reinterpret_cast<const uint8_t *>(id5Addr);
+    const uint8_t original =
+        *reinterpret_cast<const uint8_t *>(availableAddr);
 
-    DWORD oldProtect = 0;
-    DWORD tmpProtect = 0;
-    if (!VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1,
-                        PAGE_READWRITE, &oldProtect)) {
-      AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. +14C 쓰기 권한 획득 실패 -> 다음 refresh에서 재시도.");
-      return true;
+    // If ID5 is already the last model entry, preserve a consumed zero rather
+    // than turning this into an unlimited-use refresh loop.
+    if (!chosenPlan.alreadyPresent || original != 0) {
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(availableAddr), 1,
+                          PAGE_READWRITE, &oldProtect)) {
+        AddLog(u8"[책략5수명] ID5 횟수 ON 요청 유지. entry%u 쓰기 권한 획득 실패.",
+               (unsigned)entryIndex);
+        return true;
+      }
+
+      *reinterpret_cast<uint8_t *>(availableAddr) = 1;
+      VirtualProtect(reinterpret_cast<LPVOID>(availableAddr), 1,
+                     oldProtect, &tmpProtect);
+
+      if (*reinterpret_cast<const uint8_t *>(availableAddr) != 1) {
+        AddLog(u8"[책략5수명] ID5 횟수 ON 요청 유지. entry%u available=1 검증 실패.",
+               (unsigned)entryIndex);
+        return true;
+      }
     }
 
-    *reinterpret_cast<uint8_t *>(id5Addr) = 1;
-    VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1,
-                   oldProtect, &tmpProtect);
-
-    if (*reinterpret_cast<const uint8_t *>(id5Addr) != 1) {
-      AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. +14C=1 쓰기 검증 실패 -> 다음 refresh에서 재시도.");
-      return true;
-    }
-
-    g_id5CountAddr = id5Addr;
+    g_id5CountAddr = availableAddr;
     g_id5CountOwner = chosen;
+    g_id5CountOriginal = original;
+    g_id5CountEntryIndex = entryIndex;
     g_id5CountApplied = true;
-    g_id5CountRequested = true;
 
-    AddLog(u8"[책략5슬롯DBG] %s ID5 후보(+14C) 수량 0 -> 1 적용 성공: %p",
-           chosenName, reinterpret_cast<void *>(id5Addr));
+    AddLog(u8"[책략5슬롯DBG] %s 원본 책략 N=%u / ID5 entry=%u available %u -> %u: %p",
+           chosenName ? chosenName : u8"현재측",
+           (unsigned)chosenPlan.originalCount,
+           (unsigned)entryIndex,
+           (unsigned)original,
+           (unsigned)*reinterpret_cast<const uint8_t *>(availableAddr),
+           reinterpret_cast<void *>(availableAddr));
     return true;
   }
 
