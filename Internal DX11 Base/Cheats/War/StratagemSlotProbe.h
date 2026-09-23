@@ -19,4 +19,9 @@ namespace DX11Base {
   // a 0x20-stride loop with "cmp r12d,4 / jb ..." near the stratagem fields.
   // Experimental: change only the loop bound immediate 4 -> 5, reversible.
   bool SetStratagemFiveLoopTest(bool enable);
+
+  // Second stratagem table used by the old CT:
+  // [[gameBase]+troopTypePointerOffset]+0x9D30, stride 0x20.
+  // Reversible test: clone a valid row into row 5 and set ID/name/desc IDs to 5.
+  bool SetStratagemFiveMetadataTest(bool enable);
 }
