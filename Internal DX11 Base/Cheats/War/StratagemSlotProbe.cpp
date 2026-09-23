@@ -32,6 +32,7 @@ namespace DX11Base {
     static uintptr_t g_id5CountAddr = 0;
     static uintptr_t g_id5CountOwner = 0;
     static uint8_t g_id5CountOriginal = 0;
+    static uint32_t g_id5CountEntryIndex = UINT32_MAX;
 
     static bool g_fiveLoopApplied = false;
     static uintptr_t g_fiveLoopImmAddr = 0;
@@ -142,6 +143,7 @@ namespace DX11Base {
     static uintptr_t g_fifthUiModelEntryAddr = 0;
     static uint64_t g_fifthUiModelEntryOriginal[2] = {};
     static bool g_fifthUiModelEntryApplied = false;
+    static uint32_t g_fifthRuntimeOriginalCount = 0;
 
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
