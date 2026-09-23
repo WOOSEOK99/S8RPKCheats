@@ -123,6 +123,7 @@ namespace DX11Base {
     static volatile LONG g_fifthUiOnSelectAnyHits = 0;
     static bool g_fifthUiSignalCallsitesLogged = false;
     static bool g_fifthUiCallbackTargetsLogged = false;
+    static bool g_fifthUiCallbackCodeTargetsLogged = false;
 
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
@@ -1364,6 +1365,131 @@ namespace DX11Base {
         }
         AddLog(u8"[책략5UICBTGT] #%u directCalls=%u",n+1,calls);
       }
+    }
+
+
+    static bool IsExecutableAddress(uintptr_t address) {
+      if(!address)
+        return false;
+      MEMORY_BASIC_INFORMATION mbi{};
+      if(!VirtualQuery(reinterpret_cast<LPCVOID>(address),&mbi,sizeof(mbi)))
+        return false;
+      if(mbi.State!=MEM_COMMIT)
+        return false;
+      const DWORD p=mbi.Protect & 0xFF;
+      return p==PAGE_EXECUTE ||
+             p==PAGE_EXECUTE_READ ||
+             p==PAGE_EXECUTE_READWRITE ||
+             p==PAGE_EXECUTE_WRITECOPY;
+    }
+
+    static void LogFifthUiCallbackCodeTargets() {
+      if(g_fifthUiCallbackCodeTargetsLogged)
+        return;
+      g_fifthUiCallbackCodeTargetsLogged=true;
+
+      const uintptr_t exeBase=
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      MODULEINFO mi{};
+      if(!exeBase || !IsSupportedTrickUiBuild(exeBase) ||
+         !GetModuleInformation(GetCurrentProcess(),
+                               reinterpret_cast<HMODULE>(exeBase),
+                               &mi,sizeof(mi)))
+        return;
+
+      const uintptr_t imageEnd=exeBase+static_cast<uintptr_t>(mi.SizeOfImage);
+      constexpr uintptr_t kDialogInitializeRva=0x01DF3F20;
+      constexpr size_t kDialogInitializeSize=0x4C9;
+      const uintptr_t fn=exeBase+kDialogInitializeRva;
+
+      uint8_t code[kDialogInitializeSize]={};
+      if(!SafeCopySeh(fn,code,sizeof(code)))
+        return;
+
+      uintptr_t tables[8]={};
+      unsigned tableCount=0;
+
+      for(size_t i=0x1D0;i+7<=sizeof(code) && i<0x210;++i){
+        const uint8_t rex=code[i];
+        if((rex!=0x48 && rex!=0x4C) || code[i+1]!=0x8D)
+          continue;
+        const uint8_t modrm=code[i+2];
+        if((modrm & 0xC7)!=0x05)
+          continue;
+
+        int32_t disp=0;
+        std::memcpy(&disp,code+i+3,sizeof(disp));
+        const uintptr_t target=fn+i+7+static_cast<intptr_t>(disp);
+        if(target<exeBase || target>=imageEnd)
+          continue;
+
+        bool dup=false;
+        for(unsigned n=0;n<tableCount;++n)
+          if(tables[n]==target) dup=true;
+        if(!dup && tableCount<8)
+          tables[tableCount++]=target;
+      }
+
+      AddLog(u8"[책략5UICBCODE] callback tables=%u",tableCount);
+
+      uintptr_t seen[32]={};
+      unsigned seenCount=0;
+
+      for(unsigned t=0;t<tableCount;++t){
+        uint64_t q[16]={};
+        if(!SafeCopySeh(tables[t],q,sizeof(q))){
+          AddLog(u8"[책략5UICBCODE] table%u unreadable: RVA=+%llX",
+                 t+1,(unsigned long long)(tables[t]-exeBase));
+          continue;
+        }
+
+        for(unsigned s=0;s<8;++s){
+          const uintptr_t p=static_cast<uintptr_t>(q[s]);
+          if(p<exeBase || p>=imageEnd || !IsExecutableAddress(p))
+            continue;
+
+          bool dup=false;
+          for(unsigned n=0;n<seenCount;++n)
+            if(seen[n]==p) dup=true;
+          if(dup)
+            continue;
+          if(seenCount<32)
+            seen[seenCount++]=p;
+
+          uint8_t head[0x80]={};
+          if(!SafeCopySeh(p,head,sizeof(head)))
+            continue;
+
+          AddLog(u8"[책략5UICBCODE] table%u slot%u -> RVA=+%llX",
+                 t+1,s,(unsigned long long)(p-exeBase));
+
+          for(size_t off=0;off<sizeof(head);off+=0x20){
+            char line[256]={}; int pos=0;
+            for(size_t j=0;j<0x20 && pos<(int)sizeof(line)-4;++j)
+              pos+=sprintf_s(line+pos,sizeof(line)-pos,"%02X ",(unsigned)head[off+j]);
+            AddLog(u8"[책략5UICBCODE] +%02llX : %s",
+                   (unsigned long long)off,line);
+          }
+
+          for(size_t off=0;off+5<=sizeof(head);++off){
+            if(head[off]!=0xE8 && head[off]!=0xE9)
+              continue;
+            int32_t rel=0;
+            std::memcpy(&rel,head+off+1,sizeof(rel));
+            const uintptr_t target=
+                p+off+5+static_cast<intptr_t>(rel);
+            if(target>=exeBase && target<imageEnd){
+              AddLog(u8"[책략5UICBCODE] RVA=+%llX %s +%02llX -> RVA=+%llX",
+                     (unsigned long long)(p-exeBase),
+                     head[off]==0xE8?"CALL":"JMP",
+                     (unsigned long long)off,
+                     (unsigned long long)(target-exeBase));
+            }
+          }
+        }
+      }
+
+      AddLog(u8"[책략5UICBCODE] unique executable targets=%u",seenCount);
     }
 
     static void LogFifthUiSignalCallsites() {
@@ -3224,6 +3350,7 @@ namespace DX11Base {
     const bool onSelectRuntimeReady = EnsureFifthUiOnTrickSelectRuntimeHook();
     LogFifthUiSignalCallsites();
     LogFifthUiCallbackTargets();
+    LogFifthUiCallbackCodeTargets();
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
     const bool ready = initReady && layoutPostReady && resetCompactReady &&

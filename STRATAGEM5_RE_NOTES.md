@@ -2321,3 +2321,32 @@ callback closure가 사용하는 정적 target을 해석하고, 각 target의 �
 
 목표는 focus / kill-focus / select closure의 실제 invoker/manager 코드를 분리하고,
 그중 hover 시 적용범위/설명을 갱신하는 함수에서 index4 또는 runtime count 제한을 찾는 것이다.
+
+
+---
+
+## 45. 2026-09-23 callback RIP target은 코드가 아니라 함수포인터 테이블
+
+직전 로그에서 `[책략5UICBTGT]`의 3개 RIP-relative LEA target을
+코드로 가정했지만, 실제 출력은 실행 명령이 아니라 런타임 함수 주소 qword들이었다.
+
+즉 해당 3개 target은 focus / kill-focus / select closure용
+정적 함수 포인터 테이블(또는 인접한 std::function support table)이다.
+
+예:
+`RVA +2716988`의 첫 qword들이 모두 EXE 내부 실행 주소를 가리킨다.
+
+이번 변경은 새 detour를 추가하지 않고 이 테이블의 앞 8개 qword를 따라가서:
+
+- 실제 executable target RVA
+- 각 target의 런타임 첫 0x80 bytes
+- 그 안의 direct CALL / JMP 목적지 RVA
+
+를 read-only로 기록한다.
+
+로그 키:
+
+`[책략5UICBCODE]`
+
+정적 EXE 파일의 해당 .text는 런타임과 다르게 보이는 구간이 있으므로,
+이번 분석은 반드시 실게임 메모리의 런타임 바이트를 기준으로 한다.
