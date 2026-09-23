@@ -184,6 +184,8 @@ namespace DX11Base {
 
     static bool CreateFifthUiSidecarDisplayOnlySeh(uintptr_t layout);
     static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout);
+    static bool ValidatePreparedFifthUiHelper(
+        uintptr_t layout, uint32_t *descriptorTag = nullptr);
 
 
     // Read only PE headers and the bounded CodeView directory, never scan memory.
@@ -1520,7 +1522,7 @@ namespace DX11Base {
                   sizeof(g_fifthUiMakerOriginal));
     }
 
-    static bool ValidatePreparedFifthUiHelper(uintptr_t layout, uint32_t *descriptorTag = nullptr) {
+    static bool ValidatePreparedFifthUiHelper(uintptr_t layout, uint32_t *descriptorTag) {
       const TrickUiInitTrace trace = ReadTrickUiInitTrace();
       if (!layout || !IsValidPtr(layout, 0x2A8) || !trace.helperClassMatched ||
           trace.owner != layout || trace.maker != layout + 0x140)
