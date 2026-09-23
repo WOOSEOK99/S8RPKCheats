@@ -1,210 +1,225 @@
 #include "../../pch.h"
 
 #include "../../Cheats.h"
+#include "../../MemoryUtils.h"
 #include "../../showlog.h"
 #include "StratagemSlotProbe.h"
 
+#include <psapi.h>
 #include <cstdint>
 #include <cstring>
 
 namespace DX11Base {
   namespace {
-    static volatile LONG g_scanRunning = 0;
+    constexpr uintptr_t kSideOffset = 0x18;
+    constexpr uintptr_t kGaugeOffset = 0x154;
+    constexpr uintptr_t kFirstStratagemCountOffset = 0x10C;
+    constexpr uintptr_t kStratagemCountStride = 0x10;
+    constexpr int kStratagemCountSlots = 10;
 
-    static bool IsWritableProtect(DWORD protect) {
-      const DWORD base = protect & 0xFF;
-      return base == PAGE_READWRITE ||
-             base == PAGE_WRITECOPY ||
-             base == PAGE_EXECUTE_READWRITE ||
-             base == PAGE_EXECUTE_WRITECOPY;
-    }
+    static uintptr_t g_hookAddr = 0;
+    static uintptr_t g_caveAddr = 0;
+    static uint8_t g_original[5] = {};
+    static bool g_hookApplied = false;
 
-    static bool HasNearbyCount4(uintptr_t addr, uintptr_t regionStart, uintptr_t regionEnd) {
-      const uintptr_t from = (addr > regionStart + 0x20) ? addr - 0x20 : regionStart;
-      const uintptr_t to = (addr + 0x40 < regionEnd) ? addr + 0x40 : regionEnd;
+    static volatile uintptr_t g_attackInfo = 0;
+    static volatile uintptr_t g_defenseInfo = 0;
 
-      for (uintptr_t p = from; p + 4 <= to; ++p) {
-        if (*(const uint8_t *)p == 4)
-          return true;
-        if ((p & 1) == 0 && p + 2 <= to && *(const uint16_t *)p == 4)
-          return true;
-        if ((p & 3) == 0 && p + 4 <= to && *(const uint32_t *)p == 4)
-          return true;
+    static bool BuildCaptureCave(uintptr_t hookAddr) {
+      g_caveAddr = AllocNear(hookAddr, 128);
+      if (!g_caveAddr)
+        return false;
+
+      uint8_t *cave = reinterpret_cast<uint8_t *>(g_caveAddr);
+      int idx = 0;
+
+      auto emit8 = [&](uint8_t v) { cave[idx++] = v; };
+      auto emit64 = [&](uintptr_t v) {
+        *reinterpret_cast<uintptr_t *>(&cave[idx]) = v;
+        idx += 8;
+      };
+
+      emit8(0x52); // push rdx
+
+      // cmp byte ptr [rax+18],0
+      emit8(0x80); emit8(0x78); emit8(0x18); emit8(0x00);
+      emit8(0x75); const int jneDefense = idx++;
+
+      // attack -> g_attackInfo
+      emit8(0x48); emit8(0xBA); emit64(reinterpret_cast<uintptr_t>(&g_attackInfo));
+      emit8(0x48); emit8(0x89); emit8(0x02);
+      emit8(0xEB); const int jmpDoneAttack = idx++;
+
+      const int checkDefense = idx;
+
+      // cmp byte ptr [rax+18],1
+      emit8(0x80); emit8(0x78); emit8(0x18); emit8(0x01);
+      emit8(0x75); const int jneDone = idx++;
+
+      // defense -> g_defenseInfo
+      emit8(0x48); emit8(0xBA); emit64(reinterpret_cast<uintptr_t>(&g_defenseInfo));
+      emit8(0x48); emit8(0x89); emit8(0x02);
+
+      const int done = idx;
+
+      emit8(0x5A); // pop rdx
+      emit8(0x0F); emit8(0xB6); emit8(0x40); emit8(0x18); // original movzx eax,[rax+18]
+      emit8(0xC3); // original ret
+
+      auto patchRel8 = [&](int dispIndex, int target) -> bool {
+        const int rel = target - (dispIndex + 1);
+        if (rel < -128 || rel > 127)
+          return false;
+        cave[dispIndex] = static_cast<uint8_t>(static_cast<int8_t>(rel));
+        return true;
+      };
+
+      if (!patchRel8(jneDefense, checkDefense) ||
+          !patchRel8(jmpDoneAttack, done) ||
+          !patchRel8(jneDone, done)) {
+        VirtualFree(reinterpret_cast<LPVOID>(g_caveAddr), 0, MEM_RELEASE);
+        g_caveAddr = 0;
+        return false;
       }
-      return false;
+
+      FlushInstructionCache(GetCurrentProcess(), cave, idx);
+      return ApplyJmp(hookAddr, g_caveAddr, 5);
     }
 
-    static void LogWindow(uintptr_t addr, uintptr_t regionStart, uintptr_t regionEnd) {
-      const uintptr_t from = (addr > regionStart + 0x10) ? addr - 0x10 : regionStart;
-      const size_t remain = (size_t)(regionEnd - from);
-      const size_t bytes = remain >= 0x30 ? 0x30 : remain;
-      if (!IsValidPtr(from, bytes))
+    static bool EnsureCaptureHook() {
+      if (g_hookApplied)
+        return true;
+
+      const uintptr_t exeBase = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase)
+        return false;
+
+      MODULEINFO mi{};
+      if (!GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return false;
+
+      const uintptr_t imageEnd = exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      // CT battle-info getter:
+      // 48 8B 41 08
+      // 48 8B 48 30
+      // 48 8B 01
+      // 0F B6 40 18
+      // C3
+      const char *pattern =
+          "48 8B 41 08 48 8B 48 30 48 8B 01 0F B6 40 18 C3";
+      const uintptr_t found = FindPattern(exeBase, imageEnd, pattern);
+      if (!found) {
+        AddLog(u8"[책략5슬롯DBG] 전장 정보 getter 패턴을 찾지 못했습니다.");
+        return false;
+      }
+
+      g_hookAddr = found + 0x0B;
+      static const uint8_t expected[5] = {
+          0x0F, 0xB6, 0x40, 0x18, 0xC3
+      };
+
+      if (!IsValidPtr(g_hookAddr, sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(g_hookAddr),
+                      expected, sizeof(expected)) != 0) {
+        AddLog(u8"[책략5슬롯DBG] getter 검증 실패: %p",
+               reinterpret_cast<void *>(g_hookAddr));
+        g_hookAddr = 0;
+        return false;
+      }
+
+      std::memcpy(g_original,
+                  reinterpret_cast<const void *>(g_hookAddr),
+                  sizeof(g_original));
+
+      if (!BuildCaptureCave(g_hookAddr)) {
+        AddLog(u8"[책략5슬롯DBG] 전장 정보 캡처 훅 설치 실패.");
+        g_hookAddr = 0;
+        g_caveAddr = 0;
+        return false;
+      }
+
+      g_hookApplied = true;
+      g_attackInfo = 0;
+      g_defenseInfo = 0;
+
+      AddLog(u8"[책략5슬롯DBG] 전장 정보 캡처 훅 설치 완료.");
+      AddLog(u8"[책략5슬롯DBG] 책략 선택 화면을 한 번 열거나 수량을 변경한 뒤 이 버튼을 다시 누르세요.");
+      return true;
+    }
+
+    static bool ValidateInfo(uintptr_t ptr, uint8_t expectedSide) {
+      if (!ptr)
+        return false;
+
+      const uintptr_t lastCount =
+          ptr + kFirstStratagemCountOffset +
+          (kStratagemCountSlots - 1) * kStratagemCountStride;
+
+      if (!IsValidPtr(ptr + kSideOffset, 1) ||
+          !IsValidPtr(ptr + kGaugeOffset, sizeof(uint16_t)) ||
+          !IsValidPtr(lastCount, 1))
+        return false;
+
+      return *reinterpret_cast<const uint8_t *>(ptr + kSideOffset) ==
+             expectedSide;
+    }
+
+    static void DumpSide(const char *name, uintptr_t ptr, uint8_t side) {
+      if (!ValidateInfo(ptr, side))
         return;
 
-      char line[512] = {};
-      int pos = 0;
-      for (size_t i = 0; i < bytes && pos < (int)sizeof(line) - 4; ++i)
-        pos += sprintf_s(line + pos, sizeof(line) - pos, "%02X ", *(const uint8_t *)(from + i));
-
-      AddLog(u8"[책략5슬롯DBG] bytes @ %p : %s", (void *)from, line);
-    }
-
-    static bool IsPlausibleEmpty8(uint8_t v) {
-      return v == 0 || v == 0xFF;
-    }
-
-    static bool IsPlausibleEmpty16(uint16_t v) {
-      return v == 0 || v == 0xFFFF;
-    }
-
-    static bool IsPlausibleEmpty32(uint32_t v) {
-      return v == 0 || v == 0xFFFFFFFFu;
-    }
-
-    static DWORD WINAPI ScanThreadProc(LPVOID) {
-      SYSTEM_INFO si{};
-      GetSystemInfo(&si);
-
-      uintptr_t p = (uintptr_t)si.lpMinimumApplicationAddress;
-      const uintptr_t maxAddr = (uintptr_t)si.lpMaximumApplicationAddress;
-
-      int byteCandidates = 0;
-      int wordCandidates = 0;
-      int dwordCandidates = 0;
-      int logged = 0;
-      constexpr int kMaxLogs = 40;
-
-      AddLog(u8"[책략5슬롯DBG] 경량 스캔 시작: 기존 1,2,3,4 뒤에 빈 5번째 칸(0/FFFF)만 찾습니다.");
-      AddLog(u8"[책략5슬롯DBG] 이전 로그의 1..17 연속 배열은 일반 ID 테이블로 판정하여 제외합니다.");
-
-      while (p < maxAddr) {
-        MEMORY_BASIC_INFORMATION mbi{};
-        if (VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) != sizeof(mbi))
-          break;
-
-        const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
-        const uintptr_t regionEnd = regionStart + mbi.RegionSize;
-
-        const bool scan =
-            mbi.State == MEM_COMMIT &&
-            mbi.Type == MEM_PRIVATE &&
-            !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
-            IsWritableProtect(mbi.Protect) &&
-            mbi.RegionSize >= 0x20 &&
-            mbi.RegionSize <= (128ull * 1024ull * 1024ull);
-
-        if (scan) {
-          __try {
-            const uint8_t *b = (const uint8_t *)regionStart;
-            const size_t n = mbi.RegionSize;
-
-            // BYTE layouts: 1,2,3,4,empty OR zero-based 0,1,2,3,empty.
-            for (size_t i = 0; i + 5 <= n; ++i) {
-              const bool oneBased =
-                  b[i] == 1 && b[i + 1] == 2 && b[i + 2] == 3 && b[i + 3] == 4 &&
-                  IsPlausibleEmpty8(b[i + 4]);
-              const bool zeroBased =
-                  b[i] == 0 && b[i + 1] == 1 && b[i + 2] == 2 && b[i + 3] == 3 &&
-                  IsPlausibleEmpty8(b[i + 4]);
-
-              if ((oneBased || zeroBased) &&
-                  HasNearbyCount4(regionStart + i, regionStart, regionEnd)) {
-                ++byteCandidates;
-                if (logged < kMaxLogs) {
-                  AddLog(u8"[책략5슬롯DBG] BYTE 후보 #%d addr=%p mode=%s fifth=%u",
-                         byteCandidates, (void *)(regionStart + i),
-                         oneBased ? "1-based" : "0-based",
-                         (unsigned)b[i + 4]);
-                  LogWindow(regionStart + i, regionStart, regionEnd);
-                  ++logged;
-                }
-              }
-            }
-
-            // WORD layout.
-            for (size_t i = 0; i + 10 <= n; i += 2) {
-              const uint16_t *s = (const uint16_t *)(b + i);
-              const bool oneBased =
-                  s[0] == 1 && s[1] == 2 && s[2] == 3 && s[3] == 4 &&
-                  IsPlausibleEmpty16(s[4]);
-              const bool zeroBased =
-                  s[0] == 0 && s[1] == 1 && s[2] == 2 && s[3] == 3 &&
-                  IsPlausibleEmpty16(s[4]);
-
-              if ((oneBased || zeroBased) &&
-                  HasNearbyCount4(regionStart + i, regionStart, regionEnd)) {
-                ++wordCandidates;
-                if (logged < kMaxLogs) {
-                  AddLog(u8"[책략5슬롯DBG] WORD 후보 #%d addr=%p mode=%s fifth=%u",
-                         wordCandidates, (void *)(regionStart + i),
-                         oneBased ? "1-based" : "0-based",
-                         (unsigned)s[4]);
-                  LogWindow(regionStart + i, regionStart, regionEnd);
-                  ++logged;
-                }
-              }
-            }
-
-            // DWORD layout.
-            for (size_t i = 0; i + 20 <= n; i += 4) {
-              const uint32_t *d = (const uint32_t *)(b + i);
-              const bool oneBased =
-                  d[0] == 1 && d[1] == 2 && d[2] == 3 && d[3] == 4 &&
-                  IsPlausibleEmpty32(d[4]);
-              const bool zeroBased =
-                  d[0] == 0 && d[1] == 1 && d[2] == 2 && d[3] == 3 &&
-                  IsPlausibleEmpty32(d[4]);
-
-              if ((oneBased || zeroBased) &&
-                  HasNearbyCount4(regionStart + i, regionStart, regionEnd)) {
-                ++dwordCandidates;
-                if (logged < kMaxLogs) {
-                  AddLog(u8"[책략5슬롯DBG] DWORD 후보 #%d addr=%p mode=%s fifth=%u",
-                         dwordCandidates, (void *)(regionStart + i),
-                         oneBased ? "1-based" : "0-based",
-                         (unsigned)d[4]);
-                  LogWindow(regionStart + i, regionStart, regionEnd);
-                  ++logged;
-                }
-              }
-            }
-          } __except (EXCEPTION_EXECUTE_HANDLER) {
-          }
-
-          // Yield between heap regions so the game/UI remains responsive.
-          Sleep(0);
-        }
-
-        if (regionEnd <= p)
-          break;
-        p = regionEnd;
+      uint8_t counts[kStratagemCountSlots] = {};
+      for (int i = 0; i < kStratagemCountSlots; ++i) {
+        counts[i] = *reinterpret_cast<const uint8_t *>(
+            ptr + kFirstStratagemCountOffset +
+            (uintptr_t)i * kStratagemCountStride);
       }
 
-      AddLog(u8"[책략5슬롯DBG] 경량 스캔 완료: BYTE=%d WORD=%d DWORD=%d / 로그=%d",
-             byteCandidates, wordCandidates, dwordCandidates, logged);
-      if (byteCandidates == 0 && wordCandidates == 0 && dwordCandidates == 0) {
-        AddLog(u8"[책략5슬롯DBG] 연속 선택배열 후보 없음 -> 다음은 '선택 배열'이 아니라 UI/루프의 4개 제한을 찾는 방향으로 전환합니다.");
-      }
+      const uint16_t gauge =
+          *reinterpret_cast<const uint16_t *>(ptr + kGaugeOffset);
 
-      InterlockedExchange(&g_scanRunning, 0);
-      return 0;
+      AddLog(
+          u8"[책략5슬롯DBG] %s ptr=%p side=%u gauge=%u / "
+          "책략수량 ID1~10 = %u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
+          name, reinterpret_cast<void *>(ptr), (unsigned)side,
+          (unsigned)gauge,
+          (unsigned)counts[0], (unsigned)counts[1],
+          (unsigned)counts[2], (unsigned)counts[3],
+          (unsigned)counts[4], (unsigned)counts[5],
+          (unsigned)counts[6], (unsigned)counts[7],
+          (unsigned)counts[8], (unsigned)counts[9]);
+
+      AddLog(
+          u8"[책략5슬롯DBG] offsets: "
+          "ID1=+10C ID2=+11C ID3=+12C ID4=+13C "
+          "ID5후보=+14C ID6=+15C ... ID10=+19C");
     }
   }
 
   void ScanStratagemFiveSlotCandidates() {
-    if (InterlockedCompareExchange(&g_scanRunning, 1, 0) != 0) {
-      AddLog(u8"[책략5슬롯DBG] 이미 스캔 중입니다.");
+    if (!EnsureCaptureHook())
       return;
+
+    bool dumped = false;
+
+    const uintptr_t attack = g_attackInfo;
+    if (ValidateInfo(attack, 0)) {
+      DumpSide(u8"공격측", attack, 0);
+      dumped = true;
     }
 
-    HANDLE h = CreateThread(nullptr, 0, ScanThreadProc, nullptr, 0, nullptr);
-    if (!h) {
-      InterlockedExchange(&g_scanRunning, 0);
-      AddLog(u8"[책략5슬롯DBG] 스캔 스레드 생성 실패.");
-      return;
+    const uintptr_t defense = g_defenseInfo;
+    if (ValidateInfo(defense, 1)) {
+      DumpSide(u8"수비측", defense, 1);
+      dumped = true;
     }
 
-    CloseHandle(h);
-    AddLog(u8"[책략5슬롯DBG] 백그라운드 스캔 시작. 게임 화면은 계속 조작할 수 있습니다.");
+    if (!dumped) {
+      AddLog(u8"[책략5슬롯DBG] 아직 전장 정보 포인터가 잡히지 않았습니다.");
+      AddLog(u8"[책략5슬롯DBG] 책략 선택 화면을 열고 수량을 한 번 변경한 뒤 다시 누르세요.");
+    }
   }
 } // namespace DX11Base
