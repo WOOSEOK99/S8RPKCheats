@@ -58,6 +58,9 @@ namespace DX11Base {
     static uint8_t g_uiDialogOriginal[9] = {};
     static bool g_uiDialogHookApplied = false;
     static volatile uintptr_t g_trickUiDialog = 0;
+    static uintptr_t g_fifthUiSidecarLayout = 0;
+    static uintptr_t g_fifthUiSidecarButton = 0;
+    static bool g_fifthUiSidecarAttempted = false;
 
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
@@ -290,6 +293,220 @@ namespace DX11Base {
       g_trickUiDialog = 0;
       AddLog(u8"[책략5UICAP] dialog 캡처 훅 설치 완료.");
       return true;
+    }
+
+    static bool CreateFifthUiSidecarDisplayOnlySeh(uintptr_t layout) {
+      if (!layout || !IsValidPtr(layout, 0x2A8))
+        return false;
+
+      if (g_fifthUiSidecarLayout == layout &&
+          g_fifthUiSidecarButton &&
+          IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
+        return true;
+
+      if (g_fifthUiSidecarLayout != layout) {
+        g_fifthUiSidecarLayout = layout;
+        g_fifthUiSidecarButton = 0;
+        g_fifthUiSidecarAttempted = false;
+      }
+
+      if (g_fifthUiSidecarAttempted)
+        return false;
+      g_fifthUiSidecarAttempted = true;
+
+      __try {
+        uintptr_t existing0 = 0;
+        if (!SafeReadPtrSeh(layout + 0x1E0, &existing0) ||
+            !existing0 || !IsValidPtr(existing0, 0x1D8)) {
+          AddLog(u8"[책략5UITEST] 기존 1번 버튼 검증 실패. sidecar 생성 중단.");
+          return false;
+        }
+
+        const uintptr_t exeBase =
+            reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+        if (!exeBase)
+          return false;
+
+        constexpr uintptr_t kMemoryManagerGetterRva = 0x00014ED0;
+        constexpr uintptr_t kTrickButtonCtorRva = 0x01E7FEC0;
+        constexpr uintptr_t kTrickButtonInitializeRva = 0x01E7FF40;
+        constexpr uintptr_t kSetTrickIdRva = 0x01E7FD90;
+
+        static const uint8_t ctorExpected[] =
+            {0x48,0x89,0x4C,0x24,0x08,0x53};
+        static const uint8_t initExpected[] =
+            {0x48,0x89,0x5C,0x24,0x10,0x48};
+        static const uint8_t setExpected[] =
+            {0x48,0x89,0x5C,0x24,0x08,0x57};
+
+        if (!IsValidPtr(exeBase + kTrickButtonCtorRva, sizeof(ctorExpected)) ||
+            !IsValidPtr(exeBase + kTrickButtonInitializeRva, sizeof(initExpected)) ||
+            !IsValidPtr(exeBase + kSetTrickIdRva, sizeof(setExpected)) ||
+            std::memcmp(reinterpret_cast<const void *>(exeBase + kTrickButtonCtorRva),
+                        ctorExpected, sizeof(ctorExpected)) != 0 ||
+            std::memcmp(reinterpret_cast<const void *>(exeBase + kTrickButtonInitializeRva),
+                        initExpected, sizeof(initExpected)) != 0 ||
+            std::memcmp(reinterpret_cast<const void *>(exeBase + kSetTrickIdRva),
+                        setExpected, sizeof(setExpected)) != 0) {
+          AddLog(u8"[책략5UITEST] TrickSelectButton 함수 빌드 가드 불일치. 생성 중단.");
+          return false;
+        }
+
+        using GetMemoryManagerFn = uintptr_t(__fastcall *)();
+        using GameAllocFn = uintptr_t(__fastcall *)(uintptr_t, size_t, void *);
+        using ButtonCtorFn = uintptr_t(__fastcall *)(uintptr_t);
+        using ButtonInitFn = void(__fastcall *)(uintptr_t, int, int, uintptr_t);
+        using SetTrickIdFn = void(__fastcall *)(uintptr_t, uint8_t);
+        using SetXYFn = void(__fastcall *)(uintptr_t, int, int);
+        using SetBoolFn = void(__fastcall *)(uintptr_t, bool);
+        using SetU32Fn = void(__fastcall *)(uintptr_t, uint32_t);
+        using SetPairFn = void(__fastcall *)(uintptr_t, uint64_t);
+
+        const auto getMemoryManager =
+            reinterpret_cast<GetMemoryManagerFn>(exeBase + kMemoryManagerGetterRva);
+        const uintptr_t memoryManager = getMemoryManager();
+        if (!memoryManager || !IsValidPtr(memoryManager + 0x118, sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UITEST] 게임 메모리 관리자 획득 실패.");
+          return false;
+        }
+
+        const uintptr_t allocator =
+            *reinterpret_cast<const uintptr_t *>(memoryManager + 0x118);
+        if (!allocator || !IsValidPtr(allocator, sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UITEST] 버튼 allocator 포인터 무효.");
+          return false;
+        }
+
+        const uintptr_t allocatorVtable =
+            *reinterpret_cast<const uintptr_t *>(allocator);
+        if (!allocatorVtable ||
+            !IsValidPtr(allocatorVtable + 0x28, sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UITEST] allocator vtable 무효.");
+          return false;
+        }
+
+        const uintptr_t allocAddr =
+            *reinterpret_cast<const uintptr_t *>(allocatorVtable + 0x28);
+        if (!allocAddr || !IsValidPtr(allocAddr, 1)) {
+          AddLog(u8"[책략5UITEST] allocator 함수 무효.");
+          return false;
+        }
+
+        struct AllocTag {
+          uint32_t tag;
+          uint32_t reserved;
+          uintptr_t context;
+        };
+        AllocTag allocTag{0x35u, 0u, 0u};
+
+        const auto allocFn = reinterpret_cast<GameAllocFn>(allocAddr);
+        const uintptr_t raw = allocFn(allocator, 0x1D8, &allocTag);
+        if (!raw || !IsValidPtr(raw, 0x1D8)) {
+          AddLog(u8"[책략5UITEST] 0x1D8 버튼 메모리 할당 실패.");
+          return false;
+        }
+
+        const auto ctor =
+            reinterpret_cast<ButtonCtorFn>(exeBase + kTrickButtonCtorRva);
+        uintptr_t button = ctor(raw);
+        if (!button || !IsValidPtr(button, 0x1D8)) {
+          AddLog(u8"[책략5UITEST] TrickSelectButton 생성자 실패.");
+          return false;
+        }
+
+        const int x = static_cast<int>(
+            g_trickUiStartX + g_trickUiStep * 4);
+        const int y = static_cast<int>(g_trickUiY);
+        if (g_trickUiStep <= 0 || x < -4096 || x > 8192 ||
+            y < -4096 || y > 8192) {
+          AddLog(u8"[책략5UITEST] live 좌표 비정상: x=%d y=%d step=%d",
+                 x, y, (int)g_trickUiStep);
+          return false;
+        }
+
+        const auto initialize =
+            reinterpret_cast<ButtonInitFn>(exeBase + kTrickButtonInitializeRva);
+        initialize(button, x, y, layout);
+
+        // Mirror the proven post-Initialize setup used by Layout::Initialize,
+        // but deliberately DO NOT register UI ID 7 yet.
+        *reinterpret_cast<uint8_t *>(button + 0x1D4) = 0;
+        *reinterpret_cast<uint8_t *>(button + 0x1D5) = 1;
+
+        const int32_t state1C8 =
+            *reinterpret_cast<const int32_t *>(button + 0x1C8);
+        if (state1C8 != 1) {
+          *reinterpret_cast<uint32_t *>(button + 0x40) |= 0x200u;
+
+          uintptr_t vtable =
+              *reinterpret_cast<const uintptr_t *>(button);
+          if (vtable && IsValidPtr(vtable + 0x270, sizeof(uintptr_t) * 2)) {
+            const uintptr_t fn268 =
+                *reinterpret_cast<const uintptr_t *>(vtable + 0x268);
+            const uintptr_t fn270 =
+                *reinterpret_cast<const uintptr_t *>(vtable + 0x270);
+
+            if (fn268 && IsValidPtr(fn268, 1))
+              reinterpret_cast<SetU32Fn>(fn268)(button, 0);
+
+            int32_t pair[2] = {};
+            if (SafeCopySeh(exeBase + 0x02C3F808, pair, sizeof(pair)) &&
+                fn270 && IsValidPtr(fn270, 1)) {
+              uint64_t packed = 0;
+              std::memcpy(&packed, pair, sizeof(packed));
+              reinterpret_cast<SetPairFn>(fn270)(button, packed);
+            }
+          }
+
+          uintptr_t copyValue = 0;
+          if (SafeReadPtrSeh(button + 0x1A8, &copyValue))
+            *reinterpret_cast<uintptr_t *>(button + 0x48) = copyValue;
+        }
+
+        // Unregistered sentinel ID: avoids collision with the proven 0..6 registry.
+        *reinterpret_cast<uint32_t *>(button + 0x88) = 0xFFFFFFFFu;
+        *reinterpret_cast<uint32_t *>(button + 0x8C) = 1u;
+
+        const auto setTrickId =
+            reinterpret_cast<SetTrickIdFn>(exeBase + kSetTrickIdRva);
+        setTrickId(button, 5);
+
+        uintptr_t buttonVtable =
+            *reinterpret_cast<const uintptr_t *>(button);
+        uintptr_t existingVtable =
+            *reinterpret_cast<const uintptr_t *>(existing0);
+        if (!buttonVtable || buttonVtable != existingVtable) {
+          AddLog(u8"[책략5UITEST] sidecar vtable 불일치: new=%p existing=%p",
+                 reinterpret_cast<void *>(buttonVtable),
+                 reinterpret_cast<void *>(existingVtable));
+          return false;
+        }
+
+        if (IsValidPtr(buttonVtable + 0x108, sizeof(uintptr_t))) {
+          const uintptr_t setPos =
+              *reinterpret_cast<const uintptr_t *>(buttonVtable + 0x90);
+          const uintptr_t setVisible =
+              *reinterpret_cast<const uintptr_t *>(buttonVtable + 0x108);
+
+          if (setPos && IsValidPtr(setPos, 1))
+            reinterpret_cast<SetXYFn>(setPos)(button, x, y);
+          if (setVisible && IsValidPtr(setVisible, 1))
+            reinterpret_cast<SetBoolFn>(setVisible)(button, true);
+        }
+
+        g_fifthUiSidecarLayout = layout;
+        g_fifthUiSidecarButton = button;
+
+        AddLog(u8"[책략5UITEST] 표시 전용 5번째 버튼 생성 성공: layout=%p button=%p x=%d y=%d UI-ID=-1 TrickID=5",
+               reinterpret_cast<void *>(layout),
+               reinterpret_cast<void *>(button),
+               x, y);
+        AddLog(u8"[책략5UITEST] 아직 registry/callback 미연결 상태입니다. 보이는지만 확인하고 클릭하지 마세요.");
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5UITEST] sidecar 생성 중 예외 발생. 추가 쓰기 중단.");
+        return false;
+      }
     }
 
     static void LogUiProbeWindow(const char *name,
@@ -1143,6 +1360,9 @@ namespace DX11Base {
       g_trickUiY = 0;
       g_trickUiStep = 0;
       g_lastLoggedUiLayout = 0;
+      g_fifthUiSidecarLayout = 0;
+      g_fifthUiSidecarButton = 0;
+      g_fifthUiSidecarAttempted = false;
       AddLog(u8"[책략5메타DBG] 5번 내부 등록 해제.");
       return true;
     }
@@ -1355,7 +1575,7 @@ namespace DX11Base {
         AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
       if (!EnsureTrickUiDialogCaptureHook())
         AddLog(u8"[책략5UICAP] dialog 캡처 훅은 설치되지 않았습니다.");
-      DumpTrickUiPdbProbe();
+      AddLog(u8"[책략5UIDBG] 기존 PDB 바이트 덤프는 문서화 완료되어 이번 테스트에서는 생략합니다.");
       return true;
     }
 
@@ -1395,7 +1615,7 @@ namespace DX11Base {
       AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
     if (!EnsureTrickUiDialogCaptureHook())
       AddLog(u8"[책략5UICAP] dialog 캡처 훅은 설치되지 않았습니다.");
-    DumpTrickUiPdbProbe();
+    AddLog(u8"[책략5UIDBG] 기존 PDB 바이트 덤프는 문서화 완료되어 이번 테스트에서는 생략합니다.");
     return true;
   }
 
@@ -1591,8 +1811,10 @@ namespace DX11Base {
              (int32_t)fields50[14], (int32_t)fields50[15]);
     }
 
+    CreateFifthUiSidecarDisplayOnlySeh(layout);
+
     g_lastLoggedUiLayout = layout;
-    AddLog(u8"[책략5UICAP] live layout 캡처 완료. 이 로그로 5번째 sidecar 버튼 생성 조건을 확정합니다.");
+    AddLog(u8"[책략5UICAP] live layout 캡처 완료.");
   }
 
   void ScanStratagemFiveSlotCandidates() {

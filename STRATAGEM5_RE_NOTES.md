@@ -845,3 +845,72 @@ call 0x01D13E60
 를 판단한다.
 
 이 진단이 끝나기 전에는 `controlCount 7 -> 8`을 쓰지 않는다.
+
+
+---
+
+## 19. 2026-09-23 CUIMaker registry 동적 구조 확정 및 첫 sidecar 생성 단계
+
+`CUIMaker::InitLayouts` 런타임 코드를 해석한 결과 registry는 고정 7칸 배열이 아니다.
+
+```text
+count = R8D
+descriptor storage = game allocator(count * 0x60)
+pointer storage    = game allocator(count * 8)
+maker+0x00 = descriptor storage
+maker+0x08 = pointer storage
+maker+0x10 = count
+maker+0x18 = owner/layout
+```
+
+현재 `layout+0x140`가 이 maker 구조이며 따라서:
+
+- `layout+0x140` = descriptor storage
+- `layout+0x148` = pointer storage
+- `layout+0x150` = count (=7)
+
+이다.
+
+`CUIMaker::RegisterLayout`도:
+
+```asm
+test id,id
+js fail
+cmp id,[maker+0x10]
+jge fail
+...
+control+0x8C = 1
+control+0x88 = id
+```
+
+형태로 동적 count만 검사한다.
+
+따라서 향후 ID7용 count=8 확장은 구조적으로 가능하다.
+다만 기존 registry를 즉시 재할당하면 destructor/기존 control 참조까지 함께 고려해야 하므로
+첫 실제 UI 실험에서는 registry를 건드리지 않는다.
+
+### 첫 실제 5번째 버튼 생성 테스트
+
+다음 테스트는 live `TrickCommandDialogLayout` 캡처 후:
+
+1. 게임 자체 allocator를 사용해 정확히 `0x1D8` 할당
+2. `TrickSelectButton::ctor` 호출
+3. `TrickSelectButton::Initialize(x=1526,y=364,parent=layout)` 호출
+4. 기존 버튼 생성 후처리 일부를 동일하게 적용
+5. `SetTrickID(5)`
+6. 기존 0..6 registry와 충돌하지 않도록 UI ID는 `-1` sentinel
+7. `RegisterLayout`과 signal callback은 아직 호출하지 않음
+
+으로 진행한다.
+
+이 단계의 목적은 **독립 sidecar TrickSelectButton이 실제 전투 UI에 렌더링 가능한지**만 검증하는 것이다.
+버튼이 보여도 아직 클릭하지 않는다.
+
+성공 후 다음 단계:
+
+- GetTrickButton(4) -> sidecar
+- Dialog::Open index4 -> sidecar
+- Dialog::Initialize callback loop index4 -> sidecar
+- registry를 안전하게 8칸으로 확장하여 ID7 정식 등록
+
+순으로 기능화한다.
