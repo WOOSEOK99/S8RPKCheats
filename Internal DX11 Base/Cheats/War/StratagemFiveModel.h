@@ -60,9 +60,12 @@ inline bool Prepare(const Entry (&entries)[5], uint32_t count,
   }
   // Never add a second ID5 or rewrite a native/pre-existing ID5's uses.
   if (fifthEntry >= 0) {
-    if (count < 2 || fifthEntry != static_cast<int>(count - 1)) return false;
+    if (fifthCamp < 0 || count < 2 ||
+        fifthEntry != static_cast<int>(count - 1))
+      return false;
     out.originalCount = count - 1;
     out.campSlot = static_cast<uint32_t>(fifthCamp);
+    out.added = entries[fifthEntry];
     out.alreadyPresent = true;
     return true;
   }
