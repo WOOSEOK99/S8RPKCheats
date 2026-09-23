@@ -4912,10 +4912,10 @@ namespace DX11Base {
     const ULONGLONG now = GetTickCount64();
     if (now - s_lastAttemptTick < 500)
       return;
+    s_lastAttemptTick = now;
 
     bool attackReady = ValidateInfo(g_attackInfo, 0);
     bool defenseReady = ValidateInfo(g_defenseInfo, 1);
-
     if (!attackReady && !defenseReady) {
       if (TryRecaptureBattleInfoFromDialogSeh()) {
         attackReady = ValidateInfo(g_attackInfo, 0);
@@ -4926,50 +4926,42 @@ namespace DX11Base {
     if (!attackReady && !defenseReady)
       return;
 
-    s_lastAttemptTick = now;
+    // Resolve canonical row5 first. Count selection now depends on the actual
+    // native model/Camp row mapping, not on the old 1/1/1/1 heuristic.
+    if (g_fiveMetadataRequested &&
+        (!g_fiveMetadataTable || !g_fiveMetadataAddr))
+      SetStratagemFiveMetadataTest(true);
 
     bool countCurrent = false;
-    if (g_id5CountApplied && g_id5CountOwner) {
-      countCurrent =
-          (g_id5CountOwner == g_attackInfo && attackReady) ||
-          (g_id5CountOwner == g_defenseInfo && defenseReady);
-      if (countCurrent) {
-        const uintptr_t expected =
-            g_id5CountOwner + kFirstStratagemCountOffset +
-            4 * kStratagemCountStride;
-        countCurrent =
-            g_id5CountAddr == expected &&
-            IsValidPtr(expected, 1) &&
-            *reinterpret_cast<const uint8_t *>(expected) == 1;
-      }
-    }
-
-    if (g_id5CountRequested && !countCurrent) {
+    if (g_id5CountRequested) {
       SetStratagemFiveCountTest(true);
 
-      countCurrent = false;
-      if (g_id5CountApplied && g_id5CountOwner) {
+      if (g_id5CountApplied &&
+          g_id5CountOwner &&
+          g_id5CountEntryIndex < 5) {
         const bool ownerCurrent =
-            (g_id5CountOwner == g_attackInfo && ValidateInfo(g_id5CountOwner, 0)) ||
-            (g_id5CountOwner == g_defenseInfo && ValidateInfo(g_id5CountOwner, 1));
+            (g_id5CountOwner == g_attackInfo &&
+             ValidateInfo(g_id5CountOwner, 0)) ||
+            (g_id5CountOwner == g_defenseInfo &&
+             ValidateInfo(g_id5CountOwner, 1));
         const uintptr_t expected =
-            g_id5CountOwner + kFirstStratagemCountOffset +
-            4 * kStratagemCountStride;
+            g_id5CountOwner + 0xF0 + 0x10 +
+            static_cast<uintptr_t>(g_id5CountEntryIndex) * 0x10 +
+            0x0C;
         countCurrent =
             ownerCurrent &&
             g_id5CountAddr == expected &&
-            IsValidPtr(expected, 1) &&
-            *reinterpret_cast<const uint8_t *>(expected) == 1;
+            IsValidPtr(expected, 1);
       }
 
       if (!countCurrent)
         return;
-
-      AddLog(u8"[책략5수명] 새 전투 객체에 ID5 수량 자동 재적용 완료.");
     }
 
     bool metadataCurrent = false;
     if (g_fiveMetadataRequested) {
+      SetStratagemFiveMetadataTest(true);
+
       metadataCurrent =
           g_fiveMetadataApplied &&
           g_fiveRuntimeSlotApplied &&
@@ -4977,54 +4969,25 @@ namespace DX11Base {
           g_fiveRuntimeSlotAddr &&
           g_fiveMetadataAddr &&
           IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
-          *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
-              g_fiveMetadataAddr;
-      if (!metadataCurrent) {
-        SetStratagemFiveMetadataTest(true);
-        metadataCurrent =
-            g_fiveMetadataApplied &&
-            g_fiveRuntimeSlotApplied &&
-            g_fiveRuntimeOwner == g_id5CountOwner &&
-            g_fiveRuntimeSlotAddr &&
-            g_fiveMetadataAddr &&
-            IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
-            *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
-                g_fiveMetadataAddr;
-        if (metadataCurrent)
-          AddLog(u8"[책략5수명] 새 전투 객체에 ID5 내부등록 자동 재적용 완료.");
-      }
+          *reinterpret_cast<const uintptr_t *>(
+              g_fiveRuntimeSlotAddr) == g_fiveMetadataAddr;
+
+      if (!metadataCurrent)
+        return;
     }
 
-    // The dialog/model is created slightly later than the battle Camp/UI shell.
-    // On a second battle after loading another save, the first probe can see a
-    // valid dialog/layout while dialog+0x20 (model holder) is still NULL. Do not
-    // treat that one early miss as final: once the native model becomes ready,
-    // synthesize entry4 exactly as in the first successful battle.
-    if (metadataCurrent &&
-        !g_fifthUiModelCountApplied &&
-        !g_fifthUiModelEntryApplied) {
-      const uintptr_t dialog = g_trickUiDialog;
-      const uintptr_t layout = g_trickUiLayout;
-      if (dialog && layout &&
-          g_fifthUiId7Registered &&
-          g_fifthUiSidecarLayout == layout &&
-          g_fifthUiSidecarButton &&
-          IsValidPtr(dialog, 0x40) &&
-          IsValidPtr(layout, 0x2A8)) {
-        uintptr_t dialogLayout = 0;
-        uintptr_t holder = 0;
-        uintptr_t inner = 0;
-        if (SafeReadPtrSeh(dialog + 0x08, &dialogLayout) &&
-            dialogLayout == layout &&
-            SafeReadPtrSeh(dialog + 0x20, &holder) &&
-            holder &&
-            IsValidPtr(holder, sizeof(uintptr_t)) &&
-            SafeReadPtrSeh(holder, &inner) &&
-            inner &&
-            IsValidPtr(inner + 0xF0, 0x80)) {
-          if (TryExtendFifthDialogModelCountSeh(dialog))
-            AddLog(u8"[책략5수명] dialog model 준비 완료 후 fifth entry/count 자동 적용.");
-        }
+    if (!metadataCurrent)
+      return;
+
+    // Retry this even after the entry was synthesized. For N==4 the UI ID7
+    // helper/sidecar can become valid slightly later; an already-present ID5
+    // plan republishes the sidecar without rewriting model data.
+    const uintptr_t dialog = g_trickUiDialog;
+    if (dialog && IsValidPtr(dialog, 0x40)) {
+      if (TryExtendFifthDialogModelCountSeh(dialog)) {
+        AddLog(u8"[책략5수명] 현재 전투 N+1 ID5 model/UI 상태 확인 완료: N=%u total=%u",
+               (unsigned)g_fifthRuntimeOriginalCount,
+               (unsigned)(g_fifthRuntimeOriginalCount + 1));
       }
     }
   }
