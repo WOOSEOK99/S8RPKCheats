@@ -2018,3 +2018,44 @@ sidecar와 4번째 버튼이 겹치는 것이다.
 1. 다섯 카드가 모두 분리되어 보이는지
 2. 5번째 hover 유지
 3. 그 뒤 5번째 클릭 -> 상세 패널/선택 상태가 ID5로 넘어가는지
+
+
+---
+
+## 37. 2026-09-23 5번째 렌더/hover/클릭 성공, 선택 전환은 4개 제한에 막힘
+
+실게임에서 다음이 확인됐다.
+
+- 5개 카드 분리 렌더 성공
+- 5번째 hover/focus 반응 성공
+- 5번째 클릭 시 버튼 자체의 체크/선택 표현 성공
+- 그러나 하단 설명은 4번째 사모위계에 머물고 실제 선택 전환도 진행되지 않음
+- callback loop index4Hits=1, ID7 등록/sidecar/Open/GetTrickButton 모두 정상
+
+따라서 버튼 객체/입력 문제가 아니라 **Dialog 선택 처리의 별도 4개 bounds check**가
+다음 병목으로 판단된다.
+
+PDB에서 이미 확인된 작은 함수:
+
+`TrickCommandDialog::OnTrickSelect`
+- RVA 0x01DF37B0
+- size 0x4C
+
+이번 패치는 이 함수 전체 0x4C를 런타임 검증하여:
+
+1. direct `m_pButtons +0x1E0` 접근이 없어야 함
+2. `Layout::GetTrickButton` direct call이 정확히 1개여야 함
+3. `cmp r32,4`가 정확히 1개여야 함
+
+세 조건이 모두 맞을 때만 그 단일 immediate 4를 5로 확장한다.
+
+GetTrickButton(4)는 이미 sidecar를 반환하도록 완전 대체되어 있으므로,
+이 경로는 +0x200을 읽지 않는다.
+
+성공 로그:
+
+```text
+[책략5UISEL] OnTrickSelect index 범위 4->5 확장 성공
+```
+
+이번 확인 목표는 5번째 클릭 시 하단 설명/현재 선택이 ID5로 전환되는지다.

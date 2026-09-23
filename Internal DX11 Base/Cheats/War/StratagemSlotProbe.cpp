@@ -109,6 +109,10 @@ namespace DX11Base {
     static bool g_fifthUiResetCompactHookApplied = false;
     static bool g_fifthUiCompactLogged = false;
 
+    static uintptr_t g_fifthUiOnSelectCmpImmAddr = 0;
+    static uint8_t g_fifthUiOnSelectCmpOriginal = 0;
+    static bool g_fifthUiOnSelectBoundHookApplied = false;
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -1172,6 +1176,93 @@ namespace DX11Base {
              (unsigned long long)(cmpAddr - exeBase),
              (unsigned long long)(loadAddr - exeBase),
              (unsigned long long)(skipTarget - exeBase));
+      return true;
+    }
+
+
+
+    static bool EnsureFifthUiOnTrickSelectBoundHook() {
+      if (g_fifthUiOnSelectBoundHookApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kOnTrickSelectRva = 0x01DF37B0;
+      constexpr size_t kOnTrickSelectSize = 0x4C;
+      constexpr uintptr_t kGetTrickButtonRva = 0x01DAF060;
+      const uintptr_t fn = exeBase + kOnTrickSelectRva;
+      const uintptr_t getButton = exeBase + kGetTrickButtonRva;
+
+      uint8_t code[kOnTrickSelectSize] = {};
+      if (!SafeCopySeh(fn, code, sizeof(code)))
+        return false;
+
+      // Refuse if this tiny function performs a direct m_pButtons(+1E0)
+      // access. The only safe index4 path is via our replaced GetTrickButton.
+      unsigned directButtonsDisp = 0;
+      for (size_t i=0;i+4<=sizeof(code);++i) {
+        if (code[i]==0xE0 && code[i+1]==0x01 &&
+            code[i+2]==0x00 && code[i+3]==0x00)
+          ++directButtonsDisp;
+      }
+
+      unsigned getButtonCalls = 0;
+      for (size_t i=0;i+5<=sizeof(code);++i) {
+        if (code[i] != 0xE8)
+          continue;
+        int32_t rel=0;
+        std::memcpy(&rel, code+i+1, sizeof(rel));
+        const uintptr_t target =
+            fn + i + 5 + static_cast<intptr_t>(rel);
+        if (target == getButton)
+          ++getButtonCalls;
+      }
+
+      // Match only cmp r32,4 encoded as 83 /7 04. On this build the select
+      // handler has one such bounds check. Do not patch any unrelated '4'.
+      unsigned cmp4Count = 0;
+      uintptr_t cmpImmAddr = 0;
+      for (size_t i=0;i+3<=sizeof(code);++i) {
+        if (code[i] == 0x83 &&
+            (code[i+1] & 0x38) == 0x38 &&
+            code[i+2] == 0x04) {
+          ++cmp4Count;
+          cmpImmAddr = fn + i + 2;
+        }
+      }
+
+      if (directButtonsDisp != 0 || getButtonCalls != 1 || cmp4Count != 1) {
+        AddLog(u8"[책략5UISEL] OnTrickSelect 가드 불일치: direct+1E0=%u getButtonCalls=%u cmp4=%u",
+               directButtonsDisp, getButtonCalls, cmp4Count);
+        return false;
+      }
+
+      uint8_t current=0;
+      if (!SafeCopySeh(cmpImmAddr,&current,1) || current!=0x04)
+        return false;
+
+      DWORD oldProtect=0,tmpProtect=0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(cmpImmAddr),1,
+                          PAGE_EXECUTE_READWRITE,&oldProtect))
+        return false;
+      *reinterpret_cast<uint8_t *>(cmpImmAddr)=0x05;
+      FlushInstructionCache(GetCurrentProcess(),
+                            reinterpret_cast<void *>(cmpImmAddr),1);
+      VirtualProtect(reinterpret_cast<LPVOID>(cmpImmAddr),1,
+                     oldProtect,&tmpProtect);
+
+      uint8_t verify=0;
+      if (!SafeCopySeh(cmpImmAddr,&verify,1) || verify!=0x05)
+        return false;
+
+      g_fifthUiOnSelectCmpImmAddr=cmpImmAddr;
+      g_fifthUiOnSelectCmpOriginal=0x04;
+      g_fifthUiOnSelectBoundHookApplied=true;
+      AddLog(u8"[책략5UISEL] OnTrickSelect index 범위 4->5 확장 성공: RVA=+%llX",
+             (unsigned long long)(cmpImmAddr-exeBase));
       return true;
     }
 
@@ -2704,14 +2795,15 @@ namespace DX11Base {
     const bool initReady = EnsureTrickUiInitLayoutsBridgeHook(reportFailure);
     const bool layoutPostReady = EnsureFifthUiLayoutPostButtonsHook();
     const bool resetCompactReady = EnsureFifthUiResetCompactHook();
+    const bool onSelectReady = EnsureFifthUiOnTrickSelectBoundHook();
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
     const bool ready = initReady && layoutPostReady && resetCompactReady &&
-                       preCallbackReady && callbackLoopReady;
+                       onSelectReady && preCallbackReady && callbackLoopReady;
     if (!ready && reportFailure) {
-      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d reset=%d preCallback=%d callbackLoop=%d",
+      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d reset=%d onSelect=%d preCallback=%d callbackLoop=%d",
              initReady?1:0, layoutPostReady?1:0, resetCompactReady?1:0,
-             preCallbackReady?1:0, callbackLoopReady?1:0);
+             onSelectReady?1:0, preCallbackReady?1:0, callbackLoopReady?1:0);
     }
     return ready;
   }
