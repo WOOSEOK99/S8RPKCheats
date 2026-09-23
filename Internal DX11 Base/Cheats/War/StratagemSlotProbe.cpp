@@ -67,6 +67,201 @@ namespace DX11Base {
       }
     }
 
+    static void LogUiProbeWindow(const char *name,
+                                 uintptr_t funcAddr,
+                                 size_t offset,
+                                 const uint8_t *bytes,
+                                 size_t size) {
+      if (!name || !bytes || offset >= size)
+        return;
+
+      const size_t from = offset > 12 ? offset - 12 : 0;
+      const size_t to = (offset + 24 < size) ? offset + 24 : size;
+
+      char line[512] = {};
+      int pos = 0;
+      for (size_t i = from; i < to && pos < (int)sizeof(line) - 4; ++i) {
+        pos += sprintf_s(line + pos, sizeof(line) - pos, "%02X ",
+                         (unsigned)bytes[i]);
+      }
+
+      AddLog(u8"[책략5UIDBG] %s +%llX @ %p : %s",
+             name,
+             (unsigned long long)offset,
+             reinterpret_cast<void *>(funcAddr + offset),
+             line);
+    }
+
+    static void ProbeUiFunction(uintptr_t exeBase,
+                                uintptr_t imageEnd,
+                                const char *name,
+                                uintptr_t rva,
+                                size_t size,
+                                uintptr_t getTrickButtonAddr,
+                                bool dumpWhole) {
+      if (!exeBase || !name || size == 0 || size > 0x1100)
+        return;
+
+      const uintptr_t addr = exeBase + rva;
+      if (addr < exeBase || addr + size < addr || addr + size > imageEnd ||
+          !IsValidPtr(addr, size)) {
+        AddLog(u8"[책략5UIDBG] %s 범위 무효: RVA=+%llX size=%llu",
+               name,
+               (unsigned long long)rva,
+               (unsigned long long)size);
+        return;
+      }
+
+      uint8_t bytes[0x1100] = {};
+      if (!SafeCopySeh(addr, bytes, size)) {
+        AddLog(u8"[책략5UIDBG] %s 코드 읽기 실패: %p",
+               name, reinterpret_cast<void *>(addr));
+        return;
+      }
+
+      AddLog(u8"[책략5UIDBG] %s RVA=+%llX addr=%p size=0x%llX",
+             name,
+             (unsigned long long)rva,
+             reinterpret_cast<void *>(addr),
+             (unsigned long long)size);
+
+      if (dumpWhole) {
+        for (size_t i = 0; i < size; i += 32) {
+          const size_t chunk = ((size - i) > 32) ? 32 : (size - i);
+          char line[256] = {};
+          int pos = 0;
+          for (size_t j = 0; j < chunk && pos < (int)sizeof(line) - 4; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos, "%02X ",
+                             (unsigned)bytes[i + j]);
+          }
+          AddLog(u8"[책략5UIDBG] %s bytes +%llX : %s",
+                 name, (unsigned long long)i, line);
+        }
+      }
+
+      int cmpHits = 0;
+      int buttonDispHits = 0;
+      int getButtonCalls = 0;
+      constexpr int kMaxHitsPerKind = 16;
+
+      for (size_t i = 0; i < size; ++i) {
+        bool cmpCandidate = false;
+
+        if (i + 2 < size &&
+            (bytes[i] == 0x83 || bytes[i] == 0x80) &&
+            (bytes[i + 1] & 0x38) == 0x38 &&
+            (bytes[i + 2] == 0x03 ||
+             bytes[i + 2] == 0x04 ||
+             bytes[i + 2] == 0x05)) {
+          cmpCandidate = true;
+        } else if (i + 1 < size &&
+                   bytes[i] == 0x3C &&
+                   (bytes[i + 1] == 0x03 ||
+                    bytes[i + 1] == 0x04 ||
+                    bytes[i + 1] == 0x05)) {
+          cmpCandidate = true;
+        } else if (i + 4 < size &&
+                   bytes[i] == 0x3D &&
+                   (bytes[i + 1] == 0x03 ||
+                    bytes[i + 1] == 0x04 ||
+                    bytes[i + 1] == 0x05) &&
+                   bytes[i + 2] == 0x00 &&
+                   bytes[i + 3] == 0x00 &&
+                   bytes[i + 4] == 0x00) {
+          cmpCandidate = true;
+        }
+
+        if (cmpCandidate && cmpHits < kMaxHitsPerKind) {
+          LogUiProbeWindow(name, addr, i, bytes, size);
+          ++cmpHits;
+        }
+
+        if (i + 3 < size &&
+            bytes[i] == 0xE0 &&
+            bytes[i + 1] == 0x01 &&
+            bytes[i + 2] == 0x00 &&
+            bytes[i + 3] == 0x00 &&
+            buttonDispHits < kMaxHitsPerKind) {
+          LogUiProbeWindow(name, addr, i, bytes, size);
+          ++buttonDispHits;
+        }
+
+        if (i + 4 < size && bytes[i] == 0xE8) {
+          int32_t rel = 0;
+          std::memcpy(&rel, bytes + i + 1, sizeof(rel));
+          const uintptr_t target =
+              addr + i + 5 + static_cast<intptr_t>(rel);
+          if (target == getTrickButtonAddr &&
+              getButtonCalls < kMaxHitsPerKind) {
+            LogUiProbeWindow(name, addr, i, bytes, size);
+            ++getButtonCalls;
+          }
+        }
+      }
+
+      AddLog(u8"[책략5UIDBG] %s 후보 요약: cmp(3/4/5)=%d / +1E0참조=%d / GetTrickButton호출=%d",
+             name, cmpHits, buttonDispHits, getButtonCalls);
+    }
+
+    static void DumpTrickUiPdbProbe() {
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase)
+        return;
+
+      MODULEINFO mi{};
+      if (!GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi))) {
+        AddLog(u8"[책략5UIDBG] 모듈 정보 읽기 실패.");
+        return;
+      }
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      // 업로드된 SAN8RPK.exe + SAN8RPK.pdb는 RSDS GUID/age가 정확히 일치.
+      // PDB:
+      // TrickCommandDialogLayout size=0x2A8
+      //   +0x1E0 std::array<TrickSelectButton*, 4> m_pButtons
+      //   +0x200 다음 멤버(std::function) 시작
+      // Initialize local ButtonLayouts = UIMaker::SLayout[4] (0x40 bytes)
+      // 반면 WarMeetingStrategyTrickLayout::m_aData는 StrategyTrickData[10].
+      constexpr uintptr_t kGetTrickButtonRva = 0x01DAF060;
+
+      AddLog(u8"[책략5UIDBG] PDB 전투 UI 진단 시작: Layout size=0x2A8 / m_pButtons=+1E0 array[4] / next=+200.");
+      AddLog(u8"[책략5UIDBG] 준비 UI WarMeetingStrategyTrickLayout은 m_aData[10] 구조. 전투 UI와 별개입니다.");
+
+      struct Probe {
+        const char *name;
+        uintptr_t rva;
+        size_t size;
+        bool dumpWhole;
+      };
+
+      const Probe probes[] = {
+          {u8"Layout::GetTrickButton", 0x01DAF060, 0x13, true},
+          {u8"Layout::ResetBtnPos", 0x01DAE9F0, 0x20D, false},
+          {u8"Layout::AddControl", 0x01DAF300, 0x3E, true},
+          {u8"Layout::DelControl", 0x01DAF2B0, 0x41, true},
+          {u8"Layout::Initialize", 0x01DAF350, 0x1019, false},
+          {u8"Dialog::Open", 0x01DF3CB0, 0x241, false},
+          {u8"Dialog::Initialize", 0x01DF3F20, 0x4C9, false},
+          {u8"Dialog::OnTrickSelect", 0x01DF37B0, 0x4C, true},
+      };
+
+      const uintptr_t getTrickButtonAddr =
+          exeBase + kGetTrickButtonRva;
+
+      for (const auto &probe : probes) {
+        ProbeUiFunction(exeBase, imageEnd,
+                        probe.name, probe.rva, probe.size,
+                        getTrickButtonAddr, probe.dumpWhole);
+      }
+
+      AddLog(u8"[책략5UIDBG] PDB 전투 UI 진단 완료. 위 로그만 보내주세요.");
+    }
+
     static bool BuildCaptureCave(uintptr_t hookAddr) {
       g_caveAddr = AllocNear(hookAddr, 128);
       if (!g_caveAddr)
@@ -818,6 +1013,7 @@ namespace DX11Base {
       AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터가 이미 row5입니다: camp=%p slot5=%p",
              reinterpret_cast<void *>(matchedObject),
              reinterpret_cast<void *>(matchedSlot));
+      DumpTrickUiPdbProbe();
       return true;
     }
 
@@ -853,6 +1049,7 @@ namespace DX11Base {
            reinterpret_cast<void *>(matchedSlot),
            reinterpret_cast<void *>(matchedOld5),
            reinterpret_cast<void *>(row5));
+    DumpTrickUiPdbProbe();
     return true;
   }
 
