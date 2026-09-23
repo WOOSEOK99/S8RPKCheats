@@ -140,6 +140,8 @@ namespace DX11Base {
     static bool g_fifthUiSignalCallsitesLogged = false;
     static bool g_fifthUiCallbackTargetsLogged = false;
     static bool g_fifthUiCallbackCodeTargetsLogged = false;
+    static bool g_fifthUiTextPathLogged = false;
+    static bool g_fifthTrickDataVtableLogged = false;
     static uintptr_t g_fifthUiModelCountAddr = 0;
     static uint32_t g_fifthUiModelCountOriginal = 0;
     static bool g_fifthUiModelCountApplied = false;
@@ -1650,6 +1652,193 @@ namespace DX11Base {
 
       AddLog(u8"[책략5UICBCODE] unique executable targets=%u",seenCount);
     }
+
+    static void LogFifthUiTextPathCandidates() {
+      if (g_fifthUiTextPathLogged)
+        return;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      MODULEINFO mi{};
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase) ||
+          !GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return;
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      // Confirmed from the previous runtime callback trace:
+      // focus closure for a hovered stratagem button. This path is responsible
+      // for switching the range/detail panel to the model entry for the hovered
+      // index. Read-only: no detour or write is installed here.
+      constexpr uintptr_t kFocusClosureRva = 0x007594B0;
+      constexpr size_t kFocusScanSize = 0x300;
+      const uintptr_t focus = exeBase + kFocusClosureRva;
+      uint8_t code[kFocusScanSize] = {};
+      if (!SafeCopySeh(focus, code, sizeof(code)))
+        return;
+
+      g_fifthUiTextPathLogged = true;
+      AddLog(u8"[책략5UITEXT] focus path scan: RVA=+%llX size=0x%llX",
+             (unsigned long long)kFocusClosureRva,
+             (unsigned long long)sizeof(code));
+
+      uintptr_t directTargets[64] = {};
+      unsigned directCount = 0;
+
+      for (size_t off = 0; off + 7 <= sizeof(code); ++off) {
+        if (code[off] == 0xE8 || code[off] == 0xE9) {
+          int32_t rel = 0;
+          std::memcpy(&rel, code + off + 1, sizeof(rel));
+          const uintptr_t target =
+              focus + off + 5 + static_cast<intptr_t>(rel);
+          if (target >= exeBase && target < imageEnd) {
+            AddLog(u8"[책략5UITEXT] focus %s +%03llX -> RVA=+%llX",
+                   code[off] == 0xE8 ? "CALL" : "JMP",
+                   (unsigned long long)off,
+                   (unsigned long long)(target - exeBase));
+
+            bool duplicate = false;
+            for (unsigned i = 0; i < directCount; ++i)
+              if (directTargets[i] == target)
+                duplicate = true;
+            if (!duplicate && directCount < 64)
+              directTargets[directCount++] = target;
+          }
+        }
+
+        // Log only simple RIP-relative LEA/MOV references. These often point
+        // at localization tables, static format descriptors, or function
+        // pointer tables used by the detail panel.
+        const uint8_t rex = code[off];
+        if ((rex == 0x48 || rex == 0x4C) &&
+            (code[off + 1] == 0x8D || code[off + 1] == 0x8B) &&
+            (code[off + 2] & 0xC7) == 0x05) {
+          int32_t disp = 0;
+          std::memcpy(&disp, code + off + 3, sizeof(disp));
+          const uintptr_t target =
+              focus + off + 7 + static_cast<intptr_t>(disp);
+          if (target >= exeBase && target < imageEnd) {
+            AddLog(u8"[책략5UITEXT] focus RIP-%s +%03llX -> RVA=+%llX",
+                   code[off + 1] == 0x8D ? "LEA" : "MOV",
+                   (unsigned long long)off,
+                   (unsigned long long)(target - exeBase));
+          }
+        }
+      }
+
+      AddLog(u8"[책략5UITEXT] focus direct executable targets=%u",
+             directCount);
+
+      // One level deeper is enough for the next RE step. Dumping only a small
+      // head keeps the log bounded and does not execute any candidate.
+      for (unsigned i = 0; i < directCount; ++i) {
+        const uintptr_t target = directTargets[i];
+        if (!IsExecutableAddress(target))
+          continue;
+
+        uint8_t head[0x80] = {};
+        if (!SafeCopySeh(target, head, sizeof(head)))
+          continue;
+
+        AddLog(u8"[책략5UITEXT] target%u RVA=+%llX",
+               i + 1,
+               (unsigned long long)(target - exeBase));
+
+        for (size_t off = 0; off < sizeof(head); off += 0x20) {
+          char line[256] = {};
+          int pos = 0;
+          for (size_t j = 0; j < 0x20 &&
+                             pos < (int)sizeof(line) - 4; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos,
+                             "%02X ", (unsigned)head[off + j]);
+          }
+          AddLog(u8"[책략5UITEXT] target%u +%02llX : %s",
+                 i + 1,
+                 (unsigned long long)off,
+                 line);
+        }
+
+        for (size_t off = 0; off + 5 <= sizeof(head); ++off) {
+          if (head[off] != 0xE8 && head[off] != 0xE9)
+            continue;
+          int32_t rel = 0;
+          std::memcpy(&rel, head + off + 1, sizeof(rel));
+          const uintptr_t nested =
+              target + off + 5 + static_cast<intptr_t>(rel);
+          if (nested >= exeBase && nested < imageEnd) {
+            AddLog(u8"[책략5UITEXT] target%u %s +%02llX -> RVA=+%llX",
+                   i + 1,
+                   head[off] == 0xE8 ? "CALL" : "JMP",
+                   (unsigned long long)off,
+                   (unsigned long long)(nested - exeBase));
+          }
+        }
+      }
+    }
+
+    static void LogFifthTrickDataVtableCandidates(uintptr_t row5) {
+      if (g_fifthTrickDataVtableLogged || !row5 ||
+          !IsValidPtr(row5, sizeof(uintptr_t)))
+        return;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      MODULEINFO mi{};
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase) ||
+          !GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return;
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      uintptr_t vtable = 0;
+      if (!SafeReadPtrSeh(row5, &vtable) ||
+          !vtable || !IsValidPtr(vtable, 24 * sizeof(uintptr_t)))
+        return;
+
+      g_fifthTrickDataVtableLogged = true;
+      AddLog(u8"[책략5UITEXT] ID5 TrickData row=%p vtable=%p",
+             reinterpret_cast<void *>(row5),
+             reinterpret_cast<void *>(vtable));
+
+      for (unsigned slot = 0; slot < 24; ++slot) {
+        uintptr_t fn = 0;
+        if (!SafeReadPtrSeh(vtable + slot * sizeof(uintptr_t), &fn))
+          continue;
+        if (fn < exeBase || fn >= imageEnd || !IsExecutableAddress(fn))
+          continue;
+
+        uint8_t head[0x40] = {};
+        if (!SafeCopySeh(fn, head, sizeof(head)))
+          continue;
+
+        AddLog(u8"[책략5UITEXT] TrickData vtbl[%u] -> RVA=+%llX",
+               slot,
+               (unsigned long long)(fn - exeBase));
+
+        for (size_t off = 0; off + 5 <= sizeof(head); ++off) {
+          if (head[off] != 0xE8 && head[off] != 0xE9)
+            continue;
+          int32_t rel = 0;
+          std::memcpy(&rel, head + off + 1, sizeof(rel));
+          const uintptr_t target =
+              fn + off + 5 + static_cast<intptr_t>(rel);
+          if (target >= exeBase && target < imageEnd) {
+            AddLog(u8"[책략5UITEXT]   vtbl[%u] %s +%02llX -> RVA=+%llX",
+                   slot,
+                   head[off] == 0xE8 ? "CALL" : "JMP",
+                   (unsigned long long)off,
+                   (unsigned long long)(target - exeBase));
+          }
+        }
+      }
+    }
+
 
     static void LogFifthUiSignalCallsites() {
       if(g_fifthUiSignalCallsitesLogged)
@@ -4899,6 +5088,11 @@ namespace DX11Base {
     g_fiveMetadataTable = table;
     g_fiveMetadataAddr = row5;
     g_fiveMetadataApplied = true;
+
+    // Read-only text-path diagnostics. These do not call any unknown virtual
+    // method and do not patch the game; they only record executable targets.
+    LogFifthUiTextPathCandidates();
+    LogFifthTrickDataVtableCandidates(row5);
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
