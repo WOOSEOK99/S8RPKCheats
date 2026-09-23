@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <intrin.h>
 
 namespace DX11Base {
   static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog);
@@ -142,6 +143,9 @@ namespace DX11Base {
     static bool g_fifthUiCallbackCodeTargetsLogged = false;
     static bool g_fifthUiTextPathLogged = false;
     static bool g_fifthTrickDataVtableLogged = false;
+    static std::atomic<uintptr_t> g_fifthTitleNameGetterOriginal{0};
+    static std::atomic<bool> g_fifthTitleNameGetterProbeInstalled{false};
+    static std::atomic<uintptr_t> g_fifthTitleSeenCallers[16]{};
     static uintptr_t g_fifthUiModelCountAddr = 0;
     static uint32_t g_fifthUiModelCountOriginal = 0;
     static bool g_fifthUiModelCountApplied = false;
@@ -1652,6 +1656,193 @@ namespace DX11Base {
 
       AddLog(u8"[책략5UICBCODE] unique executable targets=%u",seenCount);
     }
+
+    using FifthTitleNameGetterFn = const wchar_t *(__fastcall *)(void *);
+
+    static const wchar_t *__fastcall FifthTitleNameGetterProbe(void *self) {
+      const uintptr_t originalAddr = g_fifthTitleNameGetterOriginal.load();
+      const auto original =
+          reinterpret_cast<FifthTitleNameGetterFn>(originalAddr);
+      const wchar_t *result = original ? original(self) : nullptr;
+      if (!result)
+        return result;
+
+      bool isInspire = false;
+      __try {
+        isInspire =
+            static_cast<uint16_t>(result[0]) == 0x9F13 && // 鼓
+            static_cast<uint16_t>(result[1]) == 0x821E && // 舞
+            result[2] == L'\0';
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        isInspire = false;
+      }
+
+      if (!isInspire)
+        return result;
+
+      const uintptr_t caller =
+          reinterpret_cast<uintptr_t>(_ReturnAddress());
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+
+      bool firstForCaller = false;
+      for (auto &slot : g_fifthTitleSeenCallers) {
+        uintptr_t seen = slot.load();
+        if (seen == caller)
+          return result;
+        if (seen == 0) {
+          uintptr_t expected = 0;
+          if (slot.compare_exchange_strong(expected, caller)) {
+            firstForCaller = true;
+            break;
+          }
+        }
+      }
+
+      if (!firstForCaller)
+        return result;
+
+      MODULEINFO mi{};
+      uintptr_t imageEnd = 0;
+      if (exeBase &&
+          GetModuleInformation(GetCurrentProcess(),
+                               reinterpret_cast<HMODULE>(exeBase),
+                               &mi, sizeof(mi))) {
+        imageEnd = exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+      }
+
+      if (caller >= exeBase && caller < imageEnd) {
+        AddLog(u8"[책략5TITLEPROBE] 鼓舞 반환 감지: self=%p callerRVA=+%llX",
+               self,
+               (unsigned long long)(caller - exeBase));
+      } else {
+        AddLog(u8"[책략5TITLEPROBE] 鼓舞 반환 감지: self=%p caller=%p",
+               self, reinterpret_cast<void *>(caller));
+      }
+
+      // Dump a small caller window only once per unique callsite. The wrapper
+      // does not alter the returned title pointer.
+      if (caller >= exeBase + 0x60 && caller + 0x80 < imageEnd) {
+        const uintptr_t start = caller - 0x60;
+        uint8_t code[0xE0] = {};
+        if (SafeCopySeh(start, code, sizeof(code))) {
+          for (size_t off = 0; off < sizeof(code); off += 0x20) {
+            char line[256] = {};
+            int pos = 0;
+            for (size_t j = 0; j < 0x20 &&
+                               pos < (int)sizeof(line) - 4; ++j) {
+              pos += sprintf_s(line + pos, sizeof(line) - pos,
+                               "%02X ", (unsigned)code[off + j]);
+            }
+            AddLog(u8"[책략5TITLEPROBE] callerWindow RVA=+%llX : %s",
+                   (unsigned long long)(start + off - exeBase),
+                   line);
+          }
+
+          for (size_t off = 0; off + 5 <= sizeof(code); ++off) {
+            if (code[off] != 0xE8 && code[off] != 0xE9)
+              continue;
+            int32_t rel = 0;
+            std::memcpy(&rel, code + off + 1, sizeof(rel));
+            const uintptr_t target =
+                start + off + 5 + static_cast<intptr_t>(rel);
+            if (target >= exeBase && target < imageEnd) {
+              AddLog(u8"[책략5TITLEPROBE] callerWindow %s RVA=+%llX -> +%llX",
+                     code[off] == 0xE8 ? "CALL" : "JMP",
+                     (unsigned long long)(start + off - exeBase),
+                     (unsigned long long)(target - exeBase));
+            }
+          }
+        }
+      }
+
+      return result;
+    }
+
+    static bool EnsureFifthTitleNameGetterProbe() {
+      if (g_fifthTitleNameGetterProbeInstalled.load())
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      const uintptr_t versionBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandleW(L"version.dll"));
+      if (!exeBase || !versionBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kNameGetterStubRva = 0x0170E2D0;
+      constexpr uintptr_t kNameGetterPtrRva = 0x0170E2D6;
+      constexpr uintptr_t kVersionGetterOffset = 0x5CB0;
+      const uint8_t expectedStub[6] = {
+          0xFF, 0x25, 0x00, 0x00, 0x00, 0x00
+      };
+
+      uint8_t stub[6] = {};
+      if (!SafeCopySeh(exeBase + kNameGetterStubRva,
+                       stub, sizeof(stub)) ||
+          std::memcmp(stub, expectedStub, sizeof(stub)) != 0) {
+        AddLog(u8"[책략5TITLEPROBE] 이름 getter 스텁 검증 실패.");
+        return false;
+      }
+
+      uintptr_t current = 0;
+      if (!SafeReadPtrSeh(exeBase + kNameGetterPtrRva, &current))
+        return false;
+
+      const uintptr_t expectedOriginal = versionBase + kVersionGetterOffset;
+      const uintptr_t probeAddr =
+          reinterpret_cast<uintptr_t>(&FifthTitleNameGetterProbe);
+      if (current == probeAddr) {
+        g_fifthTitleNameGetterProbeInstalled.store(true);
+        return true;
+      }
+
+      // The trait-name editor owns the same shared getter when enabled. Do not
+      // chain an unknown cave in this diagnostic build; skip instead.
+      if (current != expectedOriginal) {
+        AddLog(u8"[책략5TITLEPROBE] 공용 이름 getter가 이미 다른 패치 사용 중: current=%p expected=%p. 진단 훅 생략.",
+               reinterpret_cast<void *>(current),
+               reinterpret_cast<void *>(expectedOriginal));
+        return false;
+      }
+
+      HMODULE pinnedModule = nullptr;
+      if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_PIN,
+                             reinterpret_cast<LPCWSTR>(&FifthTitleNameGetterProbe),
+                             &pinnedModule))
+        return false;
+
+      g_fifthTitleNameGetterOriginal.store(expectedOriginal);
+
+      DWORD oldProtect = 0;
+      void *ptrAddr =
+          reinterpret_cast<void *>(exeBase + kNameGetterPtrRva);
+      if (!VirtualProtect(ptrAddr, sizeof(uintptr_t),
+                          PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        g_fifthTitleNameGetterOriginal.store(0);
+        return false;
+      }
+
+      *reinterpret_cast<uintptr_t *>(ptrAddr) = probeAddr;
+      FlushInstructionCache(GetCurrentProcess(),
+                            ptrAddr, sizeof(uintptr_t));
+      DWORD ignored = 0;
+      VirtualProtect(ptrAddr, sizeof(uintptr_t),
+                     oldProtect, &ignored);
+
+      uintptr_t verify = 0;
+      if (!SafeReadPtrSeh(exeBase + kNameGetterPtrRva, &verify) ||
+          verify != probeAddr) {
+        g_fifthTitleNameGetterOriginal.store(0);
+        return false;
+      }
+
+      g_fifthTitleNameGetterProbeInstalled.store(true);
+      AddLog(u8"[책략5TITLEPROBE] 鼓舞 caller 추적용 공용 이름 getter 래퍼 설치 완료.");
+      return true;
+    }
+
 
     static void LogFifthUiTextPathCandidates() {
       if (g_fifthUiTextPathLogged)
@@ -5191,6 +5382,7 @@ namespace DX11Base {
     // method and do not patch the game; they only record executable targets.
     LogFifthUiTextPathCandidates();
     LogFifthTrickDataVtableCandidates(row5);
+    EnsureFifthTitleNameGetterProbe();
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
