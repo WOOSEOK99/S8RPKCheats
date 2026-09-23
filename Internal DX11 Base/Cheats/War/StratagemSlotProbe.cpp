@@ -76,11 +76,8 @@ namespace DX11Base {
     // x64 caves read these aligned atomic pointer values with ordinary MOVs.
     static std::atomic<uintptr_t> g_fifthUiActiveLayout{0};
     static std::atomic<uintptr_t> g_fifthUiActiveButton{0};
-    static std::atomic<unsigned> g_fifthBattleEpoch{1};
-    static std::atomic<unsigned> g_fifthSessionEpoch{1};
     static void BeginFifthUiNativeInitialize(uintptr_t layout);
     static bool ValidateFifthUiRegistrySeh(uintptr_t layout);
-    static bool EnsureFifthNativeLifecycleHooks();
 
     // Dialog::Open still skips UI work for loop index >=4 even after ID7 is
     // registered. Keep the fixed m_pButtons[4] array untouched; a narrow hook
@@ -2499,6 +2496,93 @@ namespace DX11Base {
       g_fifthUiMakerAddr = 0;
       std::memset(g_fifthUiMakerOriginal, 0,
                   sizeof(g_fifthUiMakerOriginal));
+    }
+
+    static void BeginFifthUiNativeInitialize(uintptr_t layout) {
+      // Native Layout::Initialize is the generation boundary for UI controls.
+      // Retire all published sidecar references before CUIMaker rebuilds the
+      // same address or a new layout. Never dereference the previous controls.
+      g_fifthUiActiveLayout.store(0);
+      g_fifthUiActiveButton.store(0);
+
+      g_fifthUiSidecarLayout = 0;
+      g_fifthUiSidecarButton = 0;
+      g_fifthUiSidecarAttempted = false;
+      g_fifthUiId7Registered = false;
+      g_fifthUiRegisteredEpoch = 0;
+      std::memset(g_fifthUiOriginalButtons, 0,
+                  sizeof(g_fifthUiOriginalButtons));
+
+      g_fifthUiMakerExpanded = false;
+      g_fifthUiMakerAddr = 0;
+      std::memset(g_fifthUiMakerOriginal, 0,
+                  sizeof(g_fifthUiMakerOriginal));
+
+      g_fifthUiCompactLogged = false;
+      g_fifthUiResetSignalDumped = false;
+      g_fifthUiOnSelectRuntimeLogged = 0;
+      g_fifthUiOnSelectAnyHits = 0;
+      InterlockedExchange(&g_fifthUiCallbackIndex4Hits, 0);
+
+      if (layout) {
+        g_trickUiLayout = layout;
+        g_lastLoggedUiLayout = 0;
+      }
+    }
+
+    static bool ValidateFifthUiRegistrySeh(uintptr_t layout) {
+      if (!layout ||
+          !g_fifthUiId7Registered ||
+          g_fifthUiSidecarLayout != layout ||
+          !g_fifthUiSidecarButton ||
+          !IsValidPtr(layout, 0x2A8) ||
+          !IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
+        return false;
+
+      __try {
+        const TrickUiInitTrace trace = ReadTrickUiInitTrace();
+        if (!trace.hit ||
+            g_fifthUiRegisteredEpoch != trace.hit ||
+            trace.owner != layout ||
+            trace.maker != layout + 0x140)
+          return false;
+
+        uintptr_t currentButtons[4] = {};
+        if (!SafeCopySeh(layout + 0x1E0, currentButtons,
+                         sizeof(currentButtons)) ||
+            std::memcmp(currentButtons, g_fifthUiOriginalButtons,
+                        sizeof(currentButtons)) != 0)
+          return false;
+
+        const uintptr_t exeBase =
+            reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+        if (!exeBase)
+          return false;
+
+        constexpr uintptr_t kLookupLayoutRva = 0x01D15440;
+        using LookupLayoutFn = uintptr_t(__fastcall *)(uintptr_t, int);
+        const auto lookup =
+            reinterpret_cast<LookupLayoutFn>(exeBase + kLookupLayoutRva);
+
+        const uintptr_t maker = layout + 0x140;
+        uintptr_t owner = 0;
+        uint32_t count = 0;
+        if (!SafeCopySeh(maker + 0x10, &count, sizeof(count)) ||
+            !SafeReadPtrSeh(maker + 0x18, &owner) ||
+            count != 8 || owner != layout ||
+            lookup(maker, 7) != g_fifthUiSidecarButton)
+          return false;
+
+        uint32_t id = 0xFFFFFFFFu;
+        uint32_t state = 0xFFFFFFFFu;
+        if (!SafeCopySeh(g_fifthUiSidecarButton + 0x88, &id, sizeof(id)) ||
+            !SafeCopySeh(g_fifthUiSidecarButton + 0x8C, &state, sizeof(state)))
+          return false;
+
+        return id == 7 && state == 1;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
     }
 
     static bool ValidatePreparedFifthUiHelper(uintptr_t layout, uint32_t *descriptorTag) {
