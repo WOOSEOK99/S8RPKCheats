@@ -746,8 +746,8 @@ namespace DX11Base {
       ImGui::Separator();
       ImGui::Spacing();
 
-      ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"위젯");
-      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
+      ImGui::SameLine(0.0f, 10.0f * scale);
 
       if (ImGui::Checkbox(u8"전기취소##FOOTER_WIDGET", &DX11Base::bShowWidgetTengi)) {
         NotifyFeatureToggle(u8"위젯: 전기취소", DX11Base::bShowWidgetTengi);
@@ -769,9 +769,13 @@ namespace DX11Base {
         SaveConfig();
       }
 
-      ImGui::SameLine(0.0f, 24.0f * scale);
-      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"알림");
-      ImGui::SameLine();
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextDisabled(u8"|");
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 ]");
+      ImGui::SameLine(0.0f, 10.0f * scale);
+      ImGui::TextDisabled(u8"속도");
+      ImGui::SameLine(0.0f, 6.0f * scale);
       ImGui::SetNextItemWidth(150.0f * scale);
       if (ImGui::SliderFloat(u8"##FooterNotificationSpeed", &DX11Base::g_notificationSpeed,
                              20.0f, 500.0f, "%.0f px/s")) {
@@ -783,9 +787,11 @@ namespace DX11Base {
         AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
       }
 
-      // 하단 고정 2행: 기존 공용 설정
+      // 하단 고정 2행: 로그 + 게임 속도 + UI + 시작 설정
       ImGui::Spacing();
 
+      ImGui::TextColored(ImVec4(0.75f, 0.75f, 0.75f, 1.0f), u8"[ 로그 ]");
+      ImGui::SameLine(0.0f, 10.0f * scale);
       if (ImGui::Checkbox(u8"파일 로그 출력", &bFileLog)) {
         SaveConfig();
       }
@@ -794,7 +800,11 @@ namespace DX11Base {
         ImGui::Text(u8"에포크 초기화 오류 파악용 로그(S8RPK_cheat.log)를 자동 저장합니다.");
         ImGui::EndTooltip();
       }
-      ImGui::SameLine(0.0f, 30.0f * scale);
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextDisabled(u8"|");
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.0f, 1.0f), u8"[ 게임 속도 ]");
+      ImGui::SameLine(0.0f, 10.0f * scale);
 
       ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
 
@@ -875,8 +885,12 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      ImGui::SameLine(0, 20.0f * scale);
-      ImGui::Text(u8"UI 배율");
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextDisabled(u8"|");
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), u8"[ UI ]");
+      ImGui::SameLine(0.0f, 10.0f * scale);
+      ImGui::Text(u8"배율");
       ImGui::SameLine();
       float scaleBtnSize = 25.0f * scale;
       if (ImGui::Button("-##ScaleDown", ImVec2(scaleBtnSize, 0))) {
@@ -892,7 +906,11 @@ namespace DX11Base {
         io.FontGlobalScale = (std::min)(3.0f, io.FontGlobalScale + 0.1f);
       }
 
-      ImGui::SameLine(0, 15.0f * scale);
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextDisabled(u8"|");
+      ImGui::SameLine(0.0f, 20.0f * scale);
+      ImGui::TextColored(ImVec4(0.65f, 1.0f, 0.65f, 1.0f), u8"[ 시작 ]");
+      ImGui::SameLine(0.0f, 10.0f * scale);
       if (ImGui::Checkbox(u8"시작 시 치트창 표시", &DX11Base::bAutoLoadMenu)) {
         NotifyFeatureToggle(u8"시작 시 치트창 표시", DX11Base::bAutoLoadMenu);
         DX11Base::SaveConfig();
