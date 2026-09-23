@@ -462,6 +462,11 @@ namespace DX11Base {
           } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
 
+      // 5번 책략 데이터는 세이브/게임 세대가 바뀌면 새 TrickData 테이블에 재적용합니다.
+      __try {
+        DX11Base::RefreshSpell5HealProbe();
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
       // 5번 책략: 체크 의도는 유지하되 현재 전투 세대의 포인터에만 붙입니다.
       __try {
         DX11Base::RefreshStratagemFiveBattleRuntime();
