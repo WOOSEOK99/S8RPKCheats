@@ -750,8 +750,48 @@ namespace DX11Base {
         }
       }
 
-      // 하단: 공용 설정 (배속 및 UI 배율 한 줄 통합)
+      // 하단 고정 1행: 위젯 + 알림 설정
       ImGui::Separator();
+      ImGui::Spacing();
+
+      ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"위젯");
+      ImGui::SameLine();
+
+      if (ImGui::Checkbox(u8"전기취소##FOOTER_WIDGET", &DX11Base::bShowWidgetTengi)) {
+        NotifyFeatureToggle(u8"위젯: 전기취소", DX11Base::bShowWidgetTengi);
+        SaveConfig();
+      }
+      ImGui::SameLine();
+      if (ImGui::Checkbox(u8"주인공##FOOTER_WIDGET", &DX11Base::bShowWidgetHero)) {
+        NotifyFeatureToggle(u8"위젯: 주인공", DX11Base::bShowWidgetHero);
+        SaveConfig();
+      }
+      ImGui::SameLine();
+      if (ImGui::Checkbox(u8"모든무장##FOOTER_WIDGET", &DX11Base::bShowWidgetAllOfficers)) {
+        NotifyFeatureToggle(u8"위젯: 모든 무장", DX11Base::bShowWidgetAllOfficers);
+        SaveConfig();
+      }
+      ImGui::SameLine();
+      if (ImGui::Checkbox(u8"알림확인##FOOTER_WIDGET", &DX11Base::bShowWidgetNotif)) {
+        NotifyFeatureToggle(u8"위젯: 알림확인", DX11Base::bShowWidgetNotif);
+        SaveConfig();
+      }
+
+      ImGui::SameLine(0.0f, 24.0f * scale);
+      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"알림");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(150.0f * scale);
+      if (ImGui::SliderFloat(u8"##FooterNotificationSpeed", &DX11Base::g_notificationSpeed,
+                             20.0f, 500.0f, "%.0f px/s")) {
+        SaveConfig();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button(u8"알림 비우기##Footer", ImVec2(100.0f * scale, 0))) {
+        g_notifications.clear();
+        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
+      }
+
+      // 하단 고정 2행: 기존 공용 설정
       ImGui::Spacing();
 
       if (ImGui::Checkbox(u8"파일 로그 출력", &bFileLog)) {
