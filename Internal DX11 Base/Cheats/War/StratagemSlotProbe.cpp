@@ -544,7 +544,6 @@ namespace DX11Base {
   }
 
   bool SetStratagemFiveMetadataTest(bool enable) {
-    constexpr uintptr_t kTroopTypePointerOffset = 0x46BF10;
     constexpr uintptr_t kStratagemMetadataOffset = 0x9D30;
     constexpr uintptr_t kRecordStride = 0x20;
     constexpr uintptr_t kId1 = 0x08;
@@ -557,21 +556,73 @@ namespace DX11Base {
         return true;
 
       const uintptr_t gameBase = GetGameBase();
-      if (!gameBase ||
-          !IsValidPtr(gameBase + kTroopTypePointerOffset, sizeof(uintptr_t))) {
-        AddLog(u8"[책략5메타DBG] gameBase/troopType 포인터가 유효하지 않습니다.");
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!gameBase || !exeBase) {
+        AddLog(u8"[책략5메타DBG] gameBase/EXE base를 찾지 못했습니다.");
+        return false;
+      }
+
+      MODULEINFO mi{};
+      if (!GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi))) {
+        AddLog(u8"[책략5메타DBG] 모듈 정보 읽기 실패.");
+        return false;
+      }
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      // Old CT's troopTypePointerOffsetCheck, ported exactly.
+      // The CT reads the current troop-type pointer offset from found+4.
+      const char *troopTypePat =
+          "48 8B ? ? ? ? ? ? E8 ? ? ? ? 48 8B ? "
+          "48 83 ? ? 5B C3 33 ? 48 8B ? E8 ? ? ? ? "
+          "48 8B ? 48 83 ? ? 5B C3 E8 ? ? ? ? ? ? ? ? ? ? ? 40 53";
+
+      uintptr_t scanStart = exeBase + 0x58E000;
+      uintptr_t scanEnd = exeBase + 0x59E000;
+      if (scanStart >= imageEnd)
+        scanStart = exeBase;
+      if (scanEnd > imageEnd)
+        scanEnd = imageEnd;
+
+      const uintptr_t found =
+          FindPattern(scanStart, scanEnd, troopTypePat);
+      if (!found || !IsValidPtr(found + 4, sizeof(uint32_t))) {
+        AddLog(u8"[책략5메타DBG] troopTypePointerOffset 패턴을 찾지 못했습니다.");
+        return false;
+      }
+
+      const uint32_t troopTypePointerOffset =
+          *reinterpret_cast<const uint32_t *>(found + 4);
+      const uintptr_t pointerAddr =
+          gameBase + static_cast<uintptr_t>(troopTypePointerOffset);
+
+      if (!IsValidPtr(pointerAddr, sizeof(uintptr_t))) {
+        AddLog(u8"[책략5메타DBG] troopType 포인터 주소 무효: offset=0x%X addr=%p",
+               (unsigned)troopTypePointerOffset,
+               reinterpret_cast<void *>(pointerAddr));
         return false;
       }
 
       const uintptr_t troopTypeBase =
-          *reinterpret_cast<const uintptr_t *>(
-              gameBase + kTroopTypePointerOffset);
-      if (!troopTypeBase) {
-        AddLog(u8"[책략5메타DBG] troopType base가 0입니다.");
+          *reinterpret_cast<const uintptr_t *>(pointerAddr);
+      if (!troopTypeBase || troopTypeBase == UINTPTR_MAX ||
+          !IsValidPtr(troopTypeBase + kStratagemMetadataOffset,
+                      kRecordStride * 5)) {
+        AddLog(u8"[책략5메타DBG] troopType base/책략 메타 범위 무효: offset=0x%X base=%p",
+               (unsigned)troopTypePointerOffset,
+               reinterpret_cast<void *>(troopTypeBase));
         return false;
       }
 
       const uintptr_t table = troopTypeBase + kStratagemMetadataOffset;
+      AddLog(u8"[책략5메타DBG] 동적 troopTypeOffset=0x%X base=%p table=%p",
+             (unsigned)troopTypePointerOffset,
+             reinterpret_cast<void *>(troopTypeBase),
+             reinterpret_cast<void *>(table));
       if (!IsValidPtr(table, kRecordStride * 5)) {
         AddLog(u8"[책략5메타DBG] 책략 메타 테이블 범위가 유효하지 않습니다: %p",
                reinterpret_cast<void *>(table));
