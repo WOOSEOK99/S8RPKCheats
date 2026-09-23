@@ -146,6 +146,7 @@ namespace DX11Base {
     static std::atomic<uintptr_t> g_fifthTitleNameGetterOriginal{0};
     static std::atomic<bool> g_fifthTitleNameGetterProbeInstalled{false};
     static std::atomic<uintptr_t> g_fifthTitleSeenCallers[16]{};
+    static std::atomic<unsigned> g_fifthTitleProbeHits{0};
     static uintptr_t g_fifthUiModelCountAddr = 0;
     static uint32_t g_fifthUiModelCountOriginal = 0;
     static bool g_fifthUiModelCountApplied = false;
@@ -1667,40 +1668,49 @@ namespace DX11Base {
       if (!result)
         return result;
 
-      bool isInspire = false;
+      // Only sample while the stratagem UI has a live layout. Do not key this
+      // diagnostic to a guessed/localized title string; record the actual short
+      // strings returned by the shared getter and let the runtime tell us which
+      // caller belongs to the hovered stratagem title.
+      if (!g_trickUiLayout && !g_fifthUiActiveLayout.load())
+        return result;
+
+      wchar_t local[32] = {};
+      size_t length = 0;
+      bool readable = false;
       __try {
-        isInspire =
-            static_cast<uint16_t>(result[0]) == 0x9F13 && // 鼓
-            static_cast<uint16_t>(result[1]) == 0x821E && // 舞
-            result[2] == L'\0';
+        for (; length + 1 < _countof(local); ++length) {
+          const wchar_t ch = result[length];
+          local[length] = ch;
+          if (ch == L'\0') {
+            readable = true;
+            break;
+          }
+        }
       } __except (EXCEPTION_EXECUTE_HANDLER) {
-        isInspire = false;
+        readable = false;
       }
 
-      if (!isInspire)
+      if (!readable || length == 0 || length > 24)
+        return result;
+
+      char utf8[256] = {};
+      const int utf8Count = WideCharToMultiByte(
+          CP_UTF8, 0, local, static_cast<int>(length),
+          utf8, static_cast<int>(sizeof(utf8) - 1),
+          nullptr, nullptr);
+      if (utf8Count <= 0)
+        return result;
+      utf8[utf8Count] = '\0';
+
+      const unsigned hit = g_fifthTitleProbeHits.fetch_add(1) + 1;
+      if (hit > 80)
         return result;
 
       const uintptr_t caller =
           reinterpret_cast<uintptr_t>(_ReturnAddress());
       const uintptr_t exeBase =
           reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-
-      bool firstForCaller = false;
-      for (auto &slot : g_fifthTitleSeenCallers) {
-        uintptr_t seen = slot.load();
-        if (seen == caller)
-          return result;
-        if (seen == 0) {
-          uintptr_t expected = 0;
-          if (slot.compare_exchange_strong(expected, caller)) {
-            firstForCaller = true;
-            break;
-          }
-        }
-      }
-
-      if (!firstForCaller)
-        return result;
 
       MODULEINFO mi{};
       uintptr_t imageEnd = 0;
@@ -1712,20 +1722,35 @@ namespace DX11Base {
       }
 
       if (caller >= exeBase && caller < imageEnd) {
-        AddLog(u8"[책략5TITLEPROBE] 鼓舞 반환 감지: self=%p callerRVA=+%llX",
-               self,
+        AddLog(u8"[책략5TITLEPROBE] hit=%u text=\"%s\" self=%p callerRVA=+%llX",
+               hit, utf8, self,
                (unsigned long long)(caller - exeBase));
       } else {
-        AddLog(u8"[책략5TITLEPROBE] 鼓舞 반환 감지: self=%p caller=%p",
-               self, reinterpret_cast<void *>(caller));
+        AddLog(u8"[책략5TITLEPROBE] hit=%u text=\"%s\" self=%p caller=%p",
+               hit, utf8, self, reinterpret_cast<void *>(caller));
       }
 
-      // Dump a small caller window only once per unique callsite. The wrapper
-      // does not alter the returned title pointer.
-      if (caller >= exeBase + 0x60 && caller + 0x80 < imageEnd) {
-        const uintptr_t start = caller - 0x60;
+      bool firstForCaller = false;
+      for (auto &slot : g_fifthTitleSeenCallers) {
+        uintptr_t seen = slot.load();
+        if (seen == caller)
+          break;
+        if (seen == 0) {
+          uintptr_t expected = 0;
+          if (slot.compare_exchange_strong(expected, caller)) {
+            firstForCaller = true;
+            break;
+          }
+        }
+      }
+
+      // Dump one bounded caller window for each unique callsite. All strings
+      // continue to return unchanged.
+      if (firstForCaller &&
+          caller >= exeBase + 0x60 && caller + 0x80 < imageEnd) {
+        const uintptr_t windowStart = caller - 0x60;
         uint8_t code[0xE0] = {};
-        if (SafeCopySeh(start, code, sizeof(code))) {
+        if (SafeCopySeh(windowStart, code, sizeof(code))) {
           for (size_t off = 0; off < sizeof(code); off += 0x20) {
             char line[256] = {};
             int pos = 0;
@@ -1735,23 +1760,8 @@ namespace DX11Base {
                                "%02X ", (unsigned)code[off + j]);
             }
             AddLog(u8"[책략5TITLEPROBE] callerWindow RVA=+%llX : %s",
-                   (unsigned long long)(start + off - exeBase),
+                   (unsigned long long)(windowStart + off - exeBase),
                    line);
-          }
-
-          for (size_t off = 0; off + 5 <= sizeof(code); ++off) {
-            if (code[off] != 0xE8 && code[off] != 0xE9)
-              continue;
-            int32_t rel = 0;
-            std::memcpy(&rel, code + off + 1, sizeof(rel));
-            const uintptr_t target =
-                start + off + 5 + static_cast<intptr_t>(rel);
-            if (target >= exeBase && target < imageEnd) {
-              AddLog(u8"[책략5TITLEPROBE] callerWindow %s RVA=+%llX -> +%llX",
-                     code[off] == 0xE8 ? "CALL" : "JMP",
-                     (unsigned long long)(start + off - exeBase),
-                     (unsigned long long)(target - exeBase));
-            }
           }
         }
       }
@@ -1839,7 +1849,7 @@ namespace DX11Base {
       }
 
       g_fifthTitleNameGetterProbeInstalled.store(true);
-      AddLog(u8"[책략5TITLEPROBE] 鼓舞 caller 추적용 공용 이름 getter 래퍼 설치 완료.");
+      AddLog(u8"[책략5TITLEPROBE] 책략창 활성 중 공용 이름 getter 반환문자열 추적 래퍼 설치 완료.");
       return true;
     }
 
