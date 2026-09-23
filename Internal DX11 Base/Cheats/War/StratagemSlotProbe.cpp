@@ -161,6 +161,13 @@ namespace DX11Base {
     static std::atomic<FifthRuntimeStage> g_fifthRuntimeStage{
         FifthRuntimeStage::WaitingOwner};
 
+    // ID5 is only safe when armed before a battle UI generation is created.
+    // Start blocked: startup/save-load must first observe a stable non-battle
+    // state before the desired checkbox state can become effective.
+    static std::atomic<bool> g_fifthDesiredEnabled{false};
+    static std::atomic<bool> g_fifthEffectiveEnabled{false};
+    static std::atomic<bool> g_fifthSkipCurrentBattle{true};
+
     static bool AdvanceFifthRuntimeStateSeh(uintptr_t dialog);
     static void SetFifthUiSidecarVisibleSeh(bool visible);
 
@@ -395,6 +402,18 @@ namespace DX11Base {
         SaveTrickUiInitTrace(trace);
         return;
       }
+
+      // Never widen a layout belonging to a battle generation that was loaded
+      // in progress or whose checkbox was changed mid-battle. Let the game's
+      // original seven-layout initialization run untouched.
+      if (g_fifthSkipCurrentBattle.load() ||
+          !g_fifthEffectiveEnabled.load()) {
+        trace.reason = "deferred-current-battle";
+        SaveTrickUiInitTrace(trace);
+        original(maker, descriptors, count, owner);
+        return;
+      }
+
       AddLog(u8"[책략5UIHELPER] 브리지 진입: hit=%u tick=%llu thread=%lu maker=%p owner=%p count=%d",
              hit, GetTickCount64(), GetCurrentThreadId(),
              reinterpret_cast<void *>(maker), reinterpret_cast<void *>(owner), count);
@@ -2157,6 +2176,9 @@ namespace DX11Base {
 
     static bool PrepareFifthUiDuringLayoutInitializeSeh(uintptr_t layout) {
       __try {
+        if (g_fifthSkipCurrentBattle.load() ||
+            !g_fifthEffectiveEnabled.load())
+          return false;
         if (!layout || !IsValidPtr(layout, 0x2A8))
           return false;
 
@@ -2281,6 +2303,9 @@ namespace DX11Base {
 
     static bool PrepareFifthUiBeforeCallbacksSeh(uintptr_t dialog) {
       __try {
+        if (g_fifthSkipCurrentBattle.load() ||
+            !g_fifthEffectiveEnabled.load())
+          return true;
         if (!dialog || !IsValidPtr(dialog, 0x40))
           return false;
 
@@ -3997,6 +4022,10 @@ namespace DX11Base {
     }
 
     static bool AdvanceFifthRuntimeStateSeh(uintptr_t dialog) {
+      if (g_fifthSkipCurrentBattle.load() ||
+          !g_fifthEffectiveEnabled.load())
+        return false;
+
       if (!g_id5CountRequested.load() ||
           !g_fiveMetadataRequested.load()) {
         g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
@@ -5413,37 +5442,83 @@ namespace DX11Base {
     g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
   }
 
-  bool SetStratagemFiveFeature(bool enable) {
+  static bool ApplyStratagemFiveDesiredStateSafe() {
+    const bool enable = g_fifthDesiredEnabled.load();
+
     if (enable) {
-      // One user action raises every persistent request. Individual setters may
-      // still report "not ready yet", but they store the request before that
-      // point; readiness is owned by AdvanceFifthRuntimeStateSeh().
       PrepareStratagemFiveUiBridge(false);
       SetSpell5HealProbe(true);
       SetStratagemFiveMetadataTest(true);
       SetStratagemFiveCountTest(true);
-
-      const uintptr_t dialog = g_trickUiDialog;
-      if (dialog && IsValidPtr(dialog, 0x40))
-        AdvanceFifthRuntimeStateSeh(dialog);
-
-      AddLog(u8"[책략5STATE] 통합 기능 ON: data/count/metadata 요청 동시 유지 / stage=%u",
-             (unsigned)g_fifthRuntimeStage.load());
+      g_fifthEffectiveEnabled.store(true);
+      g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
+      AddLog(u8"[책략5STATE] 안전 구간에서 ON 요청 반영 완료. 다음 전투부터 적용.");
       return true;
     }
 
-    // Unwind in dependency order: remove model/Camp publication first, then
-    // the available-use entry, and finally restore the canonical ID5 data.
+    // Safe non-battle boundary: any previous battle objects were already
+    // abandoned, so only clear persistent requests/data state here.
     const bool metadataOk = SetStratagemFiveMetadataTest(false);
     const bool countOk = SetStratagemFiveCountTest(false);
     const bool dataOk = SetSpell5HealProbe(false);
-
+    g_fifthEffectiveEnabled.store(false);
     g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
-    AddLog(u8"[책략5STATE] 통합 기능 OFF: metadata/count/data 순서로 해제.");
+    AddLog(u8"[책략5STATE] 안전 구간에서 OFF 요청 반영 완료. 다음 전투부터 비활성.");
     return metadataOk && countOk && dataOk;
   }
 
+  bool SetStratagemFiveFeature(bool enable) {
+    g_fifthDesiredEnabled.store(enable);
+
+    // Never mutate the current battle in response to a checkbox change.
+    // The request is remembered and synchronized only after a stable
+    // council/domestic (non-battle) state is observed.
+    if (g_fifthSkipCurrentBattle.load()) {
+      AddLog(enable
+                 ? u8"[책략5STATE] ON 예약: 현재 전투에는 적용하지 않고 다음 전투부터 적용."
+                 : u8"[책략5STATE] OFF 예약: 현재 전투에는 손대지 않고 다음 전투부터 비활성.");
+      return true;
+    }
+
+    // Even for a normally armed battle, toggles are deferred by the lifecycle
+    // gate. UpdateStratagemFiveBattleLifecycle() owns the safe synchronization.
+    AddLog(enable
+               ? u8"[책략5STATE] ON 요청 저장. 안전한 비전투 구간에서 반영."
+               : u8"[책략5STATE] OFF 요청 저장. 안전한 비전투 구간에서 반영.");
+    return true;
+  }
+
+  bool ShouldSkipStratagemFiveCurrentBattle() {
+    return g_fifthSkipCurrentBattle.load() ||
+           !g_fifthEffectiveEnabled.load();
+  }
+
+  void UpdateStratagemFiveBattleLifecycle(bool battleActive,
+                                          bool safeNonBattle) {
+    if (battleActive) {
+      // Never change the gate once this battle generation has started.
+      return;
+    }
+
+    if (!safeNonBattle)
+      return;
+
+    // A confirmed council/domestic state is the only boundary where pending
+    // checkbox changes may become effective. From here the next battle's
+    // Layout::Initialize can safely see the bridge already armed (or disabled).
+    const bool desired = g_fifthDesiredEnabled.load();
+    const bool effective = g_fifthEffectiveEnabled.load();
+    if (desired != effective)
+      ApplyStratagemFiveDesiredStateSafe();
+
+    g_fifthSkipCurrentBattle.store(false);
+  }
+
   void ResetStratagemFiveBattleRuntime() {
+    // Block all hooks immediately. A later confirmed non-battle state will
+    // synchronize the desired checkbox state before the next battle begins.
+    g_fifthSkipCurrentBattle.store(true);
+
     // Every battle is a fresh ID5 generation. Hide the old physical sidecar
     // while the layout is still potentially reachable, then forget every
     // battle-local object/reference. Process-wide hooks and persistent ON
@@ -5457,7 +5532,12 @@ namespace DX11Base {
 
   void ResetStratagemFiveSessionRuntime(uintptr_t oldP1,
                                          uintptr_t newP1) {
-    AddLog(u8"[책략5수명] 게임 세대 변경 감지: p1 %p -> %p. 전투/UI 런타임 상태 초기화.",
+    // Save/load generation changes are unsafe until we later prove that the
+    // game is back in council/domestic. This specifically covers loading a save
+    // that was made in the middle of a battle.
+    g_fifthSkipCurrentBattle.store(true);
+
+    AddLog(u8"[책략5수명] 게임 세대 변경 감지: p1 %p -> %p. 현재 세대 5번 책략 적용 보류.",
            reinterpret_cast<void *>(oldP1),
            reinterpret_cast<void *>(newP1));
 
@@ -5469,6 +5549,9 @@ namespace DX11Base {
   }
 
   void RefreshStratagemFiveBattleRuntime() {
+    if (ShouldSkipStratagemFiveCurrentBattle())
+      return;
+
     if (!g_id5CountRequested.load() ||
         !g_fiveMetadataRequested.load())
       return;
