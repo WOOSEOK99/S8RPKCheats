@@ -92,6 +92,54 @@ namespace DX11Base {
              line);
     }
 
+    static void LogUiProbeRange(uintptr_t exeBase,
+                                uintptr_t imageEnd,
+                                const char *name,
+                                uintptr_t rva,
+                                size_t offset,
+                                size_t length) {
+      if (!exeBase || !name || !length)
+        return;
+
+      const uintptr_t addr = exeBase + rva + offset;
+      if (addr < exeBase || addr + length < addr || addr + length > imageEnd ||
+          !IsValidPtr(addr, length)) {
+        AddLog(u8"[책략5UIRANGE] %s 범위 무효: +%llX len=0x%llX",
+               name,
+               (unsigned long long)offset,
+               (unsigned long long)length);
+        return;
+      }
+
+      uint8_t bytes[0x400] = {};
+      if (length > sizeof(bytes) || !SafeCopySeh(addr, bytes, length)) {
+        AddLog(u8"[책략5UIRANGE] %s 읽기 실패: +%llX len=0x%llX",
+               name,
+               (unsigned long long)offset,
+               (unsigned long long)length);
+        return;
+      }
+
+      AddLog(u8"[책략5UIRANGE] %s 상세범위 +%llX..+%llX",
+             name,
+             (unsigned long long)offset,
+             (unsigned long long)(offset + length));
+
+      for (size_t i = 0; i < length; i += 32) {
+        const size_t chunk = ((length - i) > 32) ? 32 : (length - i);
+        char line[256] = {};
+        int pos = 0;
+        for (size_t j = 0; j < chunk && pos < (int)sizeof(line) - 4; ++j) {
+          pos += sprintf_s(line + pos, sizeof(line) - pos, "%02X ",
+                           (unsigned)bytes[i + j]);
+        }
+        AddLog(u8"[책략5UIRANGE] %s +%llX : %s",
+               name,
+               (unsigned long long)(offset + i),
+               line);
+      }
+    }
+
     static void ProbeUiFunction(uintptr_t exeBase,
                                 uintptr_t imageEnd,
                                 const char *name,
@@ -259,7 +307,22 @@ namespace DX11Base {
                         getTrickButtonAddr, probe.dumpWhole);
       }
 
-      AddLog(u8"[책략5UIDBG] PDB 전투 UI 진단 완료. 위 로그만 보내주세요.");
+      // 1차 실게임 로그에서 실제 4제한이 잡힌 구간만 넓게 읽는다.
+      // 쓰기 없음. 5번째 버튼 생성/저장 경로를 역추적하기 위한 상세 덤프.
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"Layout::ResetBtnPos",
+                      0x01DAE9F0, 0x180, 0x8D);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"Layout::Initialize",
+                      0x01DAF350, 0xB40, 0x320);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"Dialog::Open",
+                      0x01DF3CB0, 0x70, 0x1D0);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"Dialog::Initialize",
+                      0x01DF3F20, 0x1D0, 0x200);
+
+      AddLog(u8"[책략5UIDBG] PDB 전투 UI 진단 완료. UIDBG/UIRANGE 로그를 보내주세요.");
     }
 
     static bool BuildCaptureCave(uintptr_t hookAddr) {
