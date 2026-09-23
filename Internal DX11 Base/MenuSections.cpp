@@ -1927,6 +1927,21 @@ namespace DX11Base {
       }
 
       EndSection(); // 시나리오
+
+      BeginSection();
+      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 설정 ]");
+
+      ImGui::SetNextItemWidth(150.0f * scale);
+      if (ImGui::SliderFloat(u8"알림 속도", &DX11Base::g_notificationSpeed, 20.0f, 500.0f, "%.0f px/s")) {
+        SaveConfig();
+      }
+
+      ImGui::SameLine(0, 20.0f * scale);
+      if (ImGui::Button(u8"알림 비우기", ImVec2(100.0f * scale, 0))) {
+        g_notifications.clear();
+        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
+      }
+      EndSection(); // 알림
     }
 
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
@@ -2034,20 +2049,6 @@ namespace DX11Base {
       }
       EndSection(); // 위젯
 
-      BeginSection();
-      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 설정 ]");
-
-      ImGui::SetNextItemWidth(150.0f * scale);
-      if (ImGui::SliderFloat(u8"알림 속도", &DX11Base::g_notificationSpeed, 20.0f, 500.0f, "%.0f px/s")) {
-        SaveConfig();
-      }
-
-      ImGui::SameLine(0, 20.0f * scale);
-      if (ImGui::Button(u8"알림 비우기", ImVec2(100.0f * scale, 0))) {
-        g_notifications.clear();
-        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
-      }
-      EndSection(); // 알림
     }
   } // namespace MenuSections
 } // namespace DX11Base
