@@ -2441,6 +2441,28 @@ namespace DX11Base {
       return true;
     }
 
+    static void SetFifthUiSidecarVisibleSeh(bool visible) {
+      const uintptr_t button = g_fifthUiSidecarButton;
+      if (!button || !IsValidPtr(button, sizeof(uintptr_t)))
+        return;
+
+      __try {
+        const uintptr_t vt =
+            *reinterpret_cast<const uintptr_t *>(button);
+        if (!vt || !IsValidPtr(vt + 0x108, sizeof(uintptr_t)))
+          return;
+
+        const uintptr_t setVisible =
+            *reinterpret_cast<const uintptr_t *>(vt + 0x108);
+        if (!setVisible || !IsValidPtr(setVisible, 1))
+          return;
+
+        using SetBoolFn = void(__fastcall *)(uintptr_t, bool);
+        reinterpret_cast<SetBoolFn>(setVisible)(button, visible);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+      }
+    }
+
     static void RestoreFifthUiMakerTestSeh() {
       __try {
         if (g_fifthUiMakerExpanded &&
@@ -3892,24 +3914,23 @@ namespace DX11Base {
 
     if (!enable) {
       g_fiveMetadataRequested = false;
-      RestoreFifthUiModelCountSeh();
 
-      RestoreFifthUiMakerTestSeh();
+      // Runtime model/Camp 연결은 원복하되, live layout에 이미 생성/등록된
+      // sidecar와 ID7 bookkeeping은 절대 버리지 않는다. helper7은 최초
+      // Initialize에서 한 번 소모되므로 여기서 maker를 7칸으로 되돌리거나
+      // sidecar 전역 포인터를 지우면 같은 layout에서 다시 복구할 수 없다.
+      RestoreFifthUiModelCountSeh();
       restoreRuntimeSlot();
+
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
-      g_trickUiLayout = 0;
-      g_trickUiDialog = 0;
-      g_trickUiStartX = 0;
-      g_trickUiY = 0;
-      g_trickUiStep = 0;
-      g_lastLoggedUiLayout = 0;
-      g_fifthUiSidecarLayout = 0;
-      g_fifthUiSidecarButton = 0;
-      g_fifthUiSidecarAttempted = false;
-      g_fifthUiId7Registered = false;
-      AddLog(u8"[책략5메타DBG] 5번 내부 등록 해제.");
+
+      // UI bridge는 현재 layout 수명 동안 유지하고 표시만 잠시 끈다.
+      // 재활성화 시 동일 sidecar를 그대로 재사용한다.
+      SetFifthUiSidecarVisibleSeh(false);
+
+      AddLog(u8"[책략5메타DBG] 5번 내부 등록 해제. live UI sidecar/ID7 등록은 재사용을 위해 유지.");
       return true;
     }
 
@@ -3918,6 +3939,16 @@ namespace DX11Base {
     if (!PrepareStratagemFiveUiBridge())
       return false;
     LogTrickUiBridgeStatus("metadata-enable");
+
+    const uintptr_t liveLayout =
+        static_cast<uintptr_t>(g_trickUiLayout);
+    if (g_fifthUiId7Registered &&
+        g_fifthUiSidecarButton &&
+        g_fifthUiSidecarLayout &&
+        (!liveLayout || g_fifthUiSidecarLayout == liveLayout)) {
+      SetFifthUiSidecarVisibleSeh(true);
+      AddLog(u8"[책략5수명] 기존 live sidecar/ID7 등록 재사용.");
+    }
 
     if (g_fiveMetadataApplied && g_fiveRuntimeSlotApplied) {
       const bool sameGeneration =
