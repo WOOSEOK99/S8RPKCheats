@@ -277,7 +277,7 @@ namespace DX11Base {
     }
     //
     // ─────────────────────────────────────────────────────────────
-    void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale) {
+    void DrawDomesticSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       if (p1) {
         BeginSection();
 
@@ -513,6 +513,11 @@ namespace DX11Base {
 
         EndSection();
 
+      }
+    }
+
+    void DrawCouncilSection(uintptr_t p1, uintptr_t gameBase, float scale) {
+      if (p1) {
         BeginSection();
         ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 및 진급 관련 ]");
         DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP, p1, gameBase, scale);
@@ -663,7 +668,6 @@ namespace DX11Base {
         }
         EndSection(); // 평정 및 진급
       }
-
     }
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
