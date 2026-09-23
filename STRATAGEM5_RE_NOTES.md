@@ -421,3 +421,110 @@ runtime freeze 대응:
 5. EXE/PDB가 대화에 없어도 **기존에 문서화된 구조/RVA를 다시 물어보지 않는다.**
 6. 새 PDB 심볼이 정말 필요할 때만 바이너리 재업로드가 필요하다고 말한다.
 7. 게임 업데이트가 의심되면 먼저 빌드 지문(SHA-256/RSDS GUID/age) 비교부터 한다.
+
+
+---
+
+## 14. 2026-09-23 1차 실전 UI 코드 로그 분석
+
+실게임 런타임 코드에서 다음이 직접 확인됨.
+
+### TrickCommandDialogLayout::GetTrickButton
+
+RVA `0x01DAF060`
+
+```asm
+cmp edx, 4
+jae out_of_range
+mov eax, edx
+mov rax, [rcx + rax*8 + 0x1E0]
+ret
+```
+
+즉 index 0~3만 허용하고, 실제 포인터 배열은 `this+0x1E0`에 존재한다.
+
+### TrickCommandDialog::Open
+
+RVA `0x01DF3CB0` 내부에서:
+
+```asm
+cmp edi, 4
+jae ...
+...
+mov rsi, [rax + rsi*8 + 0x1E0]
+```
+
+직접 배열 접근과 4개 제한이 함께 존재한다.
+
+또한 현재 선택 index 계열 값에도:
+
+```asm
+cmp eax, 4
+jb ...
+```
+
+가 존재한다.
+
+### TrickCommandDialog::Initialize
+
+RVA `0x01DF3F20` 내부에서 2개의 4 제한이 확인됨.
+
+1)
+
+```asm
+cmp r12d, 4
+jae ...
+```
+
+2)
+
+```asm
+inc edi
+add r14, 8
+cmp edi, 4
+jb <loop>
+```
+
+따라서 초기화에도 실제 4회 루프가 있다.
+
+### TrickCommandDialogLayout::Initialize
+
+RVA `0x01DAF350` 내부에서:
+
+- `lea rdi, [rsi+0x1E0]`
+- local count = `4`
+- `this+0x1E0` 참조가 여러 곳 존재
+
+가 확인됨.
+
+### 결론
+
+실전 UI의 4 제한은 단일 지점이 아니다.
+
+현재 확인된 제한/직접 접근:
+
+- `Layout::GetTrickButton`
+- `Dialog::Open`
+- `Dialog::Initialize`
+- `Layout::Initialize`
+- `Layout::ResetBtnPos`
+
+따라서 단순 `4 -> 5` 전역 패치는 금지.
+
+특히 `m_pButtons`는 `+0x1E0 ~ +0x1FF`의 고정 4포인터 배열이며
+`+0x200`부터 다른 멤버가 시작하므로 5번째 포인터를 연속 저장할 수 없다.
+
+현재 유력 방향:
+
+- 기존 4개 `m_pButtons`는 그대로 유지
+- 5번째 `TrickSelectButton*`만 외부 sidecar 저장소에 보관
+- `GetTrickButton(index==4)` 등 접근 함수를 후킹해서 sidecar 반환
+- `Open / Initialize / ResetBtnPos`의 직접 배열 접근은 필요한 곳만 별도 우회
+- 실제 버튼 객체 생성 방식은 추가 진단 후 확정
+
+2026-09-23 추가 진단 commit:
+
+- `6aa25fb3e6b7585d8f6fae57fdd6310f680cad49`
+
+이 커밋은 쓰기 패치가 아니라, 위 함수의 실제 버튼 생성/배치 흐름을 보기 위해
+좁은 범위의 런타임 코드 바이트를 `[책략5UIRANGE]`로 추가 출력한다.
