@@ -471,8 +471,8 @@ namespace DX11Base {
         return false;
       }
 
-      // "41 83 FC 04" starts at found+21, immediate byte is +24.
-      const uintptr_t immAddr = found + 24;
+      // "41 83 FC 04" starts at found+22, immediate byte is +25.
+      const uintptr_t immAddr = found + 25;
       if (!IsValidPtr(immAddr, 1) ||
           *reinterpret_cast<const uint8_t *>(immAddr) != 0x04) {
         AddLog(u8"[책략5루프DBG] 비교값 검증 실패: found=%p imm=%p value=%02X",
