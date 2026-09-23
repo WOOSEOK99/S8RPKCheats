@@ -2157,6 +2157,22 @@ namespace DX11Base {
             !layout || !IsValidPtr(layout, 0x2A8))
           return false;
 
+        // This is the first point where the player-side Camp::Impl is known
+        // unambiguously. Finish pending data/count/Camp wiring synchronously
+        // before the native callback loop, instead of waiting for a 500ms poll.
+        g_trickUiDialog = dialog;
+        g_trickUiLayout = layout;
+
+        if (g_fiveMetadataRequested.load() &&
+            (!g_fiveMetadataTable || !g_fiveMetadataAddr))
+          SetStratagemFiveMetadataTest(true);
+
+        if (g_id5CountRequested.load())
+          SetStratagemFiveCountTest(true);
+
+        if (g_fiveMetadataRequested.load())
+          SetStratagemFiveMetadataTest(true);
+
         if (ValidateFifthUiRegistrySeh(layout)) {
           g_trickUiDialog = dialog;
           g_trickUiLayout = layout;
