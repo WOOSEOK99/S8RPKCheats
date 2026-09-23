@@ -237,6 +237,7 @@ namespace DX11Base {
     static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout);
     static bool ValidatePreparedFifthUiHelper(
         uintptr_t layout, uint32_t *descriptorTag = nullptr);
+    static bool TryGetDialogCampOwnerSeh(uintptr_t *outOwner);
 
 
     // Read only PE headers and the bounded CodeView directory, never scan memory.
@@ -2159,85 +2160,77 @@ namespace DX11Base {
             !layout || !IsValidPtr(layout, 0x2A8))
           return false;
 
-        // This is the first point where the player-side Camp::Impl is known
-        // unambiguously. Finish pending data/count/Camp wiring synchronously
-        // before the native callback loop, instead of waiting for a 500ms poll.
         g_trickUiDialog = dialog;
         g_trickUiLayout = layout;
 
-        if (g_fiveMetadataRequested.load() &&
-            (!g_fiveMetadataTable || !g_fiveMetadataAddr))
-          SetStratagemFiveMetadataTest(true);
-
-        if (g_id5CountRequested.load())
-          SetStratagemFiveCountTest(true);
-
-        if (g_fiveMetadataRequested.load())
-          SetStratagemFiveMetadataTest(true);
-
-        if (ValidateFifthUiRegistrySeh(layout)) {
-          g_trickUiDialog = dialog;
-          g_trickUiLayout = layout;
-
-          if (g_fiveRuntimeSlotApplied &&
-              g_fiveRuntimeOwner &&
-              g_fiveMetadataAddr)
-            TryExtendFifthDialogModelCountSeh(dialog);
-
-          AddLog(u8"[책략5UICB] callback 직전 기존 ID7 registry 확인: dialog=%p layout=%p sidecar=%p active=%p",
+        // First advance DATA -> OWNER -> COUNT -> CAMP -> MODEL strictly from
+        // verified state. This is event-driven and independent of wall-clock
+        // timing or machine speed.
+        const bool modelReady = AdvanceFifthRuntimeStateSeh(dialog);
+        if (!modelReady) {
+          AddLog(u8"[책략5STATE] callback 직전 단계 대기: stage=%u dialog=%p layout=%p",
+                 (unsigned)g_fifthRuntimeStage.load(),
                  reinterpret_cast<void *>(dialog),
-                 reinterpret_cast<void *>(layout),
-                 reinterpret_cast<void *>(g_fifthUiSidecarButton),
-                 reinterpret_cast<void *>(g_fifthUiActiveButton.load()));
+                 reinterpret_cast<void *>(layout));
+          return true; // native callback continues; a later event can advance.
+        }
+
+        // N+1 <= 4 uses the game's existing physical button array. No sidecar
+        // registration or index4 publication is needed in that case.
+        if (g_fifthRuntimeOriginalCount < 4) {
+          g_fifthUiActiveLayout.store(0);
+          g_fifthUiActiveButton.store(0);
+          SetFifthUiSidecarVisibleSeh(false);
+          AddLog(u8"[책략5STATE] callback 직전 READY: N=%u total=%u native button index=%u",
+                 (unsigned)g_fifthRuntimeOriginalCount,
+                 (unsigned)(g_fifthRuntimeOriginalCount + 1),
+                 (unsigned)g_fifthRuntimeOriginalCount);
           return true;
         }
 
-        uint32_t count=0;
-        uintptr_t owner=0, helperTable=0, helper7=0;
-        const bool helperReady =
-            SafeCopySeh(layout + 0x150, &count, sizeof(count)) && count == 8 &&
-            SafeReadPtrSeh(layout + 0x158, &owner) && owner == layout &&
-            SafeReadPtrSeh(layout + 0x148, &helperTable) &&
-            helperTable && IsValidPtr(helperTable, 8*sizeof(uintptr_t)) &&
-            SafeReadPtrSeh(helperTable + 7*sizeof(uintptr_t), &helper7) &&
-            helper7 && IsValidPtr(helper7, sizeof(uintptr_t)) &&
-            ValidatePreparedFifthUiHelper(layout);
+        // Only N==4 needs the external fifth physical button. Register it only
+        // after the model is already a verified five-entry model.
+        if (g_fifthRuntimeOriginalCount != 4)
+          return true;
 
-        if (!helperReady) {
-          AddLog(u8"[책략5UICB] callback 직전 sidecar 준비 거부: layout=%p count=%u helper7=%p",
-                 reinterpret_cast<void *>(layout), (unsigned)count,
-                 reinterpret_cast<void *>(helper7));
-          return false;
+        if (!ValidateFifthUiRegistrySeh(layout)) {
+          uint32_t count = 0;
+          uintptr_t owner = 0, helperTable = 0, helper7 = 0;
+          const bool helperReady =
+              SafeCopySeh(layout + 0x150, &count, sizeof(count)) &&
+              count == 8 &&
+              SafeReadPtrSeh(layout + 0x158, &owner) && owner == layout &&
+              SafeReadPtrSeh(layout + 0x148, &helperTable) &&
+              helperTable &&
+              IsValidPtr(helperTable, 8 * sizeof(uintptr_t)) &&
+              SafeReadPtrSeh(helperTable + 7 * sizeof(uintptr_t), &helper7) &&
+              helper7 && IsValidPtr(helper7, sizeof(uintptr_t)) &&
+              ValidatePreparedFifthUiHelper(layout);
+
+          if (!helperReady) {
+            AddLog(u8"[책략5STATE] N=4 model READY, sidecar helper 대기: layout=%p count=%u helper7=%p",
+                   reinterpret_cast<void *>(layout), (unsigned)count,
+                   reinterpret_cast<void *>(helper7));
+            return true;
+          }
+
+          if (!CreateFifthUiSidecarDisplayOnlySeh(layout) ||
+              !ExpandMakerAndRegisterFifthSidecarSeh(layout)) {
+            AddLog(u8"[책략5STATE] N=4 sidecar 생성/등록 실패.");
+            return true;
+          }
         }
 
-        g_trickUiDialog = dialog;
-        g_trickUiLayout = layout;
+        // Re-publish now that registry is valid; this activates the index4
+        // bridge and positions the five buttons.
+        TryExtendFifthDialogModelCountSeh(dialog);
 
-        if (!CreateFifthUiSidecarDisplayOnlySeh(layout)) {
-          AddLog(u8"[책략5UICB] callback 직전 sidecar 생성 실패.");
-          return false;
-        }
-        if (!ExpandMakerAndRegisterFifthSidecarSeh(layout)) {
-          AddLog(u8"[책략5UICB] callback 직전 ID7 등록 실패.");
-          return false;
-        }
-
-        // Build N+1 before the native callback loop consumes the dialog
-        // model. For N<4 this uses an existing physical button; for N==4 it
-        // also publishes the already-registered sidecar.
-        if (g_fiveRuntimeSlotApplied &&
-            g_fiveRuntimeOwner &&
-            g_fiveMetadataAddr)
-          TryExtendFifthDialogModelCountSeh(dialog);
-
-        AddLog(u8"[책략5UICB] callback 직전 UI/model 준비 완료: dialog=%p layout=%p sidecar=%p active=%p",
-               reinterpret_cast<void *>(dialog),
-               reinterpret_cast<void *>(layout),
+        AddLog(u8"[책략5STATE] callback 직전 READY: N=4 total=5 sidecar=%p active=%p",
                reinterpret_cast<void *>(g_fifthUiSidecarButton),
                reinterpret_cast<void *>(g_fifthUiActiveButton.load()));
         return true;
-      } __except(EXCEPTION_EXECUTE_HANDLER) {
-        AddLog(u8"[책략5UICB] callback 직전 sidecar 준비 중 예외.");
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5STATE] callback 직전 상태 진행 중 예외.");
         return false;
       }
     }
