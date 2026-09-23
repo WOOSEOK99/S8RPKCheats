@@ -27,6 +27,7 @@
 #include "Engine.h"
 #include "Menu.h"
 #include "MenuSections.h"
+#include "MainColumns.h"
 #include "MenuState.h"
 #include "NotificationManager.h"
 #include "TacticsEditWindow.h"
@@ -577,7 +578,7 @@ namespace DX11Base {
       ImVec2 titleSize = ImGui::CalcTextSize(visibleTitle);
       ImGui::SetNextWindowSize(ImVec2(titleSize.x + 35.0f * scale, 0), ImGuiCond_Always);
     } else {
-      ImGui::SetNextWindowSize(ImVec2(720 * scale, 0), ImGuiCond_Always);
+      ImGui::SetNextWindowSize(ImVec2(1050 * scale, 0), ImGuiCond_Always);
 
       // ImGui::SetNextWindowSizeConstraints(ImVec2(650 * scale, -1), ImVec2(650 * scale, -1));
     }
@@ -717,35 +718,25 @@ namespace DX11Base {
     if (bMenuExpanded) {
 
       if (gameBase) {
-        float gap = 5.0f * scale; // 왼쪽과 오른쪽 사이의 확실한 간격
-        float leftColWidth = 330.0f * scale;
-
-        // 1. 테이블 시작 (2열, 가로 꽉 채우기 플래그)
-        if (ImGui::BeginTable("MainLayoutTable", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
-          // 2. 컬럼 설정: 왼쪽은 고정, 오른쪽은 남은 공간 전부(Stretch)
-          ImGui::TableSetupColumn("Left", ImGuiTableColumnFlags_WidthFixed, leftColWidth);
-          ImGui::TableSetupColumn("Right", ImGuiTableColumnFlags_WidthStretch);
+        if (ImGui::BeginTable(
+                "MainLayoutTable",
+                3,
+                ImGuiTableFlags_SizingStretchSame |
+                    ImGuiTableFlags_NoSavedSettings)) {
+          ImGui::TableSetupColumn("Column1", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+          ImGui::TableSetupColumn("Column2", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+          ImGui::TableSetupColumn("Column3", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 
           ImGui::TableNextRow();
 
-          // --- [ 왼쪽 컬럼 ] ---
           ImGui::TableSetColumnIndex(0);
-          // 왼쪽 내용 그리기
-          MenuSections::DrawCivilianSection(p1, gameBase, scale);
-          MenuSections::DrawScenarioSection(p1, scale);
+          MainColumns::DrawColumn1(p1, gameBase, scale);
 
-          // --- [ 오른쪽 컬럼 ] ---
           ImGui::TableSetColumnIndex(1);
+          MainColumns::DrawColumn2(p1, gameBase, scale);
 
-          // 간격을 주기 위해 오른쪽 컬럼 시작점에서 살짝 띄웁니다.
-          ImGui::Indent(gap);
-
-          MenuSections::DrawSocialSection(p1, gameBase, scale);
-          MenuSections::DrawWarSection(p1, gameBase, scale);
-          MenuSections::DrawOfficerEditSection(p1, scale);
-          MenuSections::DrawOfficerDetailSection(p1, ImGui::GetWindowPos(), ImGui::GetWindowSize(), scale);
-
-          ImGui::Unindent(gap); // 들여쓰기 해제
+          ImGui::TableSetColumnIndex(2);
+          MainColumns::DrawColumn3(p1, gameBase, scale);
 
           ImGui::EndTable();
         }
