@@ -27,6 +27,7 @@ namespace DX11Base {
     static volatile uintptr_t g_defenseInfo = 0;
 
     static bool g_id5CountApplied = false;
+    static bool g_id5CountRequested = false;
     static uintptr_t g_id5CountAddr = 0;
     static uintptr_t g_id5CountOwner = 0;
     static uint8_t g_id5CountOriginal = 0;
@@ -36,12 +37,14 @@ namespace DX11Base {
     static uint8_t g_fiveLoopOriginal = 0;
 
     static bool g_fiveMetadataApplied = false;
+    static bool g_fiveMetadataRequested = false;
     static uintptr_t g_fiveMetadataAddr = 0;
     static uintptr_t g_fiveMetadataTable = 0;
 
     static bool g_fiveRuntimeSlotApplied = false;
     static uintptr_t g_fiveRuntimeSlotAddr = 0;
     static uintptr_t g_fiveRuntimeSlotOriginal = 0;
+    static uintptr_t g_fiveRuntimeOwner = 0;
 
     // Runtime UI instance capture. The hook is build-guarded and only records
     // TrickCommandDialogLayout* when ResetBtnPos runs; it does not change UI data.
@@ -909,7 +912,14 @@ namespace DX11Base {
       e8(0xC3);                                // ret
 
       const int sideLabel=i;
-      e8(0x48); e8(0xB8);                      // mov rax,&global
+      // index4 is valid only for the exact layout that owns the sidecar.
+      e8(0x48); e8(0xB8);                      // mov rax,&layout-global
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarLayout));
+      e8(0x48); e8(0x8B); e8(0x00);            // mov rax,[rax]
+      e8(0x48); e8(0x39); e8(0xC1);            // cmp rcx,rax
+      e8(0x0F); e8(0x85);                      // jne out
+      const int jneLayoutOut=i; e32(0);
+      e8(0x48); e8(0xB8);                      // mov rax,&button-global
       e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
       e8(0x48); e8(0x8B); e8(0x00);            // mov rax,[rax]
       e8(0xC3);                                // ret
@@ -919,7 +929,8 @@ namespace DX11Base {
       e8(0xC3);                                // ret
 
       if(!patchRel32(jeSide,sideLabel) ||
-         !patchRel32(jaOut,outLabel)) {
+         !patchRel32(jaOut,outLabel) ||
+         !patchRel32(jneLayoutOut,outLabel)) {
         VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
         return false;
       }
@@ -1115,8 +1126,14 @@ namespace DX11Base {
       emit8(0x0F); emit8(0x85);                         // jne original-load
       const int jneOriginalDisp = idx; emit32(0);
 
-      // index==4: substitute the external sidecar instead of reading +0x200.
-      emit8(0x48); emit8(0xBE);                         // mov rsi, &global
+      // index==4: substitute only when RAX is the exact layout that
+      // owns the current sidecar. This blocks stale pointers across save/load.
+      emit8(0x48); emit8(0xBE);                         // mov rsi,&layout-global
+      emit64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarLayout));
+      emit8(0x48); emit8(0x3B); emit8(0x06);            // cmp rax,[rsi]
+      emit8(0x0F); emit8(0x85);                         // jne original-skip
+      const int jneLayoutSkipDisp = idx; emit32(0);
+      emit8(0x48); emit8(0xBE);                         // mov rsi,&button-global
       emit64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
       emit8(0x48); emit8(0x8B); emit8(0x36);            // mov rsi,[rsi]
       emit8(0x48); emit8(0x85); emit8(0xF6);            // test rsi,rsi
@@ -1148,6 +1165,7 @@ namespace DX11Base {
       }
 
       if (!patchRel32(jneOriginalDisp, originalLoadLabel) ||
+          !patchRel32(jneLayoutSkipDisp, originalSkipLabel) ||
           !patchRel32(jzSkipDisp, originalSkipLabel)) {
         VirtualFree(reinterpret_cast<LPVOID>(caveAddr), 0, MEM_RELEASE);
         return false;
@@ -2353,12 +2371,20 @@ namespace DX11Base {
       }
 
       const int sideLabel=i;
+      // Replay the original first load so RAX is the current dialog layout.
+      e8(0x48); e8(0x8B); e8(0x46); e8(0x08); // mov rax,[rsi+8]
+      e8(0x48); e8(0xBB);              // mov rbx,&layout-global
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarLayout));
+      e8(0x48); e8(0x3B); e8(0x03);    // cmp rax,[rbx]
+      e8(0x0F); e8(0x85);              // jne no-sidecar
+      const int jneLayoutExit=i; e32(0);
+
       e8(0x50);                         // push rax
       e8(0x48); e8(0xB8);              // mov rax,&hitCounter
       e64(reinterpret_cast<uintptr_t>(&g_fifthUiCallbackIndex4Hits));
       e8(0xF0); e8(0xFF); e8(0x00);    // lock inc dword ptr [rax]
       e8(0x58);                         // pop rax
-      e8(0x48); e8(0xBB);              // mov rbx,&global
+      e8(0x48); e8(0xBB);              // mov rbx,&button-global
       e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
       e8(0x48); e8(0x8B); e8(0x1B);   // mov rbx,[rbx]
       e8(0x48); e8(0x85); e8(0xDB);   // test rbx,rbx
@@ -2377,7 +2403,9 @@ namespace DX11Base {
         return false;
       }
 
-      if(!rel32(jeSide,sideLabel) || !rel32(jzExit,noSideLabel)) {
+      if(!rel32(jeSide,sideLabel) ||
+         !rel32(jneLayoutExit,noSideLabel) ||
+         !rel32(jzExit,noSideLabel)) {
         VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
         return false;
       }
@@ -2657,7 +2685,22 @@ namespace DX11Base {
         return true;
 
       if (g_fifthUiSidecarLayout != layout) {
-        // Previous layout lifetime has ended; do not carry its maker snapshot forward.
+        // Previous layout lifetime has ended. Never dereference its model/sidecar
+        // pointers during save/load; only drop bookkeeping and bind the new owner.
+        g_fifthUiModelCountAddr = 0;
+        g_fifthUiModelCountOriginal = 0;
+        g_fifthUiModelCountApplied = false;
+        g_fifthUiModelEntryAddr = 0;
+        g_fifthUiModelEntryOriginal[0] = 0;
+        g_fifthUiModelEntryOriginal[1] = 0;
+        g_fifthUiModelEntryApplied = false;
+        g_trickUiDialog = 0;
+        g_lastLoggedUiLayout = 0;
+        g_fifthUiCompactLogged = false;
+        g_fifthUiResetSignalDumped = false;
+        InterlockedExchange(&g_fifthUiCallbackIndex4Hits, 0);
+
+        // Do not carry the previous maker snapshot forward.
         g_fifthUiMakerExpanded = false;
         g_fifthUiMakerAddr = 0;
         std::memset(g_fifthUiMakerOriginal, 0,
@@ -3372,109 +3415,140 @@ namespace DX11Base {
   }
 
   bool SetStratagemFiveCountTest(bool enable) {
-    if (enable) {
-      if (g_id5CountApplied)
+    if (!enable) {
+      g_id5CountRequested = false;
+
+      if (!g_id5CountApplied)
         return true;
 
-      if (!EnsureCaptureHook())
-        return false;
-
-      struct Candidate {
-        uintptr_t ptr;
-        uint8_t side;
-        const char *name;
-      };
-
-      const Candidate candidates[] = {
-          {g_attackInfo, 0, u8"공격측"},
-          {g_defenseInfo, 1, u8"수비측"},
-      };
-
-      uintptr_t chosen = 0;
-      const char *chosenName = nullptr;
-
-      for (const auto &candidate : candidates) {
-        if (!ValidateInfo(candidate.ptr, candidate.side))
-          continue;
-
-        const uint8_t c1 = *reinterpret_cast<const uint8_t *>(
-            candidate.ptr + kFirstStratagemCountOffset + 0 * kStratagemCountStride);
-        const uint8_t c2 = *reinterpret_cast<const uint8_t *>(
-            candidate.ptr + kFirstStratagemCountOffset + 1 * kStratagemCountStride);
-        const uint8_t c3 = *reinterpret_cast<const uint8_t *>(
-            candidate.ptr + kFirstStratagemCountOffset + 2 * kStratagemCountStride);
-        const uint8_t c4 = *reinterpret_cast<const uint8_t *>(
-            candidate.ptr + kFirstStratagemCountOffset + 3 * kStratagemCountStride);
-        const uint8_t c5 = *reinterpret_cast<const uint8_t *>(
-            candidate.ptr + kFirstStratagemCountOffset + 4 * kStratagemCountStride);
-
-        if (c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 0) {
-          if (chosen) {
-            AddLog(u8"[책략5슬롯DBG] 공격/수비 양쪽이 모두 1/1/1/1이라 자동 선택할 수 없습니다.");
-            return false;
-          }
-          chosen = candidate.ptr;
-          chosenName = candidate.name;
+      // Restore only while the exact captured owner/slot still looks live.
+      // On save/load transition the old arena may already be gone or reused;
+      // in that case abandon the stale bookkeeping without touching it.
+      const bool ownerStillCurrent =
+          (g_id5CountOwner == g_attackInfo && ValidateInfo(g_id5CountOwner, 0)) ||
+          (g_id5CountOwner == g_defenseInfo && ValidateInfo(g_id5CountOwner, 1));
+      if (ownerStillCurrent &&
+          g_id5CountAddr ==
+              g_id5CountOwner + kFirstStratagemCountOffset +
+                  4 * kStratagemCountStride &&
+          IsValidPtr(g_id5CountAddr, 1)) {
+        DWORD oldProtect = 0;
+        DWORD tmpProtect = 0;
+        if (VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1,
+                           PAGE_READWRITE, &oldProtect)) {
+          *reinterpret_cast<uint8_t *>(g_id5CountAddr) = g_id5CountOriginal;
+          VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1,
+                         oldProtect, &tmpProtect);
         }
+        AddLog(u8"[책략5슬롯DBG] ID5 수량 테스트 원복.");
+      } else {
+        AddLog(u8"[책략5수명] 이전 전투 ID5 수량 포인터는 더 이상 현재 객체가 아니므로 쓰지 않고 폐기.");
       }
 
-      if (!chosen) {
-        AddLog(u8"[책략5슬롯DBG] ID1~4=1/1/1/1, ID5=0인 플레이어측 후보를 찾지 못했습니다.");
-        AddLog(u8"[책략5슬롯DBG] 전투 시작 직후 기존 책략을 쓰기 전에 다시 시도하세요.");
-        return false;
-      }
-
-      const uintptr_t id5Addr =
-          chosen + kFirstStratagemCountOffset + 4 * kStratagemCountStride;
-
-      if (!IsValidPtr(id5Addr, 1))
-        return false;
-
-      g_id5CountOriginal = *reinterpret_cast<const uint8_t *>(id5Addr);
-
-      DWORD oldProtect = 0;
-      DWORD tmpProtect = 0;
-      if (!VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1, PAGE_READWRITE, &oldProtect)) {
-        AddLog(u8"[책략5슬롯DBG] ID5 수량 슬롯 쓰기 권한 변경 실패: %p",
-               reinterpret_cast<void *>(id5Addr));
-        return false;
-      }
-
-      *reinterpret_cast<uint8_t *>(id5Addr) = 1;
-      VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1, oldProtect, &tmpProtect);
-
-      if (*reinterpret_cast<const uint8_t *>(id5Addr) != 1) {
-        AddLog(u8"[책략5슬롯DBG] ID5 수량 1 쓰기 검증 실패.");
-        return false;
-      }
-
-      g_id5CountAddr = id5Addr;
-      g_id5CountOwner = chosen;
-      g_id5CountApplied = true;
-
-      AddLog(u8"[책략5슬롯DBG] %s ID5 후보(+14C) 수량 0 -> 1 적용 성공: %p",
-             chosenName, reinterpret_cast<void *>(id5Addr));
-      AddLog(u8"[책략5슬롯DBG] 이제 전투 책략 UI에 기존 4개와 별도로 5번이 나타나는지 확인하세요.");
+      g_id5CountApplied = false;
+      g_id5CountAddr = 0;
+      g_id5CountOwner = 0;
+      g_id5CountOriginal = 0;
       return true;
     }
 
-    if (!g_id5CountApplied)
-      return true;
+    if (!EnsureCaptureHook())
+      return false;
 
-    if (g_id5CountAddr && IsValidPtr(g_id5CountAddr, 1)) {
-      DWORD oldProtect = 0;
-      DWORD tmpProtect = 0;
-      if (VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1, PAGE_READWRITE, &oldProtect)) {
-        *reinterpret_cast<uint8_t *>(g_id5CountAddr) = g_id5CountOriginal;
-        VirtualProtect(reinterpret_cast<LPVOID>(g_id5CountAddr), 1, oldProtect, &tmpProtect);
+    // If the remembered owner is still the exact current captured object and
+    // its fifth count is still 1, keep it. Otherwise this is a new battle/save
+    // generation: never restore through the stale pointer; simply forget it.
+    if (g_id5CountApplied) {
+      const bool ownerStillCurrent =
+          (g_id5CountOwner == g_attackInfo && ValidateInfo(g_id5CountOwner, 0)) ||
+          (g_id5CountOwner == g_defenseInfo && ValidateInfo(g_id5CountOwner, 1));
+      const uintptr_t expectedAddr =
+          g_id5CountOwner + kFirstStratagemCountOffset +
+          4 * kStratagemCountStride;
+      if (ownerStillCurrent &&
+          g_id5CountAddr == expectedAddr &&
+          IsValidPtr(g_id5CountAddr, 1) &&
+          *reinterpret_cast<const uint8_t *>(g_id5CountAddr) == 1) {
+        g_id5CountRequested = true;
+        return true;
+      }
+
+      AddLog(u8"[책략5수명] 새 전투/로드 세대 감지: 이전 ID5 수량 적용 상태 폐기.");
+      g_id5CountApplied = false;
+      g_id5CountAddr = 0;
+      g_id5CountOwner = 0;
+      g_id5CountOriginal = 0;
+    }
+
+    struct Candidate {
+      uintptr_t ptr;
+      uint8_t side;
+      const char *name;
+    };
+
+    const Candidate candidates[] = {
+        {g_attackInfo, 0, u8"공격측"},
+        {g_defenseInfo, 1, u8"수비측"},
+    };
+
+    uintptr_t chosen = 0;
+    const char *chosenName = nullptr;
+
+    for (const auto &candidate : candidates) {
+      if (!ValidateInfo(candidate.ptr, candidate.side))
+        continue;
+
+      const uint8_t c1 = *reinterpret_cast<const uint8_t *>(
+          candidate.ptr + kFirstStratagemCountOffset + 0 * kStratagemCountStride);
+      const uint8_t c2 = *reinterpret_cast<const uint8_t *>(
+          candidate.ptr + kFirstStratagemCountOffset + 1 * kStratagemCountStride);
+      const uint8_t c3 = *reinterpret_cast<const uint8_t *>(
+          candidate.ptr + kFirstStratagemCountOffset + 2 * kStratagemCountStride);
+      const uint8_t c4 = *reinterpret_cast<const uint8_t *>(
+          candidate.ptr + kFirstStratagemCountOffset + 3 * kStratagemCountStride);
+      const uint8_t c5 = *reinterpret_cast<const uint8_t *>(
+          candidate.ptr + kFirstStratagemCountOffset + 4 * kStratagemCountStride);
+
+      if (c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 0) {
+        if (chosen) {
+          AddLog(u8"[책략5슬롯DBG] 공격/수비 양쪽이 모두 1/1/1/1이라 자동 선택할 수 없습니다.");
+          return false;
+        }
+        chosen = candidate.ptr;
+        chosenName = candidate.name;
       }
     }
 
-    AddLog(u8"[책략5슬롯DBG] ID5 수량 테스트 원복.");
-    g_id5CountApplied = false;
-    g_id5CountAddr = 0;
-    g_id5CountOwner = 0;
-    g_id5CountOriginal = 0;
+    if (!chosen)
+      return false;
+
+    const uintptr_t id5Addr =
+        chosen + kFirstStratagemCountOffset + 4 * kStratagemCountStride;
+    if (!IsValidPtr(id5Addr, 1))
+      return false;
+
+    g_id5CountOriginal = *reinterpret_cast<const uint8_t *>(id5Addr);
+
+    DWORD oldProtect = 0;
+    DWORD tmpProtect = 0;
+    if (!VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1,
+                        PAGE_READWRITE, &oldProtect))
+      return false;
+
+    *reinterpret_cast<uint8_t *>(id5Addr) = 1;
+    VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1,
+                   oldProtect, &tmpProtect);
+
+    if (*reinterpret_cast<const uint8_t *>(id5Addr) != 1)
+      return false;
+
+    g_id5CountAddr = id5Addr;
+    g_id5CountOwner = chosen;
+    g_id5CountApplied = true;
+    g_id5CountRequested = true;
+
+    AddLog(u8"[책략5슬롯DBG] %s ID5 후보(+14C) 수량 0 -> 1 적용 성공: %p",
+           chosenName, reinterpret_cast<void *>(id5Addr));
     return true;
   }
 
@@ -3769,9 +3843,11 @@ namespace DX11Base {
       g_fiveRuntimeSlotApplied = false;
       g_fiveRuntimeSlotAddr = 0;
       g_fiveRuntimeSlotOriginal = 0;
+      g_fiveRuntimeOwner = 0;
     };
 
     if (!enable) {
+      g_fiveMetadataRequested = false;
       RestoreFifthUiModelCountSeh();
 
       RestoreFifthUiMakerTestSeh();
@@ -3799,8 +3875,29 @@ namespace DX11Base {
       return false;
     LogTrickUiBridgeStatus("metadata-enable");
 
-    if (g_fiveMetadataApplied && g_fiveRuntimeSlotApplied)
-      return true;
+    if (g_fiveMetadataApplied && g_fiveRuntimeSlotApplied) {
+      const bool sameGeneration =
+          g_fiveRuntimeOwner &&
+          g_fiveRuntimeOwner == g_id5CountOwner &&
+          g_fiveRuntimeSlotAddr &&
+          g_fiveMetadataAddr &&
+          IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
+          *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
+              g_fiveMetadataAddr;
+      if (sameGeneration) {
+        g_fiveMetadataRequested = true;
+        return true;
+      }
+
+      AddLog(u8"[책략5수명] 새 전투/로드 세대 감지: 이전 내부등록 포인터를 쓰지 않고 폐기.");
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      g_fiveRuntimeSlotApplied = false;
+      g_fiveRuntimeSlotAddr = 0;
+      g_fiveRuntimeSlotOriginal = 0;
+      g_fiveRuntimeOwner = 0;
+    }
 
     const uintptr_t gameBase = GetGameBase();
     const uintptr_t exeBase =
@@ -4000,6 +4097,8 @@ namespace DX11Base {
       g_fiveRuntimeSlotAddr = matchedSlot;
       g_fiveRuntimeSlotOriginal = row5;
       g_fiveRuntimeSlotApplied = true;
+      g_fiveRuntimeOwner = g_id5CountOwner;
+      g_fiveMetadataRequested = true;
       AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터가 이미 row5입니다: camp=%p slot5=%p",
              reinterpret_cast<void *>(matchedObject),
              reinterpret_cast<void *>(matchedSlot));
@@ -4037,6 +4136,8 @@ namespace DX11Base {
     g_fiveRuntimeSlotAddr = matchedSlot;
     g_fiveRuntimeSlotOriginal = matchedOld5;
     g_fiveRuntimeSlotApplied = true;
+    g_fiveRuntimeOwner = g_id5CountOwner;
+    g_fiveMetadataRequested = true;
 
     AddLog(u8"[책략5PDBDBG] 5슬롯 연결 성공: object=%p slot5=%p old=%p new=%p",
            reinterpret_cast<void *>(matchedObject),
@@ -4450,6 +4551,59 @@ namespace DX11Base {
 
     g_lastLoggedUiLayout = layout;
     AddLog(u8"[책략5UICAP] live layout 캡처 완료.");
+  }
+
+  void RefreshStratagemFiveBattleRuntime() {
+    if (!g_id5CountRequested && !g_fiveMetadataRequested)
+      return;
+
+    static ULONGLONG s_lastAttemptTick = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (now - s_lastAttemptTick < 500)
+      return;
+
+    const bool attackReady = ValidateInfo(g_attackInfo, 0);
+    const bool defenseReady = ValidateInfo(g_defenseInfo, 1);
+    if (!attackReady && !defenseReady)
+      return;
+
+    s_lastAttemptTick = now;
+
+    bool countCurrent = false;
+    if (g_id5CountApplied && g_id5CountOwner) {
+      countCurrent =
+          (g_id5CountOwner == g_attackInfo && attackReady) ||
+          (g_id5CountOwner == g_defenseInfo && defenseReady);
+      if (countCurrent) {
+        const uintptr_t expected =
+            g_id5CountOwner + kFirstStratagemCountOffset +
+            4 * kStratagemCountStride;
+        countCurrent =
+            g_id5CountAddr == expected &&
+            IsValidPtr(expected, 1) &&
+            *reinterpret_cast<const uint8_t *>(expected) == 1;
+      }
+    }
+
+    if (g_id5CountRequested && !countCurrent) {
+      if (!SetStratagemFiveCountTest(true))
+        return;
+      AddLog(u8"[책략5수명] 새 전투 객체에 ID5 수량 자동 재적용 완료.");
+    }
+
+    if (g_fiveMetadataRequested) {
+      const bool metadataCurrent =
+          g_fiveMetadataApplied &&
+          g_fiveRuntimeSlotApplied &&
+          g_fiveRuntimeOwner == g_id5CountOwner &&
+          g_fiveRuntimeSlotAddr &&
+          g_fiveMetadataAddr &&
+          IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
+          *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
+              g_fiveMetadataAddr;
+      if (!metadataCurrent && SetStratagemFiveMetadataTest(true))
+        AddLog(u8"[책략5수명] 새 전투 객체에 ID5 내부등록 자동 재적용 완료.");
+    }
   }
 
   void ScanStratagemFiveSlotCandidates() {
