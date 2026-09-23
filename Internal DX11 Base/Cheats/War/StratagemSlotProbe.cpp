@@ -127,6 +127,9 @@ namespace DX11Base {
     static uintptr_t g_fifthUiModelCountAddr = 0;
     static uint32_t g_fifthUiModelCountOriginal = 0;
     static bool g_fifthUiModelCountApplied = false;
+    static uintptr_t g_fifthUiModelEntryAddr = 0;
+    static uint64_t g_fifthUiModelEntryOriginal[2] = {};
+    static bool g_fifthUiModelEntryApplied = false;
 
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
@@ -3703,16 +3706,28 @@ namespace DX11Base {
   }
 
   static void RestoreFifthUiModelCountSeh() {
-    if(!g_fifthUiModelCountApplied)
+    if(!g_fifthUiModelCountApplied && !g_fifthUiModelEntryApplied)
       return;
 
-    const uintptr_t addr=g_fifthUiModelCountAddr;
-    const uint32_t original=g_fifthUiModelCountOriginal;
+    const uintptr_t countAddr=g_fifthUiModelCountAddr;
+    const uint32_t countOriginal=g_fifthUiModelCountOriginal;
+    const uintptr_t entryAddr=g_fifthUiModelEntryAddr;
+    const uint64_t entryOriginal0=g_fifthUiModelEntryOriginal[0];
+    const uint64_t entryOriginal1=g_fifthUiModelEntryOriginal[1];
 
     __try {
-      if(addr && IsValidPtr(addr,sizeof(uint32_t)) &&
-         *reinterpret_cast<const uint32_t *>(addr)==5) {
-        *reinterpret_cast<uint32_t *>(addr)=original;
+      // Shrink the visible range first, then restore the synthetic entry.
+      if(g_fifthUiModelCountApplied &&
+         countAddr && IsValidPtr(countAddr,sizeof(uint32_t)) &&
+         *reinterpret_cast<const uint32_t *>(countAddr)==5) {
+        *reinterpret_cast<uint32_t *>(countAddr)=countOriginal;
+      }
+
+      if(g_fifthUiModelEntryApplied &&
+         entryAddr && IsValidPtr(entryAddr,2*sizeof(uint64_t))) {
+        auto *q=reinterpret_cast<uint64_t *>(entryAddr);
+        q[0]=entryOriginal0;
+        q[1]=entryOriginal1;
       }
     } __except(EXCEPTION_EXECUTE_HANDLER) {
     }
@@ -3720,6 +3735,10 @@ namespace DX11Base {
     g_fifthUiModelCountAddr=0;
     g_fifthUiModelCountOriginal=0;
     g_fifthUiModelCountApplied=false;
+    g_fifthUiModelEntryAddr=0;
+    g_fifthUiModelEntryOriginal[0]=0;
+    g_fifthUiModelEntryOriginal[1]=0;
+    g_fifthUiModelEntryApplied=false;
   }
 
   bool SetStratagemFiveMetadataTest(bool enable) {
@@ -4034,7 +4053,8 @@ namespace DX11Base {
 
 
   static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog) {
-    if(!dialog || !g_fiveRuntimeSlotApplied || !g_fiveMetadataAddr)
+    if(!dialog || !g_fiveRuntimeSlotApplied ||
+       !g_fiveMetadataAddr || !g_fiveMetadataTable)
       return false;
 
     __try {
@@ -4080,41 +4100,108 @@ namespace DX11Base {
         return false;
       }
 
-      // Existing four model entries must all have a valid first pointer.
+      // The four live entries must exactly match native TrickData rows 1..4.
+      // Their second qword must also follow the observed {high=1, low=index}
+      // pattern. This is intentionally stricter than merely checking pointers.
+      constexpr uintptr_t kNativeTrickStride=0x20;
+      uint32_t commonHigh=0;
       for(int n=0;n<4;++n) {
         const uintptr_t p=static_cast<uintptr_t>(entry[n*2]);
-        if(!p || !IsValidPtr(p,sizeof(uintptr_t))) {
-          AddLog(u8"[책략5UIMODEL] entry%d 첫 포인터가 기존 항목답지 않아 쓰기 중단: %p",
-                 n,reinterpret_cast<void *>(p));
+        const uintptr_t expected=
+            g_fiveMetadataTable + static_cast<uintptr_t>(n)*kNativeTrickStride;
+        const uint32_t low=static_cast<uint32_t>(entry[n*2+1] & 0xFFFFFFFFull);
+        const uint32_t high=static_cast<uint32_t>(entry[n*2+1] >> 32);
+
+        if(p!=expected || low!=static_cast<uint32_t>(n)) {
+          AddLog(u8"[책략5UIMODEL] entry%d 패턴 불일치: ptr=%p expected=%p low=%u",
+                 n,
+                 reinterpret_cast<void *>(p),
+                 reinterpret_cast<void *>(expected),
+                 (unsigned)low);
+          return false;
+        }
+
+        if(n==0) {
+          commonHigh=high;
+          if(commonHigh!=1) {
+            AddLog(u8"[책략5UIMODEL] entry 공통 상위값이 예상 1이 아닙니다: %u. 쓰기 중단.",
+                   (unsigned)commonHigh);
+            return false;
+          }
+        } else if(high!=commonHigh) {
+          AddLog(u8"[책략5UIMODEL] entry%d 상위값 불일치: %u vs %u. 쓰기 중단.",
+                 n,(unsigned)high,(unsigned)commonHigh);
           return false;
         }
       }
 
-      // The 5-capacity buffer is physically present at +0x50. Only widen the
-      // count if the game has already populated that fifth entry itself.
+      // Latest live result showed the fifth physical record already default-
+      // initialized as {nullptr, 0x00000001'00000000}. Only that exact state
+      // is eligible for this one-shot synthetic-entry test.
       const uintptr_t p5=static_cast<uintptr_t>(entry[8]);
-      if(!p5 || !IsValidPtr(p5,sizeof(uintptr_t))) {
-        AddLog(u8"[책략5UIMODEL] entry4가 아직 비어 있습니다(%p). count만 5로 올리면 위험하므로 중단.",
-               reinterpret_cast<void *>(p5));
+      const uint32_t fifthLow=static_cast<uint32_t>(entry[9] & 0xFFFFFFFFull);
+      const uint32_t fifthHigh=static_cast<uint32_t>(entry[9] >> 32);
+      if(p5!=0 || fifthLow!=0 || fifthHigh!=commonHigh) {
+        AddLog(u8"[책략5UIMODEL] entry4 기본상태 불일치: ptr=%p high=%u low=%u. 쓰기 중단.",
+               reinterpret_cast<void *>(p5),
+               (unsigned)fifthHigh,
+               (unsigned)fifthLow);
         return false;
       }
 
+      const uintptr_t row5=g_fiveMetadataAddr;
+      const uintptr_t entryAddr=base+0x50;
       const uintptr_t countAddr=base+0x60;
-      *reinterpret_cast<uint32_t *>(countAddr)=5;
-      if(*reinterpret_cast<const uint32_t *>(countAddr)!=5) {
-        AddLog(u8"[책략5UIMODEL] count 4->5 검증 실패.");
+      const uint64_t newSecond=
+          (static_cast<uint64_t>(commonHigh)<<32) | 4ull;
+
+      if(!row5 ||
+         !IsValidPtr(row5,sizeof(uintptr_t)) ||
+         !IsValidPtr(entryAddr,2*sizeof(uint64_t)) ||
+         !IsValidPtr(countAddr,sizeof(uint32_t))) {
+        AddLog(u8"[책략5UIMODEL] 합성 entry 쓰기 대상 범위 무효. 쓰기 중단.");
         return false;
       }
 
+      g_fifthUiModelEntryAddr=entryAddr;
+      g_fifthUiModelEntryOriginal[0]=entry[8];
+      g_fifthUiModelEntryOriginal[1]=entry[9];
+      g_fifthUiModelEntryApplied=true;
       g_fifthUiModelCountAddr=countAddr;
       g_fifthUiModelCountOriginal=4;
       g_fifthUiModelCountApplied=true;
-      AddLog(u8"[책략5UIMODEL] fifth entry가 이미 유효하여 model count 4->5 적용 성공: countAddr=%p entry4=%p",
-             reinterpret_cast<void *>(countAddr),
-             reinterpret_cast<void *>(p5));
+
+      auto *fifth=reinterpret_cast<uint64_t *>(entryAddr);
+      fifth[0]=static_cast<uint64_t>(row5);
+      fifth[1]=newSecond;
+      *reinterpret_cast<uint32_t *>(countAddr)=5;
+
+      if(fifth[0]!=static_cast<uint64_t>(row5) ||
+         fifth[1]!=newSecond ||
+         *reinterpret_cast<const uint32_t *>(countAddr)!=5) {
+        *reinterpret_cast<uint32_t *>(countAddr)=4;
+        fifth[0]=g_fifthUiModelEntryOriginal[0];
+        fifth[1]=g_fifthUiModelEntryOriginal[1];
+
+        g_fifthUiModelCountAddr=0;
+        g_fifthUiModelCountOriginal=0;
+        g_fifthUiModelCountApplied=false;
+        g_fifthUiModelEntryAddr=0;
+        g_fifthUiModelEntryOriginal[0]=0;
+        g_fifthUiModelEntryOriginal[1]=0;
+        g_fifthUiModelEntryApplied=false;
+
+        AddLog(u8"[책략5UIMODEL] 합성 fifth entry/count 쓰기 검증 실패. 즉시 원복.");
+        return false;
+      }
+
+      AddLog(u8"[책략5UIMODEL] 합성 fifth entry 적용 성공: entry4={row5=%p, high=%u, index=4} count 4->5",
+             reinterpret_cast<void *>(row5),
+             (unsigned)commonHigh);
+      AddLog(u8"[책략5UIMODEL] 이번 테스트는 기존 4개 entry의 정확한 row/index 패턴이 모두 일치할 때만 적용됩니다.");
       return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {
-      AddLog(u8"[책략5UIMODEL] model count 확장 중 예외. 쓰기 유지하지 않음.");
+      AddLog(u8"[책략5UIMODEL] 합성 fifth entry 적용 중 예외. 테스트 중단.");
       return false;
     }
   }
