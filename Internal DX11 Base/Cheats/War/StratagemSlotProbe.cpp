@@ -5148,6 +5148,7 @@ namespace DX11Base {
     g_fifthUiOnSelectRuntimeLogged = 0;
     g_fifthUiOnSelectAnyHits = 0;
     InterlockedExchange(&g_fifthUiCallbackIndex4Hits, 0);
+    g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
   }
 
   void ResetStratagemFiveBattleRuntime() {
@@ -5201,6 +5202,7 @@ namespace DX11Base {
     g_fifthUiOnSelectRuntimeLogged = 0;
     g_fifthUiOnSelectAnyHits = 0;
     InterlockedExchange(&g_fifthUiCallbackIndex4Hits, 0);
+    g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
 
     AddLog(u8"[책략5수명] 전투 종료 확정: Camp/dialog/model 상태 폐기, live sidecar/ID7 등록은 보존·숨김. ON 요청 유지.");
   }
@@ -5219,90 +5221,33 @@ namespace DX11Base {
   }
 
   void RefreshStratagemFiveBattleRuntime() {
-    if (!g_id5CountRequested && !g_fiveMetadataRequested)
+    if (!g_id5CountRequested.load() ||
+        !g_fiveMetadataRequested.load())
       return;
 
-    static ULONGLONG s_lastAttemptTick = 0;
-    const ULONGLONG now = GetTickCount64();
-    if (now - s_lastAttemptTick < 500)
-      return;
-    s_lastAttemptTick = now;
-
-    bool attackReady = ValidateInfo(g_attackInfo, 0);
-    bool defenseReady = ValidateInfo(g_defenseInfo, 1);
-    if (!attackReady && !defenseReady) {
-      if (TryRecaptureBattleInfoFromDialogSeh()) {
-        attackReady = ValidateInfo(g_attackInfo, 0);
-        defenseReady = ValidateInfo(g_defenseInfo, 1);
-      }
-    }
-
-    if (!attackReady && !defenseReady)
-      return;
-
-    // Resolve canonical row5 first. Count selection now depends on the actual
-    // native model/Camp row mapping, not on the old 1/1/1/1 heuristic.
-    if (g_fiveMetadataRequested &&
-        (!g_fiveMetadataTable || !g_fiveMetadataAddr))
-      SetStratagemFiveMetadataTest(true);
-
-    bool countCurrent = false;
-    if (g_id5CountRequested) {
-      SetStratagemFiveCountTest(true);
-
-      if (g_id5CountApplied &&
-          g_id5CountOwner &&
-          g_id5CountEntryIndex < 5) {
-        const bool ownerCurrent =
-            (g_id5CountOwner == g_attackInfo &&
-             ValidateInfo(g_id5CountOwner, 0)) ||
-            (g_id5CountOwner == g_defenseInfo &&
-             ValidateInfo(g_id5CountOwner, 1));
-        const uintptr_t expected =
-            g_id5CountOwner + 0xF0 + 0x10 +
-            static_cast<uintptr_t>(g_id5CountEntryIndex) * 0x10 +
-            0x0C;
-        countCurrent =
-            ownerCurrent &&
-            g_id5CountAddr == expected &&
-            IsValidPtr(expected, 1);
-      }
-
-      if (!countCurrent)
-        return;
-    }
-
-    bool metadataCurrent = false;
-    if (g_fiveMetadataRequested) {
-      SetStratagemFiveMetadataTest(true);
-
-      metadataCurrent =
-          g_fiveMetadataApplied &&
-          g_fiveRuntimeSlotApplied &&
-          g_fiveRuntimeOwner == g_id5CountOwner &&
-          g_fiveRuntimeSlotAddr &&
-          g_fiveMetadataAddr &&
-          IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
-          *reinterpret_cast<const uintptr_t *>(
-              g_fiveRuntimeSlotAddr) == g_fiveMetadataAddr;
-
-      if (!metadataCurrent)
-        return;
-    }
-
-    if (!metadataCurrent)
-      return;
-
-    // Retry this even after the entry was synthesized. For N==4 the UI ID7
-    // helper/sidecar can become valid slightly later; an already-present ID5
-    // plan republishes the sidecar without rewriting model data.
     const uintptr_t dialog = g_trickUiDialog;
-    if (dialog && IsValidPtr(dialog, 0x40)) {
-      if (TryExtendFifthDialogModelCountSeh(dialog)) {
-        AddLog(u8"[책략5수명] 현재 전투 N+1 ID5 model/UI 상태 확인 완료: N=%u total=%u",
-               (unsigned)g_fifthRuntimeOriginalCount,
-               (unsigned)(g_fifthRuntimeOriginalCount + 1));
-      }
+    if (!dialog || !IsValidPtr(dialog, 0x40))
+      return;
+
+    const FifthRuntimeStage before = g_fifthRuntimeStage.load();
+    const bool ready = AdvanceFifthRuntimeStateSeh(dialog);
+    const FifthRuntimeStage after = g_fifthRuntimeStage.load();
+
+    // Log only transitions; the state machine itself is safe to call from
+    // every battle lifecycle event and does not depend on elapsed time.
+    if (after != before) {
+      AddLog(u8"[책략5STATE] 진행: %u -> %u / dialog=%p",
+             (unsigned)before, (unsigned)after,
+             reinterpret_cast<void *>(dialog));
+    }
+
+    if (ready) {
+      // If N==4 and the sidecar registry became available after model
+      // synthesis, publishing again is idempotent and activates index4.
+      if (g_fifthRuntimeOriginalCount == 4 &&
+          g_trickUiLayout &&
+          ValidateFifthUiRegistrySeh(g_trickUiLayout))
+        TryExtendFifthDialogModelCountSeh(dialog);
     }
   }
 
