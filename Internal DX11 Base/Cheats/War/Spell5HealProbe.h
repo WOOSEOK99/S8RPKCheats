@@ -11,6 +11,11 @@ namespace DX11Base {
   // ID5 TrickData record. A persistent ON request by itself is not "ready".
   bool IsSpell5HealProbeReady();
 
+  // Event-driven fast path used by the battle dialog. metadataTable points to
+  // TrickData object row1 (vptr at +00, payload at +08), so the SpellRecord
+  // payload table is metadataTable+8. This avoids waiting for gameBase.
+  bool SetSpell5HealProbeFromMetadataTable(uintptr_t metadataTable);
+
   // Battle end reset. TrickData itself is game-generation data, so keep the
   // applied record but clear per-battle target/heal diagnostics.
   void ResetSpell5HealProbeBattleRuntime();
