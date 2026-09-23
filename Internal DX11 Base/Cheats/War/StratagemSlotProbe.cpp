@@ -757,13 +757,12 @@ namespace DX11Base {
 
       g_uiLayoutHookAddr = hookAddr;
       g_uiLayoutHookApplied = true;
-      g_trickUiLayout = 0;
-      g_trickUiStartX = 0;
-      g_trickUiY = 0;
-      g_trickUiStep = 0;
-      g_trickUiDialog = 0;
+
+      // PrepareFifthUiBeforeCallbacksSeh may already have captured the live
+      // dialog/layout before this optional probe hook is first installed.
+      // Never erase that generation here; battle/session reset owns clearing.
       g_lastLoggedUiLayout = 0;
-      AddLog(u8"[책략5UICAP] layout 캡처 훅 설치 완료. 책략창을 한 번 여세요.");
+      AddLog(u8"[책략5UICAP] layout 캡처 훅 설치 완료. 기존 live dialog/layout 캡처는 보존.");
       return true;
     }
 
@@ -856,8 +855,10 @@ namespace DX11Base {
 
       g_uiDialogHookAddr = hookAddr;
       g_uiDialogHookApplied = true;
-      g_trickUiDialog = 0;
-      AddLog(u8"[책략5UICAP] dialog 캡처 훅 설치 완료.");
+
+      // Do not clear a dialog already captured by the pre-callback hook.
+      // The capture hook only supplements later Dialog::Open calls.
+      AddLog(u8"[책략5UICAP] dialog 캡처 훅 설치 완료. 기존 live dialog 캡처는 보존.");
       return true;
     }
 
@@ -4477,6 +4478,14 @@ namespace DX11Base {
       AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
     if (!EnsureTrickUiDialogCaptureHook())
       AddLog(u8"[책략5UICAP] dialog 캡처 훅은 설치되지 않았습니다.");
+
+    const uintptr_t liveDialog =
+        static_cast<uintptr_t>(g_trickUiDialog);
+    if (liveDialog && IsValidPtr(liveDialog, 0x40)) {
+      if (TryExtendFifthDialogModelCountSeh(liveDialog)) {
+        AddLog(u8"[책략5수명] 내부등록 직후 현재 dialog에 N+1 model/UI 즉시 적용.");
+      }
+    }
 
     return true;
   }
