@@ -742,6 +742,7 @@ namespace DX11Base {
 
           MenuSections::DrawSocialSection(p1, gameBase, scale);
           MenuSections::DrawWarSection(p1, gameBase, scale);
+          MenuSections::DrawOfficerEditSection(scale);
           MenuSections::DrawOfficerDetailSection(p1, ImGui::GetWindowPos(), ImGui::GetWindowSize(), scale);
 
           ImGui::Unindent(gap); // 들여쓰기 해제
