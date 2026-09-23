@@ -3546,6 +3546,136 @@ namespace DX11Base {
       }
     }
 
+    static bool TryResolveFifthMetadataTableFromOwnerSeh(
+        uintptr_t owner, uintptr_t *outTable = nullptr) {
+      if (!owner)
+        return false;
+
+      __try {
+        const uintptr_t modelBase = owner + 0xF0;
+        uint32_t count = 0;
+        StratagemFiveModel::Entry entries[5] = {};
+        if (!IsValidPtr(modelBase + 0x10, sizeof(entries)) ||
+            !IsValidPtr(modelBase + 0x60, sizeof(count)) ||
+            !SafeCopySeh(modelBase + 0x10, entries, sizeof(entries)) ||
+            !SafeCopySeh(modelBase + 0x60, &count, sizeof(count)) ||
+            count < 1 || count > 5)
+          return false;
+
+        uintptr_t table = 0;
+        for (uint32_t i = 0; i < count && !table; ++i) {
+          const uintptr_t row = entries[i].data;
+          if (!row || !IsValidPtr(row + 0x0C, 1))
+            continue;
+
+          const uint8_t a = *reinterpret_cast<const uint8_t *>(row + 0x08);
+          const uint8_t b = *reinterpret_cast<const uint8_t *>(row + 0x0A);
+          const uint8_t d = *reinterpret_cast<const uint8_t *>(row + 0x0C);
+          if (a != b || a != d || a < 1 || a > 5)
+            continue;
+
+          const uintptr_t candidate =
+              row - static_cast<uintptr_t>(a - 1) * 0x20;
+          if (!IsValidPtr(candidate, 5 * 0x20))
+            continue;
+
+          bool valid = true;
+          for (uint32_t n = 0; n < 5; ++n) {
+            const uintptr_t r = candidate + static_cast<uintptr_t>(n) * 0x20;
+            const uint8_t expected = static_cast<uint8_t>(n + 1);
+            const uint8_t x = *reinterpret_cast<const uint8_t *>(r + 0x08);
+            const uint8_t y = *reinterpret_cast<const uint8_t *>(r + 0x0A);
+            const uint8_t z = *reinterpret_cast<const uint8_t *>(r + 0x0C);
+            if (x != expected || y != expected || z != expected) {
+              valid = false;
+              break;
+            }
+          }
+          if (!valid)
+            continue;
+
+          for (uint32_t n = 0; n < count; ++n) {
+            uint32_t rowId = 0;
+            if (!StratagemFiveModel::RowId(entries[n].data,
+                                             candidate, rowId)) {
+              valid = false;
+              break;
+            }
+          }
+          if (valid)
+            table = candidate;
+        }
+
+        if (!table)
+          return false;
+
+        g_fiveMetadataTable = table;
+        g_fiveMetadataAddr = table + 4 * 0x20;
+        g_fiveMetadataApplied = true;
+        if (outTable)
+          *outTable = table;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    static bool TryApplyFifthCampForOwnerSeh(uintptr_t owner) {
+      if (!owner || !g_fiveMetadataTable || !g_fiveMetadataAddr ||
+          !g_id5CountApplied || g_id5CountOwner != owner)
+        return false;
+
+      if (g_fiveRuntimeSlotApplied &&
+          g_fiveRuntimeOwner == owner &&
+          g_fiveRuntimeSlotAddr &&
+          IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
+          *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
+              g_fiveMetadataAddr)
+        return true;
+
+      StratagemFiveModel::Plan plan{};
+      StratagemFiveModel::Entry entries[5] = {};
+      uintptr_t campRows[5] = {};
+      uintptr_t modelBase = 0;
+      uintptr_t tricksAddr = 0;
+      if (!TryReadFifthPlanForOwnerSeh(owner, &plan, &entries, &campRows,
+                                        &modelBase, &tricksAddr) ||
+          plan.originalCount > 4 || plan.campSlot >= 5)
+        return false;
+
+      const uintptr_t slotAddr =
+          tricksAddr + static_cast<uintptr_t>(plan.campSlot) *
+                           sizeof(uintptr_t);
+      if (!IsValidPtr(slotAddr, sizeof(uintptr_t)))
+        return false;
+
+      const uintptr_t oldValue =
+          *reinterpret_cast<const uintptr_t *>(slotAddr);
+      if (oldValue != 0 && oldValue != g_fiveMetadataAddr)
+        return false;
+
+      if (oldValue != g_fiveMetadataAddr) {
+        DWORD oldProtect = 0;
+        DWORD tmpProtect = 0;
+        if (!VirtualProtect(reinterpret_cast<LPVOID>(slotAddr),
+                            sizeof(uintptr_t), PAGE_READWRITE, &oldProtect))
+          return false;
+        *reinterpret_cast<uintptr_t *>(slotAddr) = g_fiveMetadataAddr;
+        VirtualProtect(reinterpret_cast<LPVOID>(slotAddr),
+                       sizeof(uintptr_t), oldProtect, &tmpProtect);
+        if (*reinterpret_cast<const uintptr_t *>(slotAddr) !=
+            g_fiveMetadataAddr)
+          return false;
+      }
+
+      g_fiveRuntimeSlotAddr = slotAddr;
+      g_fiveRuntimeSlotOriginal = oldValue;
+      g_fiveRuntimeSlotApplied = true;
+      g_fiveRuntimeOwner = owner;
+      g_fifthRuntimeOriginalCount = plan.originalCount;
+      return true;
+    }
+
     static bool TryReadFifthPlanForOwnerSeh(
         uintptr_t owner,
         StratagemFiveModel::Plan *outPlan,
