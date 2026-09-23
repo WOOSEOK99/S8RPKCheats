@@ -2160,10 +2160,17 @@ namespace DX11Base {
         if (ValidateFifthUiRegistrySeh(layout)) {
           g_trickUiDialog = dialog;
           g_trickUiLayout = layout;
-          AddLog(u8"[책략5UICB] callback 직전 sidecar 이미 준비됨: dialog=%p layout=%p button=%p",
+
+          if (g_fiveRuntimeSlotApplied &&
+              g_fiveRuntimeOwner &&
+              g_fiveMetadataAddr)
+            TryExtendFifthDialogModelCountSeh(dialog);
+
+          AddLog(u8"[책략5UICB] callback 직전 기존 ID7 registry 확인: dialog=%p layout=%p sidecar=%p active=%p",
                  reinterpret_cast<void *>(dialog),
                  reinterpret_cast<void *>(layout),
-                 reinterpret_cast<void *>(g_fifthUiSidecarButton));
+                 reinterpret_cast<void *>(g_fifthUiSidecarButton),
+                 reinterpret_cast<void *>(g_fifthUiActiveButton.load()));
           return true;
         }
 
