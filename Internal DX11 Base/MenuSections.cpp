@@ -1587,12 +1587,12 @@ namespace DX11Base {
       ImGui::Spacing();
       ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
       static bool s_spell5HealProbe = false;
-      if (ImGui::Checkbox(u8"5번 책략 광역힐 2차 테스트", &s_spell5HealProbe)) {
+      if (ImGui::Checkbox(u8"5번 책략 데이터 활성화", &s_spell5HealProbe)) {
         if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
           s_spell5HealProbe = !s_spell5HealProbe;
-          AddNotification(u8"5번 책략 광역힐 2차 테스트 적용 실패 - 로그 확인");
+          AddNotification(u8"5번 책략 데이터 활성화 실패 - 로그 확인");
         } else {
-          NotifyFeatureToggle(u8"5번 책략 광역힐 2차 테스트", s_spell5HealProbe);
+          NotifyFeatureToggle(u8"5번 책략 데이터 활성화", s_spell5HealProbe);
         }
       }
       ImGui::TextDisabled(u8"아군 사기+40 / 범위5는 그대로 두고, 실제 영향 대상에게 병력 +2000을 적용합니다.");
@@ -1605,6 +1605,18 @@ namespace DX11Base {
       }
       ImGui::TextDisabled(u8"책략 수량 1/2/1/1로 전투를 시작한 뒤, 1일차 전장 화면에서 다시 누르세요.");
       ImGui::TextDisabled(u8"전투 준비 화면 값은 아직 0일 수 있습니다. 실제 전투 시작 후 ID1~4가 1/2/1/1인지 확인합니다.");
+
+      static bool s_spell5CountTest = false;
+      if (ImGui::Checkbox(u8"5번 책략 횟수 1 테스트", &s_spell5CountTest)) {
+        if (!DX11Base::SetStratagemFiveCountTest(s_spell5CountTest)) {
+          s_spell5CountTest = !s_spell5CountTest;
+          AddNotification(u8"5번 책략 횟수 테스트 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"5번 책략 횟수 1 테스트", s_spell5CountTest);
+        }
+      }
+      ImGui::TextDisabled(u8"ID1~4가 정확히 1/2/1/1인 진영에만 ID5(+14C)=1을 씁니다.");
+      ImGui::TextDisabled(u8"5번 데이터 활성화와 함께 켠 뒤, 전투 책략 UI에 1~5가 동시에 보이는지 확인하세요.");
 
       EndSection(); // 전쟁
     }
