@@ -3955,39 +3955,117 @@ namespace DX11Base {
       *outOwner = 0;
 
       const uintptr_t dialog = g_trickUiDialog;
-      if (!dialog || !IsValidPtr(dialog, 0x40))
-        return false;
-
-      __try {
-        uintptr_t holder = 0;
-        uintptr_t inner = 0;
-        if (!SafeReadPtrSeh(dialog + 0x20, &holder) ||
-            !holder || !IsValidPtr(holder, sizeof(uintptr_t)) ||
-            !SafeReadPtrSeh(holder, &inner) ||
-            !inner)
-          return false;
-
-        // Dialog::Initialize is already about to consume Tricker entries.
-        // Do not wait for the older battle-info side/gauge fields to settle;
-        // validate only the Camp/Tricker structures required by ID5.
-        const uintptr_t modelBase = inner + 0xF0;
-        uint32_t count = 0;
-        uintptr_t campData = 0;
-        if (!IsValidPtr(modelBase + 0x10,
-                        5 * sizeof(StratagemFiveModel::Entry)) ||
-            !IsValidPtr(modelBase + 0x60, sizeof(count)) ||
-            !SafeCopySeh(modelBase + 0x60, &count, sizeof(count)) ||
-            count < 1 || count > 5 ||
-            !SafeReadPtrSeh(inner + 0x10, &campData) ||
-            !campData ||
-            !IsValidPtr(campData + 0x68, 5 * sizeof(uintptr_t)))
-          return false;
-
-        *outOwner = inner;
-        return true;
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
+      if (!dialog || !IsValidPtr(dialog, 0x40)) {
+        AddLog(u8"[책략5STATE] owner fail: reason=dialog-range dialog=%p",
+               reinterpret_cast<void *>(dialog));
         return false;
       }
+
+      uintptr_t holder = 0;
+      uintptr_t inner = 0;
+      uintptr_t campData = 0;
+      uint32_t count = 0;
+      bool holderRead = false;
+      bool holderRange = false;
+      bool innerRead = false;
+      bool entriesRange = false;
+      bool countRange = false;
+      bool countRead = false;
+      bool countValid = false;
+      bool campRead = false;
+      bool campRowsRange = false;
+      const char *reason = "unknown";
+      DWORD exceptionCode = 0;
+      bool success = false;
+
+      __try {
+        holderRead = SafeReadPtrSeh(dialog + 0x20, &holder);
+        if (!holderRead) {
+          reason = "holder-read";
+        } else if (!holder) {
+          reason = "holder-null";
+        } else {
+          holderRange = IsValidPtr(holder, sizeof(uintptr_t));
+          if (!holderRange) {
+            reason = "holder-range";
+          } else {
+            innerRead = SafeReadPtrSeh(holder, &inner);
+            if (!innerRead) {
+              reason = "inner-read";
+            } else if (!inner) {
+              reason = "inner-null";
+            } else {
+              // Dialog::Initialize is already about to consume Tricker entries.
+              // Do not wait for the older battle-info side/gauge fields to settle;
+              // validate only the Camp/Tricker structures required by ID5.
+              const uintptr_t modelBase = inner + 0xF0;
+              entriesRange =
+                  IsValidPtr(modelBase + 0x10,
+                             5 * sizeof(StratagemFiveModel::Entry));
+              countRange = IsValidPtr(modelBase + 0x60, sizeof(count));
+              if (!entriesRange) {
+                reason = "model-entry-range";
+              } else if (!countRange) {
+                reason = "model-count-range";
+              } else {
+                countRead = SafeCopySeh(modelBase + 0x60,
+                                        &count, sizeof(count));
+                if (!countRead) {
+                  reason = "model-count-read";
+                } else {
+                  countValid = count >= 1 && count <= 5;
+                  if (!countValid) {
+                    reason = "model-count-value";
+                  } else {
+                    campRead = SafeReadPtrSeh(inner + 0x10, &campData);
+                    if (!campRead) {
+                      reason = "campdata-read";
+                    } else if (!campData) {
+                      reason = "campdata-null";
+                    } else {
+                      campRowsRange =
+                          IsValidPtr(campData + 0x68,
+                                     5 * sizeof(uintptr_t));
+                      if (!campRowsRange) {
+                        reason = "camp-rows-range";
+                      } else {
+                        *outOwner = inner;
+                        reason = "ok";
+                        success = true;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        exceptionCode = GetExceptionCode();
+        reason = "exception";
+      }
+
+      if (!success) {
+        AddLog(
+            u8"[책략5STATE] owner fail: reason=%s dialog=%p holderRead=%d holder=%p holderRange=%d innerRead=%d inner=%p entriesRange=%d countRange=%d countRead=%d count=%u countValid=%d campRead=%d campData=%p campRowsRange=%d exception=%08X",
+            reason,
+            reinterpret_cast<void *>(dialog),
+            holderRead ? 1 : 0,
+            reinterpret_cast<void *>(holder),
+            holderRange ? 1 : 0,
+            innerRead ? 1 : 0,
+            reinterpret_cast<void *>(inner),
+            entriesRange ? 1 : 0,
+            countRange ? 1 : 0,
+            countRead ? 1 : 0,
+            (unsigned)count,
+            countValid ? 1 : 0,
+            campRead ? 1 : 0,
+            reinterpret_cast<void *>(campData),
+            campRowsRange ? 1 : 0,
+            static_cast<unsigned>(exceptionCode));
+      }
+      return success;
     }
 
     static void DumpSide(const char *name, uintptr_t ptr, uint8_t side) {
