@@ -4,6 +4,7 @@
 #include "../../MemoryUtils.h"
 #include "../../showlog.h"
 #include "StratagemSlotProbe.h"
+#include "StratagemFiveModel.h"
 
 #include <psapi.h>
 #include <atomic>
@@ -27,7 +28,7 @@ namespace DX11Base {
     static volatile uintptr_t g_defenseInfo = 0;
 
     static bool g_id5CountApplied = false;
-    static bool g_id5CountRequested = false;
+    static std::atomic<bool> g_id5CountRequested{false};
     static uintptr_t g_id5CountAddr = 0;
     static uintptr_t g_id5CountOwner = 0;
     static uint8_t g_id5CountOriginal = 0;
@@ -37,7 +38,7 @@ namespace DX11Base {
     static uint8_t g_fiveLoopOriginal = 0;
 
     static bool g_fiveMetadataApplied = false;
-    static bool g_fiveMetadataRequested = false;
+    static std::atomic<bool> g_fiveMetadataRequested{false};
     static uintptr_t g_fiveMetadataAddr = 0;
     static uintptr_t g_fiveMetadataTable = 0;
 
@@ -69,6 +70,17 @@ namespace DX11Base {
     static uintptr_t g_fifthUiMakerAddr = 0;
     static uint8_t g_fifthUiMakerOriginal[0x28] = {};
     static bool g_fifthUiId7Registered = false;
+    static unsigned g_fifthUiRegisteredEpoch = 0;
+    static uintptr_t g_fifthUiOriginalButtons[4]{};
+    // Published separately from the physical button used during callback setup.
+    // x64 caves read these aligned atomic pointer values with ordinary MOVs.
+    static std::atomic<uintptr_t> g_fifthUiActiveLayout{0};
+    static std::atomic<uintptr_t> g_fifthUiActiveButton{0};
+    static std::atomic<unsigned> g_fifthBattleEpoch{1};
+    static std::atomic<unsigned> g_fifthSessionEpoch{1};
+    static void BeginFifthUiNativeInitialize(uintptr_t layout);
+    static bool ValidateFifthUiRegistrySeh(uintptr_t layout);
+    static bool EnsureFifthNativeLifecycleHooks();
 
     // Dialog::Open still skips UI work for loop index >=4 even after ID7 is
     // registered. Keep the fixed m_pButtons[4] array untouched; a narrow hook
@@ -346,6 +358,9 @@ namespace DX11Base {
       trace.count = count;
       SaveTrickUiInitTrace(trace);
       g_lastInitLayoutsOwner.store(owner);
+      // A native initialization call is a new UI generation, even at the same
+      // address. Retire our published references before the maker is rebuilt.
+      BeginFifthUiNativeInitialize(owner);
 
       const auto original =
           reinterpret_cast<InitLayoutsFn>(g_originalInitLayoutsAddr.load());
@@ -914,13 +929,13 @@ namespace DX11Base {
       const int sideLabel=i;
       // index4 is valid only for the exact layout that owns the sidecar.
       e8(0x48); e8(0xB8);                      // mov rax,&layout-global
-      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarLayout));
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiActiveLayout));
       e8(0x48); e8(0x8B); e8(0x00);            // mov rax,[rax]
       e8(0x48); e8(0x39); e8(0xC1);            // cmp rcx,rax
       e8(0x0F); e8(0x85);                      // jne out
       const int jneLayoutOut=i; e32(0);
       e8(0x48); e8(0xB8);                      // mov rax,&button-global
-      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiActiveButton));
       e8(0x48); e8(0x8B); e8(0x00);            // mov rax,[rax]
       e8(0xC3);                                // ret
 
@@ -1129,12 +1144,12 @@ namespace DX11Base {
       // index==4: substitute only when RAX is the exact layout that
       // owns the current sidecar. This blocks stale pointers across save/load.
       emit8(0x48); emit8(0xBE);                         // mov rsi,&layout-global
-      emit64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarLayout));
+      emit64(reinterpret_cast<uintptr_t>(&g_fifthUiActiveLayout));
       emit8(0x48); emit8(0x3B); emit8(0x06);            // cmp rax,[rsi]
       emit8(0x0F); emit8(0x85);                         // jne original-skip
       const int jneLayoutSkipDisp = idx; emit32(0);
       emit8(0x48); emit8(0xBE);                         // mov rsi,&button-global
-      emit64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
+      emit64(reinterpret_cast<uintptr_t>(&g_fifthUiActiveButton));
       emit8(0x48); emit8(0x8B); emit8(0x36);            // mov rsi,[rsi]
       emit8(0x48); emit8(0x85); emit8(0xF6);            // test rsi,rsi
       emit8(0x0F); emit8(0x84);                         // jz original-skip
@@ -1796,14 +1811,6 @@ namespace DX11Base {
       if (!layout || !outStartX || !outY || !outStep)
         return false;
 
-      const int liveStep = static_cast<int>(g_trickUiStep);
-      if (liveStep > 0) {
-        *outStartX = static_cast<int>(g_trickUiStartX);
-        *outY = static_cast<int>(g_trickUiY);
-        *outStep = liveStep;
-        return true;
-      }
-
       __try {
         uintptr_t descBase = 0;
         uint32_t count = 0;
@@ -1841,7 +1848,10 @@ namespace DX11Base {
 
     static void CompactFifthUiButtonsAfterResetSeh(uintptr_t layout) {
       __try {
-        if (!g_fifthUiId7Registered ||
+        if (g_fifthUiActiveLayout.load() != layout ||
+            !g_fifthUiActiveButton.load() ||
+            !ValidateFifthUiRegistrySeh(layout) ||
+            !g_fifthUiId7Registered ||
             !layout || layout != g_fifthUiSidecarLayout ||
             !g_fifthUiSidecarButton ||
             !IsValidPtr(layout,0x2A8) ||
@@ -2017,10 +2027,7 @@ namespace DX11Base {
         if (!layout || !IsValidPtr(layout, 0x2A8))
           return false;
 
-        if (g_fifthUiId7Registered &&
-            g_fifthUiSidecarLayout == layout &&
-            g_fifthUiSidecarButton &&
-            IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
+        if (ValidateFifthUiRegistrySeh(layout))
           return true;
 
         uint32_t count=0;
@@ -2149,10 +2156,7 @@ namespace DX11Base {
             !layout || !IsValidPtr(layout, 0x2A8))
           return false;
 
-        if (g_fifthUiId7Registered &&
-            g_fifthUiSidecarLayout == layout &&
-            g_fifthUiSidecarButton &&
-            IsValidPtr(g_fifthUiSidecarButton, 0x1D8)) {
+        if (ValidateFifthUiRegistrySeh(layout)) {
           g_trickUiDialog = dialog;
           g_trickUiLayout = layout;
           AddLog(u8"[책략5UICB] callback 직전 sidecar 이미 준비됨: dialog=%p layout=%p button=%p",
@@ -2531,7 +2535,7 @@ namespace DX11Base {
         return false;
 
       if (g_fifthUiId7Registered)
-        return true;
+        return ValidateFifthUiRegistrySeh(layout);
 
       volatile int stage = 0;
       __try {
@@ -2662,6 +2666,8 @@ namespace DX11Base {
         }
 
         g_fifthUiId7Registered=true;
+        g_fifthUiRegisteredEpoch=ReadTrickUiInitTrace().hit;
+        std::memcpy(g_fifthUiOriginalButtons,buttons,sizeof(buttons));
 
         // RegisterLayout may apply the descriptor's initial visibility. Reassert
         // visible after registration before the next Dialog::Open test.
@@ -2673,7 +2679,7 @@ namespace DX11Base {
           if (setVisible && IsValidPtr(setVisible, 1)) {
             using SetBoolFn = void(__fastcall *)(uintptr_t, bool);
             reinterpret_cast<SetBoolFn>(setVisible)(
-                g_fifthUiSidecarButton, true);
+                g_fifthUiSidecarButton, false);
           }
         }
 
@@ -2704,7 +2710,7 @@ namespace DX11Base {
       if (g_fifthUiSidecarLayout == layout &&
           g_fifthUiSidecarButton &&
           IsValidPtr(g_fifthUiSidecarButton, 0x1D8)) {
-        SetFifthUiSidecarVisibleSeh(true);
+        SetFifthUiSidecarVisibleSeh(false);
         AddLog(u8"[책략5수명] 재사용 layout=%p: 기존 sidecar=%p 재표시. 새 버튼 생성 안 함.",
                reinterpret_cast<void *>(layout),
                reinterpret_cast<void *>(g_fifthUiSidecarButton));
@@ -2924,7 +2930,7 @@ namespace DX11Base {
           if (setPos && IsValidPtr(setPos, 1))
             reinterpret_cast<SetXYFn>(setPos)(button, x, y);
           if (setVisible && IsValidPtr(setVisible, 1))
-            reinterpret_cast<SetBoolFn>(setVisible)(button, true);
+            reinterpret_cast<SetBoolFn>(setVisible)(button, false);
         }
 
         g_fifthUiSidecarLayout = layout;
