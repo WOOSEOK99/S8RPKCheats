@@ -1510,48 +1510,6 @@ namespace DX11Base {
         bShowTacticsEditWin = !bShowTacticsEditWin;
       }
 
-      if (ImGui::Checkbox(u8"치료", &bSelfHeal)) {
-        DX11Base::SetSelfHeal(bSelfHeal);
-        NotifyFeatureToggle(u8"치료", bSelfHeal);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-
-      if (ImGui::Checkbox(u8"동토", &bDongto)) {
-        DX11Base::SetDongto(bDongto);
-        NotifyFeatureToggle(u8"동토", bDongto);
-        SaveConfig();
-      }
-      ImGui::SameLine();
-
-      if (ImGui::Checkbox(u8"천계", &bCelestial)) {
-        DX11Base::SetCelestialMod(bCelestial);
-        NotifyFeatureToggle(u8"천계", bCelestial);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-
-      if (ImGui::Checkbox(u8"투석", &bCatapult)) {
-        DX11Base::SetCatapultCheat(bCatapult);
-        NotifyFeatureToggle(u8"투석", bCatapult);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"격류/낙석", &bTerrainIgnore)) {
-        DX11Base::SetTerrainIgnore(bTerrainIgnore);
-        NotifyFeatureToggle(u8"격류/낙석", bTerrainIgnore);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"방어 건물 강화", &bDefBuilding)) {
-        DX11Base::SetDefBuildingBoost(bDefBuilding);
-        NotifyFeatureToggle(u8"방어 건물 강화", bDefBuilding);
-        SaveConfig();
-      }
-
       ImGui::Spacing();
       ImGui::Separator();
       ImGui::Spacing();
@@ -1582,10 +1540,6 @@ namespace DX11Base {
         }
       }
 
-      ImGui::TextDisabled(u8"전투 중 해당 진영의 책략 게이지 처리 시 최대치(10000)로 한 번 채웁니다.");
-
-      ImGui::Spacing();
-      ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
       static bool s_stratagemFiveEnabled = true;
       if (ImGui::Checkbox(u8"5번 책략 활성화", &s_stratagemFiveEnabled)) {
         const bool enable = s_stratagemFiveEnabled;
@@ -1605,8 +1559,6 @@ namespace DX11Base {
         s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
         ImGui::OpenPopup(u8"5번 책략 설정###Stratagem5SettingsPopup");
       }
-
-      ImGui::TextDisabled(u8"기본값: 아군 / 사기 +40 / 효과2 없음 / 범위 5 / 추가 병력회복 +2000 / 사용횟수 1회");
 
       ImGui::SetNextWindowSize(ImVec2(590.0f * scale, 570.0f * scale),
                                ImGuiCond_Appearing);
@@ -1786,8 +1738,6 @@ namespace DX11Base {
 
         ImGui::EndPopup();
       }
-
-      ImGui::TextDisabled(u8"데이터/횟수/내부등록은 한 기능으로 묶여 단계 순서대로 자동 처리됩니다.");
 
       EndSection(); // 전쟁
     }
@@ -1977,6 +1927,21 @@ namespace DX11Base {
       }
 
       EndSection(); // 시나리오
+
+      BeginSection();
+      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 설정 ]");
+
+      ImGui::SetNextItemWidth(150.0f * scale);
+      if (ImGui::SliderFloat(u8"알림 속도", &DX11Base::g_notificationSpeed, 20.0f, 500.0f, "%.0f px/s")) {
+        SaveConfig();
+      }
+
+      ImGui::SameLine(0, 20.0f * scale);
+      if (ImGui::Button(u8"알림 비우기", ImVec2(100.0f * scale, 0))) {
+        g_notifications.clear();
+        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
+      }
+      EndSection(); // 알림
     }
 
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
@@ -2084,20 +2049,6 @@ namespace DX11Base {
       }
       EndSection(); // 위젯
 
-      BeginSection();
-      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 설정 ]");
-
-      ImGui::SetNextItemWidth(150.0f * scale);
-      if (ImGui::SliderFloat(u8"알림 속도", &DX11Base::g_notificationSpeed, 20.0f, 500.0f, "%.0f px/s")) {
-        SaveConfig();
-      }
-
-      ImGui::SameLine(0, 20.0f * scale);
-      if (ImGui::Button(u8"알림 비우기", ImVec2(100.0f * scale, 0))) {
-        g_notifications.clear();
-        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
-      }
-      EndSection(); // 알림
     }
   } // namespace MenuSections
 } // namespace DX11Base
