@@ -4,7 +4,7 @@
 > 새 채팅/세션에서는 EXE/PDB 재업로드를 요청하기 전에 반드시 이 문서와
 > `Internal DX11 Base/Cheats/War/StratagemSlotProbe.cpp`,
 > `Internal DX11 Base/Cheats/War/Spell5HealProbe.cpp`를 먼저 확인한다.
-> 최신 실게임 결과와 초기 실패 진단은 **29절**, 조기 설치 설계는 **28절**을 확인한다.
+> 최신 원인 확정과 입력 tag/등록 type 분리는 **30절**, 조기 설치 설계는 **28절**을 확인한다.
 >
 > 바이너리를 다시 요청하는 경우는 **게임 빌드가 바뀌었거나**, 이 문서/코드에
 > 아직 추출되지 않은 새 PDB 심볼이 반드시 필요한 경우로 제한한다.
@@ -1284,6 +1284,9 @@ ID7용 helper 하나만 생성한다.
 
 ## 27. 2026-09-23 type20 exact handler 확정 후 설계 전환: 최초 InitLayouts에서 ID7 helper 생성
 
+> 정정(30절): switch[20]의 주소는 그대로 유효하지만, 실제 네 버튼의 최초 입력 tag는
+> 20이 아니라 0이었다. 아래의 "버튼 입력도 type20" 전제는 최신 실측으로 폐기한다.
+
 runtime jump table 직접 확인:
 
 ```text
@@ -1587,4 +1590,110 @@ type 검사 실패라면 저장된 값과 원본 소비 코드를 대조한 뒤 
 입력 복사 전에 거부됐다면 `초기 입력` 줄이 없는 것이 정상이다.
 로컬 smoke test는 기존 7개에 **초기 로그 OFF 후 원인/입력 사본 재출력**과
 **이전 호출이 최신 스냅샷을 덮어쓰지 않음**을 추가하여 9개가 통과했다.
+이 PC의 MSBuild `Release|x64` / `hid` 빌드·링크도 종료 코드 0을 확인했다.
+
+---
+
+## 30. 2026-09-23 실패 원인 확정: 초기 입력 tag=0과 등록 인자 type=20의 혼동
+
+### 1. 현재 실패 원인
+
+`de38bcb` 사용자 파일 로그에서 확정:
+
+```text
+15:13:20 브리지 설치 완료: callRVA=1DAFE95
+15:14:03 브리지 진입: maker=0000014CC15A9390 owner=0000014CC15A9250 count=7
+15:14:03 초기 7칸 descriptor type 검증 실패: 0/0/0/0
+15:14:16 reason=descriptor-types owner+140일치=1
+15:14:30 Layout=0000014CC15A9250 controlCount(+150)=7
+```
+
+설치 시점과 해당 CALL 경로는 이번 실행에서 확인됐다.
+이번 실패는 **초기 입력 첫 dword에 등록 인자 20을 요구한 잘못된 가드** 때문이다.
+가드가 원본 count=7로 통과시켰으므로 helper7 생성과 ID7 등록 단계에는 도달하지 않았다.
+
+입력에서 관찰된 7행의 첫 5 dword(십진수):
+
+| 행/입력 offset | +00 tag | +04 | +08 | +0C | +10 |
+|---|---:|---:|---:|---:|---:|
+| 0 / +000 | 12 | 260 | 314 | 1400 | 420 |
+| 1 / +060 | 13 | 260 | 75 | 1400 | 659 |
+| 2 / +0C0 | 0 | 406 | 364 | 268 | 148 |
+| 3 / +120 | 0 | 686 | 364 | 268 | 148 |
+| 4 / +180 | 0 | 966 | 364 | 268 | 148 |
+| 5 / +1E0 | 0 | 1246 | 364 | 268 | 148 |
+| 6 / +240 | 0 | 480 | 536 | 960 | 152 |
+
+행2~5의 +04/+08은 ResetBtnPos의 기존 네 버튼 좌표와 정확히 맞는다.
+이 실측은 해당 입력의 0x60 간격과 네 버튼 행 대응을 뒷받침한다.
+`RegisterLayout`의 원본 호출 인자 `R9D=0x14`는 별도 확인된 값이며 그대로 유지한다.
+또 입력 행0의 첫값은 12인데 초기화/등록이 끝난 maker 저장소 첫값은 20이었다.
+따라서 **서로 다른 단계의 첫값/호출 인자를 같은 의미로 취급하지 않는다.**
+switch[20] handler 주소를 다시 추측하거나, 입력 tag를 강제로 20으로 고치지 않는다.
+
+### 2. 가장 안전한 해결 방향
+
+기존 최초 InitLayouts 경로에서 실제 입력 행5 전체 0x60 bytes를 새 행7로 그대로 복사한다.
+입력 가드는 단순히 20→0만 바꾸지 않고 위 7개 행의 첫 5 dword를 모두 검증한다.
++0x14 이후에는 이번 로그에도 달라지는 값이 있으므로 의미를 추측하거나 초기화하지 않는다.
+
+원본 InitLayouts가 count=8로 한 번 반환한 직후, 원본 버튼들이 helper를 소비하기 전에
+ID2/3/4/5/7 helper를 읽어 다음을 확인한다.
+
+- count=8, maker owner 일치, descriptor/helper 저장소 범위 유효.
+- ID7 helper가 유효하고 원본 네 helper와 별개 객체이며 vtable이 모두 같음.
+- 생성 직후 행5와 행7의 첫 5 dword가 같음.
+
+통과한 maker/owner/저장소/helper7/vtable/행7 사본을 저장한다.
+실제 sidecar 생성 전과 등록 직전에 이 값들이 현재 객체와 여전히 같은지 다시 확인한다.
+등록할 때는 descriptor의 첫값을 인자로 사용하지 않고 원본 그대로
+`RegisterLayout(maker,7,sidecar,20,1)`을 호출한다.
+
+### 3. 수정 함수/파일
+
+- `StratagemSlotProbe.cpp::TrickUiInitLayoutsBridge`: 실측 입력 가드와 최초 helper 클래스 비교.
+- `TrickUiInitTrace` / `LogTrickUiBridgeStatus`: helper 5개의 vtable 및 등록 전 첫값을 보관/출력.
+- `ValidatePreparedFifthUiHelper`: 준비 당시와 현재의 owner/helper/descriptor 동일성 검사.
+- `UpdateStratagemFiveUiRuntimeProbe`: 위 검사를 sidecar 생성 전에도 적용.
+- `ExpandMakerAndRegisterFifthSidecarSeh`: 등록 전 첫값==20 검사를 위 동일성 검사로 대체.
+  등록 인자는 고정 20/1로 유지하고, ID7 점유 시 중단하며, 성공 판정 때 helper7 소모도 확인.
+- `STRATAGEM5_RE_NOTES.md`: 이번 근거와 이전 type20 입력 전제 정정.
+
+### 4. 위험 요소
+
+이번 입력 가드는 확인된 좌표/레이아웃에 한정된다. 다른 입력 형식이면 원본 7칸으로 통과한다.
+helper vtable 일치는 클래스 비교 근거이며 전체 ABI/소유권/렌더 경로까지 입증하지는 않는다.
+검증 실패 후 maker를 되감거나 재초기화하지 않는다. 확장 호출 예외는 이전처럼 전파한다.
+등록 성공 뒤 실제 다섯 번째 표시와 기존 네 버튼 보존은 여전히 실게임 확인 대상이다.
+프로세스 재시작/수명 제한과 callback/Open/GetTrickButton 미연결 상태는 유지된다.
+
+### 5. 기존 실패 접근과의 차이
+
+준비가 끝난 maker를 다시 초기화하거나 기존 ID0~6을 재등록하지 않는다.
+실제 원본 입력을 그대로 복제하고 게임이 최초 한 번 생성한 helper의 일치 여부를 검증한다.
+null helper, 다른 owner/클래스, 초기화 이후 바뀐 descriptor로는 등록하지 않는다.
+
+### 다음 실게임 테스트
+
+1. 게임을 완전히 종료하고 이번 `hid.dll`로 교체한다. 파일 로그 ON 상태로 재실행한다.
+2. 전투 진입 후 기존대로 데이터 → 횟수 1 → 내부등록 순서로 켜고 책략창을 연다.
+3. 아래 성공 로그와 실제 다섯 번째 버튼 표시/기존 네 버튼 유지 여부를 확인한다.
+   다섯 번째 선택/사용은 아직 연결 전이므로 클릭하지 않는다.
+
+```text
+[책략5UIHELPER] 초기 입력 형식 검증 성공: 버튼 tag=0, 등록 type=20. ID5 입력을 ID7로 그대로 복제.
+[책략5UIHELPER] 초기 InitLayouts 7->8 완료: ... count=8 helper7=...
+[책략5UIHELPER] ID7 helper 클래스 검증 성공: 기존 ID2~5와 vtbl 일치.
+[책략5UITEST] 원본이 만든 helper7로 ID7 등록 시작: ... descriptorTag=... registerType=20
+[책략5UITEST] ID7 정식 등록 성공. helper7 소모 및 5버튼 압축 배치 완료.
+```
+
+`descriptorTag`의 생성 후 값은 관찰값으로 출력하며 0/20을 임의로 강제하지 않는다.
+실패 시 `[책략5UIHELPER]`, `[책략5UIINIT]`, `[책략5UITEST]`, live Layout/count 로그를 보낸다.
+`descriptor-input-shape`면 실패 행/입력값, `helper-class-mismatch`면 5개 vtable과 등록 전
+첫값, 등록 실패면 stage/lookup/id/state/helper7이 다음 판단 근거다.
+
+로컬에서는 실측 prefix를 넣은 smoke test 13개가 통과했다. 원본/입력 보존, 잘못된 tag/좌표
+거부, helper 클래스 불일치·소모·교체·descriptor 변조 시 등록 차단 등을 확인했다.
+게임 원본 InitLayouts/등록/화면 표시를 대체 함수 검사로 검증했다고 해석하지 않는다.
 이 PC의 MSBuild `Release|x64` / `hid` 빌드·링크도 종료 코드 0을 확인했다.

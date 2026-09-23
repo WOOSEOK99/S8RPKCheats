@@ -69,7 +69,8 @@ namespace DX11Base {
 
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
-    // constructs the one-shot type20 helper for UI ID7.
+    // constructs a matching one-shot helper for UI ID7. The input tag and the
+    // later RegisterLayout type are separate values (see RE notes section 30).
     static uintptr_t g_trickInitLayoutsCallAddr = 0;
     static uintptr_t g_trickInitLayoutsCaveAddr = 0;
     static uint8_t g_trickInitLayoutsOriginalCall[5] = {};
@@ -90,11 +91,14 @@ namespace DX11Base {
       uintptr_t maker, descriptors, owner;
       int count;
       bool inputCopied;
-      uint32_t inputHead[7][8]; // first 0x20 bytes at each assumed 0x60 stride
+      uint32_t inputHead[7][8]; // first 0x20 bytes at each observed 0x60 stride
       bool resultReturned;
       bool resultRead;
       uint32_t resultCount;
-      uintptr_t resultOwner, resultTable, helper7;
+      uintptr_t resultOwner, resultTable, resultDescriptors, helper7;
+      uintptr_t helperVtables[5]; // IDs 2,3,4,5,7, before original registration
+      uint32_t resultHead[5][5];
+      bool helperClassMatched;
       DWORD exceptionCode;
     };
     static SRWLOCK g_trickUiInitTraceLock = SRWLOCK_INIT;
@@ -220,7 +224,7 @@ namespace DX11Base {
       if (trace.inputCopied) {
         for (unsigned row = 0; row < 7; ++row) {
           const uint32_t *v = trace.inputHead[row];
-          AddLog(u8"[책략5UIINIT] 초기 입력 +%03X (가정 stride=60, 앞20): %08X %08X %08X %08X %08X %08X %08X %08X",
+          AddLog(u8"[책략5UIINIT] 초기 입력 +%03X (stride=60, 앞20): %08X %08X %08X %08X %08X %08X %08X %08X",
                  row * 0x60, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
         }
       }
@@ -228,6 +232,15 @@ namespace DX11Base {
         AddLog(u8"[책략5UIINIT] 초기 확장 반환: readOk=%d count=%u owner=%p table=%p helper7=%p",
                trace.resultRead ? 1 : 0, trace.resultCount, reinterpret_cast<void *>(trace.resultOwner),
                reinterpret_cast<void *>(trace.resultTable), reinterpret_cast<void *>(trace.helper7));
+      if (trace.resultReturned) {
+        AddLog(u8"[책략5UIINIT] 초기 helper vtbl(ID2/3/4/5/7)=%p,%p,%p,%p,%p match=%d",
+               reinterpret_cast<void *>(trace.helperVtables[0]), reinterpret_cast<void *>(trace.helperVtables[1]),
+               reinterpret_cast<void *>(trace.helperVtables[2]), reinterpret_cast<void *>(trace.helperVtables[3]),
+               reinterpret_cast<void *>(trace.helperVtables[4]), trace.helperClassMatched ? 1 : 0);
+        AddLog(u8"[책략5UIINIT] 등록 전 descriptor 첫값(ID2/3/4/5/7)=%u,%u,%u,%u,%u / 등록 인자 type=20",
+               trace.resultHead[0][0], trace.resultHead[1][0], trace.resultHead[2][0],
+               trace.resultHead[3][0], trace.resultHead[4][0]);
+      }
       if (trace.exceptionCode)
         AddLog(u8"[책략5UIINIT] 초기 확장 예외: code=%08X", static_cast<unsigned>(trace.exceptionCode));
     }
@@ -302,28 +315,32 @@ namespace DX11Base {
       for (unsigned row = 0; row < 7; ++row)
         std::memcpy(trace.inputHead[row], expanded + row * 0x60, sizeof(trace.inputHead[row]));
 
-      // The existing stratagem buttons are UI IDs 2..5 and all use type 0x14.
-      // Clone ID5's descriptor into the new ID7 slot. Position is adjusted
-      // later on the actual controls after registration.
-      int32_t type2=0, type3=0, type4=0, type5=0;
-      std::memcpy(&type2, expanded + 2 * 0x60, 4);
-      std::memcpy(&type3, expanded + 3 * 0x60, 4);
-      std::memcpy(&type4, expanded + 4 * 0x60, 4);
-      std::memcpy(&type5, expanded + 5 * 0x60, 4);
-
-      if (type2 != 0x14 || type3 != 0x14 ||
-          type4 != 0x14 || type5 != 0x14) {
-        trace.reason = "descriptor-types";
-        SaveTrickUiInitTrace(trace);
-        AddLog(u8"[책략5UIHELPER] 초기 7칸 descriptor type 검증 실패: %d/%d/%d/%d",
-               type2, type3, type4, type5);
-        original(maker, descriptors, count, owner);
-        return;
+      // Exact input prefixes captured on 2026-09-23. The first dword for the
+      // buttons is ZERO, not the later RegisterLayout argument 0x14. Validate
+      // all seven tag/rectangle prefixes; bytes after +0x14 include unknowns
+      // and are copied unchanged, not treated as stable padding or IDs.
+      static const uint32_t expectedInput[7][5] = {
+          {12, 260, 314, 1400, 420}, {13, 260, 75, 1400, 659},
+          {0, 406, 364, 268, 148}, {0, 686, 364, 268, 148},
+          {0, 966, 364, 268, 148}, {0, 1246, 364, 268, 148},
+          {0, 480, 536, 960, 152}
+      };
+      for (unsigned row = 0; row < 7; ++row) {
+        if (std::memcmp(trace.inputHead[row], expectedInput[row], sizeof(expectedInput[row])) != 0) {
+          trace.reason = "descriptor-input-shape";
+          SaveTrickUiInitTrace(trace);
+          AddLog(u8"[책략5UIHELPER] 초기 입력 형식 불일치: row=%u tag=%u rect=%u/%u/%u/%u. 원본 7칸 통과.",
+                 row, trace.inputHead[row][0], trace.inputHead[row][1], trace.inputHead[row][2],
+                 trace.inputHead[row][3], trace.inputHead[row][4]);
+          original(maker, descriptors, count, owner);
+          return;
+        }
       }
 
       std::memcpy(expanded + 7 * 0x60,
                   expanded + 5 * 0x60,
                   0x60);
+      AddLog(u8"[책략5UIHELPER] 초기 입력 형식 검증 성공: 버튼 tag=0, 등록 type=20. ID5 입력을 ID7로 그대로 복제.");
 
       trace.reason = "calling-expanded";
       SaveTrickUiInitTrace(trace);
@@ -340,18 +357,47 @@ namespace DX11Base {
       trace.resultRead = SafeCopySeh(maker + 0x10, &newCount, sizeof(newCount));
       trace.resultRead = SafeReadPtrSeh(maker + 0x08, &pointerTable) && trace.resultRead;
       trace.resultRead = SafeReadPtrSeh(maker + 0x18, &trace.resultOwner) && trace.resultRead;
-      if (pointerTable && IsValidPtr(pointerTable, 8 * sizeof(uintptr_t)))
+      trace.resultRead = SafeReadPtrSeh(maker + 0x00, &trace.resultDescriptors) && trace.resultRead;
+      if (newCount == 8 && pointerTable && IsValidPtr(pointerTable, 8 * sizeof(uintptr_t)))
         SafeReadPtrSeh(pointerTable + 7 * sizeof(uintptr_t), &helper7);
 
       trace.resultCount = newCount;
       trace.resultTable = pointerTable;
       trace.helper7 = helper7;
 
-      if (newCount != 8 || !helper7 || !IsValidPtr(helper7, sizeof(uintptr_t))) {
+      if (!trace.resultRead || trace.resultOwner != owner || newCount != 8 ||
+          !helper7 || !IsValidPtr(helper7, sizeof(uintptr_t)) ||
+          !IsValidPtr(trace.resultDescriptors, 8 * 0x60)) {
         trace.reason = "expanded-result";
         SaveTrickUiInitTrace(trace);
         AddLog(u8"[책략5UIHELPER] 확장 결과 검증 실패: count=%u helper7=%p. 재초기화하지 않습니다.",
                static_cast<unsigned>(newCount), reinterpret_cast<void *>(helper7));
+        return;
+      }
+
+      // Observe the helpers while the original IDs 2..5 are still unconsumed.
+      // Prove the clone created the same helper class before allowing ID7 use.
+      const unsigned ids[5] = {2, 3, 4, 5, 7};
+      uintptr_t helpers[5] = {};
+      bool helpersMatch = true;
+      for (unsigned i = 0; i < 5; ++i) {
+        if (!SafeReadPtrSeh(pointerTable + ids[i] * sizeof(uintptr_t), &helpers[i]) ||
+            !helpers[i] || !SafeReadPtrSeh(helpers[i], &trace.helperVtables[i]) ||
+            !trace.helperVtables[i] || !IsValidPtr(trace.helperVtables[i], sizeof(uintptr_t)) ||
+            !SafeCopySeh(trace.resultDescriptors + ids[i] * 0x60, trace.resultHead[i], sizeof(trace.resultHead[i])))
+          helpersMatch = false;
+      }
+      for (unsigned i = 0; i < 4; ++i) {
+        if (helpers[i] == helper7 || trace.helperVtables[i] != trace.helperVtables[4])
+          helpersMatch = false;
+      }
+      if (std::memcmp(trace.resultHead[3], trace.resultHead[4], sizeof(trace.resultHead[4])) != 0)
+        helpersMatch = false;
+      trace.helperClassMatched = helpersMatch;
+      if (!helpersMatch) {
+        trace.reason = "helper-class-mismatch";
+        SaveTrickUiInitTrace(trace);
+        LogTrickUiBridgeStatus("helper-check");
         return;
       }
       ++g_trickInitLayoutsExpanded;
@@ -363,6 +409,7 @@ namespace DX11Base {
              reinterpret_cast<void *>(owner),
              (unsigned)newCount,
              reinterpret_cast<void *>(helper7));
+      AddLog(u8"[책략5UIHELPER] ID7 helper 클래스 검증 성공: 기존 ID2~5와 vtbl 일치.");
     }
 
     static bool EnsureTrickUiInitLayoutsBridgeHook(bool reportFailure = true) {
@@ -759,6 +806,31 @@ namespace DX11Base {
                   sizeof(g_fifthUiMakerOriginal));
     }
 
+    static bool ValidatePreparedFifthUiHelper(uintptr_t layout, uint32_t *descriptorTag = nullptr) {
+      const TrickUiInitTrace trace = ReadTrickUiInitTrace();
+      if (!layout || !IsValidPtr(layout, 0x2A8) || !trace.helperClassMatched ||
+          trace.owner != layout || trace.maker != layout + 0x140)
+        return false;
+
+      uintptr_t descBase = 0, pointerBase = 0, owner = 0, helper7 = 0, vtable = 0;
+      uint32_t count = 0, head[5] = {};
+      if (!SafeReadPtrSeh(layout + 0x140, &descBase) || descBase != trace.resultDescriptors ||
+          !SafeReadPtrSeh(layout + 0x148, &pointerBase) || pointerBase != trace.resultTable ||
+          !SafeCopySeh(layout + 0x150, &count, sizeof(count)) || count != 8 ||
+          !SafeReadPtrSeh(layout + 0x158, &owner) || owner != layout ||
+          !IsValidPtr(pointerBase, 8 * sizeof(uintptr_t)) ||
+          !SafeReadPtrSeh(pointerBase + 7 * sizeof(uintptr_t), &helper7) ||
+          !helper7 || helper7 != trace.helper7 || !IsValidPtr(helper7, sizeof(uintptr_t)) ||
+          !SafeReadPtrSeh(helper7, &vtable) || vtable != trace.helperVtables[4] ||
+          !IsValidPtr(descBase, 8 * 0x60) ||
+          !SafeCopySeh(descBase + 7 * 0x60, head, sizeof(head)) ||
+          std::memcmp(head, trace.resultHead[4], sizeof(head)) != 0)
+        return false;
+      if (descriptorTag)
+        *descriptorTag = head[0];
+      return true;
+    }
+
     static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout) {
       if (!layout ||
           !g_fifthUiSidecarButton ||
@@ -812,14 +884,13 @@ namespace DX11Base {
         uintptr_t helper7=0;
         SafeReadPtrSeh(pointerBase + 7*sizeof(uintptr_t), &helper7);
         if (!helper7 || !IsValidPtr(helper7, sizeof(uintptr_t))) {
-          AddLog(u8"[책략5UITEST] ID7 type20 helper가 없음. 초기 InitLayouts 브리지가 적용되지 않았습니다.");
+          AddLog(u8"[책략5UITEST] ID7 helper가 없음. 초기 InitLayouts 결과를 확인하세요.");
           return false;
         }
 
-        int32_t type7=0;
-        SafeCopySeh(descBase + 7*0x60, &type7, sizeof(type7));
-        if (type7 != 0x14) {
-          AddLog(u8"[책략5UITEST] ID7 descriptor type 불일치: %d", type7);
+        uint32_t descriptorTag = 0;
+        if (!ValidatePreparedFifthUiHelper(layout, &descriptorTag)) {
+          AddLog(u8"[책략5UITEST] ID7 초기 helper/클래스/descriptor 사본 일치 검증 실패. 등록 중단.");
           return false;
         }
 
@@ -834,28 +905,33 @@ namespace DX11Base {
         }
 
         if (lookup(maker,7)) {
-          AddLog(u8"[책략5UITEST] ID7은 이미 등록되어 있습니다.");
-          g_fifthUiId7Registered=true;
-          return true;
+          AddLog(u8"[책략5UITEST] ID7이 이미 점유되어 있어 추가 등록을 중단합니다.");
+          return false;
         }
 
         stage=2;
-        AddLog(u8"[책략5UITEST] 원본이 만든 helper7로 ID7 등록 시작: helper=%p button=%p type=%d",
+        // This is the independently confirmed R9D value at the original
+        // RegisterLayout call, NOT the pre-registration descriptor's first word.
+        constexpr int kTrickButtonRegistrationType = 0x14;
+        AddLog(u8"[책략5UITEST] 원본이 만든 helper7로 ID7 등록 시작: helper=%p button=%p descriptorTag=%u registerType=%d",
                reinterpret_cast<void *>(helper7),
                reinterpret_cast<void *>(g_fifthUiSidecarButton),
-               type7);
-        registerLayout(maker,7,g_fifthUiSidecarButton,type7,1);
+               descriptorTag, kTrickButtonRegistrationType);
+        registerLayout(maker,7,g_fifthUiSidecarButton,kTrickButtonRegistrationType,1);
 
         stage=3;
         const uintptr_t check7=lookup(maker,7);
+        uintptr_t remainingHelper7 = 0;
+        const bool helperConsumed = SafeReadPtrSeh(pointerBase + 7 * sizeof(uintptr_t), &remainingHelper7) &&
+                                    remainingHelper7 == 0;
         uint32_t sidecarId=0,sidecarState=0;
         SafeCopySeh(g_fifthUiSidecarButton+0x88,&sidecarId,sizeof(sidecarId));
         SafeCopySeh(g_fifthUiSidecarButton+0x8C,&sidecarState,sizeof(sidecarState));
-        if(check7 != g_fifthUiSidecarButton ||
+        if(!helperConsumed || check7 != g_fifthUiSidecarButton ||
            sidecarId != 7 || sidecarState != 1) {
-          AddLog(u8"[책략5UITEST] ID7 등록 검증 실패: lookup=%p id=%u state=%u",
+          AddLog(u8"[책략5UITEST] ID7 등록 검증 실패: lookup=%p id=%u state=%u helper7=%p",
                  reinterpret_cast<void *>(check7),
-                 (unsigned)sidecarId,(unsigned)sidecarState);
+                 (unsigned)sidecarId,(unsigned)sidecarState, reinterpret_cast<void *>(remainingHelper7));
           return false;
         }
 
@@ -2453,7 +2529,8 @@ namespace DX11Base {
         SafeReadPtrSeh(layout + 0x148, &helperTable) &&
         IsValidPtr(helperTable, 8 * sizeof(uintptr_t)) &&
         SafeReadPtrSeh(helperTable + 7 * sizeof(uintptr_t), &helper7) &&
-        helper7 && IsValidPtr(helper7, sizeof(uintptr_t));
+        helper7 && IsValidPtr(helper7, sizeof(uintptr_t)) &&
+        ValidatePreparedFifthUiHelper(layout);
     if (!helperReady) {
       AddLog(u8"[책략5UIHELPER] 표시 실험 중단: layout=%p count=%u helper7=%p hits=%u expanded=%u. 생성/등록/재초기화 없음.",
              reinterpret_cast<void *>(layout), static_cast<unsigned>(controlCount),
