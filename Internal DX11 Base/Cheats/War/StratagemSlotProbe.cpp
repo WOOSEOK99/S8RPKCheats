@@ -154,9 +154,14 @@ namespace DX11Base {
     static uint64_t g_fifthUiModelEntryOriginal[2] = {};
     static bool g_fifthUiModelEntryApplied = false;
     static uint32_t g_fifthRuntimeOriginalCount = 0;
-    static uintptr_t g_fifthAlreadyPresentLoggedOwner = 0;
-    static uintptr_t g_fifthAlreadyPresentLoggedModel = 0;
-    static uint32_t g_fifthAlreadyPresentLoggedCount = UINT32_MAX;
+    static bool g_fifthAlreadyPresentLoggedThisBattle = false;
+
+    static uintptr_t g_fifthVisibleTextProbeHookAddr = 0;
+    static uintptr_t g_fifthVisibleTextProbeCaveAddr = 0;
+    static uint8_t g_fifthVisibleTextProbeOriginal[10] = {};
+    static bool g_fifthVisibleTextProbeApplied = false;
+    static std::atomic<bool> g_fifthVisibleTitleSeen{false};
+    static std::atomic<bool> g_fifthVisibleDescSeen{false};
 
     // Must be defined before the pre-callback hook helpers below reference it.
     enum class FifthRuntimeStage : uint8_t {
@@ -1660,6 +1665,193 @@ namespace DX11Base {
 
       AddLog(u8"[책략5UICBCODE] unique executable targets=%u",seenCount);
     }
+
+    static bool WideStartsWithSeh(const wchar_t *text,
+                                      const wchar_t *prefix) {
+      if (!text || !prefix)
+        return false;
+      __try {
+        for (size_t i = 0;; ++i) {
+          const wchar_t p = prefix[i];
+          if (p == L'\0')
+            return true;
+          if (text[i] != p)
+            return false;
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    static void __fastcall ProbeFifthVisibleTextSeh(const wchar_t *text) {
+      if (!text || (!g_trickUiLayout && !g_fifthUiActiveLayout.load()))
+        return;
+
+      const bool title =
+          !g_fifthVisibleTitleSeen.load() &&
+          WideStartsWithSeh(text, L"제5책 이일대로");
+      const bool desc =
+          !g_fifthVisibleDescSeen.load() &&
+          WideStartsWithSeh(text, L"적부대를 방심");
+      if (!title && !desc)
+        return;
+
+      wchar_t sample[96] = {};
+      __try {
+        size_t i = 0;
+        for (; i + 1 < _countof(sample); ++i) {
+          sample[i] = text[i];
+          if (text[i] == L'\0')
+            break;
+        }
+        sample[_countof(sample) - 1] = L'\0';
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return;
+      }
+
+      char utf8[512] = {};
+      const int n = WideCharToMultiByte(
+          CP_UTF8, 0, sample, -1, utf8,
+          static_cast<int>(sizeof(utf8)), nullptr, nullptr);
+      if (n <= 0)
+        return;
+
+      if (title && !g_fifthVisibleTitleSeen.exchange(true)) {
+        AddLog(u8"[책략5VISIBLETEXT] 제목 문자열 경로 포착: ptr=%p text=\"%s\"",
+               reinterpret_cast<const void *>(text), utf8);
+      }
+      if (desc && !g_fifthVisibleDescSeen.exchange(true)) {
+        AddLog(u8"[책략5VISIBLETEXT] 설명 문자열 경로 포착: ptr=%p text=\"%s\"",
+               reinterpret_cast<const void *>(text), utf8);
+      }
+    }
+
+    static bool EnsureFifthVisibleTextProbe() {
+      if (g_fifthVisibleTextProbeApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kHookRva = 0x0170ACE0;
+      constexpr uintptr_t kContinueRva = 0x0170ACEA;
+      constexpr uintptr_t kEmptyRva = 0x0170AD98;
+      static const uint8_t expected[10] = {
+          0x66,0x83,0x3F,0x00,
+          0x0F,0x84,0xAE,0x00,0x00,0x00
+      };
+
+      const uintptr_t hookAddr = exeBase + kHookRva;
+      if (!IsValidPtr(hookAddr, sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(hookAddr),
+                      expected, sizeof(expected)) != 0) {
+        AddLog(u8"[책략5VISIBLETEXT] +170ACE0 원본 바이트 불일치. 다른 설명 패치가 활성화되어 있어 진단 훅 생략.");
+        return false;
+      }
+
+      const uintptr_t caveAddr = AllocNear(hookAddr, 256);
+      if (!caveAddr)
+        return false;
+
+      uint8_t *out = reinterpret_cast<uint8_t *>(caveAddr);
+      int i = 0;
+      auto e8=[&](uint8_t v){out[i++]=v;};
+      auto e32=[&](int32_t v){std::memcpy(out+i,&v,4);i+=4;};
+      auto e64=[&](uintptr_t v){std::memcpy(out+i,&v,8);i+=8;};
+      auto emitJmp=[&](uintptr_t target){
+        e8(0xE9);
+        const intptr_t rel =
+            static_cast<intptr_t>(target) -
+            static_cast<intptr_t>(caveAddr + i + 4);
+        if (rel < INT32_MIN || rel > INT32_MAX)
+          return false;
+        e32(static_cast<int32_t>(rel));
+        return true;
+      };
+
+      // Preserve flags, volatile GPRs and XMM0..5 around the diagnostic call.
+      e8(0x9C);
+      e8(0x50); e8(0x51); e8(0x52);
+      e8(0x41); e8(0x50); e8(0x41); e8(0x51);
+      e8(0x41); e8(0x52); e8(0x41); e8(0x53);
+      e8(0x48); e8(0x81); e8(0xEC); e32(0x80);
+
+      const uint8_t xmmStores[][6] = {
+        {0xF3,0x0F,0x7F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x7F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x7F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x7F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x7F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x7F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : xmmStores) {
+        std::memcpy(out+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      e8(0x48); e8(0x8B); e8(0xCF); // mov rcx,rdi
+      e8(0x48); e8(0xB8); e64(reinterpret_cast<uintptr_t>(&ProbeFifthVisibleTextSeh));
+      e8(0xFF); e8(0xD0);
+
+      const uint8_t xmmLoads[][6] = {
+        {0xF3,0x0F,0x6F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x6F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x6F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x6F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x6F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x6F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : xmmLoads) {
+        std::memcpy(out+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      e8(0x48); e8(0x81); e8(0xC4); e32(0x80);
+      e8(0x41); e8(0x5B); e8(0x41); e8(0x5A);
+      e8(0x41); e8(0x59); e8(0x41); e8(0x58);
+      e8(0x5A); e8(0x59); e8(0x58); e8(0x9D);
+
+      // Original: cmp word ptr [rdi],0
+      e8(0x66); e8(0x83); e8(0x3F); e8(0x00);
+      // jne non-empty
+      e8(0x0F); e8(0x85);
+      const int jneDispAt=i; e32(0);
+      const int jneNext=i;
+
+      if (!emitJmp(exeBase + kEmptyRva)) {
+        VirtualFree(reinterpret_cast<void *>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      const int nonEmptyAt=i;
+      if (!emitJmp(exeBase + kContinueRva)) {
+        VirtualFree(reinterpret_cast<void *>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+      const int64_t jneRel =
+          static_cast<int64_t>(nonEmptyAt) - static_cast<int64_t>(jneNext);
+      if (jneRel < INT32_MIN || jneRel > INT32_MAX) {
+        VirtualFree(reinterpret_cast<void *>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+      std::memcpy(out+jneDispAt,&jneRel,4);
+
+      std::memcpy(g_fifthVisibleTextProbeOriginal,
+                  reinterpret_cast<const void *>(hookAddr),
+                  sizeof(g_fifthVisibleTextProbeOriginal));
+      FlushInstructionCache(GetCurrentProcess(),out,i);
+      if (!ApplyJmp(hookAddr,caveAddr,sizeof(expected))) {
+        VirtualFree(reinterpret_cast<void *>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      g_fifthVisibleTextProbeHookAddr=hookAddr;
+      g_fifthVisibleTextProbeCaveAddr=caveAddr;
+      g_fifthVisibleTextProbeApplied=true;
+      AddLog(u8"[책략5VISIBLETEXT] 실제 책략 제목/설명 UTF-16 경로 진단 훅 설치 완료.");
+      return true;
+    }
+
 
     using FifthTitleNameGetterFn = const wchar_t *(__fastcall *)(void *);
 
@@ -5395,7 +5587,7 @@ namespace DX11Base {
     // method and do not patch the game; they only record executable targets.
     LogFifthUiTextPathCandidates();
     LogFifthTrickDataVtableCandidates(row5);
-    EnsureFifthTitleNameGetterProbe();
+    EnsureFifthVisibleTextProbe();
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
@@ -5579,15 +5771,10 @@ namespace DX11Base {
         g_fifthRuntimeOriginalCount = plan.originalCount;
         PublishFifthUiForOriginalCountSeh(dialog, plan.originalCount);
 
-        // This branch is intentionally re-validated during battle refreshes.
-        // Keep the idempotent publish, but log only once per owner/model/count
-        // generation instead of spamming the log every refresh tick.
-        if (g_fifthAlreadyPresentLoggedOwner != inner ||
-            g_fifthAlreadyPresentLoggedModel != modelBase ||
-            g_fifthAlreadyPresentLoggedCount != plan.originalCount) {
-          g_fifthAlreadyPresentLoggedOwner = inner;
-          g_fifthAlreadyPresentLoggedModel = modelBase;
-          g_fifthAlreadyPresentLoggedCount = plan.originalCount;
+        // Re-validation is intentional, but this informational message is
+        // useful only once per battle generation.
+        if (!g_fifthAlreadyPresentLoggedThisBattle) {
+          g_fifthAlreadyPresentLoggedThisBattle = true;
           AddLog(u8"[책략5UIMODEL] ID5가 이미 마지막 entry에 존재: N=%u total=%u entry=%u",
                  (unsigned)plan.originalCount,
                  (unsigned)(plan.originalCount + 1),
@@ -5936,9 +6123,9 @@ namespace DX11Base {
     g_fifthUiModelEntryOriginal[1] = 0;
     g_fifthUiModelEntryApplied = false;
     g_fifthRuntimeOriginalCount = 0;
-    g_fifthAlreadyPresentLoggedOwner = 0;
-    g_fifthAlreadyPresentLoggedModel = 0;
-    g_fifthAlreadyPresentLoggedCount = UINT32_MAX;
+    g_fifthAlreadyPresentLoggedThisBattle = false;
+    g_fifthVisibleTitleSeen.store(false);
+    g_fifthVisibleDescSeen.store(false);
     g_fifthUiActiveLayout.store(0);
     g_fifthUiActiveButton.store(0);
 
