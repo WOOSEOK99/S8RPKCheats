@@ -2392,3 +2392,64 @@ select closure:
 entry4가 비어 있으면 절대 쓰지 않는다.
 
 이 테스트가 실패하면 더 이상 사용자를 반복 진단에 묶지 않고 현재 브랜치 실험을 중단한다.
+
+
+---
+
+## 47. 2026-09-23 최종 로그 이후 — guarded synthetic fifth model entry
+
+최종 실게임 로그에서 runtime dialog model이 다음과 같이 확인됨.
+
+```text
+count=4
+entry0 = row1, 0x00000001'00000000
+entry1 = row2, 0x00000001'00000001
+entry2 = row3, 0x00000001'00000002
+entry3 = row4, 0x00000001'00000003
+entry4 = null, 0x00000001'00000000
+```
+
+따라서 단순히 count만 5로 올리는 이전 테스트는 중단 판정이 맞았지만,
+5번째 물리 레코드의 두 번째 qword 상위 32비트가 기존 4개와 동일하게 이미 1로
+초기화되어 있다는 추가 단서가 생겼다.
+
+새 실험 브랜치:
+
+```text
+experiment/stratagem5-model-entry-test
+```
+
+이번 테스트는 추측성 범용 쓰기가 아니라 아래 조건이 전부 일치할 때만 동작한다.
+
+1. runtime count == 4
+2. entry0..3 첫 포인터가 canonical native row1..4와 정확히 일치
+3. entry0..3 두 번째 qword가 high=1, low=index(0..3) 패턴과 정확히 일치
+4. entry4가 정확히 { nullptr, high=1, low=0 } 기본 상태
+5. canonical row5 주소가 유효
+
+전부 맞을 때만 entry4를:
+
+```text
+{ row5, 0x00000001'00000004 }
+```
+
+로 합성하고 count를 4->5로 변경한다.
+
+해제 시에는 먼저 count를 원래 값으로 줄인 뒤 entry4의 원래 16바이트를 복원한다.
+쓰기 직후 검증에 실패하면 즉시 같은 함수 안에서 원복한다.
+
+성공 로그 키:
+
+```text
+[책략5UIMODEL] 합성 fifth entry 적용 성공
+```
+
+이 테스트 성공 시 확인할 것은:
+
+- 5번째 hover 적용 범위
+- 하단 설명/그림이 ID5로 전환
+- 클릭/선택
+- 실제 ID5 실행
+
+실패하거나 프리즈/크래시가 발생하면 이 synthetic-entry 접근은 즉시 탈락 처리하고,
+다음 단계는 entry0..3/count=4를 채우는 원본 model populate 함수 추적으로 전환한다.
