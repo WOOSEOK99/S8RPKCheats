@@ -1281,7 +1281,9 @@ namespace DX11Base {
         return false;
 
       constexpr uintptr_t kLayoutInitializeRva = 0x01DAF350;
-      constexpr uintptr_t kHookOffset = 0x0CF3;
+      // Runtime dump: +CEB = 0F 85 A5 FE FF FF, therefore the
+      // following direct CALL begins at +CF1 (not +CF3).
+      constexpr uintptr_t kHookOffset = 0x0CF1;
       const uintptr_t hookAddr = exeBase + kLayoutInitializeRva + kHookOffset;
       static const uint8_t expected[5] = {0xE8,0x8A,0x4E,0x26,0xFE};
 

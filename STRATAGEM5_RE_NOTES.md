@@ -1953,3 +1953,29 @@ GetTrickButton/Open sidecar 우회, callback 직전 준비까지 모두 성공�
 ```
 
 두 조건이 맞는데도 hover/render가 없으면 다음 병목은 별도 parent child/hit-test container로 좁혀진다.
+
+
+---
+
+## 35. 2026-09-23 Layout post-buttons hook 오프셋 수정
+
+실게임 로그에서 조기 훅 준비가 다음 상태였다.
+
+```text
+init=1
+layoutPost=0
+preCallback=1
+callbackLoop=1
+```
+
+원인은 `Layout::Initialize` post-buttons hook 주소를 +0xCF3으로 잡은 단순 오프셋 오류였다.
+
+기존 런타임 덤프:
+
+```text
++CEB : 0F 85 A5 FE FF FF
++CF1 : E8 8A 4E 26 FE
+```
+
+따라서 direct CALL의 실제 시작은 +0xCF1이다.
+이번 수정은 hook 위치만 +0xCF3 -> +0xCF1로 바로잡는다.
