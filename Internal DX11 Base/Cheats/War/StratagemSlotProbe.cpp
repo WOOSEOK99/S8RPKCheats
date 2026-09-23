@@ -3590,8 +3590,8 @@ namespace DX11Base {
 
       if (c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 0) {
         if (chosen) {
-          AddLog(u8"[책략5슬롯DBG] 공격/수비 양쪽이 모두 1/1/1/1이라 자동 선택할 수 없습니다.");
-          return false;
+          AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. 공격/수비 양쪽 후보가 동시에 유효해 현재 틱 적용 보류.");
+          return true;
         }
         chosen = candidate.ptr;
         chosenName = candidate.name;
@@ -3605,23 +3605,29 @@ namespace DX11Base {
 
     const uintptr_t id5Addr =
         chosen + kFirstStratagemCountOffset + 4 * kStratagemCountStride;
-    if (!IsValidPtr(id5Addr, 1))
-      return false;
+    if (!IsValidPtr(id5Addr, 1)) {
+      AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. +14C 주소가 아직 유효하지 않아 적용 보류.");
+      return true;
+    }
 
     g_id5CountOriginal = *reinterpret_cast<const uint8_t *>(id5Addr);
 
     DWORD oldProtect = 0;
     DWORD tmpProtect = 0;
     if (!VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1,
-                        PAGE_READWRITE, &oldProtect))
-      return false;
+                        PAGE_READWRITE, &oldProtect)) {
+      AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. +14C 쓰기 권한 획득 실패 -> 다음 refresh에서 재시도.");
+      return true;
+    }
 
     *reinterpret_cast<uint8_t *>(id5Addr) = 1;
     VirtualProtect(reinterpret_cast<LPVOID>(id5Addr), 1,
                    oldProtect, &tmpProtect);
 
-    if (*reinterpret_cast<const uint8_t *>(id5Addr) != 1)
-      return false;
+    if (*reinterpret_cast<const uint8_t *>(id5Addr) != 1) {
+      AddLog(u8"[책략5수명] ID5 수량 ON 요청 유지. +14C=1 쓰기 검증 실패 -> 다음 refresh에서 재시도.");
+      return true;
+    }
 
     g_id5CountAddr = id5Addr;
     g_id5CountOwner = chosen;
@@ -4806,8 +4812,26 @@ namespace DX11Base {
     }
 
     if (g_id5CountRequested && !countCurrent) {
-      if (!SetStratagemFiveCountTest(true))
+      SetStratagemFiveCountTest(true);
+
+      countCurrent = false;
+      if (g_id5CountApplied && g_id5CountOwner) {
+        const bool ownerCurrent =
+            (g_id5CountOwner == g_attackInfo && ValidateInfo(g_id5CountOwner, 0)) ||
+            (g_id5CountOwner == g_defenseInfo && ValidateInfo(g_id5CountOwner, 1));
+        const uintptr_t expected =
+            g_id5CountOwner + kFirstStratagemCountOffset +
+            4 * kStratagemCountStride;
+        countCurrent =
+            ownerCurrent &&
+            g_id5CountAddr == expected &&
+            IsValidPtr(expected, 1) &&
+            *reinterpret_cast<const uint8_t *>(expected) == 1;
+      }
+
+      if (!countCurrent)
         return;
+
       AddLog(u8"[책략5수명] 새 전투 객체에 ID5 수량 자동 재적용 완료.");
     }
 
@@ -4822,8 +4846,8 @@ namespace DX11Base {
           IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
           *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
               g_fiveMetadataAddr;
-      if (!metadataCurrent && SetStratagemFiveMetadataTest(true)) {
-        AddLog(u8"[책략5수명] 새 전투 객체에 ID5 내부등록 자동 재적용 완료.");
+      if (!metadataCurrent) {
+        SetStratagemFiveMetadataTest(true);
         metadataCurrent =
             g_fiveMetadataApplied &&
             g_fiveRuntimeSlotApplied &&
@@ -4833,6 +4857,8 @@ namespace DX11Base {
             IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t)) &&
             *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) ==
                 g_fiveMetadataAddr;
+        if (metadataCurrent)
+          AddLog(u8"[책략5수명] 새 전투 객체에 ID5 내부등록 자동 재적용 완료.");
       }
     }
 
