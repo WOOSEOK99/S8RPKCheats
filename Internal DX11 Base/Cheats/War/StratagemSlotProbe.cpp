@@ -154,6 +154,9 @@ namespace DX11Base {
     static uint64_t g_fifthUiModelEntryOriginal[2] = {};
     static bool g_fifthUiModelEntryApplied = false;
     static uint32_t g_fifthRuntimeOriginalCount = 0;
+    static uintptr_t g_fifthAlreadyPresentLoggedOwner = 0;
+    static uintptr_t g_fifthAlreadyPresentLoggedModel = 0;
+    static uint32_t g_fifthAlreadyPresentLoggedCount = UINT32_MAX;
 
     // Must be defined before the pre-callback hook helpers below reference it.
     enum class FifthRuntimeStage : uint8_t {
@@ -5575,10 +5578,21 @@ namespace DX11Base {
       if (plan.alreadyPresent) {
         g_fifthRuntimeOriginalCount = plan.originalCount;
         PublishFifthUiForOriginalCountSeh(dialog, plan.originalCount);
-        AddLog(u8"[책략5UIMODEL] ID5가 이미 마지막 entry에 존재: N=%u total=%u entry=%u",
-               (unsigned)plan.originalCount,
-               (unsigned)(plan.originalCount + 1),
-               (unsigned)plan.originalCount);
+
+        // This branch is intentionally re-validated during battle refreshes.
+        // Keep the idempotent publish, but log only once per owner/model/count
+        // generation instead of spamming the log every refresh tick.
+        if (g_fifthAlreadyPresentLoggedOwner != inner ||
+            g_fifthAlreadyPresentLoggedModel != modelBase ||
+            g_fifthAlreadyPresentLoggedCount != plan.originalCount) {
+          g_fifthAlreadyPresentLoggedOwner = inner;
+          g_fifthAlreadyPresentLoggedModel = modelBase;
+          g_fifthAlreadyPresentLoggedCount = plan.originalCount;
+          AddLog(u8"[책략5UIMODEL] ID5가 이미 마지막 entry에 존재: N=%u total=%u entry=%u",
+                 (unsigned)plan.originalCount,
+                 (unsigned)(plan.originalCount + 1),
+                 (unsigned)plan.originalCount);
+        }
         return true;
       }
 
@@ -5922,6 +5936,9 @@ namespace DX11Base {
     g_fifthUiModelEntryOriginal[1] = 0;
     g_fifthUiModelEntryApplied = false;
     g_fifthRuntimeOriginalCount = 0;
+    g_fifthAlreadyPresentLoggedOwner = 0;
+    g_fifthAlreadyPresentLoggedModel = 0;
+    g_fifthAlreadyPresentLoggedCount = UINT32_MAX;
     g_fifthUiActiveLayout.store(0);
     g_fifthUiActiveButton.store(0);
 
