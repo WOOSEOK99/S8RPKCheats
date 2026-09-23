@@ -61,6 +61,9 @@ namespace DX11Base {
     static uintptr_t g_fifthUiSidecarLayout = 0;
     static uintptr_t g_fifthUiSidecarButton = 0;
     static bool g_fifthUiSidecarAttempted = false;
+    static bool g_fifthUiMakerExpanded = false;
+    static uintptr_t g_fifthUiMakerAddr = 0;
+    static uint8_t g_fifthUiMakerOriginal[0x28] = {};
 
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
@@ -295,6 +298,286 @@ namespace DX11Base {
       return true;
     }
 
+    static void RestoreFifthUiMakerTestSeh() {
+      __try {
+        if (g_fifthUiMakerExpanded &&
+            g_fifthUiMakerAddr &&
+            IsValidPtr(g_fifthUiMakerAddr, sizeof(g_fifthUiMakerOriginal))) {
+          std::memcpy(reinterpret_cast<void *>(g_fifthUiMakerAddr),
+                      g_fifthUiMakerOriginal,
+                      sizeof(g_fifthUiMakerOriginal));
+          AddLog(u8"[책략5UITEST] UI registry를 기존 7칸 상태로 원복.");
+        }
+
+        if (g_fifthUiSidecarButton &&
+            IsValidPtr(g_fifthUiSidecarButton, sizeof(uintptr_t))) {
+          const uintptr_t vt =
+              *reinterpret_cast<const uintptr_t *>(g_fifthUiSidecarButton);
+          if (vt && IsValidPtr(vt + 0x108, sizeof(uintptr_t))) {
+            const uintptr_t setVisible =
+                *reinterpret_cast<const uintptr_t *>(vt + 0x108);
+            if (setVisible && IsValidPtr(setVisible, 1)) {
+              using SetBoolFn = void(__fastcall *)(uintptr_t, bool);
+              reinterpret_cast<SetBoolFn>(setVisible)(
+                  g_fifthUiSidecarButton, false);
+            }
+          }
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+      }
+
+      g_fifthUiMakerExpanded = false;
+      g_fifthUiMakerAddr = 0;
+      std::memset(g_fifthUiMakerOriginal, 0,
+                  sizeof(g_fifthUiMakerOriginal));
+    }
+
+    static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout) {
+      if (!layout ||
+          !g_fifthUiSidecarButton ||
+          g_fifthUiSidecarLayout != layout ||
+          !IsValidPtr(layout, 0x2A8) ||
+          !IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
+        return false;
+
+      if (g_fifthUiMakerExpanded &&
+          g_fifthUiMakerAddr == layout + 0x140)
+        return true;
+
+      __try {
+        const uintptr_t exeBase =
+            reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+        if (!exeBase)
+          return false;
+
+        constexpr uintptr_t kInitLayoutsRva = 0x01D13E60;
+        constexpr uintptr_t kLookupLayoutRva = 0x01D15440;
+        constexpr uintptr_t kRegisterLayoutRva = 0x01D16AA0;
+
+        static const uint8_t initExpected[] =
+            {0x4C,0x89,0x4C,0x24,0x20,0x55};
+        static const uint8_t regExpected[] =
+            {0x48,0x89,0x6C,0x24,0x18,0x56};
+
+        if (!IsValidPtr(exeBase + kInitLayoutsRva, sizeof(initExpected)) ||
+            !IsValidPtr(exeBase + kRegisterLayoutRva, sizeof(regExpected)) ||
+            std::memcmp(reinterpret_cast<const void *>(exeBase + kInitLayoutsRva),
+                        initExpected, sizeof(initExpected)) != 0 ||
+            std::memcmp(reinterpret_cast<const void *>(exeBase + kRegisterLayoutRva),
+                        regExpected, sizeof(regExpected)) != 0) {
+          AddLog(u8"[책략5UITEST] CUIMaker 함수 빌드 가드 불일치. registry 확장 중단.");
+          return false;
+        }
+
+        const uintptr_t maker = layout + 0x140;
+        uintptr_t descBase = 0;
+        uintptr_t pointerBase = 0;
+        uint32_t count = 0;
+        uintptr_t owner = 0;
+        if (!SafeReadPtrSeh(maker + 0x00, &descBase) ||
+            !SafeReadPtrSeh(maker + 0x08, &pointerBase) ||
+            !SafeCopySeh(maker + 0x10, &count, sizeof(count)) ||
+            !SafeReadPtrSeh(maker + 0x18, &owner) ||
+            count != 7 ||
+            owner != layout ||
+            !descBase || !pointerBase ||
+            !IsValidPtr(descBase, 7 * 0x60) ||
+            !IsValidPtr(pointerBase, 7 * sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UITEST] 기존 CUIMaker 구조 검증 실패: count=%u owner=%p",
+                 (unsigned)count,
+                 reinterpret_cast<void *>(owner));
+          return false;
+        }
+
+        uintptr_t buttons[4] = {};
+        if (!SafeCopySeh(layout + 0x1E0, buttons, sizeof(buttons)))
+          return false;
+
+        using LookupLayoutFn = uintptr_t(__fastcall *)(uintptr_t, int);
+        using InitLayoutsFn = void(__fastcall *)(uintptr_t, const void *, int, uintptr_t);
+        using RegisterLayoutFn = void(__fastcall *)(uintptr_t, int, uintptr_t, int);
+
+        const auto lookup =
+            reinterpret_cast<LookupLayoutFn>(exeBase + kLookupLayoutRva);
+        const auto initLayouts =
+            reinterpret_cast<InitLayoutsFn>(exeBase + kInitLayoutsRva);
+        const auto registerLayout =
+            reinterpret_cast<RegisterLayoutFn>(exeBase + kRegisterLayoutRva);
+
+        uintptr_t registered[7] = {};
+        for (int id = 0; id < 7; ++id)
+          registered[id] = lookup(maker, id);
+
+        bool buttonMapOk = true;
+        for (int i = 0; i < 4; ++i) {
+          if (registered[i + 2] != buttons[i])
+            buttonMapOk = false;
+        }
+
+        uintptr_t id6Control = 0;
+        SafeReadPtrSeh(layout + 0x290, &id6Control);
+        if (!buttonMapOk ||
+            !id6Control ||
+            registered[6] != id6Control) {
+          AddLog(u8"[책략5UITEST] registry lookup 검증 실패: id2..5/button 또는 id6 불일치.");
+          AddLog(u8"[책략5UITEST] lookup=%p,%p,%p,%p,%p,%p,%p",
+                 reinterpret_cast<void *>(registered[0]),
+                 reinterpret_cast<void *>(registered[1]),
+                 reinterpret_cast<void *>(registered[2]),
+                 reinterpret_cast<void *>(registered[3]),
+                 reinterpret_cast<void *>(registered[4]),
+                 reinterpret_cast<void *>(registered[5]),
+                 reinterpret_cast<void *>(registered[6]));
+          return false;
+        }
+
+        alignas(16) uint8_t descriptors[8 * 0x60] = {};
+        std::memcpy(descriptors,
+                    reinterpret_cast<const void *>(descBase),
+                    7 * 0x60);
+
+        // ID7 starts from the proven button layout descriptor (ID5).
+        std::memcpy(descriptors + 7 * 0x60,
+                    descriptors + 5 * 0x60,
+                    0x60);
+
+        const int expectedX[4] = {
+            (int)g_trickUiStartX,
+            (int)(g_trickUiStartX + g_trickUiStep),
+            (int)(g_trickUiStartX + g_trickUiStep * 2),
+            (int)(g_trickUiStartX + g_trickUiStep * 3)
+        };
+        const int y = (int)g_trickUiY;
+        const int fifthX =
+            (int)(g_trickUiStartX + g_trickUiStep * 4);
+
+        int xField = -1;
+        int yField = -1;
+        const int candidateFields[] = {0x04, 0x08, 0x0C, 0x10};
+        for (int field : candidateFields) {
+          bool xMatch = true;
+          bool yMatch = true;
+          for (int i = 0; i < 4; ++i) {
+            int32_t v = 0;
+            std::memcpy(&v,
+                        descriptors + (i + 2) * 0x60 + field,
+                        sizeof(v));
+            if (v != expectedX[i])
+              xMatch = false;
+            if (v != y)
+              yMatch = false;
+          }
+          if (xMatch)
+            xField = field;
+          if (yMatch)
+            yField = field;
+        }
+
+        if (xField < 0 || yField < 0) {
+          AddLog(u8"[책략5UITEST] descriptor 좌표 필드 자동 검증 실패. registry 쓰기 중단.");
+          for (int id = 2; id <= 5; ++id) {
+            int32_t a=0,b=0,c=0,d=0;
+            std::memcpy(&a, descriptors + id*0x60 + 0x04, 4);
+            std::memcpy(&b, descriptors + id*0x60 + 0x08, 4);
+            std::memcpy(&c, descriptors + id*0x60 + 0x0C, 4);
+            std::memcpy(&d, descriptors + id*0x60 + 0x10, 4);
+            AddLog(u8"[책략5UITEST] desc%d +4/+8/+C/+10 = %d/%d/%d/%d",
+                   id, a,b,c,d);
+          }
+          return false;
+        }
+
+        std::memcpy(descriptors + 7 * 0x60 + xField,
+                    &fifthX, sizeof(fifthX));
+        std::memcpy(descriptors + 7 * 0x60 + yField,
+                    &y, sizeof(y));
+
+        int32_t types[8] = {};
+        for (int id = 0; id < 8; ++id)
+          std::memcpy(&types[id],
+                      descriptors + id * 0x60,
+                      sizeof(types[id]));
+
+        if (types[5] != 0x14 || types[7] != 0x14) {
+          AddLog(u8"[책략5UITEST] 버튼 descriptor type 검증 실패: id5=%d id7=%d",
+                 types[5], types[7]);
+          return false;
+        }
+
+        std::memcpy(g_fifthUiMakerOriginal,
+                    reinterpret_cast<const void *>(maker),
+                    sizeof(g_fifthUiMakerOriginal));
+        g_fifthUiMakerAddr = maker;
+
+        initLayouts(maker, descriptors, 8, layout);
+
+        uint32_t newCount = 0;
+        uintptr_t newDesc = 0;
+        uintptr_t newPointers = 0;
+        if (!SafeReadPtrSeh(maker + 0x00, &newDesc) ||
+            !SafeReadPtrSeh(maker + 0x08, &newPointers) ||
+            !SafeCopySeh(maker + 0x10, &newCount, sizeof(newCount)) ||
+            newCount != 8 ||
+            !newDesc || !newPointers ||
+            !IsValidPtr(newDesc, 8 * 0x60) ||
+            !IsValidPtr(newPointers, 8 * sizeof(uintptr_t))) {
+          std::memcpy(reinterpret_cast<void *>(maker),
+                      g_fifthUiMakerOriginal,
+                      sizeof(g_fifthUiMakerOriginal));
+          g_fifthUiMakerAddr = 0;
+          AddLog(u8"[책략5UITEST] CUIMaker 8칸 재초기화 검증 실패. 원복.");
+          return false;
+        }
+
+        // Re-register every previously occupied slot with its original type.
+        for (int id = 0; id < 7; ++id) {
+          if (!registered[id])
+            continue;
+          registerLayout(maker, id, registered[id], types[id]);
+        }
+
+        registerLayout(maker, 7, g_fifthUiSidecarButton, types[7]);
+
+        const uintptr_t check7 = lookup(maker, 7);
+        uint32_t sidecarId = 0;
+        uint32_t sidecarState = 0;
+        SafeCopySeh(g_fifthUiSidecarButton + 0x88,
+                    &sidecarId, sizeof(sidecarId));
+        SafeCopySeh(g_fifthUiSidecarButton + 0x8C,
+                    &sidecarState, sizeof(sidecarState));
+
+        if (check7 != g_fifthUiSidecarButton ||
+            sidecarId != 7 ||
+            sidecarState != 1) {
+          std::memcpy(reinterpret_cast<void *>(maker),
+                      g_fifthUiMakerOriginal,
+                      sizeof(g_fifthUiMakerOriginal));
+          g_fifthUiMakerAddr = 0;
+          AddLog(u8"[책략5UITEST] ID7 등록 검증 실패. 기존 7칸 registry로 원복.");
+          return false;
+        }
+
+        g_fifthUiMakerExpanded = true;
+        AddLog(u8"[책략5UITEST] CUIMaker 7->8 확장 및 ID7 등록 성공: button=%p x=%d y=%d",
+               reinterpret_cast<void *>(g_fifthUiSidecarButton),
+               fifthX, y);
+        AddLog(u8"[책략5UITEST] 아직 5번 callback은 미연결입니다. 버튼이 보여도 클릭하지 마세요.");
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (g_fifthUiMakerAddr &&
+            IsValidPtr(g_fifthUiMakerAddr,
+                       sizeof(g_fifthUiMakerOriginal))) {
+          std::memcpy(reinterpret_cast<void *>(g_fifthUiMakerAddr),
+                      g_fifthUiMakerOriginal,
+                      sizeof(g_fifthUiMakerOriginal));
+        }
+        g_fifthUiMakerExpanded = false;
+        g_fifthUiMakerAddr = 0;
+        AddLog(u8"[책략5UITEST] registry 확장 중 예외 발생. 기존 상태로 복귀 시도.");
+        return false;
+      }
+    }
+
     static bool CreateFifthUiSidecarDisplayOnlySeh(uintptr_t layout) {
       if (!layout || !IsValidPtr(layout, 0x2A8))
         return false;
@@ -305,6 +588,11 @@ namespace DX11Base {
         return true;
 
       if (g_fifthUiSidecarLayout != layout) {
+        // Previous layout lifetime has ended; do not carry its maker snapshot forward.
+        g_fifthUiMakerExpanded = false;
+        g_fifthUiMakerAddr = 0;
+        std::memset(g_fifthUiMakerOriginal, 0,
+                    sizeof(g_fifthUiMakerOriginal));
         g_fifthUiSidecarLayout = layout;
         g_fifthUiSidecarButton = 0;
         g_fifthUiSidecarAttempted = false;
@@ -1350,6 +1638,7 @@ namespace DX11Base {
     };
 
     if (!enable) {
+      RestoreFifthUiMakerTestSeh();
       restoreRuntimeSlot();
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
@@ -1811,7 +2100,8 @@ namespace DX11Base {
              (int32_t)fields50[14], (int32_t)fields50[15]);
     }
 
-    CreateFifthUiSidecarDisplayOnlySeh(layout);
+    if (CreateFifthUiSidecarDisplayOnlySeh(layout))
+      ExpandMakerAndRegisterFifthSidecarSeh(layout);
 
     g_lastLoggedUiLayout = layout;
     AddLog(u8"[책략5UICAP] live layout 캡처 완료.");

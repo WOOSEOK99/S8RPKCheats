@@ -914,3 +914,47 @@ control+0x88 = id
 - registry를 안전하게 8칸으로 확장하여 ID7 정식 등록
 
 순으로 기능화한다.
+
+
+---
+
+## 20. 2026-09-23 표시 전용 sidecar 결과 및 ID7 registry 실험
+
+표시 전용 sidecar 생성 로그는 성공했지만 실제 화면에는 기존 4개만 보였다.
+
+```text
+표시 전용 5번째 버튼 생성 성공
+UI-ID=-1
+TrickID=5
+실제 화면: 5번째 버튼 안 보임
+```
+
+따라서 `TrickSelectButton::ctor/Initialize/SetTrickID`만으로는
+전투 UI 렌더 경로에 완전히 편입되지 않으며,
+`CUIMaker::RegisterLayout` 등록이 필요하다고 판단한다.
+
+### 다음 실험: registry 7 -> 8
+
+앞 단계에서 확인한 `CUIMaker` 동적 구조를 이용한다.
+
+안전 가드:
+
+1. 기존 maker count가 정확히 7인지 확인
+2. owner가 live layout과 일치하는지 확인
+3. 내부 lookup 함수로 ID2~5가 실제 4개 TrickSelectButton과 정확히 일치하는지 확인
+4. ID6 lookup도 `layout+0x290`의 확인된 ID6 control과 일치해야 진행
+5. 기존 descriptor 7개를 8개 임시 배열로 복사
+6. ID7 descriptor는 ID5(button4) descriptor를 clone
+7. descriptor의 X/Y 필드는 ID2~5 값이 실제 `406,686,966,1246 / y=364` 패턴과 맞는 필드를 자동 검출
+8. 새 ID7 X=1526, Y=364
+9. `CUIMaker::InitLayouts(maker, descriptors, 8, layout)`
+10. 기존 등록 control을 원래 ID/type으로 다시 등록
+11. sidecar를 ID7/type 0x14로 등록
+12. lookup(7), button+0x88==7, button+0x8C==1을 모두 검증
+
+실패하거나 예외가 발생하면 maker의 원래 0x28-byte 상태를 즉시 복구한다.
+실험 중 기존 7칸 storage는 해제하지 않아 rollback 포인터가 유효하도록 한다.
+성공 시 old storage는 소량 leak되지만 실험 단계에서 안전한 수명 검증을 우선한다.
+
+아직 callback / Dialog::Open index4 / GetTrickButton(4)는 연결하지 않는다.
+따라서 ID7 등록 후 버튼이 보여도 클릭하지 않는다.
