@@ -712,83 +712,99 @@ namespace DX11Base {
       return false;
     }
 
-    // IMPORTANT:
-    // 이전 버전은 추정한 객체에 CampData::GetTricks()를 직접 호출해서
-    // 잘못된 this 포인터가 들어가면 게임이 멈출 수 있었습니다.
-    // 이번 버전은 게임 함수를 단 한 번도 호출하지 않고,
-    // 캡처된 전장 객체와 그 1단계 포인터들의 작은 메모리 범위만 읽습니다.
-    uintptr_t objects[96] = {};
-    int objectCount = 0;
+    // PDB로 실제 구조 확인:
+    // san8r::war::Camp::Impl
+    //   +0x10 m_pCampData
+    //   +0x18 m_type
+    //
+    // san8r::war::CampData
+    //   +0x68 m_pTricks  (std::array<const TrickData*, 5>)
+    //
+    // 따라서 더 이상 추정 객체 스캔을 하지 않고 정확한 필드만 읽습니다.
+    constexpr uintptr_t kCampImplCampDataOffset = 0x10;
+    constexpr uintptr_t kCampImplTypeOffset = 0x18;
+    constexpr uintptr_t kCampDataTricksOffset = 0x68;
 
-    auto addObject = [&](uintptr_t p) {
-      if (!p || p <= 0x10000 || !IsValidPtr(p, 0x100))
-        return;
-      for (int i = 0; i < objectCount; ++i) {
-        if (objects[i] == p)
-          return;
-      }
-      if (objectCount < (int)(sizeof(objects) / sizeof(objects[0])))
-        objects[objectCount++] = p;
-    };
-
-    addObject(g_id5CountOwner);
-
-    if (IsValidPtr(g_id5CountOwner, 0x300)) {
-      for (uintptr_t off = 0; off + sizeof(uintptr_t) <= 0x300;
-           off += sizeof(uintptr_t)) {
-        uintptr_t p = 0;
-        SafeReadPtrSeh(g_id5CountOwner + off, &p);
-        addObject(p);
-      }
+    uint8_t campType = 0xFF;
+    uintptr_t campData = 0;
+    if (!IsValidPtr(g_id5CountOwner + kCampImplTypeOffset, 1) ||
+        !IsValidPtr(g_id5CountOwner + kCampImplCampDataOffset,
+                    sizeof(uintptr_t))) {
+      AddLog(u8"[책략5PDBDBG] Camp::Impl 기본 필드가 유효하지 않습니다: impl=%p",
+             reinterpret_cast<void *>(g_id5CountOwner));
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
     }
 
-    uintptr_t matchedSlot = 0;
-    uintptr_t matchedObject = 0;
-    uintptr_t matchedOld5 = 0;
-    int matches = 0;
-
-    constexpr size_t kScanBytes = 0x800;
-    alignas(uintptr_t) uint8_t snapshot[kScanBytes] = {};
-
-    for (int oi = 0; oi < objectCount; ++oi) {
-      const uintptr_t obj = objects[oi];
-
-      // IMPORTANT: no VirtualQuery/IsValidPtr inside the inner loop.
-      // The previous version did tens of thousands of protection queries on
-      // the ImGui thread and could make the game appear frozen.
-      if (!SafeCopySeh(obj, snapshot, sizeof(snapshot)))
-        continue;
-
-      for (size_t off = 0;
-           off + 5 * sizeof(uintptr_t) <= sizeof(snapshot);
-           off += sizeof(uintptr_t)) {
-        uintptr_t v[5] = {};
-        std::memcpy(v, snapshot + off, sizeof(v));
-
-        if (v[0] == row1 && v[1] == row2 &&
-            v[2] == row3 && v[3] == row4 &&
-            (v[4] == 0 || v[4] == row5)) {
-          ++matches;
-          matchedObject = obj;
-          matchedSlot = obj + off + 4 * sizeof(uintptr_t);
-          matchedOld5 = v[4];
-
-          AddLog(u8"[책략5PDBDBG] 5칸 포인터 배열 후보 #%d object=%p offset=+%llX values=%p,%p,%p,%p,%p",
-                 matches,
-                 reinterpret_cast<void *>(obj),
-                 (unsigned long long)off,
-                 reinterpret_cast<void *>(v[0]),
-                 reinterpret_cast<void *>(v[1]),
-                 reinterpret_cast<void *>(v[2]),
-                 reinterpret_cast<void *>(v[3]),
-                 reinterpret_cast<void *>(v[4]));
-        }
-      }
+    campType =
+        *reinterpret_cast<const uint8_t *>(
+            g_id5CountOwner + kCampImplTypeOffset);
+    if (!SafeReadPtrSeh(g_id5CountOwner + kCampImplCampDataOffset,
+                        &campData) ||
+        !campData ||
+        !IsValidPtr(campData + kCampDataTricksOffset,
+                    5 * sizeof(uintptr_t))) {
+      AddLog(u8"[책략5PDBDBG] CampData 포인터/5칸 배열 무효: impl=%p type=%u campData=%p",
+             reinterpret_cast<void *>(g_id5CountOwner),
+             (unsigned)campType,
+             reinterpret_cast<void *>(campData));
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
     }
 
-    if (matches != 1) {
-      AddLog(u8"[책략5PDBDBG] 직접 메모리 검사 결과 후보=%d / 검사객체=%d. 쓰기하지 않았습니다.",
-             matches, objectCount);
+    const uintptr_t tricksAddr =
+        campData + kCampDataTricksOffset;
+    uintptr_t trickPtrs[5] = {};
+    if (!SafeCopySeh(tricksAddr, trickPtrs, sizeof(trickPtrs))) {
+      AddLog(u8"[책략5PDBDBG] CampData::m_pTricks 읽기 실패: %p",
+             reinterpret_cast<void *>(tricksAddr));
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
+    }
+
+    AddLog(u8"[책략5PDBDBG] Camp::Impl=%p type=%u -> CampData=%p / m_pTricks(+68)=%p",
+           reinterpret_cast<void *>(g_id5CountOwner),
+           (unsigned)campType,
+           reinterpret_cast<void *>(campData),
+           reinterpret_cast<void *>(tricksAddr));
+    AddLog(u8"[책략5PDBDBG] tricks[0..4]=%p,%p,%p,%p,%p / native rows=%p,%p,%p,%p,%p",
+           reinterpret_cast<void *>(trickPtrs[0]),
+           reinterpret_cast<void *>(trickPtrs[1]),
+           reinterpret_cast<void *>(trickPtrs[2]),
+           reinterpret_cast<void *>(trickPtrs[3]),
+           reinterpret_cast<void *>(trickPtrs[4]),
+           reinterpret_cast<void *>(row1),
+           reinterpret_cast<void *>(row2),
+           reinterpret_cast<void *>(row3),
+           reinterpret_cast<void *>(row4),
+           reinterpret_cast<void *>(row5));
+
+    // 첫 4칸이 실제 1~4번 TrickData와 정확히 일치할 때만 5번째를 건드립니다.
+    if (trickPtrs[0] != row1 ||
+        trickPtrs[1] != row2 ||
+        trickPtrs[2] != row3 ||
+        trickPtrs[3] != row4) {
+      AddLog(u8"[책략5PDBDBG] 첫 4칸이 native 1~4행과 일치하지 않아 쓰기 중단.");
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
+    }
+
+    const uintptr_t matchedObject = campData;
+    const uintptr_t matchedSlot =
+        tricksAddr + 4 * sizeof(uintptr_t);
+    const uintptr_t matchedOld5 = trickPtrs[4];
+
+    if (matchedOld5 != 0 && matchedOld5 != row5) {
+      AddLog(u8"[책략5PDBDBG] 5번째 칸이 0/row5가 아닙니다: %p. 쓰기 중단.",
+             reinterpret_cast<void *>(matchedOld5));
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
