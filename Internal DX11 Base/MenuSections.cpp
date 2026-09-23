@@ -1598,7 +1598,6 @@ namespace DX11Base {
       ImGui::TextDisabled(u8"아군 사기+40 / 범위5는 그대로 두고, 실제 영향 대상에게 병력 +2000을 적용합니다.");
       ImGui::TextDisabled(u8"병력은 최대병력을 넘지 않습니다. 로그의 [책략5힐DBG] 전/후 병력과 최대값을 확인하세요.");
 
-      ImGui::Spacing();
       if (ImGui::Button(u8"책략 수량/5번 슬롯 확인", ImVec2(-1.0f, 0.0f))) {
         DX11Base::ScanStratagemFiveSlotCandidates();
         AddNotification(u8"책략 수량 슬롯 확인 - 로그 확인");
