@@ -90,6 +90,13 @@ namespace DX11Base {
       }
     }
 
+    static void LogUiProbeRange(uintptr_t exeBase,
+                                uintptr_t imageEnd,
+                                const char *name,
+                                uintptr_t rva,
+                                size_t offset,
+                                size_t length);
+
 
     static bool BuildTrickUiLayoutCaptureCave(uintptr_t hookAddr) {
       g_uiLayoutCaveAddr = AllocNear(hookAddr, 128);
@@ -584,6 +591,34 @@ namespace DX11Base {
                reinterpret_cast<void *>(oldPointerSlots[5]),
                reinterpret_cast<void *>(oldPointerSlots[6]),
                reinterpret_cast<void *>(oldPointerSlots[5]));
+
+        // RegisterLayout consumes a per-ID helper created by InitLayouts.
+        // At runtime all original slots are already null, which means those
+        // helpers are one-shot/moved during initial registration. Do not call
+        // RegisterLayout for ID7 until we know how to build the type-20 helper.
+        bool allHelpersConsumed = true;
+        for (int i = 0; i < 7; ++i) {
+          if (oldPointerSlots[i] != 0) {
+            allHelpersConsumed = false;
+            break;
+          }
+        }
+
+        if (allHelpersConsumed) {
+          MODULEINFO mi{};
+          if (GetModuleInformation(GetCurrentProcess(),
+                                   reinterpret_cast<HMODULE>(exeBase),
+                                   &mi, sizeof(mi))) {
+            const uintptr_t imageEnd =
+                exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+            LogUiProbeRange(exeBase, imageEnd,
+                            u8"CUIMaker::InitLayouts type20 helper tail",
+                            0x01D13E60, 0x240, 0x2C0);
+          }
+          AddLog(u8"[책략5UITEST] RegisterLayout helper가 초기 등록 후 소모됨. ID7 등록은 이번 실행에서 중단.");
+          AddLog(u8"[책략5UITEST] UIRANGE의 InitLayouts type20 helper tail 로그를 보내주세요.");
+          return false;
+        }
 
         // Snapshot the live maker header, then swap only storage pointers/count.
         // Everything after +0x28 remains the original, fully initialized maker.

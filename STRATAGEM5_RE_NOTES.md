@@ -1192,3 +1192,53 @@ maker의 `+0x18 owner`와 `+0x28 이후 내부 상태`는 전혀 건드리지 �
 
 이 방식은 기존 registry container/list를 그대로 유지하기 때문에
 이전 temp-maker 실험보다 원본 UI 수명 구조에 훨씬 가깝다.
+
+
+---
+
+## 25. 2026-09-23 stage=7 원인 확정: RegisterLayout helper는 1회성/소모 구조
+
+latest live experiment:
+
+```text
+existing pointer slots =
+0,0,0,0,0,0,0
+
+live maker ID7 only registration start
+stage=7 exception
+```
+
+`CUIMaker::RegisterLayout` runtime code begins by reading:
+
+```asm
+mov rcx,[maker+0x08]
+mov rcx,[rcx + id*8]
+call <helper method>
+```
+
+Therefore `maker+0x08` is not a persistent control registry.
+It is a per-ID helper/object table produced by `InitLayouts`.
+
+By the time the battle UI is fully initialized, every original slot is already null.
+This means RegisterLayout consumes/moves the helper during the first registration.
+
+Thus merely extending:
+
+- descriptor storage
+- helper pointer table
+- count
+
+is insufficient. ID7 also requires a newly-created **type 0x14 (20) helper object** matching the original four TrickSelectButton layouts.
+
+### Safe next step
+
+Do not call RegisterLayout with a null helper again.
+
+The next build dumps only the previously-unseen tail of:
+
+`CUIMaker::InitLayouts RVA 0x01D13E60, +0x240..+0x500`
+
+The goal is to isolate switch-case `type=0x14` and identify the exact helper constructor/builder invoked for button descriptors.
+
+After that, construct only the one ID7 helper and call RegisterLayout once.
+No existing ID0~6 registration is touched.
