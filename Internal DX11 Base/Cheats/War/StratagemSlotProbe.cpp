@@ -3903,9 +3903,20 @@ namespace DX11Base {
             !inner)
           return false;
 
-        const uint8_t side =
-            *reinterpret_cast<const uint8_t *>(inner + kSideOffset);
-        if (side > 1 || !ValidateInfo(inner, side))
+        // Dialog::Initialize is already about to consume Tricker entries.
+        // Do not wait for the older battle-info side/gauge fields to settle;
+        // validate only the Camp/Tricker structures required by ID5.
+        const uintptr_t modelBase = inner + 0xF0;
+        uint32_t count = 0;
+        uintptr_t campData = 0;
+        if (!IsValidPtr(modelBase + 0x10,
+                        5 * sizeof(StratagemFiveModel::Entry)) ||
+            !IsValidPtr(modelBase + 0x60, sizeof(count)) ||
+            !SafeCopySeh(modelBase + 0x60, &count, sizeof(count)) ||
+            count < 1 || count > 5 ||
+            !SafeReadPtrSeh(inner + 0x10, &campData) ||
+            !campData ||
+            !IsValidPtr(campData + 0x68, 5 * sizeof(uintptr_t)))
           return false;
 
         *outOwner = inner;
@@ -5185,59 +5196,15 @@ namespace DX11Base {
   }
 
   void ResetStratagemFiveBattleRuntime() {
-    // Same-game battles can reuse the same TrickCommandDialogLayout object.
-    // Manual metadata OFF->ON also keeps the registered sidecar and only hides
-    // it temporarily. Do the same here: never forget a still-live sidecar,
-    // otherwise the next battle can allocate/register a second ID5 button into
-    // the same layout and leave the old one as an empty shell.
+    // Every battle is a fresh ID5 generation. Hide the old physical sidecar
+    // while the layout is still potentially reachable, then forget every
+    // battle-local object/reference. Process-wide hooks and persistent ON
+    // requests remain installed and the next Layout/Dialog generation rebuilds
+    // everything from native state.
     SetFifthUiSidecarVisibleSeh(false);
-    g_fifthUiActiveLayout.store(0);
-    g_fifthUiActiveButton.store(0);
-    g_fifthRuntimeOriginalCount = 0;
+    AbandonStratagemFiveBattleRuntimeState();
 
-    g_attackInfo = 0;
-    g_defenseInfo = 0;
-
-    g_id5CountApplied = false;
-    g_id5CountAddr = 0;
-    g_id5CountOwner = 0;
-    g_id5CountOriginal = 0;
-    g_id5CountEntryIndex = UINT32_MAX;
-
-    g_fiveMetadataApplied = false;
-    g_fiveMetadataAddr = 0;
-    g_fiveMetadataTable = 0;
-    g_fiveRuntimeSlotApplied = false;
-    g_fiveRuntimeSlotAddr = 0;
-    g_fiveRuntimeSlotOriginal = 0;
-    g_fiveRuntimeOwner = 0;
-
-    // The dialog/model is battle-local even when the layout survives.
-    g_fifthUiModelCountAddr = 0;
-    g_fifthUiModelCountOriginal = 0;
-    g_fifthUiModelCountApplied = false;
-    g_fifthUiModelEntryAddr = 0;
-    g_fifthUiModelEntryOriginal[0] = 0;
-    g_fifthUiModelEntryOriginal[1] = 0;
-    g_fifthUiModelEntryApplied = false;
-
-    // Force the hooks to capture the next live dialog/layout before reuse.
-    // Keep g_fifthUiSidecarLayout/Button/Id7Registered and maker bookkeeping.
-    g_trickUiLayout = 0;
-    g_trickUiDialog = 0;
-    g_trickUiStartX = 0;
-    g_trickUiY = 0;
-    g_trickUiStep = 0;
-    g_lastLoggedUiLayout = 0;
-
-    g_fifthUiCompactLogged = false;
-    g_fifthUiResetSignalDumped = false;
-    g_fifthUiOnSelectRuntimeLogged = 0;
-    g_fifthUiOnSelectAnyHits = 0;
-    InterlockedExchange(&g_fifthUiCallbackIndex4Hits, 0);
-    g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
-
-    AddLog(u8"[책략5수명] 전투 종료 확정: Camp/dialog/model 상태 폐기, live sidecar/ID7 등록은 보존·숨김. ON 요청 유지.");
+    AddLog(u8"[책략5수명] 전투 종료 확정: ID5 battle-local 상태 전체 폐기(sidecar/ID7/maker/Camp/model/count/dialog/layout). 다음 전투에서 새로 적용.");
   }
 
   void ResetStratagemFiveSessionRuntime(uintptr_t oldP1,
