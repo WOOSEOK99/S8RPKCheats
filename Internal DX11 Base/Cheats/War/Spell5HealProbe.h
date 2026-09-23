@@ -7,6 +7,10 @@ namespace DX11Base {
   // keeps effect #20 only as a secondary healing candidate.
   bool SetSpell5HealProbe(bool enable);
 
+  // True only when the current game generation actually contains the verified
+  // ID5 TrickData record. A persistent ON request by itself is not "ready".
+  bool IsSpell5HealProbeReady();
+
   // Battle end reset. TrickData itself is game-generation data, so keep the
   // applied record but clear per-battle target/heal diagnostics.
   void ResetSpell5HealProbeBattleRuntime();
