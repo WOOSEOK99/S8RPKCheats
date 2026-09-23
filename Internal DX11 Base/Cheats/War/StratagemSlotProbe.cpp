@@ -4098,7 +4098,7 @@ namespace DX11Base {
       // Shrink the visible range first, then restore the synthetic entry.
       if(g_fifthUiModelCountApplied &&
          countAddr && IsValidPtr(countAddr,sizeof(uint32_t)) &&
-         *reinterpret_cast<const uint32_t *>(countAddr)==5) {
+         *reinterpret_cast<const uint32_t *>(countAddr)==countOriginal+1) {
         *reinterpret_cast<uint32_t *>(countAddr)=countOriginal;
       }
 
@@ -4388,156 +4388,156 @@ namespace DX11Base {
   }
 
 
+  static void PublishFifthUiForOriginalCountSeh(
+      uintptr_t dialog, uint32_t originalCount) {
+    const uintptr_t layout = g_trickUiLayout;
+
+    g_fifthRuntimeOriginalCount = originalCount;
+
+    // Native m_pButtons[4] is sufficient while N+1 <= 4. Only N==4 needs
+    // the external fifth physical button.
+    if (originalCount < 4) {
+      g_fifthUiActiveLayout.store(0);
+      g_fifthUiActiveButton.store(0);
+      SetFifthUiSidecarVisibleSeh(false);
+      return;
+    }
+
+    if (originalCount != 4 ||
+        !dialog || !layout ||
+        !ValidateFifthUiRegistrySeh(layout)) {
+      g_fifthUiActiveLayout.store(0);
+      g_fifthUiActiveButton.store(0);
+      SetFifthUiSidecarVisibleSeh(false);
+      return;
+    }
+
+    uintptr_t dialogLayout = 0;
+    if (!SafeReadPtrSeh(dialog + 0x08, &dialogLayout) ||
+        dialogLayout != layout)
+      return;
+
+    g_fifthUiActiveLayout.store(layout);
+    g_fifthUiActiveButton.store(g_fifthUiSidecarButton);
+    SetFifthUiSidecarVisibleSeh(true);
+    CompactFifthUiButtonsAfterResetSeh(layout);
+  }
+
   static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog) {
-    if(!dialog || !g_fiveRuntimeSlotApplied ||
-       !g_fiveMetadataAddr || !g_fiveMetadataTable)
+    if (!dialog || !g_fiveRuntimeSlotApplied ||
+        !g_fiveMetadataAddr || !g_fiveMetadataTable)
       return false;
 
     __try {
-      uintptr_t holder=0, inner=0;
-      if(!SafeReadPtrSeh(dialog+0x20,&holder) ||
-         !holder || !IsValidPtr(holder,sizeof(uintptr_t)) ||
-         !SafeReadPtrSeh(holder,&inner) ||
-         !inner || !IsValidPtr(inner+0xF0,0x80)) {
-        AddLog(u8"[책략5UIMODEL] dialog model 포인터 확인 실패: dialog=%p holder=%p inner=%p",
+      uintptr_t holder = 0;
+      uintptr_t inner = 0;
+      if (!SafeReadPtrSeh(dialog + 0x20, &holder) ||
+          !holder || !IsValidPtr(holder, sizeof(uintptr_t)) ||
+          !SafeReadPtrSeh(holder, &inner) ||
+          !inner || inner != g_fiveRuntimeOwner) {
+        AddLog(u8"[책략5UIMODEL] 현재 dialog owner 확인 실패: dialog=%p holder=%p inner=%p expected=%p",
                reinterpret_cast<void *>(dialog),
                reinterpret_cast<void *>(holder),
+               reinterpret_cast<void *>(inner),
+               reinterpret_cast<void *>(g_fiveRuntimeOwner));
+        return false;
+      }
+
+      StratagemFiveModel::Plan plan{};
+      StratagemFiveModel::Entry entries[5] = {};
+      uintptr_t campRows[5] = {};
+      uintptr_t modelBase = 0;
+      uintptr_t tricksAddr = 0;
+      if (!TryReadFifthPlanForOwnerSeh(
+              inner, &plan, &entries, &campRows,
+              &modelBase, &tricksAddr)) {
+        AddLog(u8"[책략5UIMODEL] 가변 N model/Camp 계획 검증 실패: owner=%p",
                reinterpret_cast<void *>(inner));
         return false;
       }
 
-      const uintptr_t base=inner+0xF0;
-      uint32_t count=0;
-      uint64_t entry[10]={};
-      if(!SafeCopySeh(base+0x60,&count,sizeof(count)) ||
-         !SafeCopySeh(base+0x10,entry,sizeof(entry))) {
-        AddLog(u8"[책략5UIMODEL] model 읽기 실패: base=%p",
-               reinterpret_cast<void *>(base));
+      if (plan.originalCount < 1 || plan.originalCount > 4) {
+        AddLog(u8"[책략5UIMODEL] 원본 책략 N 범위 오류: %u",
+               (unsigned)plan.originalCount);
         return false;
       }
 
-      AddLog(u8"[책략5UIMODEL] base=%p count=%u",
-             reinterpret_cast<void *>(base),(unsigned)count);
-      for(int n=0;n<5;++n){
-        AddLog(u8"[책략5UIMODEL] entry%d=%016llX %016llX",
-               n,
-               (unsigned long long)entry[n*2+0],
-               (unsigned long long)entry[n*2+1]);
-      }
+      const uintptr_t entryAddr =
+          modelBase + 0x10 +
+          static_cast<uintptr_t>(plan.originalCount) *
+              sizeof(StratagemFiveModel::Entry);
+      const uintptr_t countAddr = modelBase + 0x60;
 
-      if(count==5) {
-        AddLog(u8"[책략5UIMODEL] count는 이미 5입니다. 추가 쓰기 없음.");
+      if (plan.alreadyPresent) {
+        g_fifthRuntimeOriginalCount = plan.originalCount;
+        PublishFifthUiForOriginalCountSeh(dialog, plan.originalCount);
+        AddLog(u8"[책략5UIMODEL] ID5가 이미 마지막 entry에 존재: N=%u total=%u entry=%u",
+               (unsigned)plan.originalCount,
+               (unsigned)(plan.originalCount + 1),
+               (unsigned)plan.originalCount);
         return true;
       }
 
-      if(count!=4) {
-        AddLog(u8"[책략5UIMODEL] 예상하지 않은 count=%u. 쓰기 중단.",
-               (unsigned)count);
+      if (!IsValidPtr(entryAddr, sizeof(StratagemFiveModel::Entry)) ||
+          !IsValidPtr(countAddr, sizeof(uint32_t))) {
+        AddLog(u8"[책략5UIMODEL] 가변 entry/count 쓰기 대상 범위 무효: N=%u",
+               (unsigned)plan.originalCount);
         return false;
       }
 
-      // The four live entries must exactly match native TrickData rows 1..4.
-      // Their second qword must also follow the observed {high=1, low=index}
-      // pattern. This is intentionally stricter than merely checking pointers.
-      constexpr uintptr_t kNativeTrickStride=0x20;
-      uint32_t commonHigh=0;
-      for(int n=0;n<4;++n) {
-        const uintptr_t p=static_cast<uintptr_t>(entry[n*2]);
-        const uintptr_t expected=
-            g_fiveMetadataTable + static_cast<uintptr_t>(n)*kNativeTrickStride;
-        const uint32_t low=static_cast<uint32_t>(entry[n*2+1] & 0xFFFFFFFFull);
-        const uint32_t high=static_cast<uint32_t>(entry[n*2+1] >> 32);
+      g_fifthUiModelEntryAddr = entryAddr;
+      std::memcpy(g_fifthUiModelEntryOriginal,
+                  &plan.before,
+                  sizeof(plan.before));
+      g_fifthUiModelEntryApplied = true;
+      g_fifthUiModelCountAddr = countAddr;
+      g_fifthUiModelCountOriginal = plan.originalCount;
+      g_fifthUiModelCountApplied = true;
 
-        if(p!=expected || low!=static_cast<uint32_t>(n)) {
-          AddLog(u8"[책략5UIMODEL] entry%d 패턴 불일치: ptr=%p expected=%p low=%u",
-                 n,
-                 reinterpret_cast<void *>(p),
-                 reinterpret_cast<void *>(expected),
-                 (unsigned)low);
-          return false;
-        }
+      auto *entry =
+          reinterpret_cast<StratagemFiveModel::Entry *>(entryAddr);
+      *entry = plan.added;
+      *reinterpret_cast<uint32_t *>(countAddr) =
+          plan.originalCount + 1;
 
-        if(n==0) {
-          commonHigh=high;
-          if(commonHigh!=1) {
-            AddLog(u8"[책략5UIMODEL] entry 공통 상위값이 예상 1이 아닙니다: %u. 쓰기 중단.",
-                   (unsigned)commonHigh);
-            return false;
-          }
-        } else if(high!=commonHigh) {
-          AddLog(u8"[책략5UIMODEL] entry%d 상위값 불일치: %u vs %u. 쓰기 중단.",
-                 n,(unsigned)high,(unsigned)commonHigh);
-          return false;
-        }
-      }
+      StratagemFiveModel::Entry verify{};
+      uint32_t verifyCount = 0;
+      if (!SafeCopySeh(entryAddr, &verify, sizeof(verify)) ||
+          !SafeCopySeh(countAddr, &verifyCount, sizeof(verifyCount)) ||
+          verify.data != plan.added.data ||
+          verify.index != plan.added.index ||
+          verify.available != plan.added.available ||
+          verifyCount != plan.originalCount + 1) {
+        *reinterpret_cast<uint32_t *>(countAddr) =
+            plan.originalCount;
+        std::memcpy(reinterpret_cast<void *>(entryAddr),
+                    &plan.before, sizeof(plan.before));
 
-      // Latest live result showed the fifth physical record already default-
-      // initialized as {nullptr, 0x00000001'00000000}. Only that exact state
-      // is eligible for this one-shot synthetic-entry test.
-      const uintptr_t p5=static_cast<uintptr_t>(entry[8]);
-      const uint32_t fifthLow=static_cast<uint32_t>(entry[9] & 0xFFFFFFFFull);
-      const uint32_t fifthHigh=static_cast<uint32_t>(entry[9] >> 32);
-      if(p5!=0 || fifthLow!=0 || fifthHigh!=commonHigh) {
-        AddLog(u8"[책략5UIMODEL] entry4 기본상태 불일치: ptr=%p high=%u low=%u. 쓰기 중단.",
-               reinterpret_cast<void *>(p5),
-               (unsigned)fifthHigh,
-               (unsigned)fifthLow);
+        g_fifthUiModelCountAddr = 0;
+        g_fifthUiModelCountOriginal = 0;
+        g_fifthUiModelCountApplied = false;
+        g_fifthUiModelEntryAddr = 0;
+        g_fifthUiModelEntryOriginal[0] = 0;
+        g_fifthUiModelEntryOriginal[1] = 0;
+        g_fifthUiModelEntryApplied = false;
+
+        AddLog(u8"[책략5UIMODEL] 가변 ID5 entry/count 검증 실패. 즉시 원복.");
         return false;
       }
 
-      const uintptr_t row5=g_fiveMetadataAddr;
-      const uintptr_t entryAddr=base+0x50;
-      const uintptr_t countAddr=base+0x60;
-      const uint64_t newSecond=
-          (static_cast<uint64_t>(commonHigh)<<32) | 4ull;
+      g_fifthRuntimeOriginalCount = plan.originalCount;
+      PublishFifthUiForOriginalCountSeh(dialog, plan.originalCount);
 
-      if(!row5 ||
-         !IsValidPtr(row5,sizeof(uintptr_t)) ||
-         !IsValidPtr(entryAddr,2*sizeof(uint64_t)) ||
-         !IsValidPtr(countAddr,sizeof(uint32_t))) {
-        AddLog(u8"[책략5UIMODEL] 합성 entry 쓰기 대상 범위 무효. 쓰기 중단.");
-        return false;
-      }
-
-      g_fifthUiModelEntryAddr=entryAddr;
-      g_fifthUiModelEntryOriginal[0]=entry[8];
-      g_fifthUiModelEntryOriginal[1]=entry[9];
-      g_fifthUiModelEntryApplied=true;
-      g_fifthUiModelCountAddr=countAddr;
-      g_fifthUiModelCountOriginal=4;
-      g_fifthUiModelCountApplied=true;
-
-      auto *fifth=reinterpret_cast<uint64_t *>(entryAddr);
-      fifth[0]=static_cast<uint64_t>(row5);
-      fifth[1]=newSecond;
-      *reinterpret_cast<uint32_t *>(countAddr)=5;
-
-      if(fifth[0]!=static_cast<uint64_t>(row5) ||
-         fifth[1]!=newSecond ||
-         *reinterpret_cast<const uint32_t *>(countAddr)!=5) {
-        *reinterpret_cast<uint32_t *>(countAddr)=4;
-        fifth[0]=g_fifthUiModelEntryOriginal[0];
-        fifth[1]=g_fifthUiModelEntryOriginal[1];
-
-        g_fifthUiModelCountAddr=0;
-        g_fifthUiModelCountOriginal=0;
-        g_fifthUiModelCountApplied=false;
-        g_fifthUiModelEntryAddr=0;
-        g_fifthUiModelEntryOriginal[0]=0;
-        g_fifthUiModelEntryOriginal[1]=0;
-        g_fifthUiModelEntryApplied=false;
-
-        AddLog(u8"[책략5UIMODEL] 합성 fifth entry/count 쓰기 검증 실패. 즉시 원복.");
-        return false;
-      }
-
-      AddLog(u8"[책략5UIMODEL] 합성 fifth entry 적용 성공: entry4={row5=%p, high=%u, index=4} count 4->5",
-             reinterpret_cast<void *>(row5),
-             (unsigned)commonHigh);
-      AddLog(u8"[책략5UIMODEL] 이번 테스트는 기존 4개 entry의 정확한 row/index 패턴이 모두 일치할 때만 적용됩니다.");
+      AddLog(u8"[책략5UIMODEL] 가변 ID5 합성 성공: N=%u -> total=%u / entry%u row5=%p index=%u available=1 / campSlot=%u",
+             (unsigned)plan.originalCount,
+             (unsigned)(plan.originalCount + 1),
+             (unsigned)plan.originalCount,
+             reinterpret_cast<void *>(plan.added.data),
+             (unsigned)plan.added.index,
+             (unsigned)plan.campSlot);
       return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-      AddLog(u8"[책략5UIMODEL] 합성 fifth entry 적용 중 예외. 테스트 중단.");
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      AddLog(u8"[책략5UIMODEL] 가변 ID5 entry 적용 중 예외. 쓰기 중단.");
       return false;
     }
   }
