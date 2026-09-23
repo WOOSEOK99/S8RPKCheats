@@ -470,6 +470,47 @@ namespace DX11Base {
           SaveConfig();
         }
 
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, 60, scale);
+        ImGui::SameLine(160 * scale);
+        if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
+          NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
+          SaveConfig();
+        }
+
+        bool allJewelsOpen = DX11Base::IsAllJewelsOpenPreferred();
+        if (ImGui::Checkbox(u8"보주 전체 개방", &allJewelsOpen)) {
+          if (DX11Base::SetAllJewelsOpen(allJewelsOpen)) {
+            DX11Base::AddNotification(allJewelsOpen ? u8"보주 전체 개방 ON" : u8"보주 전체 개방 OFF");
+            SaveConfig();
+          }
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 보주가 개방됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
+        ImGui::SameLine(160 * scale);
+        if (ImGui::Checkbox(u8"보조 보주 모두 사용", &allSecondaryJewels)) {
+          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels)) {
+            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 모두 사용 ON"
+                                                         : u8"보조 보주 모두 사용 OFF");
+            SaveConfig();
+          }
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 보주를 사용할수 있도록 설정합니다.");
+          ImGui::EndTooltip();
+        }
+
         EndSection();
 
         BeginSection();
@@ -623,49 +664,6 @@ namespace DX11Base {
         EndSection(); // 평정 및 진급
       }
 
-      BeginSection();
-
-      if (p1 != 0) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
-        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, 60, scale);
-        ImGui::SameLine(160 * scale);
-        if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
-          NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
-          SaveConfig();
-        }
-
-        bool allJewelsOpen = DX11Base::IsAllJewelsOpenPreferred();
-        if (ImGui::Checkbox(u8"보주 전체 개방", &allJewelsOpen)) {
-          if (DX11Base::SetAllJewelsOpen(allJewelsOpen)) {
-            DX11Base::AddNotification(allJewelsOpen ? u8"보주 전체 개방 ON" : u8"보주 전체 개방 OFF");
-            SaveConfig();
-          }
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"모든 보주가 개방됩니다.");
-          ImGui::EndTooltip();
-        }
-
-        bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
-        ImGui::SameLine(160 * scale);
-        if (ImGui::Checkbox(u8"보조 보주 모두 사용", &allSecondaryJewels)) {
-          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels)) {
-            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 모두 사용 ON"
-                                                         : u8"보조 보주 모두 사용 OFF");
-            SaveConfig();
-          }
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"모든 보주를 사용할수 있도록 설정합니다.");
-          ImGui::EndTooltip();
-        }
-      }
-
-      EndSection(); // 보주 설정
     }
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
