@@ -3379,9 +3379,15 @@ namespace DX11Base {
         if (side > 1 || !ValidateInfo(inner, side))
           return false;
 
-        uintptr_t &target = (side == 0) ? g_attackInfo : g_defenseInfo;
-        if (target != inner) {
-          target = inner;
+        const uintptr_t current =
+            (side == 0) ? static_cast<uintptr_t>(g_attackInfo)
+                        : static_cast<uintptr_t>(g_defenseInfo);
+        if (current != inner) {
+          if (side == 0)
+            g_attackInfo = inner;
+          else
+            g_defenseInfo = inner;
+
           AddLog(u8"[책략5수명] dialog runtime model에서 현재 %s Camp::Impl 재캡처: %p",
                  side == 0 ? u8"공격측" : u8"수비측",
                  reinterpret_cast<void *>(inner));
