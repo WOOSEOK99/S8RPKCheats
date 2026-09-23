@@ -352,28 +352,23 @@ namespace DX11Base {
         if (!exeBase)
           return false;
 
-        constexpr uintptr_t kInitLayoutsRva = 0x01D13E60;
+        constexpr uintptr_t kMemoryManagerGetterRva = 0x00014ED0;
         constexpr uintptr_t kLookupLayoutRva = 0x01D15440;
         constexpr uintptr_t kRegisterLayoutRva = 0x01D16AA0;
 
-        static const uint8_t initExpected[] =
-            {0x4C,0x89,0x4C,0x24,0x20,0x55};
         static const uint8_t lookupExpected[] =
             {0x48,0x89,0x5C,0x24,0x08};
         static const uint8_t regExpected[] =
             {0x48,0x89,0x6C,0x24,0x18,0x56};
 
         stage = 1;
-        if (!IsValidPtr(exeBase + kInitLayoutsRva, sizeof(initExpected)) ||
-            !IsValidPtr(exeBase + kLookupLayoutRva, sizeof(lookupExpected)) ||
+        if (!IsValidPtr(exeBase + kLookupLayoutRva, sizeof(lookupExpected)) ||
             !IsValidPtr(exeBase + kRegisterLayoutRva, sizeof(regExpected)) ||
-            std::memcmp(reinterpret_cast<const void *>(exeBase + kInitLayoutsRva),
-                        initExpected, sizeof(initExpected)) != 0 ||
             std::memcmp(reinterpret_cast<const void *>(exeBase + kLookupLayoutRva),
                         lookupExpected, sizeof(lookupExpected)) != 0 ||
             std::memcmp(reinterpret_cast<const void *>(exeBase + kRegisterLayoutRva),
                         regExpected, sizeof(regExpected)) != 0) {
-          AddLog(u8"[책략5UITEST] CUIMaker 함수 빌드 가드 불일치. registry 확장 중단.");
+          AddLog(u8"[책략5UITEST] CUIMaker lookup/register 빌드 가드 불일치.");
           return false;
         }
 
@@ -404,13 +399,13 @@ namespace DX11Base {
           return false;
 
         using LookupLayoutFn = uintptr_t(__fastcall *)(uintptr_t, int);
-        using InitLayoutsFn = void(__fastcall *)(uintptr_t, const void *, int, uintptr_t);
         using RegisterLayoutFn = void(__fastcall *)(uintptr_t, int, uintptr_t, int);
+        using GetMemoryManagerFn = uintptr_t(__fastcall *)();
+        using GameAllocFn = uintptr_t(__fastcall *)(uintptr_t, size_t, void *);
+        using SetXYFn = void(__fastcall *)(uintptr_t, int, int);
 
         const auto lookup =
             reinterpret_cast<LookupLayoutFn>(exeBase + kLookupLayoutRva);
-        const auto initLayouts =
-            reinterpret_cast<InitLayoutsFn>(exeBase + kInitLayoutsRva);
         const auto registerLayout =
             reinterpret_cast<RegisterLayoutFn>(exeBase + kRegisterLayoutRva);
 
@@ -431,24 +426,15 @@ namespace DX11Base {
             !id6Control ||
             registered[6] != id6Control) {
           AddLog(u8"[책략5UITEST] registry lookup 검증 실패: id2..5/button 또는 id6 불일치.");
-          AddLog(u8"[책략5UITEST] lookup=%p,%p,%p,%p,%p,%p,%p",
-                 reinterpret_cast<void *>(registered[0]),
-                 reinterpret_cast<void *>(registered[1]),
-                 reinterpret_cast<void *>(registered[2]),
-                 reinterpret_cast<void *>(registered[3]),
-                 reinterpret_cast<void *>(registered[4]),
-                 reinterpret_cast<void *>(registered[5]),
-                 reinterpret_cast<void *>(registered[6]));
           return false;
         }
 
+        // Clone the already-proven 7 descriptors; never call InitLayouts again.
         alignas(16) uint8_t descriptors[8 * 0x60] = {};
         stage = 4;
         std::memcpy(descriptors,
                     reinterpret_cast<const void *>(descBase),
                     7 * 0x60);
-
-        // ID7 starts from the proven button descriptor (UI ID5).
         std::memcpy(descriptors + 7 * 0x60,
                     descriptors + 5 * 0x60,
                     0x60);
@@ -459,8 +445,6 @@ namespace DX11Base {
         if (oldStep <= 0)
           return false;
 
-        // Keep the old four-button row center, but compress five buttons into
-        // almost the same horizontal span. 280 -> 220 on the confirmed build.
         const int compactStep = (oldStep * 11) / 14;
         const int oldCenter = oldStart + (oldStep * 3) / 2;
         const int compactStart = oldCenter - compactStep * 2;
@@ -495,27 +479,15 @@ namespace DX11Base {
             if (v != y)
               yMatch = false;
           }
-          if (xMatch)
-            xField = field;
-          if (yMatch)
-            yField = field;
+          if (xMatch) xField = field;
+          if (yMatch) yField = field;
         }
 
         if (xField < 0 || yField < 0) {
-          AddLog(u8"[책략5UITEST] descriptor 좌표 필드 자동 검증 실패. registry 쓰기 중단.");
-          for (int id = 2; id <= 5; ++id) {
-            int32_t a=0,b=0,c=0,d=0;
-            std::memcpy(&a, descriptors + id*0x60 + 0x04, 4);
-            std::memcpy(&b, descriptors + id*0x60 + 0x08, 4);
-            std::memcpy(&c, descriptors + id*0x60 + 0x0C, 4);
-            std::memcpy(&d, descriptors + id*0x60 + 0x10, 4);
-            AddLog(u8"[책략5UITEST] desc%d +4/+8/+C/+10 = %d/%d/%d/%d",
-                   id, a,b,c,d);
-          }
+          AddLog(u8"[책략5UITEST] descriptor 좌표 필드 검증 실패. registry 쓰기 중단.");
           return false;
         }
 
-        // Repack existing four buttons and the new ID7 descriptor.
         for (int i = 0; i < 4; ++i) {
           std::memcpy(descriptors + (i + 2) * 0x60 + xField,
                       &compactX[i], sizeof(compactX[i]));
@@ -538,40 +510,72 @@ namespace DX11Base {
             types[4] != 0x14 ||
             types[5] != 0x14 ||
             types[7] != 0x14) {
-          AddLog(u8"[책략5UITEST] 버튼 descriptor type 검증 실패: %d/%d/%d/%d/%d",
-                 types[2], types[3], types[4], types[5], types[7]);
+          AddLog(u8"[책략5UITEST] 버튼 descriptor type 검증 실패.");
           return false;
         }
 
-        // IMPORTANT: do not re-initialize the live maker in place.
-        // Build a fresh 8-slot maker off to the side, fully validate it,
-        // then atomically swap only its 0x28-byte state into layout+0x140.
-        alignas(16) uint8_t tempMakerStorage[0x40] = {};
+        // Use the same game allocator, but construct only the two CUIMaker
+        // storage blocks that RegisterLayout actually needs.
+        stage = 5;
+        const auto getMemoryManager =
+            reinterpret_cast<GetMemoryManagerFn>(
+                exeBase + kMemoryManagerGetterRva);
+        const uintptr_t memoryManager = getMemoryManager();
+        if (!memoryManager ||
+            !IsValidPtr(memoryManager + 0x118, sizeof(uintptr_t)))
+          return false;
+
+        const uintptr_t allocator =
+            *reinterpret_cast<const uintptr_t *>(memoryManager + 0x118);
+        if (!allocator || !IsValidPtr(allocator, sizeof(uintptr_t)))
+          return false;
+
+        const uintptr_t allocatorVtable =
+            *reinterpret_cast<const uintptr_t *>(allocator);
+        if (!allocatorVtable ||
+            !IsValidPtr(allocatorVtable + 0x28, sizeof(uintptr_t)))
+          return false;
+
+        const uintptr_t allocAddr =
+            *reinterpret_cast<const uintptr_t *>(allocatorVtable + 0x28);
+        if (!allocAddr || !IsValidPtr(allocAddr, 1))
+          return false;
+
+        struct AllocTag {
+          uint32_t tag;
+          uint32_t reserved;
+          uintptr_t context;
+        };
+        AllocTag allocTag{0x37u, 0u, 0u};
+
+        const auto allocFn =
+            reinterpret_cast<GameAllocFn>(allocAddr);
+
+        const uintptr_t newDesc =
+            allocFn(allocator, 8 * 0x60, &allocTag);
+        const uintptr_t newPointers =
+            allocFn(allocator, 8 * sizeof(uintptr_t), &allocTag);
+
+        if (!newDesc || !newPointers ||
+            !IsValidPtr(newDesc, 8 * 0x60) ||
+            !IsValidPtr(newPointers, 8 * sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UITEST] 새 registry storage 할당 실패.");
+          return false;
+        }
+
+        std::memcpy(reinterpret_cast<void *>(newDesc),
+                    descriptors, sizeof(descriptors));
+        std::memset(reinterpret_cast<void *>(newPointers),
+                    0, 8 * sizeof(uintptr_t));
+
+        alignas(16) uint8_t tempMakerStorage[0x28] = {};
         const uintptr_t tempMaker =
             reinterpret_cast<uintptr_t>(tempMakerStorage);
-
-        stage = 5;
-        AddLog(u8"[책략5UITEST] registry 임시 8칸 생성 시작: compact=%d,%d,%d,%d,%d y=%d",
-               compactX[0], compactX[1], compactX[2],
-               compactX[3], compactX[4], y);
-        initLayouts(tempMaker, descriptors, 8, layout);
-
-        uint32_t tempCount = 0;
-        uintptr_t tempDesc = 0;
-        uintptr_t tempPointers = 0;
-        uintptr_t tempOwner = 0;
-        if (!SafeReadPtrSeh(tempMaker + 0x00, &tempDesc) ||
-            !SafeReadPtrSeh(tempMaker + 0x08, &tempPointers) ||
-            !SafeCopySeh(tempMaker + 0x10, &tempCount, sizeof(tempCount)) ||
-            !SafeReadPtrSeh(tempMaker + 0x18, &tempOwner) ||
-            tempCount != 8 ||
-            tempOwner != layout ||
-            !tempDesc || !tempPointers ||
-            !IsValidPtr(tempDesc, 8 * 0x60) ||
-            !IsValidPtr(tempPointers, 8 * sizeof(uintptr_t))) {
-          AddLog(u8"[책략5UITEST] 임시 CUIMaker 8칸 생성 검증 실패.");
-          return false;
-        }
+        *reinterpret_cast<uintptr_t *>(tempMaker + 0x00) = newDesc;
+        *reinterpret_cast<uintptr_t *>(tempMaker + 0x08) = newPointers;
+        *reinterpret_cast<uint32_t *>(tempMaker + 0x10) = 8;
+        *reinterpret_cast<uintptr_t *>(tempMaker + 0x18) = layout;
+        *reinterpret_cast<uint32_t *>(tempMaker + 0x20) = 0;
 
         stage = 6;
         for (int id = 0; id < 7; ++id) {
@@ -581,7 +585,8 @@ namespace DX11Base {
         }
 
         stage = 7;
-        registerLayout(tempMaker, 7, g_fifthUiSidecarButton, types[7]);
+        registerLayout(tempMaker, 7,
+                       g_fifthUiSidecarButton, types[7]);
 
         stage = 8;
         const uintptr_t check7 = lookup(tempMaker, 7);
@@ -625,9 +630,37 @@ namespace DX11Base {
           return false;
         }
 
+        // Move actual control objects too; descriptor changes alone do not
+        // reposition already-created controls.
+        stage = 10;
+        for (int i = 0; i < 4; ++i) {
+          const uintptr_t button = buttons[i];
+          if (!button || !IsValidPtr(button, sizeof(uintptr_t)))
+            continue;
+          const uintptr_t vt =
+              *reinterpret_cast<const uintptr_t *>(button);
+          if (!vt || !IsValidPtr(vt + 0x90, sizeof(uintptr_t)))
+            continue;
+          const uintptr_t setPos =
+              *reinterpret_cast<const uintptr_t *>(vt + 0x90);
+          if (setPos && IsValidPtr(setPos, 1))
+            reinterpret_cast<SetXYFn>(setPos)(
+                button, compactX[i], y);
+        }
+
+        const uintptr_t sidecarVt =
+            *reinterpret_cast<const uintptr_t *>(g_fifthUiSidecarButton);
+        if (sidecarVt &&
+            IsValidPtr(sidecarVt + 0x90, sizeof(uintptr_t))) {
+          const uintptr_t setPos =
+              *reinterpret_cast<const uintptr_t *>(sidecarVt + 0x90);
+          if (setPos && IsValidPtr(setPos, 1))
+            reinterpret_cast<SetXYFn>(setPos)(
+                g_fifthUiSidecarButton, compactX[4], y);
+        }
+
         g_fifthUiMakerExpanded = true;
-        AddLog(u8"[책략5UITEST] CUIMaker 7->8 교체 및 ID7 등록 성공: button=%p",
-               reinterpret_cast<void *>(g_fifthUiSidecarButton));
+        AddLog(u8"[책략5UITEST] CUIMaker 7->8 수동 확장 및 ID7 등록 성공.");
         AddLog(u8"[책략5UITEST] 5버튼 압축 배치 적용: x=%d,%d,%d,%d,%d y=%d",
                compactX[0], compactX[1], compactX[2],
                compactX[3], compactX[4], y);
@@ -643,7 +676,7 @@ namespace DX11Base {
         }
         g_fifthUiMakerExpanded = false;
         g_fifthUiMakerAddr = 0;
-        AddLog(u8"[책략5UITEST] registry 확장 중 예외 발생: stage=%d. live maker는 기존 상태 유지/복귀.",
+        AddLog(u8"[책략5UITEST] registry 수동 확장 중 예외: stage=%d. 기존 상태 유지/복귀.",
                (int)stage);
         return false;
       }

@@ -1027,3 +1027,60 @@ y = 364
 프레임/이미지가 실제로 겹치는지는 ID7 등록 성공 후 화면으로 확인한다.
 겹칠 경우 다음 단계에서 `TrickSelectButton`의 실제 scale/size setter를 찾아
 5개 버튼만 동일 비율로 축소한다.
+
+
+---
+
+## 22. 2026-09-23 stage=5 원인 확정: InitLayouts 재호출 폐기
+
+압축 배치 버전 실게임 로그:
+
+```text
+표시 전용 sidecar 생성 성공: x=1266
+registry 임시 8칸 생성 시작
+registry 확장 중 예외: stage=5
+```
+
+stage=5는 정확히 임시 maker에 `CUIMaker::InitLayouts(...,8,...)`를 호출하는 단계다.
+
+따라서 `InitLayouts`는 단순히 `maker+0/+8/+10/+18`만 채우는 함수가 아니라
+원래 UI 생성 컨텍스트/추가 상태를 전제로 하는 함수로 취급하고,
+**런타임에서 재호출하지 않는다.**
+
+### 새 방식
+
+이미 정상 생성된 live maker에서 필요한 데이터는 이미 모두 존재한다.
+
+- descriptor storage: 7 * 0x60
+- pointer storage: 7 * 8
+- count=7
+- owner=layout
+- 기존 ID0~6 control lookup 가능
+
+따라서:
+
+1. 게임 allocator로 새 descriptor storage `8*0x60` 직접 할당
+2. 기존 7 descriptor 복사
+3. ID7은 ID5 버튼 descriptor clone + 새 좌표 적용
+4. 새 pointer storage `8*8` 직접 할당 후 zero
+5. 임시 maker 0x28 bytes를 수동 구성:
+   - +00=new descriptors
+   - +08=new pointers
+   - +10=8
+   - +18=layout
+   - +20=0
+6. 기존 ID0~6을 `RegisterLayout`로 재등록
+7. sidecar를 ID7로 등록
+8. lookup(7) 및 button id/state 검증
+9. 성공 후에만 live maker의 0x28-byte state 교체
+
+즉 더 이상 `InitLayouts`를 호출하지 않는다.
+
+또 descriptor 좌표 변경만으로 이미 만들어진 버튼은 이동하지 않으므로
+기존 4개와 sidecar 모두 virtual set-position(+0x90)을 호출해:
+
+```text
+386, 606, 826, 1046, 1266 / y=364
+```
+
+으로 실제 객체 위치도 압축 배치한다.
