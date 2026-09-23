@@ -41,7 +41,63 @@ namespace DX11Base {
     constexpr uintptr_t kUnitYOffset = 0x4C;
     constexpr uintptr_t kUnitMoraleOffset = 0x80;
     constexpr uintptr_t kUnitStateOffset = 0x238;
-    constexpr uint16_t kSpell5HealAmount = 2000;
+    static Spell5CustomSettings g_customSettings{};
+
+    static int ClampInt(int value, int lo, int hi) {
+      return value < lo ? lo : (value > hi ? hi : value);
+    }
+
+    static int NormalizeEffect(int effect) {
+      switch (effect) {
+      case 0:
+      case 3:
+      case 10:
+      case 11:
+      case 12:
+        return effect;
+      default:
+        return 0;
+      }
+    }
+
+    static Spell5CustomSettings NormalizeSettings(Spell5CustomSettings v) {
+      v.target = ClampInt(v.target, 1, 3);
+      v.effect1 = NormalizeEffect(v.effect1);
+      v.effect2 = NormalizeEffect(v.effect2);
+      v.power1 = ClampInt(v.power1, -32768, 32767);
+      v.power2 = ClampInt(v.power2, -32768, 32767);
+      v.duration1 = ClampInt(v.duration1, 0, 30);
+      v.duration2 = ClampInt(v.duration2, 0, 30);
+      v.range = ClampInt(v.range, 1, 100);
+      v.healAmount = ClampInt(v.healAmount, 0, 65535);
+      return v;
+    }
+
+    static bool RecordMatchesSettings(const SpellRecord &cur) {
+      const Spell5CustomSettings s = g_customSettings;
+      return cur.code1 == 5 && cur.code2 == 5 && cur.code3 == 5 &&
+             cur.target == s.target &&
+             cur.effect1 == s.effect1 && cur.power1 == s.power1 &&
+             cur.duration1 == s.duration1 &&
+             cur.effect2 == s.effect2 && cur.power2 == s.power2 &&
+             cur.duration2 == s.duration2 &&
+             cur.range == s.range;
+    }
+
+    static void ApplySettingsToRecord(SpellRecord &clone) {
+      const Spell5CustomSettings s = g_customSettings;
+      clone.code1 = 5;
+      clone.code2 = 5;
+      clone.code3 = 5;
+      clone.target = static_cast<int16_t>(s.target);
+      clone.effect1 = static_cast<int16_t>(s.effect1);
+      clone.power1 = static_cast<int16_t>(s.power1);
+      clone.duration1 = static_cast<int16_t>(s.duration1);
+      clone.effect2 = static_cast<int16_t>(s.effect2);
+      clone.power2 = static_cast<int16_t>(s.power2);
+      clone.duration2 = static_cast<int16_t>(s.duration2);
+      clone.range = static_cast<int16_t>(s.range);
+    }
 
     struct UnitDiagSnapshot {
       uintptr_t unit = 0;
@@ -155,11 +211,7 @@ namespace DX11Base {
         IsValidPtr(spell5, sizeof(SpellRecord))) {
       const SpellRecord *cur =
           reinterpret_cast<const SpellRecord *>(spell5);
-      if (cur->code1 == 5 && cur->code2 == 5 && cur->code3 == 5 &&
-          cur->target == 1 &&
-          cur->effect1 == 10 && cur->power1 == 40 &&
-          cur->effect2 == 0 && cur->power2 == 0 &&
-          cur->range == 5)
+      if (RecordMatchesSettings(*cur))
         return true;
     }
 
@@ -179,17 +231,7 @@ namespace DX11Base {
     std::memcpy(&clone,
                 reinterpret_cast<const void *>(spell2),
                 sizeof(clone));
-    clone.code1 = 5;
-    clone.code2 = 5;
-    clone.code3 = 5;
-    clone.target = 1;
-    clone.effect1 = 10;
-    clone.power1 = 40;
-    clone.duration1 = 0;
-    clone.effect2 = 0;
-    clone.power2 = 0;
-    clone.duration2 = 0;
-    clone.range = 5;
+    ApplySettingsToRecord(clone);
 
     if (!WriteRecord(spell5, clone))
       return false;
@@ -198,6 +240,32 @@ namespace DX11Base {
     g_applied = true;
     ResetDiagnostics();
     return true;
+  }
+
+  Spell5CustomSettings GetSpell5CustomSettings() {
+    return g_customSettings;
+  }
+
+  void SetSpell5CustomSettings(const Spell5CustomSettings &settings) {
+    const Spell5CustomSettings normalized = NormalizeSettings(settings);
+    g_customSettings = normalized;
+
+    if (g_applied && g_spell5Addr &&
+        IsValidPtr(g_spell5Addr, sizeof(SpellRecord))) {
+      SpellRecord updated =
+          *reinterpret_cast<const SpellRecord *>(g_spell5Addr);
+      ApplySettingsToRecord(updated);
+      if (WriteRecord(g_spell5Addr, updated)) {
+        ResetDiagnostics();
+        AddLog(u8"[책략5설정] 즉시 반영: 대상=%d 효과1=%d/%d/%d 효과2=%d/%d/%d 범위=%d 추가병력=%d",
+               normalized.target,
+               normalized.effect1, normalized.power1, normalized.duration1,
+               normalized.effect2, normalized.power2, normalized.duration2,
+               normalized.range, normalized.healAmount);
+      } else {
+        AddLog(u8"[책략5설정] 현재 ID5 레코드 즉시 반영 실패. 다음 재적용 때 반영됩니다.");
+      }
+    }
   }
 
   bool SetSpell5HealProbeFromMetadataTable(uintptr_t metadataTable) {
@@ -228,11 +296,7 @@ namespace DX11Base {
             IsValidPtr(expectedAddr, sizeof(SpellRecord))) {
           const SpellRecord *cur =
               reinterpret_cast<const SpellRecord *>(expectedAddr);
-          if (cur->code1 == 5 && cur->code2 == 5 && cur->code3 == 5 &&
-              cur->target == 1 &&
-              cur->effect1 == 10 && cur->power1 == 40 &&
-              cur->effect2 == 0 && cur->power2 == 0 &&
-              cur->range == 5) {
+          if (RecordMatchesSettings(*cur)) {
             return true;
           }
         }
@@ -268,17 +332,7 @@ namespace DX11Base {
       // - effect2=20 was confirmed NOT to heal troops in real-game testing,
       //   so keep secondary effect disabled. Healing is injected separately
       //   after the affected unit is identified from the +40 morale change.
-      clone.code1 = 5;
-      clone.code2 = 5;
-      clone.code3 = 5;
-      clone.target = 1;
-      clone.effect1 = 10;
-      clone.power1 = 40;
-      clone.duration1 = 0;
-      clone.effect2 = 0;
-      clone.power2 = 0;
-      clone.duration2 = 0;
-      clone.range = 5;
+      ApplySettingsToRecord(clone);
 
       if (!WriteRecord(spell5, clone)) {
         AddLog(u8"[책략5수명] 5번 책략 데이터 ON 요청 유지. 현재 세대 쓰기 실패 -> 자동 재시도 대기.");
@@ -292,11 +346,21 @@ namespace DX11Base {
       g_applied = true;
       ResetDiagnostics();
 
-      AddLog(u8"[책략5DBG] 적용: 아군 / 효과1 사기+40 / 효과2 없음 / 범위5");
+      const Spell5CustomSettings applied = g_customSettings;
+      AddLog(u8"[책략5DBG] 적용: 대상=%d / 효과1=%d 수치1=%d 기간1=%d / 효과2=%d 수치2=%d 기간2=%d / 범위=%d / 추가병력=%d",
+             applied.target, applied.effect1, applied.power1, applied.duration1,
+             applied.effect2, applied.power2, applied.duration2,
+             applied.range, applied.healAmount);
       AddLog(u8"[책략5DBG] table=%p canonical5=%p source2=%p / 4번 사모위계 유지",
              reinterpret_cast<void *>(table),
              reinterpret_cast<void *>(spell5), reinterpret_cast<void *>(spell2));
-      AddLog(u8"[책략5DBG] 광역힐 2차 테스트 활성화: 전의 +40(또는 100 상한) 변화 부대에 병력 +2000(최대병력 상한) 적용.");
+      if (applied.healAmount > 0 &&
+          applied.effect1 == 10 && applied.power1 > 0) {
+        AddLog(u8"[책략5DBG] 추가 병력회복 활성화: 사기 +%d 변화 감지 시 병력 +%d(최대병력 상한).",
+               applied.power1, applied.healAmount);
+      } else if (applied.healAmount > 0) {
+        AddLog(u8"[책략5DBG] 추가 병력회복은 효과1=사기 증가일 때만 동작합니다.");
+      }
       return true;
     }
 
@@ -329,11 +393,7 @@ namespace DX11Base {
 
     const SpellRecord *cur =
         reinterpret_cast<const SpellRecord *>(g_spell5Addr);
-    return cur->code1 == 5 && cur->code2 == 5 && cur->code3 == 5 &&
-           cur->target == 1 &&
-           cur->effect1 == 10 && cur->power1 == 40 &&
-           cur->effect2 == 0 && cur->power2 == 0 &&
-           cur->range == 5;
+    return RecordMatchesSettings(*cur);
   }
 
   void ResetSpell5HealProbeBattleRuntime() {
@@ -419,13 +479,18 @@ namespace DX11Base {
       }
 
       const uint8_t before = g_diag[i].morale;
-      if (morale > before) {
+      const Spell5CustomSettings settings = g_customSettings;
+      if (settings.healAmount > 0 &&
+          settings.effect1 == 10 &&
+          settings.power1 > 0 &&
+          morale > before) {
         const int delta = (int)morale - (int)before;
-        const bool exactPlus40 = (delta == 40);
-        const bool cappedPlus40 =
-            (morale == 100 && before < 100 && ((int)before + 40) >= 100);
+        const bool exactIncrease = (delta == settings.power1);
+        const bool cappedIncrease =
+            (morale == 100 && before < 100 &&
+             ((int)before + settings.power1) >= 100);
 
-        if (exactPlus40 || cappedPlus40) {
+        if (exactIncrease || cappedIncrease) {
           const uintptr_t troopsAddr = unit + kUnitTroopsOffset;
           uint16_t troopsBefore = 0;
           uint16_t troopsAfter = 0;
@@ -444,7 +509,9 @@ namespace DX11Base {
               maxTroops =
                   *reinterpret_cast<const uint16_t *>(maxTroopsAddr);
 
-              uint32_t next = (uint32_t)troopsBefore + kSpell5HealAmount;
+              uint32_t next =
+                  (uint32_t)troopsBefore +
+                  (uint32_t)settings.healAmount;
               if (next > maxTroops)
                 next = maxTroops;
 
@@ -479,7 +546,7 @@ namespace DX11Base {
 
     if (!g_diagPrimed && validCount > 0) {
       g_diagPrimed = true;
-      AddLog(u8"[책략5힐DBG] 전투부대 %d개 기준값 저장 완료. 사기 60 이하의 부대를 범위에 두고 5번 책략을 사용하세요.", validCount);
+      AddLog(u8"[책략5힐DBG] 전투부대 %d개 기준값 저장 완료. 현재 5번 책략 설정을 기준으로 추가 병력회복을 감시합니다.", validCount);
     }
 
     for (int i = unitCount; i < kMaxTrackedUnits; ++i)
