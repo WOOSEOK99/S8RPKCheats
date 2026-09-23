@@ -4389,10 +4389,6 @@ namespace DX11Base {
       }
     }
 
-    const uintptr_t row1 = table + 0 * kRecordStride;
-    const uintptr_t row2 = table + 1 * kRecordStride;
-    const uintptr_t row3 = table + 2 * kRecordStride;
-    const uintptr_t row4 = table + 3 * kRecordStride;
     const uintptr_t row5 = table + 4 * kRecordStride;
 
     g_fiveMetadataTable = table;
