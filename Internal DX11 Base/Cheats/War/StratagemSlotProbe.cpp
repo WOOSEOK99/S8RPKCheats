@@ -50,6 +50,11 @@ namespace DX11Base {
     static bool g_uiLayoutHookApplied = false;
     static volatile uintptr_t g_trickUiLayout = 0;
     static uintptr_t g_lastLoggedUiLayout = 0;
+    static uintptr_t g_uiDialogHookAddr = 0;
+    static uintptr_t g_uiDialogCaveAddr = 0;
+    static uint8_t g_uiDialogOriginal[9] = {};
+    static bool g_uiDialogHookApplied = false;
+    static volatile uintptr_t g_trickUiDialog = 0;
 
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
@@ -169,8 +174,103 @@ namespace DX11Base {
       g_uiLayoutHookAddr = hookAddr;
       g_uiLayoutHookApplied = true;
       g_trickUiLayout = 0;
+      g_trickUiDialog = 0;
       g_lastLoggedUiLayout = 0;
       AddLog(u8"[책략5UICAP] layout 캡처 훅 설치 완료. 책략창을 한 번 여세요.");
+      return true;
+    }
+
+
+    static bool BuildTrickUiDialogCaptureCave(uintptr_t hookAddr) {
+      g_uiDialogCaveAddr = AllocNear(hookAddr, 64);
+      if (!g_uiDialogCaveAddr)
+        return false;
+
+      uint8_t *cave = reinterpret_cast<uint8_t *>(g_uiDialogCaveAddr);
+      int idx = 0;
+      auto emit8 = [&](uint8_t v) { cave[idx++] = v; };
+      auto emit32 = [&](int32_t v) {
+        std::memcpy(cave + idx, &v, sizeof(v));
+        idx += 4;
+      };
+      auto emit64 = [&](uintptr_t v) {
+        std::memcpy(cave + idx, &v, sizeof(v));
+        idx += 8;
+      };
+
+      // Dialog::Open +0x130: R15 is the live TrickCommandDialog*.
+      emit8(0x50);                         // push rax
+      emit8(0x48); emit8(0xB8);            // mov rax, imm64
+      emit64(reinterpret_cast<uintptr_t>(&g_trickUiDialog));
+      emit8(0x4C); emit8(0x89); emit8(0x38); // mov [rax], r15
+      emit8(0x58);                         // pop rax
+
+      static const uint8_t original[9] = {
+          0x49, 0x8B, 0x4F, 0x10,
+          0x4C, 0x8B, 0x64, 0x24, 0x28
+      };
+      std::memcpy(cave + idx, original, sizeof(original));
+      idx += (int)sizeof(original);
+
+      emit8(0xE9);
+      const intptr_t rel =
+          static_cast<intptr_t>(hookAddr + sizeof(original)) -
+          static_cast<intptr_t>(g_uiDialogCaveAddr + idx + 4);
+      if (rel < INT32_MIN || rel > INT32_MAX) {
+        VirtualFree(reinterpret_cast<LPVOID>(g_uiDialogCaveAddr), 0, MEM_RELEASE);
+        g_uiDialogCaveAddr = 0;
+        return false;
+      }
+      emit32(static_cast<int32_t>(rel));
+
+      FlushInstructionCache(GetCurrentProcess(), cave, idx);
+      if (!ApplyJmp(hookAddr, g_uiDialogCaveAddr, sizeof(original))) {
+        VirtualFree(reinterpret_cast<LPVOID>(g_uiDialogCaveAddr), 0, MEM_RELEASE);
+        g_uiDialogCaveAddr = 0;
+        return false;
+      }
+      return true;
+    }
+
+    static bool EnsureTrickUiDialogCaptureHook() {
+      if (g_uiDialogHookApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase)
+        return false;
+
+      // Runtime-confirmed Dialog::Open RVA and stable interior instruction.
+      constexpr uintptr_t kDialogOpenRva = 0x01DF3CB0;
+      constexpr uintptr_t kCaptureOffset = 0x130;
+      const uintptr_t hookAddr = exeBase + kDialogOpenRva + kCaptureOffset;
+
+      static const uint8_t expected[9] = {
+          0x49, 0x8B, 0x4F, 0x10,
+          0x4C, 0x8B, 0x64, 0x24, 0x28
+      };
+      if (!IsValidPtr(hookAddr, sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(hookAddr),
+                      expected, sizeof(expected)) != 0) {
+        AddLog(u8"[책략5UICAP] Dialog::Open 캡처 지점 검증 실패: %p",
+               reinterpret_cast<void *>(hookAddr));
+        return false;
+      }
+
+      std::memcpy(g_uiDialogOriginal,
+                  reinterpret_cast<const void *>(hookAddr),
+                  sizeof(g_uiDialogOriginal));
+
+      if (!BuildTrickUiDialogCaptureCave(hookAddr)) {
+        AddLog(u8"[책략5UICAP] dialog 캡처 훅 설치 실패.");
+        return false;
+      }
+
+      g_uiDialogHookAddr = hookAddr;
+      g_uiDialogHookApplied = true;
+      g_trickUiDialog = 0;
+      AddLog(u8"[책략5UICAP] dialog 캡처 훅 설치 완료.");
       return true;
     }
 
@@ -1222,6 +1322,8 @@ namespace DX11Base {
              reinterpret_cast<void *>(matchedSlot));
       if (!EnsureTrickUiLayoutCaptureHook())
         AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
+      if (!EnsureTrickUiDialogCaptureHook())
+        AddLog(u8"[책략5UICAP] dialog 캡처 훅은 설치되지 않았습니다.");
       DumpTrickUiPdbProbe();
       return true;
     }
@@ -1260,6 +1362,8 @@ namespace DX11Base {
            reinterpret_cast<void *>(row5));
     if (!EnsureTrickUiLayoutCaptureHook())
       AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
+    if (!EnsureTrickUiDialogCaptureHook())
+      AddLog(u8"[책략5UICAP] dialog 캡처 훅은 설치되지 않았습니다.");
     DumpTrickUiPdbProbe();
     return true;
   }
@@ -1289,6 +1393,59 @@ namespace DX11Base {
            reinterpret_cast<void *>(buttons[1]),
            reinterpret_cast<void *>(buttons[2]),
            reinterpret_cast<void *>(buttons[3]));
+
+
+    const uintptr_t dialog = g_trickUiDialog;
+    if (dialog && IsValidPtr(dialog, 0x40)) {
+      uintptr_t dialogLayout = 0;
+      SafeReadPtrSeh(dialog + 0x08, &dialogLayout);
+      AddLog(u8"[책략5UICAP] Dialog=%p dialog+08(layout)=%p match=%d",
+             reinterpret_cast<void *>(dialog),
+             reinterpret_cast<void *>(dialogLayout),
+             dialogLayout == layout ? 1 : 0);
+    } else {
+      AddLog(u8"[책략5UICAP] Dialog 아직 미캡처. 책략창을 닫았다가 다시 여세요.");
+    }
+
+    // CUIMaker/registration state begins at layout+0x140; +0x150 is the
+    // confirmed control count. Dump only this small fixed region.
+    uintptr_t registryQ[20] = {};
+    if (SafeCopySeh(layout + 0x140, registryQ, sizeof(registryQ))) {
+      for (int row = 0; row < 5; ++row) {
+        const int i = row * 4;
+        AddLog(u8"[책략5UIREG] +%03X: %p %p %p %p",
+               0x140 + i * 8,
+               reinterpret_cast<void *>(registryQ[i + 0]),
+               reinterpret_cast<void *>(registryQ[i + 1]),
+               reinterpret_cast<void *>(registryQ[i + 2]),
+               reinterpret_cast<void *>(registryQ[i + 3]));
+      }
+    }
+
+    // If the first two qwords look like table pointers, search only 0x200 bytes
+    // for exact occurrences of the four known button pointers.
+    for (int rootIndex = 0; rootIndex < 2; ++rootIndex) {
+      const uintptr_t root = registryQ[rootIndex];
+      if (!root || !IsValidPtr(root, 0x200))
+        continue;
+
+      uintptr_t table[64] = {};
+      if (!SafeCopySeh(root, table, sizeof(table)))
+        continue;
+
+      for (int slot = 0; slot < 64; ++slot) {
+        for (int b = 0; b < 4; ++b) {
+          if (table[slot] == buttons[b]) {
+            AddLog(u8"[책략5UIREG] root%d=%p +%03X -> btn%d=%p",
+                   rootIndex,
+                   reinterpret_cast<void *>(root),
+                   slot * 8,
+                   b,
+                   reinterpret_cast<void *>(buttons[b]));
+          }
+        }
+      }
+    }
 
     const uintptr_t exeBase =
         reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));

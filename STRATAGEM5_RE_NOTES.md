@@ -738,3 +738,39 @@ button->Initialize(layoutX, layoutY, TrickCommandDialogLayout*)
 
 이를 위해 `ResetBtnPos +0x1C8`의 확정 명령
 `add rsi,0x1E0`에서 RSI(layout)를 저장하는 build-guarded read-only capture hook을 사용한다.
+
+
+---
+
+## 17. 2026-09-23 live layout 캡처 결과
+
+`test: capture live fifth-button layout state` 실게임 결과:
+
+```text
+Layout = live TrickCommandDialogLayout*
+controlCount(+0x150) = 7
+buttons[0..3] = 4개 모두 유효
+ResetPos A/B = x1 826, y 364, x2 1106, step 280
+button UI IDs(+0x88) = 2,3,4,5
+button state(+0x8C) = 모두 1
+```
+
+네 버튼의 vtable도 모두 동일했고, `TrickSelectButton` 실객체로 일치한다.
+
+### 중요한 새 제약
+
+버튼 UI ID가 2~5인데 layout의 `controlCount(+0x150)`가 7이다.
+따라서 단순히 “다음 번호니까 ID 6”으로 5번째를 등록하면
+이미 존재하는 다른 layout control과 충돌할 가능성이 있다.
+
+5번째 버튼 생성 전에 반드시:
+
+1. `TrickCommandDialog*` live pointer를 캡처
+2. `dialog+0x08 == captured layout` 검증
+3. layout `+0x140` registration 영역의 실제 구조/점유 ID 확인
+
+을 수행한다.
+
+다음 진단은 `Dialog::Open +0x130`에서 R15(dialog)를 build-guarded하게
+캡처하고, layout `+0x140..+0x1DF`의 작은 고정 영역 및 그 내부 테이블에서
+기존 4개 button pointer의 위치만 찾는다. 광범위 메모리 스캔은 하지 않는다.
