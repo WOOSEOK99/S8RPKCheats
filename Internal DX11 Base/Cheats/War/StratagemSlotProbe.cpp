@@ -4307,168 +4307,83 @@ namespace DX11Base {
            reinterpret_cast<void *>(row5));
 
     if (!g_id5CountApplied || !g_id5CountOwner) {
-      AddLog(u8"[책략5수명] ID5 내부등록 ON 요청 저장. ID5 수량/전장 객체 준비 후 자동 연결 대기.");
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
+      // Keep the canonical table resolved. The count checkbox can now derive
+      // the current native N from Camp::Impl+0xF0 instead of assuming N==4.
+      AddLog(u8"[책략5수명] ID5 내부등록 ON 요청 저장. native table 준비 완료, 전장 owner/횟수 적용 대기.");
       return true;
     }
 
-    // PDB로 실제 구조 확인:
-    // san8r::war::Camp::Impl
-    //   +0x10 m_pCampData
-    //   +0x18 m_type
-    //
-    // san8r::war::CampData
-    //   +0x68 m_pTricks  (std::array<const TrickData*, 5>)
-    //
-    // 따라서 더 이상 추정 객체 스캔을 하지 않고 정확한 필드만 읽습니다.
-    constexpr uintptr_t kCampImplCampDataOffset = 0x10;
-    constexpr uintptr_t kCampImplTypeOffset = 0x18;
-    constexpr uintptr_t kCampDataTricksOffset = 0x68;
+    StratagemFiveModel::Plan plan{};
+    StratagemFiveModel::Entry entries[5] = {};
+    uintptr_t campRows[5] = {};
+    uintptr_t modelBase = 0;
+    uintptr_t tricksAddr = 0;
+    if (!TryReadFifthPlanForOwnerSeh(
+            g_id5CountOwner, &plan, &entries, &campRows,
+            &modelBase, &tricksAddr)) {
+      AddLog(u8"[책략5수명] ID5 내부등록 대기: 현재 owner의 원본 책략 목록 N/row 매핑 검증 실패.");
+      return true;
+    }
 
-    uint8_t campType = 0xFF;
-    uintptr_t campData = 0;
-    if (!IsValidPtr(g_id5CountOwner + kCampImplTypeOffset, 1) ||
-        !IsValidPtr(g_id5CountOwner + kCampImplCampDataOffset,
-                    sizeof(uintptr_t))) {
-      AddLog(u8"[책략5PDBDBG] Camp::Impl 기본 필드가 유효하지 않습니다: impl=%p",
-             reinterpret_cast<void *>(g_id5CountOwner));
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
+    if (plan.originalCount > 4 || plan.campSlot >= 5) {
+      AddLog(u8"[책략5PDBDBG] 가변 책략 계획 범위 오류: N=%u campSlot=%u",
+             (unsigned)plan.originalCount, (unsigned)plan.campSlot);
       return false;
     }
 
-    campType =
-        *reinterpret_cast<const uint8_t *>(
-            g_id5CountOwner + kCampImplTypeOffset);
-    if (!SafeReadPtrSeh(g_id5CountOwner + kCampImplCampDataOffset,
-                        &campData) ||
-        !campData ||
-        !IsValidPtr(campData + kCampDataTricksOffset,
-                    5 * sizeof(uintptr_t))) {
-      AddLog(u8"[책략5PDBDBG] CampData 포인터/5칸 배열 무효: impl=%p type=%u campData=%p",
-             reinterpret_cast<void *>(g_id5CountOwner),
-             (unsigned)campType,
-             reinterpret_cast<void *>(campData));
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
-      return false;
-    }
-
-    const uintptr_t tricksAddr =
-        campData + kCampDataTricksOffset;
-    uintptr_t trickPtrs[5] = {};
-    if (!SafeCopySeh(tricksAddr, trickPtrs, sizeof(trickPtrs))) {
-      AddLog(u8"[책략5PDBDBG] CampData::m_pTricks 읽기 실패: %p",
-             reinterpret_cast<void *>(tricksAddr));
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
-      return false;
-    }
-
-    AddLog(u8"[책략5PDBDBG] Camp::Impl=%p type=%u -> CampData=%p / m_pTricks(+68)=%p",
-           reinterpret_cast<void *>(g_id5CountOwner),
-           (unsigned)campType,
-           reinterpret_cast<void *>(campData),
-           reinterpret_cast<void *>(tricksAddr));
-    AddLog(u8"[책략5PDBDBG] tricks[0..4]=%p,%p,%p,%p,%p / native rows=%p,%p,%p,%p,%p",
-           reinterpret_cast<void *>(trickPtrs[0]),
-           reinterpret_cast<void *>(trickPtrs[1]),
-           reinterpret_cast<void *>(trickPtrs[2]),
-           reinterpret_cast<void *>(trickPtrs[3]),
-           reinterpret_cast<void *>(trickPtrs[4]),
-           reinterpret_cast<void *>(row1),
-           reinterpret_cast<void *>(row2),
-           reinterpret_cast<void *>(row3),
-           reinterpret_cast<void *>(row4),
-           reinterpret_cast<void *>(row5));
-
-    // 첫 4칸이 실제 1~4번 TrickData와 정확히 일치할 때만 5번째를 건드립니다.
-    if (trickPtrs[0] != row1 ||
-        trickPtrs[1] != row2 ||
-        trickPtrs[2] != row3 ||
-        trickPtrs[3] != row4) {
-      AddLog(u8"[책략5PDBDBG] 첫 4칸이 native 1~4행과 일치하지 않아 쓰기 중단.");
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
-      return false;
-    }
-
-    const uintptr_t matchedObject = campData;
     const uintptr_t matchedSlot =
-        tricksAddr + 4 * sizeof(uintptr_t);
-    const uintptr_t matchedOld5 = trickPtrs[4];
+        tricksAddr + static_cast<uintptr_t>(plan.campSlot) *
+                         sizeof(uintptr_t);
+    const uintptr_t matchedOld =
+        *reinterpret_cast<const uintptr_t *>(matchedSlot);
 
-    if (matchedOld5 != 0 && matchedOld5 != row5) {
-      AddLog(u8"[책략5PDBDBG] 5번째 칸이 0/row5가 아닙니다: %p. 쓰기 중단.",
-             reinterpret_cast<void *>(matchedOld5));
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
+    if (matchedOld != 0 && matchedOld != row5) {
+      AddLog(u8"[책략5PDBDBG] ID5 연결 대상 CampData slot%u가 비어있지 않음: %p",
+             (unsigned)plan.campSlot,
+             reinterpret_cast<void *>(matchedOld));
       return false;
     }
 
-    if (matchedOld5 == row5) {
-      g_fiveRuntimeSlotAddr = matchedSlot;
-      g_fiveRuntimeSlotOriginal = row5;
-      g_fiveRuntimeSlotApplied = true;
-      g_fiveRuntimeOwner = g_id5CountOwner;
-      g_fiveMetadataRequested = true;
-      AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터가 이미 row5입니다: camp=%p slot5=%p",
-             reinterpret_cast<void *>(matchedObject),
-             reinterpret_cast<void *>(matchedSlot));
-      if (!EnsureTrickUiLayoutCaptureHook())
-        AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
-      if (!EnsureTrickUiDialogCaptureHook())
-        AddLog(u8"[책략5UICAP] dialog 캡처 훅은 설치되지 않았습니다.");
-      AddLog(u8"[책략5UIDBG] 기존 PDB 바이트 덤프는 문서화 완료되어 이번 테스트에서는 생략합니다.");
-      return true;
-    }
+    if (matchedOld != row5) {
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(matchedSlot),
+                          sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
+        AddLog(u8"[책략5PDBDBG] CampData slot%u 쓰기 권한 변경 실패.",
+               (unsigned)plan.campSlot);
+        return false;
+      }
 
-    DWORD oldProtect = 0;
-    DWORD tmpProtect = 0;
-    if (!VirtualProtect(reinterpret_cast<LPVOID>(matchedSlot),
-                        sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
-      AddLog(u8"[책략5PDBDBG] 5번째 포인터 쓰기 권한 변경 실패.");
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
-      return false;
-    }
+      *reinterpret_cast<uintptr_t *>(matchedSlot) = row5;
+      VirtualProtect(reinterpret_cast<LPVOID>(matchedSlot),
+                     sizeof(uintptr_t), oldProtect, &tmpProtect);
 
-    *reinterpret_cast<uintptr_t *>(matchedSlot) = row5;
-    VirtualProtect(reinterpret_cast<LPVOID>(matchedSlot),
-                   sizeof(uintptr_t), oldProtect, &tmpProtect);
-
-    if (*reinterpret_cast<const uintptr_t *>(matchedSlot) != row5) {
-      AddLog(u8"[책략5PDBDBG] 5번째 포인터 쓰기 검증 실패.");
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
-      return false;
+      if (*reinterpret_cast<const uintptr_t *>(matchedSlot) != row5) {
+        AddLog(u8"[책략5PDBDBG] CampData slot%u -> row5 쓰기 검증 실패.",
+               (unsigned)plan.campSlot);
+        return false;
+      }
     }
 
     g_fiveRuntimeSlotAddr = matchedSlot;
-    g_fiveRuntimeSlotOriginal = matchedOld5;
+    g_fiveRuntimeSlotOriginal = matchedOld;
     g_fiveRuntimeSlotApplied = true;
     g_fiveRuntimeOwner = g_id5CountOwner;
     g_fiveMetadataRequested = true;
+    g_fifthRuntimeOriginalCount = plan.originalCount;
 
-    AddLog(u8"[책략5PDBDBG] 5슬롯 연결 성공: object=%p slot5=%p old=%p new=%p",
-           reinterpret_cast<void *>(matchedObject),
-           reinterpret_cast<void *>(matchedSlot),
-           reinterpret_cast<void *>(matchedOld5),
+    AddLog(u8"[책략5PDBDBG] 가변 ID5 연결 성공: N=%u modelBase=%p campSlot=%u old=%p new(row5)=%p",
+           (unsigned)plan.originalCount,
+           reinterpret_cast<void *>(modelBase),
+           (unsigned)plan.campSlot,
+           reinterpret_cast<void *>(matchedOld),
            reinterpret_cast<void *>(row5));
+
     if (!EnsureTrickUiLayoutCaptureHook())
       AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
     if (!EnsureTrickUiDialogCaptureHook())
       AddLog(u8"[책략5UICAP] dialog 캡처 훅은 설치되지 않았습니다.");
-    AddLog(u8"[책략5UIDBG] 기존 PDB 바이트 덤프는 문서화 완료되어 이번 테스트에서는 생략합니다.");
+
     return true;
   }
 
