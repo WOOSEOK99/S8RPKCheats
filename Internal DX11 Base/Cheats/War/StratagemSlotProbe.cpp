@@ -3359,6 +3359,39 @@ namespace DX11Base {
              expectedSide;
     }
 
+    static bool TryRecaptureBattleInfoFromDialogSeh() {
+      const uintptr_t dialog = g_trickUiDialog;
+      if (!dialog || !IsValidPtr(dialog, 0x40))
+        return false;
+
+      __try {
+        uintptr_t holder = 0;
+        uintptr_t inner = 0;
+        if (!SafeReadPtrSeh(dialog + 0x20, &holder) ||
+            !holder ||
+            !IsValidPtr(holder, sizeof(uintptr_t)) ||
+            !SafeReadPtrSeh(holder, &inner) ||
+            !inner)
+          return false;
+
+        const uint8_t side =
+            *reinterpret_cast<const uint8_t *>(inner + kSideOffset);
+        if (side > 1 || !ValidateInfo(inner, side))
+          return false;
+
+        uintptr_t &target = (side == 0) ? g_attackInfo : g_defenseInfo;
+        if (target != inner) {
+          target = inner;
+          AddLog(u8"[책략5수명] dialog runtime model에서 현재 %s Camp::Impl 재캡처: %p",
+                 side == 0 ? u8"공격측" : u8"수비측",
+                 reinterpret_cast<void *>(inner));
+        }
+        return true;
+      } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
     static void DumpSide(const char *name, uintptr_t ptr, uint8_t side) {
       if (!ValidateInfo(ptr, side))
         return;
@@ -3454,6 +3487,11 @@ namespace DX11Base {
 
     if (!EnsureCaptureHook())
       return false;
+
+    if (!ValidateInfo(g_attackInfo, 0) &&
+        !ValidateInfo(g_defenseInfo, 1)) {
+      TryRecaptureBattleInfoFromDialogSeh();
+    }
 
     // If the remembered owner is still the exact current captured object and
     // its fifth count is still 1, keep it. Otherwise this is a new battle/save
@@ -4625,8 +4663,16 @@ namespace DX11Base {
     if (now - s_lastAttemptTick < 500)
       return;
 
-    const bool attackReady = ValidateInfo(g_attackInfo, 0);
-    const bool defenseReady = ValidateInfo(g_defenseInfo, 1);
+    bool attackReady = ValidateInfo(g_attackInfo, 0);
+    bool defenseReady = ValidateInfo(g_defenseInfo, 1);
+
+    if (!attackReady && !defenseReady) {
+      if (TryRecaptureBattleInfoFromDialogSeh()) {
+        attackReady = ValidateInfo(g_attackInfo, 0);
+        defenseReady = ValidateInfo(g_defenseInfo, 1);
+      }
+    }
+
     if (!attackReady && !defenseReady)
       return;
 
