@@ -2350,3 +2350,45 @@ callback closure가 사용하는 정적 target을 해석하고, 각 target의 �
 
 정적 EXE 파일의 해당 .text는 런타임과 다르게 보이는 구간이 있으므로,
 이번 분석은 반드시 실게임 메모리의 런타임 바이트를 기준으로 한다.
+
+
+---
+
+## 46. 2026-09-23 최종 판정용 패치 — focus/select가 공유하는 runtime model count
+
+최신 런타임 callback code 추적에서 실제 처리 함수가 확인됐다.
+
+focus closure:
+- RVA +0x7594B0
+- closure의 index를 읽음
+- dialog+0x20 -> model holder
+- model base = *holder + 0xF0
+- `cmp index,[base+0x60]`
+- 범위 내이면 `base + (index+1)*0x10` entry 사용
+- 범위 밖이면 null 처리
+
+select closure:
+- RVA +0x759630
+- 동일하게 `[base+0x60]` runtime count와 비교
+- 범위 내 entry를 dialog 선택 포인터에 저장 후 +1DF3C20으로 전달
+
+즉 5번째가 hover 외형만 반응하고 적용 범위/설명/선택이 안 되는 현상은
+**버튼/시그널 자체가 아니라 공용 runtime model이 index4를 허용하지 않는 것**과 정확히 맞는다.
+
+이번 커밋은 더 이상 callback detour를 추가하지 않는다.
+이미 캡처된 dialog에서 model을 직접 읽어:
+
+- base+0x10..+0x50의 5개 0x10-byte entry
+- base+0x60 count
+
+를 확인한다.
+
+안전 조건:
+1. count가 정확히 4
+2. entry0..3의 첫 포인터가 모두 유효
+3. 물리적으로 존재하는 entry4(+0x50)의 첫 포인터도 이미 유효
+
+세 조건을 모두 만족할 때만 count를 4->5로 올린다.
+entry4가 비어 있으면 절대 쓰지 않는다.
+
+이 테스트가 실패하면 더 이상 사용자를 반복 진단에 묶지 않고 현재 브랜치 실험을 중단한다.

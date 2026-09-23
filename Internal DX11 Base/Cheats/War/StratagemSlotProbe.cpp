@@ -124,6 +124,9 @@ namespace DX11Base {
     static bool g_fifthUiSignalCallsitesLogged = false;
     static bool g_fifthUiCallbackTargetsLogged = false;
     static bool g_fifthUiCallbackCodeTargetsLogged = false;
+    static uintptr_t g_fifthUiModelCountAddr = 0;
+    static uint32_t g_fifthUiModelCountOriginal = 0;
+    static bool g_fifthUiModelCountApplied = false;
 
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
@@ -3730,6 +3733,20 @@ namespace DX11Base {
     };
 
     if (!enable) {
+      if(g_fifthUiModelCountApplied &&
+         g_fifthUiModelCountAddr &&
+         IsValidPtr(g_fifthUiModelCountAddr,sizeof(uint32_t))) {
+        __try {
+          if(*reinterpret_cast<uint32_t *>(g_fifthUiModelCountAddr)==5)
+            *reinterpret_cast<uint32_t *>(g_fifthUiModelCountAddr)=
+                g_fifthUiModelCountOriginal;
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+        }
+      }
+      g_fifthUiModelCountAddr=0;
+      g_fifthUiModelCountOriginal=0;
+      g_fifthUiModelCountApplied=false;
+
       RestoreFifthUiMakerTestSeh();
       restoreRuntimeSlot();
       g_fiveMetadataApplied = false;
@@ -4007,6 +4024,93 @@ namespace DX11Base {
     return true;
   }
 
+
+  static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog) {
+    if(!dialog || !g_fiveRuntimeSlotApplied || !g_fiveMetadataAddr)
+      return false;
+
+    __try {
+      uintptr_t holder=0, inner=0;
+      if(!SafeReadPtrSeh(dialog+0x20,&holder) ||
+         !holder || !IsValidPtr(holder,sizeof(uintptr_t)) ||
+         !SafeReadPtrSeh(holder,&inner) ||
+         !inner || !IsValidPtr(inner+0xF0,0x80)) {
+        AddLog(u8"[책략5UIMODEL] dialog model 포인터 확인 실패: dialog=%p holder=%p inner=%p",
+               reinterpret_cast<void *>(dialog),
+               reinterpret_cast<void *>(holder),
+               reinterpret_cast<void *>(inner));
+        return false;
+      }
+
+      const uintptr_t base=inner+0xF0;
+      uint32_t count=0;
+      uint64_t entry[10]={};
+      if(!SafeCopySeh(base+0x60,&count,sizeof(count)) ||
+         !SafeCopySeh(base+0x10,entry,sizeof(entry))) {
+        AddLog(u8"[책략5UIMODEL] model 읽기 실패: base=%p",
+               reinterpret_cast<void *>(base));
+        return false;
+      }
+
+      AddLog(u8"[책략5UIMODEL] base=%p count=%u",
+             reinterpret_cast<void *>(base),(unsigned)count);
+      for(int n=0;n<5;++n){
+        AddLog(u8"[책략5UIMODEL] entry%d=%016llX %016llX",
+               n,
+               (unsigned long long)entry[n*2+0],
+               (unsigned long long)entry[n*2+1]);
+      }
+
+      if(count==5) {
+        AddLog(u8"[책략5UIMODEL] count는 이미 5입니다. 추가 쓰기 없음.");
+        return true;
+      }
+
+      if(count!=4) {
+        AddLog(u8"[책략5UIMODEL] 예상하지 않은 count=%u. 쓰기 중단.",
+               (unsigned)count);
+        return false;
+      }
+
+      // Existing four model entries must all have a valid first pointer.
+      for(int n=0;n<4;++n) {
+        const uintptr_t p=static_cast<uintptr_t>(entry[n*2]);
+        if(!p || !IsValidPtr(p,sizeof(uintptr_t))) {
+          AddLog(u8"[책략5UIMODEL] entry%d 첫 포인터가 기존 항목답지 않아 쓰기 중단: %p",
+                 n,reinterpret_cast<void *>(p));
+          return false;
+        }
+      }
+
+      // The 5-capacity buffer is physically present at +0x50. Only widen the
+      // count if the game has already populated that fifth entry itself.
+      const uintptr_t p5=static_cast<uintptr_t>(entry[8]);
+      if(!p5 || !IsValidPtr(p5,sizeof(uintptr_t))) {
+        AddLog(u8"[책략5UIMODEL] entry4가 아직 비어 있습니다(%p). count만 5로 올리면 위험하므로 중단.",
+               reinterpret_cast<void *>(p5));
+        return false;
+      }
+
+      const uintptr_t countAddr=base+0x60;
+      *reinterpret_cast<uint32_t *>(countAddr)=5;
+      if(*reinterpret_cast<const uint32_t *>(countAddr)!=5) {
+        AddLog(u8"[책략5UIMODEL] count 4->5 검증 실패.");
+        return false;
+      }
+
+      g_fifthUiModelCountAddr=countAddr;
+      g_fifthUiModelCountOriginal=4;
+      g_fifthUiModelCountApplied=true;
+      AddLog(u8"[책략5UIMODEL] fifth entry가 이미 유효하여 model count 4->5 적용 성공: countAddr=%p entry4=%p",
+             reinterpret_cast<void *>(countAddr),
+             reinterpret_cast<void *>(p5));
+      return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+      AddLog(u8"[책략5UIMODEL] model count 확장 중 예외. 쓰기 유지하지 않음.");
+      return false;
+    }
+  }
+
   void UpdateStratagemFiveUiRuntimeProbe() {
     if (!g_fiveMetadataApplied || !g_uiLayoutHookApplied)
       return;
@@ -4056,6 +4160,9 @@ namespace DX11Base {
     } else {
       AddLog(u8"[책략5UICAP] Dialog 아직 미캡처. 책략창을 닫았다가 다시 여세요.");
     }
+
+    if(dialog && IsValidPtr(dialog,0x40))
+      TryExtendFifthDialogModelCountSeh(dialog);
 
     // CUIMaker/registration state begins at layout+0x140; +0x150 is the
     // confirmed control count. Dump only this small fixed region.
