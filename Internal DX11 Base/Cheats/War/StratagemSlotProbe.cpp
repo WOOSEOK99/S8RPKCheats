@@ -278,9 +278,9 @@ namespace DX11Base {
         const uint8_t c5 = *reinterpret_cast<const uint8_t *>(
             candidate.ptr + kFirstStratagemCountOffset + 4 * kStratagemCountStride);
 
-        if (c1 == 1 && c2 == 2 && c3 == 1 && c4 == 1 && c5 == 0) {
+        if (c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 0) {
           if (chosen) {
-            AddLog(u8"[책략5슬롯DBG] 공격/수비 양쪽이 모두 1/2/1/1이라 자동 선택할 수 없습니다.");
+            AddLog(u8"[책략5슬롯DBG] 공격/수비 양쪽이 모두 1/1/1/1이라 자동 선택할 수 없습니다.");
             return false;
           }
           chosen = candidate.ptr;
@@ -289,7 +289,7 @@ namespace DX11Base {
       }
 
       if (!chosen) {
-        AddLog(u8"[책략5슬롯DBG] ID1~4=1/2/1/1, ID5=0인 플레이어측 후보를 찾지 못했습니다.");
+        AddLog(u8"[책략5슬롯DBG] ID1~4=1/1/1/1, ID5=0인 플레이어측 후보를 찾지 못했습니다.");
         AddLog(u8"[책략5슬롯DBG] 전투 시작 직후 기존 책략을 쓰기 전에 다시 시도하세요.");
         return false;
       }
