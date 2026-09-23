@@ -103,6 +103,12 @@ namespace DX11Base {
     static bool g_fifthUiLayoutPostButtonsHookApplied = false;
     static volatile LONG g_fifthUiCallbackIndex4Hits = 0;
 
+    static uintptr_t g_fifthUiResetCompactHookAddr = 0;
+    static uintptr_t g_fifthUiResetCompactCaveAddr = 0;
+    static uint8_t g_fifthUiResetCompactOriginal[5] = {};
+    static bool g_fifthUiResetCompactHookApplied = false;
+    static bool g_fifthUiCompactLogged = false;
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -1220,6 +1226,125 @@ namespace DX11Base {
       }
     }
 
+    static void CompactFifthUiButtonsAfterResetSeh(uintptr_t layout) {
+      __try {
+        if (!g_fifthUiId7Registered ||
+            !layout || layout != g_fifthUiSidecarLayout ||
+            !g_fifthUiSidecarButton ||
+            !IsValidPtr(layout,0x2A8) ||
+            !IsValidPtr(g_fifthUiSidecarButton,0x1D8))
+          return;
+
+        uintptr_t buttons[4]={};
+        if(!SafeCopySeh(layout+0x1E0,buttons,sizeof(buttons)))
+          return;
+
+        int oldStart=0,oldStep=0,y=0;
+        if(!GetFifthUiLayoutMetricsSeh(layout,&oldStart,&y,&oldStep))
+          return;
+
+        const int compactStep=(oldStep*7)/8; // 280 -> 245
+        const int oldCenter=oldStart+(oldStep*3)/2;
+        const int compactStart=oldCenter-compactStep*2;
+        const int compactX[5]={
+          compactStart,
+          compactStart+compactStep,
+          compactStart+compactStep*2,
+          compactStart+compactStep*3,
+          compactStart+compactStep*4
+        };
+
+        using SetXYFn=void(__fastcall *)(uintptr_t,int,int);
+        uintptr_t all[5]={
+          buttons[0],buttons[1],buttons[2],buttons[3],g_fifthUiSidecarButton
+        };
+        for(int n=0;n<5;++n){
+          const uintptr_t b=all[n];
+          if(!b || !IsValidPtr(b,sizeof(uintptr_t)))
+            continue;
+          const uintptr_t vt=*reinterpret_cast<const uintptr_t *>(b);
+          if(!vt || !IsValidPtr(vt+0x90,sizeof(uintptr_t)))
+            continue;
+          const uintptr_t setPos=*reinterpret_cast<const uintptr_t *>(vt+0x90);
+          if(setPos && IsValidPtr(setPos,1))
+            reinterpret_cast<SetXYFn>(setPos)(b,compactX[n],y);
+        }
+
+        if(!g_fifthUiCompactLogged){
+          g_fifthUiCompactLogged=true;
+          AddLog(u8"[책략5UIRESET] ResetBtnPos 후 5버튼 재배치 완료: %d,%d,%d,%d,%d / y=%d",
+                 compactX[0],compactX[1],compactX[2],compactX[3],compactX[4],y);
+        }
+      } __except(EXCEPTION_EXECUTE_HANDLER) {
+      }
+    }
+
+    static bool EnsureFifthUiResetCompactHook() {
+      if(g_fifthUiResetCompactHookApplied)
+        return true;
+
+      const uintptr_t exeBase=
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if(!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kResetBtnPosRva=0x01DAE9F0;
+      constexpr uintptr_t kHookOffset=0x1F2;
+      const uintptr_t hookAddr=exeBase+kResetBtnPosRva+kHookOffset;
+      static const uint8_t expected[5]={0x48,0x8B,0x5C,0x24,0x30};
+
+      if(!IsValidPtr(hookAddr,sizeof(expected)) ||
+         std::memcmp(reinterpret_cast<const void *>(hookAddr),
+                     expected,sizeof(expected))!=0){
+        AddLog(u8"[책략5UIRESET] ResetBtnPos 종료 훅 바이트 검증 실패: %p",
+               reinterpret_cast<void *>(hookAddr));
+        return false;
+      }
+
+      const uintptr_t caveAddr=AllocNear(hookAddr,96);
+      if(!caveAddr)
+        return false;
+
+      uint8_t *c=reinterpret_cast<uint8_t *>(caveAddr);
+      int i=0;
+      auto e8=[&](uint8_t v){c[i++]=v;};
+      auto e32=[&](int32_t v){std::memcpy(c+i,&v,4);i+=4;};
+      auto e64=[&](uintptr_t v){std::memcpy(c+i,&v,8);i+=8;};
+
+      // At this point RSI == layout+0x200 because the original 4-button loop
+      // started at layout+0x1E0 and advanced four qwords.
+      e8(0x48); e8(0x8D); e8(0x8E); e32(-0x200); // lea rcx,[rsi-200]
+      e8(0x48); e8(0xB8); e64(reinterpret_cast<uintptr_t>(&CompactFifthUiButtonsAfterResetSeh));
+      e8(0xFF); e8(0xD0);
+
+      std::memcpy(c+i,expected,sizeof(expected));
+      i+=(int)sizeof(expected);
+
+      e8(0xE9);
+      const intptr_t rel=static_cast<intptr_t>(hookAddr+sizeof(expected))-
+                         static_cast<intptr_t>(caveAddr+i+4);
+      if(rel<INT32_MIN||rel>INT32_MAX){
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+      e32(static_cast<int32_t>(rel));
+
+      FlushInstructionCache(GetCurrentProcess(),c,i);
+      std::memcpy(g_fifthUiResetCompactOriginal,
+                  reinterpret_cast<const void *>(hookAddr),
+                  sizeof(g_fifthUiResetCompactOriginal));
+      if(!ApplyJmp(hookAddr,caveAddr,sizeof(expected))){
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      g_fifthUiResetCompactHookAddr=hookAddr;
+      g_fifthUiResetCompactCaveAddr=caveAddr;
+      g_fifthUiResetCompactHookApplied=true;
+      AddLog(u8"[책략5UIRESET] ResetBtnPos 종료 5버튼 재배치 훅 설치 완료.");
+      return true;
+    }
+
 
     static bool PrepareFifthUiDuringLayoutInitializeSeh(uintptr_t layout) {
       __try {
@@ -1811,7 +1936,7 @@ namespace DX11Base {
           AddLog(u8"[책략5UITEST] 5버튼 배치 원본 좌표를 얻지 못했습니다.");
           return false;
         }
-        const int compactStep=(oldStep*11)/14;
+        const int compactStep=(oldStep*7)/8;
         const int oldCenter=oldStart+(oldStep*3)/2;
         const int compactStart=oldCenter-compactStep*2;
         const int compactX[5]={
@@ -2004,7 +2129,7 @@ namespace DX11Base {
           AddLog(u8"[책략5UITEST] sidecar 좌표 원본을 얻지 못했습니다.");
           return false;
         }
-        const int compactStep = (oldStep * 11) / 14;
+        const int compactStep = (oldStep * 7) / 8;
         const int oldCenter = oldStart + (oldStep * 3) / 2;
         const int compactStart = oldCenter - compactStep * 2;
         const int x = compactStart + compactStep * 4;
@@ -2578,12 +2703,14 @@ namespace DX11Base {
   bool PrepareStratagemFiveUiBridge(bool reportFailure) {
     const bool initReady = EnsureTrickUiInitLayoutsBridgeHook(reportFailure);
     const bool layoutPostReady = EnsureFifthUiLayoutPostButtonsHook();
+    const bool resetCompactReady = EnsureFifthUiResetCompactHook();
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
-    const bool ready = initReady && layoutPostReady && preCallbackReady && callbackLoopReady;
+    const bool ready = initReady && layoutPostReady && resetCompactReady &&
+                       preCallbackReady && callbackLoopReady;
     if (!ready && reportFailure) {
-      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d preCallback=%d callbackLoop=%d",
-             initReady?1:0, layoutPostReady?1:0,
+      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d reset=%d preCallback=%d callbackLoop=%d",
+             initReady?1:0, layoutPostReady?1:0, resetCompactReady?1:0,
              preCallbackReady?1:0, callbackLoopReady?1:0);
     }
     return ready;
