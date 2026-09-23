@@ -1234,6 +1234,7 @@ namespace DX11Base {
       if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::TextUnformatted(u8"전투 시작 전에 활성화하면 5번째 책략을 사용할 수 있습니다.");
+        ImGui::TextUnformatted(u8"현재는 주인공 부대의 총대장만 사용할 수 있으며, AI 총대장은 사용할 수 없습니다.");
         ImGui::TextUnformatted(u8"전투 중에 체크하거나 해제한 경우에는 현재 전투에는 적용되지 않습니다.");
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
                            u8"변경 내용은 전투 종료 후 다음 전투부터 적용됩니다.");
