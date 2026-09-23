@@ -389,11 +389,18 @@ namespace DX11Base {
     // object-bound 상태를 먼저 폐기합니다. 체크 의도는 유지되므로 다음 전투에서 재적용됩니다.
     static uintptr_t s_stratagem5SessionP1 = 0;
     if (s_stratagem5SessionP1 != 0 && p1 != s_stratagem5SessionP1) {
-      DX11Base::ResetStratagemFiveSessionRuntime(
-          s_stratagem5SessionP1, p1);
-    }
-    if (p1Ready)
+      // Important: consume the transition immediately, including p1->0.
+      // Otherwise the 30ms loop repeats the same reset/log while a save or
+      // battle transition is in progress and can contend with the UI thread.
+      const uintptr_t oldSessionP1 = s_stratagem5SessionP1;
+      DX11Base::ResetStratagemFiveSessionRuntime(oldSessionP1, p1);
+      s_stratagem5SessionP1 = p1Ready ? p1 : 0;
+    } else if (s_stratagem5SessionP1 == 0 && p1Ready) {
+      // First stable p1 after startup/load. The old generation was already
+      // abandoned when it went to zero, so only attach the new generation.
       s_stratagem5SessionP1 = p1;
+      AddLog(u8"[책략5수명] 새 p1 세대 연결: %p", reinterpret_cast<void *>(p1));
+    }
 
     // 초기 설정 지연 로드 (안정성을 위해 GameBase가 최초로 사용 가능해진 시점에 로드)
     static bool s_configLoaded = false;
