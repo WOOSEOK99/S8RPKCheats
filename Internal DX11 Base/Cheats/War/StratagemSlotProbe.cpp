@@ -4118,6 +4118,10 @@ namespace DX11Base {
     g_fifthUiModelEntryOriginal[0]=0;
     g_fifthUiModelEntryOriginal[1]=0;
     g_fifthUiModelEntryApplied=false;
+    g_fifthRuntimeOriginalCount=0;
+    g_fifthUiActiveLayout.store(0);
+    g_fifthUiActiveButton.store(0);
+    SetFifthUiSidecarVisibleSeh(false);
   }
 
   bool SetStratagemFiveMetadataTest(bool enable) {
@@ -4184,16 +4188,6 @@ namespace DX11Base {
       return true;
     }
     LogTrickUiBridgeStatus("metadata-enable");
-
-    const uintptr_t liveLayout =
-        static_cast<uintptr_t>(g_trickUiLayout);
-    if (liveLayout &&
-        g_fifthUiId7Registered &&
-        g_fifthUiSidecarButton &&
-        g_fifthUiSidecarLayout == liveLayout) {
-      SetFifthUiSidecarVisibleSeh(true);
-      AddLog(u8"[책략5수명] 동일 live layout 확인: 기존 sidecar/ID7 등록 재사용.");
-    }
 
     if (g_fiveMetadataApplied && g_fiveRuntimeSlotApplied) {
       const bool sameGeneration =
@@ -4800,6 +4794,7 @@ namespace DX11Base {
     g_id5CountAddr = 0;
     g_id5CountOwner = 0;
     g_id5CountOriginal = 0;
+    g_id5CountEntryIndex = UINT32_MAX;
 
     g_fiveMetadataApplied = false;
     g_fiveMetadataAddr = 0;
@@ -4816,6 +4811,9 @@ namespace DX11Base {
     g_fifthUiModelEntryOriginal[0] = 0;
     g_fifthUiModelEntryOriginal[1] = 0;
     g_fifthUiModelEntryApplied = false;
+    g_fifthRuntimeOriginalCount = 0;
+    g_fifthUiActiveLayout.store(0);
+    g_fifthUiActiveButton.store(0);
 
     g_trickUiLayout = 0;
     g_trickUiDialog = 0;
@@ -4847,6 +4845,9 @@ namespace DX11Base {
     // otherwise the next battle can allocate/register a second ID5 button into
     // the same layout and leave the old one as an empty shell.
     SetFifthUiSidecarVisibleSeh(false);
+    g_fifthUiActiveLayout.store(0);
+    g_fifthUiActiveButton.store(0);
+    g_fifthRuntimeOriginalCount = 0;
 
     g_attackInfo = 0;
     g_defenseInfo = 0;
@@ -4855,6 +4856,7 @@ namespace DX11Base {
     g_id5CountAddr = 0;
     g_id5CountOwner = 0;
     g_id5CountOriginal = 0;
+    g_id5CountEntryIndex = UINT32_MAX;
 
     g_fiveMetadataApplied = false;
     g_fiveMetadataAddr = 0;
