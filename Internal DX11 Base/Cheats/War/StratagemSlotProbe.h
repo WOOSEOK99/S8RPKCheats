@@ -5,6 +5,11 @@ namespace DX11Base {
   // data/toggles. Retry only during that bounded delay if runtime code is not ready.
   bool PrepareStratagemFiveUiBridge(bool reportFailure = true);
 
+  // Unified ID5 experiment switch. ON raises every persistent request together
+  // and lets the ordered runtime state machine advance DATA->COUNT->CAMP->MODEL->UI.
+  // OFF unwinds the battle/model bindings and then restores the ID5 data record.
+  bool SetStratagemFiveFeature(bool enable);
+
   // Captures the battle-side object used by the old CT and dumps the
   // stratagem count fields. Pre-battle these may still be zero; re-run after
   // the battle actually starts.
