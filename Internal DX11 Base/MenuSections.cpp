@@ -1452,6 +1452,42 @@ namespace DX11Base {
         bShowBatchOfficerEditWin = !bShowBatchOfficerEditWin;
       }
 
+      if (ImGui::BeginTable("OfficerEditScenarioTools", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
+          DX11Base::SetTechZero(bTechZero);
+          NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"체크한 상태로 새로운 시나리오 시작시 모든 세력의 기술이 초기화 됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin)) {
+          DX11Base::SetUndiscoveredToRonin(bUndiscoveredToRonin);
+          NotifyFeatureToggle(u8"모든 미발견 무장 재야로 변경", bUndiscoveredToRonin);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"<주의사항>");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"체크시 저장된 게임 불러올시에도 적용이 됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
+      }
+
       if (ImGui::Button(u8"세력별 기술력 편집", ImVec2(-1, 30 * scale))) {
         bShowFactionTechEditor = !bShowFactionTechEditor;
       }
@@ -1904,36 +1940,6 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"네 군주 마지막 전쟁 : 반동탁 연합 해산, 네군주 우호도 0");
         ImGui::EndTooltip();
       }
-
-      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin)) {
-        DX11Base::SetUndiscoveredToRonin(bUndiscoveredToRonin);
-        NotifyFeatureToggle(u8"모든 미발견 무장 재야로 변경", bUndiscoveredToRonin);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"<주의사항>");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"체크시 저장된 게임 불러올시에도 적용이 됩니다.");
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
-        DX11Base::SetTechZero(bTechZero);
-        NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);
-        SaveConfig();
-      }
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"체크한 상태로 새로운 시나리오 시작시 모든 세력의 기술이 초기화 됩니다.");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(160.0f * scale);
 
       if (ImGui::Checkbox(u8"교지 <-> 건녕 도로 차단", &bRoadBlock)) {
         DX11Base::SetRoadBlock(bRoadBlock);
