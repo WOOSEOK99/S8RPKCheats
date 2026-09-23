@@ -7,6 +7,10 @@ namespace DX11Base {
   // keeps effect #20 only as a secondary healing candidate.
   bool SetSpell5HealProbe(bool enable);
 
+  // Battle end reset. TrickData itself is game-generation data, so keep the
+  // applied record but clear per-battle target/heal diagnostics.
+  void ResetSpell5HealProbeBattleRuntime();
+
   // Save/load generation reset. Keeps the user's requested ON state but drops
   // any TrickData address that belonged to the previous game generation.
   void ResetSpell5HealProbeSession(uintptr_t oldP1, uintptr_t newP1);
