@@ -4,6 +4,7 @@
 > 새 채팅/세션에서는 EXE/PDB 재업로드를 요청하기 전에 반드시 이 문서와
 > `Internal DX11 Base/Cheats/War/StratagemSlotProbe.cpp`,
 > `Internal DX11 Base/Cheats/War/Spell5HealProbe.cpp`를 먼저 확인한다.
+> 최신 조기 설치 실험과 테스트 순서는 **28절**을 우선 확인한다.
 >
 > 바이너리를 다시 요청하는 경우는 **게임 빌드가 바뀌었거나**, 이 문서/코드에
 > 아직 추출되지 않은 새 PDB 심볼이 반드시 필요한 경우로 제한한다.
@@ -1344,3 +1345,146 @@ RegisterLayout(maker, 7, sidecar, 0x14, 1)
 으로 압축 배치한다.
 
 이 단계에서도 callback / Dialog::Open index4 / GetTrickButton(4)는 아직 연결하지 않는다.
+
+---
+
+## 28. 2026-09-23 DLL 작업 스레드에서 최초 InitLayouts 브리지 조기 설치
+
+기준: GitHub `feature/stratagem-5slot-probe` HEAD
+`570e2e01eb6709c7786df85b8bc0add679544add`와 로컬 HEAD의 일치를 원격 조회로 확인.
+작업 브랜치: `experiment/astra-stratagem5-ui`.
+
+### 1. 현재 실패 원인: 확정 사실과 아직 남은 가설
+
+기존 `EnsureTrickUiInitLayoutsBridgeHook()`의 호출자는
+`SetStratagemFiveMetadataTest(true)` 안의 내부등록 성공 경로 두 곳뿐이었다.
+전투 객체/수량/데이터가 이미 준비된 뒤에야 설치되며, DLL 시작 때는 설치하지 않았다.
+따라서 그 전에 Initialize가 끝난 layout에는 설치 성공 로그가 나와도 소급 적용되지 않는다.
+
+또한 기존 브리지는 count/descriptor 가드 실패 시 아무 진입 로그 없이 원본으로 통과했다.
+**완료 로그 없음 + live count=7만으로는 미호출과 가드 실패를 구분할 수 없었다.**
+설치가 늦었을 가능성은 높지만 실제 UI 생성 시점이나 다른 생성 경로는 아직 확정하지 않는다.
+
+`MainThread_Initialize()`는 `LoadEarlyLogConfig()` 후 `Sleep(10000)`을 실행했다.
+그 뒤 Engine/치트/D3D 훅/백그라운드 루프가 시작된다.
+`Menu::Loops()`의 BattleMonitor 호출은 100ms 간격이며, 전투 포인터는 500ms 간격으로 갱신된다.
+전투 모드 refresh는 유효한 부대 수와 Day 1~30을 확인한 뒤 수행한다.
+이 흐름은 전투 UI 생성 **이전**을 보장하는 지점이 아니므로 여기로 설치를 옮기지 않는다.
+
+### 2. 가장 안전한 해결 방향과 대안 비교
+
+| 방법 | 필요한 변경/미확정 사항 | 판단 |
+|---|---|---|
+| DLL 작업 스레드에서 특정 InitLayouts call 조기 설치 | 기존 bridge 재사용, 빌드/인자 가드, 실제 호출 로그 | 이번 실험에 채택 |
+| type20 handler `0x01D1445D`를 이용해 helper 한 개 직접 생성 | 함수 중간 switch 분기의 레지스터/스택 상태, allocator tag, ctor 후 virtual configure, 소유권/정리 규약 재현 | 더 큰 변경과 추가 런타임 근거 필요 |
+
+handler 주소가 확정돼도 독립적으로 호출 가능한 함수라는 뜻은 아니다.
+원래 InitLayouts가 최초 초기화에서 helper를 만들게 하는 쪽이 현재 근거로는 변경 범위가 작다.
+
+### 3. 수정 함수/파일
+
+- `Source.cpp::MainThread_Initialize`: loader lock 밖의 기존 작업 스레드에서
+  `LoadEarlyLogConfig()` 직후 준비. 기존 10초 대기를 100ms × 100회로 나누고,
+  준비 실패 시 그 대기 중에만 재시도한다. 성공 후에는 반복 호출하지 않는다.
+- `StratagemSlotProbe.h/.cpp::PrepareStratagemFiveUiBridge`: 전투 데이터/메뉴 토글과
+  독립적인 준비 함수. 실패 로그는 시작/최종에 출력하며 반복 재시도는 조용히 수행한다.
+- `EnsureTrickUiInitLayoutsBridgeHook`: x64 PE timestamp와 RSDS GUID/age를 1절과 대조.
+  `Layout::Initialize +0xB20..+0xB80`의 기존 0x60 범위에서 원본 InitLayouts 대상 CALL이
+  정확히 하나인지, 직전 `mov r8d,7`이 있는지 검사하고 쓰기 직전 CALL 원본을 재검증한다.
+  다른 CUIMaker 호출이나 InitLayouts 함수 전체를 후킹하지 않는다.
+- `TrickUiInitLayoutsBridge`: 진입부터 hit/tick/thread/maker/owner/count를 기록.
+  `maker == owner+0x140`, layout 범위, count=7, descriptor 범위, ID2~5 type20을 확인.
+  가드 실패 시 원본 인자로 한 번 통과한다. 확장 호출 후 count=8과 helper7이 확인돼야
+  `expanded` 카운터와 완료 로그를 남긴다.
+- 원본 함수 포인터는 CALL 패치 **전에** atomic으로 게시한다. cave는 스택을 건드리지 않는
+  tail jump를 사용해 별도 unwind 정보 없는 가짜 프레임을 만들지 않는다.
+- 확장 중 SEH는 코드만 기록하고 전파한다. 부분 초기화 maker에 원래 count=7로
+  재호출하던 기존 경로를 제거했다. 예외를 삼키고 정상 초기화처럼 계속하지 않는다.
+- `SetStratagemFiveMetadataTest`: 조기 설치 상태를 보고하고, 준비 실패 시 내부등록을 중단.
+  기존 호출 위치는 제거했다. 여기서 설치되는 경우는 늦은 fallback일 수 있다.
+- `UpdateStratagemFiveUiRuntimeProbe`: live layout 상태와 누적 hits/expanded를 함께 출력.
+  count=8, owner 일치, 유효한 helper7이 없으면 sidecar **할당 전** 중단한다.
+  실제 등록 함수의 type/lookup/5인자 호출 검증도 그대로 유지한다.
+
+### 4. 위험 요소와 복구 범위
+
+- 아직 실게임에서 조기 설치/확장/렌더 결과를 확인하지 않았다. 코드가 늦게 풀리거나,
+  DLL보다 먼저 UI가 생성되거나, 다른 경로가 사용되는 가능성이 남는다.
+- CALL 수정은 기존 방식의 5바이트 메모리 쓰기다. 설치와 해당 명령 실행이 겹치는
+  경우까지 동기화하는 패치는 아니므로, 실행 중 전투에 DLL을 주입하는 테스트는 피한다.
+- 가드가 맞아도 원본 InitLayouts의 내부 실패는 게임 예외로 이어질 수 있다.
+  그런 maker의 안전한 롤백 방법은 확인되지 않았다.
+- helper7은 최초 초기화 때 만들어져 내부등록 전까지 남는다. 미등록 helper 정리와
+  sidecar 파괴/재사용, 창 재개방 때 위치 유지, 게임 스레드와 기존 probe 간 수명 동기화는
+  여전히 실게임 확인 과제다. 이번 성공 기준은 새 프로세스의 첫 표시다.
+- raw hook이 DLL 주소를 참조하므로 설치 성공 시 DLL을 프로세스 종료까지 pin한다.
+  **이 실험 빌드는 실행 중 DLL unload/reload를 지원하지 않는다.**
+  내부등록 OFF는 count=8 maker나 조기 bridge를 제거하지 않는다.
+  완전 복구는 게임 종료 후 기존 DLL로 교체하고 재시작한다. EXE/세이브 파일은 수정하지 않는다.
+- 기존 ID1~4 배열, UI ID6, callback/Open/GetTrickButton의 동작 확장은 건드리지 않는다.
+  실제 다섯 번째 버튼 표시를 사용자가 확인한 뒤에 선택/사용 경로 작업을 진행한다.
+
+### 5. 기존 실패 접근과의 차이
+
+live maker 재초기화, 임시 maker 복제, count만 수정, null helper 등록을 하지 않는다.
+이미 쓰인 ID0~6을 재등록하지 않고, 게임의 최초 InitLayouts 한 번이 helper7까지 생성한다.
+새 준비 경로는 PE/CodeView 및 정해진 0x60 코드 범위만 읽는다. 새로운 broad scan은 없다.
+
+### 실게임 테스트 순서
+
+1. 치트 메뉴에서 **파일 로그 출력**을 켜고 설정을 저장한 뒤 게임을 완전히 종료한다.
+   `LoadEarlyLogConfig()`가 읽을 `bFileLog=true`가 저장되어 있어야 시작 로그가 남는다.
+2. 기존 DLL을 백업하고 이번 DLL을 **게임이 종료된 상태에서** 교체한다.
+   로컬 검증 산출물은 `x64/Release/hid.dll`이며 다른 proxy DLL과 중복 로드하지 않는다.
+3. 게임을 새로 실행한다. 전투 진입 전에 `S8RPK_cheat.log`에서
+   `[Stratagem5UI] early bridge preparation before startup delay`와
+   `[책략5UIHELPER] ... 브리지 설치 완료: callRVA=... tick=...`를 확인한다.
+   빌드 가드/준비 실패만 있으면 이후 토글 실험을 진행하지 않고 로그를 보낸다.
+4. 새 전투로 진입한다. 원래 UI 생성 시점에 `브리지 진입`과
+   `초기 InitLayouts 7->8 완료: ... count=8 helper7=<non-null>`이 나오는지 확인한다.
+   UI가 지연 생성된다면 이 로그는 6단계에서 나올 수도 있다.
+5. 기존 순서대로 `5번 책략 데이터` → `5번 책략 횟수 1` → `5번 책략 내부등록`을 켠다.
+   `상태(metadata-enable)`의 installed/hits/expanded/lastOwner도 보관한다.
+6. 책략창을 연다. `상태(live-layout)`, `controlCount(+150)=8`,
+   helper7 등록 시작, `ID7 정식 등록 성공` 로그를 확인하고
+   **기존 4개와 별도의 다섯 번째 버튼이 실제 화면에 보이는지** 확인한다.
+   알려진 좌표라면 `386,606,826,1046,1266 / y=364`가 출력된다.
+7. 다섯 번째 버튼은 아직 클릭하지 않는다. 첫 표시 결과와 기존 4개의 표시/기능 이상 여부를
+   기록한다. 등록 실패 후 OFF/ON 반복, 전투 재진입으로 강제 재시도하지 않는다.
+
+성공 예상 순서(주소/tick/hit 값은 실행마다 다름):
+
+```text
+[Stratagem5UI] early bridge preparation before startup delay
+[책략5UIHELPER] 책략 UI 초기 InitLayouts 7->8 브리지 설치 완료: callRVA=... tick=... thread=...
+[책략5UIHELPER] 브리지 진입: hit=1 ... count=7
+[책략5UIHELPER] 초기 InitLayouts 7->8 완료: ... count=8 helper7=...
+[책략5UIHELPER] 상태(live-layout): installed=1 ... hits=1 expanded=1 lastOwner=...
+[책략5UICAP] Layout=... controlCount(+150)=8 / buttons=...
+[책략5UITEST] 원본이 만든 helper7로 ID7 등록 시작: ...
+[책략5UITEST] ID7 정식 등록 성공. helper7 소모 및 5버튼 압축 배치 완료.
+```
+
+실패하면 **새 실행 시작부터 첫 표시 시도까지의 로그 전체**를 보낸다.
+최소 포함 태그: `[Stratagem5UI]`, `[책략5UIHELPER]`, `[책략5UICAP]`,
+`[책략5UITEST]`, `[책략5PDBDBG]`. 설치/진입/완료가 없는 경우도 그대로 보존한다.
+
+| 관찰 | 다음 판단 |
+|---|---|
+| installed=1, hits=0, live count=7 | 설치 이전 생성 또는 다른 경로. 아직 둘 중 하나로 단정하지 않음 |
+| hits>0, expanded=0 | 진입 인자/descriptor 가드 또는 확장 결과 실패 로그 확인 |
+| expanded>0인데 live count=7 | lastOwner와 현재 Layout 비교; 다른 인스턴스/초기화 경로 조사 |
+| count=8, helper7=0, 등록 성공 로그 없음 | helper 소비/파괴 시점 조사. null로 등록하지 않음 |
+| ID7 등록 성공인데 화면은 4개 | 렌더/표시 경로가 남은 문제. 선택 callback 확장으로 넘어가지 않음 |
+
+### 로컬 검증 범위
+
+- GitHub connector 빌드가 아니라 이 작업 PC의 Visual Studio 18 MSBuild로
+  `Release|x64`, `ProxyType=hid`, `TargetName=hid` 빌드 및 링크 종료 코드 0을 확인했다.
+  로그: `stratagem5-build.log` (로컬 ignored 파일).
+- 로컬 `artifacts/stratagem5_bridge_smoke.cpp`에서 production bridge를 직접 포함하고,
+  게임 함수만 stub으로 대체하여 7개 검사를 통과했다: 원본 7개 descriptor 보존/ID7 clone,
+  count 불일치 통과, owner 불일치 통과, type 불일치 거부, null helper 성공 처리 방지,
+  SEH 전파 시 원본 호출 1회, 다른 EXE 빌드 거부. 실제 hook 설치는 호출하지 않는다.
+- 이 검증은 게임의 원본 InitLayouts ABI, helper 생성/소유권, 렌더 성공을 입증하지 않는다.
+  **실게임 검증은 대기 중이며 최종 5번 선택/사용 기능은 아직 완료되지 않았다.**

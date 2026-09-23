@@ -1,6 +1,10 @@
 #pragma once
 
 namespace DX11Base {
+  // Called from the DLL worker before its startup delay, independently of battle
+  // data/toggles. Retry only during that bounded delay if runtime code is not ready.
+  bool PrepareStratagemFiveUiBridge(bool reportFailure = true);
+
   // Captures the battle-side object used by the old CT and dumps the
   // stratagem count fields. Pre-battle these may still be zero; re-run after
   // the battle actually starts.

@@ -6,6 +6,7 @@
 #include "StratagemSlotProbe.h"
 
 #include <psapi.h>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 
@@ -73,7 +74,11 @@ namespace DX11Base {
     static uintptr_t g_trickInitLayoutsCaveAddr = 0;
     static uint8_t g_trickInitLayoutsOriginalCall[5] = {};
     static bool g_trickInitLayoutsHookApplied = false;
-    static uintptr_t g_originalInitLayoutsAddr = 0;
+    static std::atomic<uintptr_t> g_originalInitLayoutsAddr{0};
+    static ULONGLONG g_trickInitLayoutsInstallTick = 0;
+    static std::atomic<unsigned> g_trickInitLayoutsHits{0};
+    static std::atomic<unsigned> g_trickInitLayoutsExpanded{0};
+    static std::atomic<uintptr_t> g_lastInitLayoutsOwner{0};
 
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
@@ -108,6 +113,74 @@ namespace DX11Base {
                                 size_t length);
 
 
+    // Read only PE headers and the bounded CodeView directory, never scan memory.
+    // The timestamp alone is insufficient for these build-specific RVAs.
+    static bool IsSupportedTrickUiBuild(uintptr_t exeBase) {
+      MODULEINFO module{};
+      IMAGE_DOS_HEADER dos{};
+      IMAGE_NT_HEADERS64 nt{};
+      if (!GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &module, sizeof(module)) ||
+          !SafeCopySeh(exeBase, &dos, sizeof(dos)) ||
+          dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0 ||
+          module.SizeOfImage < sizeof(nt) ||
+          static_cast<size_t>(dos.e_lfanew) > module.SizeOfImage - sizeof(nt) ||
+          !SafeCopySeh(exeBase + dos.e_lfanew, &nt, sizeof(nt)) ||
+          nt.Signature != IMAGE_NT_SIGNATURE ||
+          nt.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+          nt.FileHeader.TimeDateStamp != 0x69A67ED1 ||
+          nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
+          nt.OptionalHeader.SizeOfImage != module.SizeOfImage ||
+          nt.OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_DEBUG ||
+          module.SizeOfImage <= 0x01E7FF40 + 0x100)
+        return false;
+
+      const auto &debug = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+      if (!debug.VirtualAddress || !debug.Size ||
+          debug.Size % sizeof(IMAGE_DEBUG_DIRECTORY) != 0 ||
+          debug.Size / sizeof(IMAGE_DEBUG_DIRECTORY) > 64 ||
+          debug.VirtualAddress >= module.SizeOfImage ||
+          debug.Size > module.SizeOfImage - debug.VirtualAddress)
+        return false;
+
+      struct CodeViewId { DWORD signature; GUID guid; DWORD age; };
+      static_assert(sizeof(CodeViewId) == 24);
+      const GUID expected = {0xB18A027E, 0x19F4, 0x4C35,
+                             {0x87, 0x49, 0x5B, 0x6F, 0x0F, 0xF8, 0x14, 0xD8}};
+      for (DWORD offset = 0; offset < debug.Size; offset += sizeof(IMAGE_DEBUG_DIRECTORY)) {
+        IMAGE_DEBUG_DIRECTORY entry{};
+        CodeViewId id{};
+        if (!SafeCopySeh(exeBase + debug.VirtualAddress + offset, &entry, sizeof(entry)))
+          return false;
+        if (entry.Type != IMAGE_DEBUG_TYPE_CODEVIEW)
+          continue;
+        if (!entry.AddressOfRawData || entry.SizeOfData < sizeof(id) ||
+            entry.AddressOfRawData >= module.SizeOfImage ||
+            entry.SizeOfData > module.SizeOfImage - entry.AddressOfRawData ||
+            !SafeCopySeh(exeBase + entry.AddressOfRawData, &id, sizeof(id)))
+          return false;
+        if (id.signature == 0x53445352 && id.age == 1 &&
+            std::memcmp(&id.guid, &expected, sizeof(expected)) == 0)
+          return true;
+      }
+      return false;
+    }
+
+    static void LogTrickUiBridgeStatus(const char *context) {
+      AddLog(u8"[책략5UIHELPER] 상태(%s): installed=%d installTick=%llu hits=%u expanded=%u lastOwner=%p",
+             context, g_trickInitLayoutsHookApplied ? 1 : 0,
+             g_trickInitLayoutsInstallTick, g_trickInitLayoutsHits.load(),
+             g_trickInitLayoutsExpanded.load(),
+             reinterpret_cast<void *>(g_lastInitLayoutsOwner.load()));
+    }
+
+    static int LogTrickUiInitException(DWORD code) {
+      AddLog(u8"[책략5UIHELPER] 확장 InitLayouts 예외: code=%08X. 부분 초기화 maker 재호출 금지; 예외 전파.",
+             static_cast<unsigned>(code));
+      return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     static void __fastcall TrickUiInitLayoutsBridge(uintptr_t maker,
                                                     const void *descriptors,
                                                     int count,
@@ -116,13 +189,21 @@ namespace DX11Base {
           void(__fastcall *)(uintptr_t, const void *, int, uintptr_t);
 
       const auto original =
-          reinterpret_cast<InitLayoutsFn>(g_originalInitLayoutsAddr);
+          reinterpret_cast<InitLayoutsFn>(g_originalInitLayoutsAddr.load());
       if (!original)
         return;
 
-      if (count != 7 ||
+      const unsigned hit = ++g_trickInitLayoutsHits;
+      g_lastInitLayoutsOwner.store(owner);
+      AddLog(u8"[책략5UIHELPER] 브리지 진입: hit=%u tick=%llu thread=%lu maker=%p owner=%p count=%d",
+             hit, GetTickCount64(), GetCurrentThreadId(),
+             reinterpret_cast<void *>(maker), reinterpret_cast<void *>(owner), count);
+
+      if (!owner || !IsValidPtr(owner, 0x2A8) || maker != owner + 0x140 ||
+          count != 7 ||
           !descriptors ||
           !IsValidPtr(reinterpret_cast<uintptr_t>(descriptors), 7 * 0x60)) {
+        AddLog(u8"[책략5UIHELPER] 인자/owner+140/descriptor 검증 실패. 원본 인자로 1회 통과.");
         original(maker, descriptors, count, owner);
         return;
       }
@@ -130,6 +211,7 @@ namespace DX11Base {
       alignas(16) uint8_t expanded[8 * 0x60] = {};
       if (!SafeCopySeh(reinterpret_cast<uintptr_t>(descriptors),
                        expanded, 7 * 0x60)) {
+        AddLog(u8"[책략5UIHELPER] descriptor 복사 실패. 원본 인자로 1회 통과.");
         original(maker, descriptors, count, owner);
         return;
       }
@@ -157,10 +239,8 @@ namespace DX11Base {
 
       __try {
         original(maker, expanded, 8, owner);
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        AddLog(u8"[책략5UIHELPER] 원본 InitLayouts 7->8 확장 호출 중 예외. 원래 7칸으로 재시도.");
-        original(maker, descriptors, count, owner);
-        return;
+      } __except (LogTrickUiInitException(GetExceptionCode())) {
+        // Never retry InitLayouts on a possibly partially initialized maker.
       }
 
       uint32_t newCount = 0;
@@ -171,6 +251,13 @@ namespace DX11Base {
       if (pointerTable && IsValidPtr(pointerTable, 8 * sizeof(uintptr_t)))
         SafeReadPtrSeh(pointerTable + 7 * sizeof(uintptr_t), &helper7);
 
+      if (newCount != 8 || !helper7 || !IsValidPtr(helper7, sizeof(uintptr_t))) {
+        AddLog(u8"[책략5UIHELPER] 확장 결과 검증 실패: count=%u helper7=%p. 재초기화하지 않습니다.",
+               static_cast<unsigned>(newCount), reinterpret_cast<void *>(helper7));
+        return;
+      }
+      ++g_trickInitLayoutsExpanded;
+
       AddLog(u8"[책략5UIHELPER] 초기 InitLayouts 7->8 완료: maker=%p owner=%p count=%u helper7=%p",
              reinterpret_cast<void *>(maker),
              reinterpret_cast<void *>(owner),
@@ -178,7 +265,7 @@ namespace DX11Base {
              reinterpret_cast<void *>(helper7));
     }
 
-    static bool EnsureTrickUiInitLayoutsBridgeHook() {
+    static bool EnsureTrickUiInitLayoutsBridgeHook(bool reportFailure = true) {
       if (g_trickInitLayoutsHookApplied)
         return true;
 
@@ -186,6 +273,11 @@ namespace DX11Base {
           reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
       if (!exeBase)
         return false;
+      if (!IsSupportedTrickUiBuild(exeBase)) {
+        if (reportFailure)
+          AddLog(u8"[책략5UIHELPER] PE/RSDS 빌드 가드 불일치 또는 아직 준비 안 됨. 쓰기 중단.");
+        return false;
+      }
 
       constexpr uintptr_t kLayoutInitializeRva = 0x01DAF350;
       constexpr uintptr_t kInitLayoutsRva = 0x01D13E60;
@@ -195,15 +287,20 @@ namespace DX11Base {
       const uintptr_t scanEnd =
           exeBase + kLayoutInitializeRva + 0xB80;
 
+      uint8_t callWindow[0x60] = {};
+      if (!IsValidPtr(scanStart, sizeof(callWindow)) ||
+          !SafeCopySeh(scanStart, callWindow, sizeof(callWindow)))
+        return false;
+
       uintptr_t callSite = 0;
+      unsigned matches = 0;
       for (uintptr_t p = scanStart; p + 5 <= scanEnd; ++p) {
-        if (!IsValidPtr(p, 5) ||
-            *reinterpret_cast<const uint8_t *>(p) != 0xE8)
+        if (callWindow[p - scanStart] != 0xE8)
           continue;
 
         int32_t rel = 0;
         std::memcpy(&rel,
-                    reinterpret_cast<const void *>(p + 1),
+                    callWindow + (p - scanStart) + 1,
                     sizeof(rel));
         const uintptr_t target =
             static_cast<uintptr_t>(
@@ -211,12 +308,13 @@ namespace DX11Base {
                 static_cast<intptr_t>(rel));
         if (target == originalTarget) {
           callSite = p;
-          break;
+          ++matches;
         }
       }
 
-      if (!callSite) {
-        AddLog(u8"[책략5UIHELPER] Layout::Initialize의 InitLayouts call을 찾지 못했습니다.");
+      if (matches != 1) {
+        if (reportFailure)
+          AddLog(u8"[책략5UIHELPER] Layout::Initialize의 InitLayouts call 검증 실패: matches=%u", matches);
         return false;
       }
 
@@ -228,14 +326,15 @@ namespace DX11Base {
       for (uintptr_t p = verifyStart; p + 6 <= callSite; ++p) {
         static const uint8_t movR8d7[6] =
             {0x41,0xB8,0x07,0x00,0x00,0x00};
-        if (std::memcmp(reinterpret_cast<const void *>(p),
+        if (std::memcmp(callWindow + (p - scanStart),
                         movR8d7, sizeof(movR8d7)) == 0) {
           countSevenFound = true;
           break;
         }
       }
       if (!countSevenFound) {
-        AddLog(u8"[책략5UIHELPER] InitLayouts call 직전 count=7 검증 실패.");
+        if (reportFailure)
+          AddLog(u8"[책략5UIHELPER] InitLayouts call 직전 count=7 검증 실패.");
         return false;
       }
 
@@ -251,14 +350,11 @@ namespace DX11Base {
         i += 8;
       };
 
-      // Called by the original CALL site, so preserve Win64 stack alignment,
-      // call our bridge with the exact RCX/RDX/R8/R9 arguments, then RET.
-      emit8(0x48); emit8(0x83); emit8(0xEC); emit8(0x28); // sub rsp,28
+      // Tail-jump keeps the game's return address/shadow space and needs no
+      // synthetic stack frame (or unwind metadata) in the allocated cave.
       emit8(0x48); emit8(0xB8);                            // mov rax,imm64
       emit64(reinterpret_cast<uintptr_t>(&TrickUiInitLayoutsBridge));
-      emit8(0xFF); emit8(0xD0);                            // call rax
-      emit8(0x48); emit8(0x83); emit8(0xC4); emit8(0x28); // add rsp,28
-      emit8(0xC3);                                         // ret
+      emit8(0xFF); emit8(0xE0);                            // jmp rax
       FlushInstructionCache(GetCurrentProcess(), c, i);
 
       const intptr_t callRel =
@@ -274,7 +370,14 @@ namespace DX11Base {
       std::memcpy(patch + 1, &rel32, sizeof(rel32));
 
       std::memcpy(g_trickInitLayoutsOriginalCall,
-                  reinterpret_cast<const void *>(callSite), 5);
+                  callWindow + (callSite - scanStart), 5);
+
+      uint8_t currentCall[5] = {};
+      if (!SafeCopySeh(callSite, currentCall, sizeof(currentCall)) ||
+          std::memcmp(currentCall, g_trickInitLayoutsOriginalCall, sizeof(currentCall)) != 0) {
+        VirtualFree(reinterpret_cast<LPVOID>(cave), 0, MEM_RELEASE);
+        return false;
+      }
 
       DWORD oldProtect=0, tmpProtect=0;
       if (!VirtualProtect(reinterpret_cast<LPVOID>(callSite), 5,
@@ -283,6 +386,21 @@ namespace DX11Base {
         return false;
       }
 
+      // Existing raw capture hooks also retain DLL addresses. Keep this
+      // experimental DLL alive until process exit, including in-flight calls.
+      HMODULE pinnedModule = nullptr;
+      if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_PIN,
+                             reinterpret_cast<LPCWSTR>(&TrickUiInitLayoutsBridge),
+                             &pinnedModule)) {
+        VirtualProtect(reinterpret_cast<LPVOID>(callSite), 5, oldProtect, &tmpProtect);
+        VirtualFree(reinterpret_cast<LPVOID>(cave), 0, MEM_RELEASE);
+        return false;
+      }
+
+      // Publish the original target BEFORE the call site can reach the bridge.
+      g_originalInitLayoutsAddr = originalTarget;
+      g_trickInitLayoutsInstallTick = GetTickCount64();
       std::memcpy(reinterpret_cast<void *>(callSite), patch, 5);
       FlushInstructionCache(GetCurrentProcess(),
                             reinterpret_cast<void *>(callSite), 5);
@@ -291,10 +409,11 @@ namespace DX11Base {
 
       g_trickInitLayoutsCallAddr = callSite;
       g_trickInitLayoutsCaveAddr = cave;
-      g_originalInitLayoutsAddr = originalTarget;
       g_trickInitLayoutsHookApplied = true;
 
-      AddLog(u8"[책략5UIHELPER] 책략 UI 초기 InitLayouts 7->8 브리지 설치 완료.");
+      AddLog(u8"[책략5UIHELPER] 책략 UI 초기 InitLayouts 7->8 브리지 설치 완료: callRVA=%llX tick=%llu thread=%lu",
+             static_cast<unsigned long long>(callSite - exeBase),
+             g_trickInitLayoutsInstallTick, GetCurrentThreadId());
       return true;
     }
 
@@ -584,7 +703,7 @@ namespace DX11Base {
             !descBase || !pointerBase ||
             !IsValidPtr(descBase,8*0x60) ||
             !IsValidPtr(pointerBase,8*sizeof(uintptr_t))) {
-          AddLog(u8"[책략5UITEST] 초기 8칸 maker가 준비되지 않음: count=%u owner=%p. 책략창 최초 생성 전에 내부등록을 켜야 합니다.",
+          AddLog(u8"[책략5UITEST] 초기 8칸 maker가 준비되지 않음: count=%u owner=%p. 시작 로그와 브리지 진입 로그를 확인하세요. live maker 재초기화 금지.",
                  (unsigned)count,
                  reinterpret_cast<void *>(owner));
           return false;
@@ -1383,6 +1502,13 @@ namespace DX11Base {
     }
   }
 
+  bool PrepareStratagemFiveUiBridge(bool reportFailure) {
+    const bool ready = EnsureTrickUiInitLayoutsBridgeHook(reportFailure);
+    if (!ready && reportFailure)
+      AddLog(u8"[책략5UIHELPER] 초기 브리지 준비 실패. 이 시도에서 call 패치 없음.");
+    return ready;
+  }
+
   bool SetStratagemFiveCountTest(bool enable) {
     if (enable) {
       if (g_id5CountApplied)
@@ -1767,6 +1893,12 @@ namespace DX11Base {
       return true;
     }
 
+    // The DLL worker normally installed this already. This is only a guarded
+    // fallback/status report, never an attempt to reinitialize a live maker.
+    if (!PrepareStratagemFiveUiBridge())
+      return false;
+    LogTrickUiBridgeStatus("metadata-enable");
+
     if (g_fiveMetadataApplied && g_fiveRuntimeSlotApplied)
       return true;
 
@@ -1971,8 +2103,6 @@ namespace DX11Base {
       AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터가 이미 row5입니다: camp=%p slot5=%p",
              reinterpret_cast<void *>(matchedObject),
              reinterpret_cast<void *>(matchedSlot));
-      if (!EnsureTrickUiInitLayoutsBridgeHook())
-        AddLog(u8"[책략5UIHELPER] 초기 InitLayouts 7->8 브리지 설치 실패.");
       if (!EnsureTrickUiLayoutCaptureHook())
         AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
       if (!EnsureTrickUiDialogCaptureHook())
@@ -2013,8 +2143,6 @@ namespace DX11Base {
            reinterpret_cast<void *>(matchedSlot),
            reinterpret_cast<void *>(matchedOld5),
            reinterpret_cast<void *>(row5));
-    if (!EnsureTrickUiInitLayoutsBridgeHook())
-      AddLog(u8"[책략5UIHELPER] 초기 InitLayouts 7->8 브리지 설치 실패.");
     if (!EnsureTrickUiLayoutCaptureHook())
       AddLog(u8"[책략5UICAP] layout 캡처 훅은 설치되지 않았습니다.");
     if (!EnsureTrickUiDialogCaptureHook())
@@ -2040,6 +2168,8 @@ namespace DX11Base {
     if (!SafeCopySeh(layout + 0x1E0, buttons, sizeof(buttons)) ||
         !SafeCopySeh(layout + 0x150, &controlCount, sizeof(controlCount)))
       return;
+
+    LogTrickUiBridgeStatus("live-layout");
 
     AddLog(u8"[책략5UICAP] Layout=%p controlCount(+150)=%u / buttons=%p,%p,%p,%p",
            reinterpret_cast<void *>(layout),
@@ -2215,7 +2345,21 @@ namespace DX11Base {
              (int32_t)fields50[14], (int32_t)fields50[15]);
     }
 
-    if (CreateFifthUiSidecarDisplayOnlySeh(layout))
+    // Refuse before allocating a sidecar if this layout predates the bridge or
+    // its one-shot helper is absent. No count edits, helper synthesis or retries.
+    uintptr_t helperTable = 0, helper7 = 0, makerOwner = 0;
+    const bool helperReady = controlCount == 8 &&
+        SafeReadPtrSeh(layout + 0x158, &makerOwner) && makerOwner == layout &&
+        SafeReadPtrSeh(layout + 0x148, &helperTable) &&
+        IsValidPtr(helperTable, 8 * sizeof(uintptr_t)) &&
+        SafeReadPtrSeh(helperTable + 7 * sizeof(uintptr_t), &helper7) &&
+        helper7 && IsValidPtr(helper7, sizeof(uintptr_t));
+    if (!helperReady) {
+      AddLog(u8"[책략5UIHELPER] 표시 실험 중단: layout=%p count=%u helper7=%p hits=%u expanded=%u. 생성/등록/재초기화 없음.",
+             reinterpret_cast<void *>(layout), static_cast<unsigned>(controlCount),
+             reinterpret_cast<void *>(helper7), g_trickInitLayoutsHits.load(),
+             g_trickInitLayoutsExpanded.load());
+    } else if (CreateFifthUiSidecarDisplayOnlySeh(layout))
       ExpandMakerAndRegisterFifthSidecarSeh(layout);
 
     g_lastLoggedUiLayout = layout;

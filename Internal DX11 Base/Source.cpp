@@ -1,6 +1,7 @@
 #pragma once
 #include "Cheats.h"
 #include "Cheats/System/SpeedHack.h"
+#include "Cheats/War/StratagemSlotProbe.h"
 #include "Config.h"
 #include "Engine.h"
 #include "Menu.h"
@@ -275,6 +276,9 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   // [�ű�] ���� �ʱ⿡ �������� �α���� �÷��׸� Ȯ���Ͽ� D3D �� �� ���ʱ�
   // ������ ���Ͽ� ���
   DX11Base::LoadEarlyLogConfig();
+  // Install outside loader lock, before battle UI creation and the D3D delay.
+  DX11Base::AddLog("[Stratagem5UI] early bridge preparation before startup delay");
+  bool stratagemUiBridgeReady = DX11Base::PrepareStratagemFiveUiBridge();
 
   // ���� DLL ���ϸ� Ȯ��
   char dllPath[MAX_PATH];
@@ -282,7 +286,13 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   std::string dllName = std::filesystem::path(dllPath).filename().string();
 
   // [�߿�] �ʱ�ȭ �������� ���� 10�� ���
-  Sleep(10000);
+  for (int startupTick = 0; startupTick < 100; ++startupTick) {
+    Sleep(100);
+    if (!stratagemUiBridgeReady)
+      stratagemUiBridgeReady = DX11Base::PrepareStratagemFiveUiBridge(false);
+  }
+  if (!stratagemUiBridgeReady)
+    DX11Base::PrepareStratagemFiveUiBridge(); // Report the final refusal once.
 
   DX11Base::AddLog(u8"========================================");
   DX11Base::AddLog(u8"[System] ġƮ �ε� ���� (DLL: %s)", dllName.c_str());
