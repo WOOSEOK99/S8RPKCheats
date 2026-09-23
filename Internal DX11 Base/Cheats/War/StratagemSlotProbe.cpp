@@ -67,6 +67,17 @@ namespace DX11Base {
     static uint8_t g_fifthUiMakerOriginal[0x28] = {};
     static bool g_fifthUiId7Registered = false;
 
+    // Dialog::Open still skips UI work for loop index >=4 even after ID7 is
+    // registered. Keep the fixed m_pButtons[4] array untouched; a narrow hook
+    // allows index 4 through and substitutes the external sidecar pointer at
+    // the one direct [layout + index*8 + 0x1E0] load.
+    static uintptr_t g_fifthUiOpenCmpAddr = 0;
+    static uintptr_t g_fifthUiOpenLoadAddr = 0;
+    static uintptr_t g_fifthUiOpenSkipTarget = 0;
+    static uintptr_t g_fifthUiOpenCaveAddr = 0;
+    static uint8_t g_fifthUiOpenOriginalLoad[8] = {};
+    static bool g_fifthUiOpenDisplayHookApplied = false;
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -772,6 +783,224 @@ namespace DX11Base {
       return true;
     }
 
+
+    static bool EnsureFifthUiOpenDisplayHook() {
+      if (g_fifthUiOpenDisplayHookApplied)
+        return true;
+      if (!g_fifthUiId7Registered ||
+          !g_fifthUiSidecarButton ||
+          !IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
+        return false;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kDialogOpenRva = 0x01DF3CB0;
+      constexpr size_t kDialogOpenSize = 0x241;
+      const uintptr_t openAddr = exeBase + kDialogOpenRva;
+      uint8_t code[kDialogOpenSize] = {};
+      if (!IsValidPtr(openAddr, sizeof(code)) ||
+          !SafeCopySeh(openAddr, code, sizeof(code)))
+        return false;
+
+      static const uint8_t kButtonLoad[8] = {
+          0x48,0x8B,0xB4,0xF0,0xE0,0x01,0x00,0x00
+      };
+
+      uintptr_t cmpAddr = 0;
+      uintptr_t loadAddr = 0;
+      uintptr_t skipTarget = 0;
+      unsigned candidates = 0;
+
+      // Find only the proven Open pattern:
+      //   cmp edi,4
+      //   jae <skip button UI>
+      //   ... mov rsi,[rax+rsi*8+1E0]
+      // No broad scan and no global "4 -> 5" patch.
+      for (size_t i = 0; i + 9 < sizeof(code); ++i) {
+        if (code[i] != 0x83 || code[i + 1] != 0xFF || code[i + 2] != 0x04)
+          continue;
+
+        size_t branchEnd = 0;
+        uintptr_t target = 0;
+        if (code[i + 3] == 0x73) {
+          const int8_t rel8 = static_cast<int8_t>(code[i + 4]);
+          branchEnd = i + 5;
+          target = openAddr + branchEnd + rel8;
+        } else if (code[i + 3] == 0x0F && code[i + 4] == 0x83) {
+          int32_t rel32 = 0;
+          std::memcpy(&rel32, code + i + 5, sizeof(rel32));
+          branchEnd = i + 9;
+          target = openAddr + branchEnd + static_cast<intptr_t>(rel32);
+        } else {
+          continue;
+        }
+
+        const size_t searchEnd =
+            (branchEnd + 0x70 < sizeof(code)) ? branchEnd + 0x70 : sizeof(code);
+        size_t foundLoad = SIZE_MAX;
+        for (size_t j = branchEnd; j + sizeof(kButtonLoad) <= searchEnd; ++j) {
+          if (std::memcmp(code + j, kButtonLoad, sizeof(kButtonLoad)) == 0) {
+            if (foundLoad != SIZE_MAX) {
+              foundLoad = SIZE_MAX;
+              break; // ambiguous within this candidate
+            }
+            foundLoad = j;
+          }
+        }
+        if (foundLoad == SIZE_MAX)
+          continue;
+        if (target < openAddr || target >= openAddr + sizeof(code))
+          continue;
+
+        ++candidates;
+        cmpAddr = openAddr + i;
+        loadAddr = openAddr + foundLoad;
+        skipTarget = target;
+      }
+
+      if (candidates != 1 || !cmpAddr || !loadAddr || !skipTarget) {
+        AddLog(u8"[책략5UIOPEN] Open index4 후보 검증 실패: candidates=%u",
+               candidates);
+        return false;
+      }
+
+      uint8_t cmpNow[3] = {};
+      uint8_t loadNow[8] = {};
+      if (!SafeCopySeh(cmpAddr, cmpNow, sizeof(cmpNow)) ||
+          !SafeCopySeh(loadAddr, loadNow, sizeof(loadNow)) ||
+          cmpNow[0] != 0x83 || cmpNow[1] != 0xFF || cmpNow[2] != 0x04 ||
+          std::memcmp(loadNow, kButtonLoad, sizeof(loadNow)) != 0) {
+        AddLog(u8"[책략5UIOPEN] Open 패치 직전 바이트 재검증 실패.");
+        return false;
+      }
+
+      const uintptr_t caveAddr = AllocNear(loadAddr, 128);
+      if (!caveAddr)
+        return false;
+
+      uint8_t *cave = reinterpret_cast<uint8_t *>(caveAddr);
+      int idx = 0;
+      auto emit8 = [&](uint8_t v) { cave[idx++] = v; };
+      auto emit32 = [&](int32_t v) {
+        std::memcpy(cave + idx, &v, sizeof(v));
+        idx += 4;
+      };
+      auto emit64 = [&](uintptr_t v) {
+        std::memcpy(cave + idx, &v, sizeof(v));
+        idx += 8;
+      };
+      auto patchRel32 = [&](int dispIndex, int targetIndex) {
+        const int64_t rel =
+            static_cast<int64_t>(targetIndex) -
+            static_cast<int64_t>(dispIndex + 4);
+        if (rel < INT32_MIN || rel > INT32_MAX)
+          return false;
+        const int32_t v = static_cast<int32_t>(rel);
+        std::memcpy(cave + dispIndex, &v, sizeof(v));
+        return true;
+      };
+      auto emitExternalJmp = [&](uintptr_t target) {
+        emit8(0xE9);
+        const intptr_t rel =
+            static_cast<intptr_t>(target) -
+            static_cast<intptr_t>(caveAddr + idx + 4);
+        if (rel < INT32_MIN || rel > INT32_MAX)
+          return false;
+        emit32(static_cast<int32_t>(rel));
+        return true;
+      };
+
+      // Preserve flags because the replaced MOV does not alter them.
+      emit8(0x9C);                                      // pushfq
+      emit8(0x83); emit8(0xFF); emit8(0x04);            // cmp edi,4
+      emit8(0x0F); emit8(0x85);                         // jne original-load
+      const int jneOriginalDisp = idx; emit32(0);
+
+      // index==4: substitute the external sidecar instead of reading +0x200.
+      emit8(0x48); emit8(0xBE);                         // mov rsi, &global
+      emit64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
+      emit8(0x48); emit8(0x8B); emit8(0x36);            // mov rsi,[rsi]
+      emit8(0x48); emit8(0x85); emit8(0xF6);            // test rsi,rsi
+      emit8(0x0F); emit8(0x84);                         // jz original-skip
+      const int jzSkipDisp = idx; emit32(0);
+      emit8(0x9D);                                      // popfq
+      if (!emitExternalJmp(loadAddr + sizeof(kButtonLoad))) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr), 0, MEM_RELEASE);
+        return false;
+      }
+
+      const int originalLoadLabel = idx;
+      emit8(0x9D);                                      // popfq
+      std::memcpy(cave + idx, kButtonLoad, sizeof(kButtonLoad));
+      idx += static_cast<int>(sizeof(kButtonLoad));
+      if (!emitExternalJmp(loadAddr + sizeof(kButtonLoad))) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr), 0, MEM_RELEASE);
+        return false;
+      }
+
+      const int originalSkipLabel = idx;
+      // Drop saved patched flags, recreate the original cmp edi,4 flags, and
+      // jump to the game's original JAE target if sidecar vanished.
+      emit8(0x48); emit8(0x83); emit8(0xC4); emit8(0x08); // add rsp,8
+      emit8(0x83); emit8(0xFF); emit8(0x04);              // cmp edi,4
+      if (!emitExternalJmp(skipTarget)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr), 0, MEM_RELEASE);
+        return false;
+      }
+
+      if (!patchRel32(jneOriginalDisp, originalLoadLabel) ||
+          !patchRel32(jzSkipDisp, originalSkipLabel)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr), 0, MEM_RELEASE);
+        return false;
+      }
+
+      FlushInstructionCache(GetCurrentProcess(), cave, idx);
+
+      // Patch the direct load first. While cmp is still 4, index4 still skips,
+      // so there is no transient +0x200 access.
+      std::memcpy(g_fifthUiOpenOriginalLoad, loadNow, sizeof(loadNow));
+      if (!ApplyJmp(loadAddr, caveAddr, sizeof(kButtonLoad))) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr), 0, MEM_RELEASE);
+        return false;
+      }
+
+      // Only after the safe sidecar load is active, widen this one cmp 4 -> 5.
+      DWORD oldProtect = 0, tmpProtect = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(cmpAddr + 2), 1,
+                          PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        // Do not widen the cmp; the installed load cave is behavior-identical
+        // for indices 0..3 and harmless while the original cmp remains 4.
+        AddLog(u8"[책략5UIOPEN] cmp 4->5 권한 변경 실패. 표시 훅 미완료.");
+        return false;
+      }
+      *reinterpret_cast<uint8_t *>(cmpAddr + 2) = 0x05;
+      FlushInstructionCache(GetCurrentProcess(),
+                            reinterpret_cast<void *>(cmpAddr + 2), 1);
+      VirtualProtect(reinterpret_cast<LPVOID>(cmpAddr + 2), 1,
+                     oldProtect, &tmpProtect);
+
+      uint8_t verifyCmp = 0;
+      if (!SafeCopySeh(cmpAddr + 2, &verifyCmp, 1) || verifyCmp != 0x05) {
+        AddLog(u8"[책략5UIOPEN] cmp 4->5 쓰기 검증 실패.");
+        return false;
+      }
+
+      g_fifthUiOpenCmpAddr = cmpAddr;
+      g_fifthUiOpenLoadAddr = loadAddr;
+      g_fifthUiOpenSkipTarget = skipTarget;
+      g_fifthUiOpenCaveAddr = caveAddr;
+      g_fifthUiOpenDisplayHookApplied = true;
+
+      AddLog(u8"[책략5UIOPEN] Dialog::Open index4 sidecar 표시 훅 설치 성공: cmpRVA=+%llX loadRVA=+%llX skipRVA=+%llX",
+             (unsigned long long)(cmpAddr - exeBase),
+             (unsigned long long)(loadAddr - exeBase),
+             (unsigned long long)(skipTarget - exeBase));
+      return true;
+    }
+
     static void RestoreFifthUiMakerTestSeh() {
       __try {
         if (g_fifthUiMakerExpanded &&
@@ -967,10 +1196,28 @@ namespace DX11Base {
         }
 
         g_fifthUiId7Registered=true;
+
+        // RegisterLayout may apply the descriptor's initial visibility. Reassert
+        // visible after registration before the next Dialog::Open test.
+        const uintptr_t sidecarVt =
+            *reinterpret_cast<const uintptr_t *>(g_fifthUiSidecarButton);
+        if (sidecarVt && IsValidPtr(sidecarVt + 0x108, sizeof(uintptr_t))) {
+          const uintptr_t setVisible =
+              *reinterpret_cast<const uintptr_t *>(sidecarVt + 0x108);
+          if (setVisible && IsValidPtr(setVisible, 1)) {
+            using SetBoolFn = void(__fastcall *)(uintptr_t, bool);
+            reinterpret_cast<SetBoolFn>(setVisible)(
+                g_fifthUiSidecarButton, true);
+          }
+        }
+
+        const bool openHookReady = EnsureFifthUiOpenDisplayHook();
         AddLog(u8"[책략5UITEST] ID7 정식 등록 성공. helper7 소모 및 5버튼 압축 배치 완료.");
         AddLog(u8"[책략5UITEST] 5버튼 위치: %d,%d,%d,%d,%d / y=%d",
                compactX[0],compactX[1],compactX[2],compactX[3],compactX[4],y);
-        AddLog(u8"[책략5UITEST] 아직 callback/Open index4 연결 전입니다. 5번째 버튼은 클릭하지 마세요.");
+        AddLog(u8"[책략5UITEST] Dialog::Open index4 sidecar 표시 훅=%s. 책략창을 닫았다가 다시 여세요.",
+               openHookReady ? "READY" : "FAILED");
+        AddLog(u8"[책략5UITEST] callback은 아직 미연결입니다. 5번째 버튼이 보여도 클릭하지 마세요.");
         return true;
       } __except(EXCEPTION_EXECUTE_HANDLER) {
         AddLog(u8"[책략5UITEST] ID7 등록 중 예외: stage=%d",(int)stage);

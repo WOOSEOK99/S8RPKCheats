@@ -1697,3 +1697,86 @@ null helper, 다른 owner/클래스, 초기화 이후 바뀐 descriptor로는 �
 거부, helper 클래스 불일치·소모·교체·descriptor 변조 시 등록 차단 등을 확인했다.
 게임 원본 InitLayouts/등록/화면 표시를 대체 함수 검사로 검증했다고 해석하지 않는다.
 이 PC의 MSBuild `Release|x64` / `hid` 빌드·링크도 종료 코드 0을 확인했다.
+
+
+---
+
+## 31. 2026-09-23 ID7 정식 등록 성공 후 화면은 여전히 4개 — Dialog::Open 표시 경로 확장
+
+아스트라 브랜치 실게임에서 다음 단계까지 성공했다.
+
+```text
+expanded=1
+maker count=8
+ID7 helper class == 기존 ID2~5 helper class
+RegisterLayout(maker,7,sidecar,20,1) 성공
+helper7 소모 확인
+lookup(7) == sidecar
+sidecar UI ID=7
+state=1
+```
+
+즉 **registry/helper 문제는 통과했다.**
+
+하지만 실제 책략창에는 여전히 기존 네 버튼만 보였다.
+
+### 남은 표시 병목
+
+이미 14~15절에서 확인한 `TrickCommandDialog::Open`의 UI 처리:
+
+```asm
+cmp edi,4
+jae skip_button_logic
+...
+mov rsi,[rax+rsi*8+0x1E0]
+...
+SetTrickID(...)
+```
+
+데이터 루프는 5번째까지 진행할 수 있지만 index 4의 버튼 UI 처리만 건너뛴다.
+
+단순 `cmp 4 -> 5`만 하면 index 4에서:
+
+```text
+layout + 0x1E0 + 4*8 = layout + 0x200
+```
+
+을 읽게 되므로 금지한다. `+0x200`은 m_pButtons 다음 멤버다.
+
+### 이번 최소 표시 실험
+
+`Dialog::Open` 함수 범위(0x241 bytes) 안에서 다음 쌍을 **정확히 한 개만** 찾는다.
+
+1. `cmp edi,4` + 바로 이어지는 `jae skip`
+2. 그 분기 내부의 정확한
+   `mov rsi,[rax+rsi*8+0x1E0]`
+
+둘이 유일하게 확인될 때만 패치한다.
+
+패치 순서:
+
+1. direct array load를 cave로 먼저 교체한다.
+2. cave에서 index 0~3은 원래 load를 그대로 실행한다.
+3. index 4는 `g_fifthUiSidecarButton`을 RSI에 넣는다.
+4. sidecar가 null이면 원래 JAE skip target으로 복귀한다.
+5. 위 우회가 먼저 활성화된 뒤에만 해당 단일 `cmp edi,4`의 immediate를 5로 바꾼다.
+
+따라서 index 4에서 `layout+0x200`을 읽는 순간은 없다.
+
+ID7 등록 직후에는 RegisterLayout이 초기 visibility를 바꿀 가능성도 고려해
+sidecar의 virtual visible setter(+0x108)를 다시 true로 호출한다.
+
+### 이번 성공 기준
+
+ID7 등록 후:
+
+```text
+[책략5UIOPEN] Dialog::Open index4 sidecar 표시 훅 설치 성공: ...
+[책략5UITEST] Dialog::Open index4 sidecar 표시 훅=READY
+```
+
+를 확인한 뒤 **책략창을 닫았다가 다시 연다.**
+
+목표는 다섯 번째 카드가 화면에 보이는지만 확인하는 것이다.
+callback / GetTrickButton(4) / 실제 선택·사용은 아직 연결하지 않는다.
+따라서 다섯 번째가 보여도 클릭하지 않는다.
