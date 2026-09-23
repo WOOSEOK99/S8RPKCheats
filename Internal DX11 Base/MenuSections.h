@@ -12,7 +12,7 @@ namespace DX11Base {
     void DrawScenarioSection(uintptr_t p1, float scale);
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale);
     void DrawWarSection(uintptr_t p1, uintptr_t gameBase, float scale);
-    void DrawOfficerEditSection(float scale);
+    void DrawOfficerEditSection(uintptr_t p1, float scale);
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale);
   } // namespace MenuSections
 } // namespace DX11Base
