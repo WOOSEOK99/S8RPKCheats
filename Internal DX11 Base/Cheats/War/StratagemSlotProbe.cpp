@@ -234,6 +234,7 @@ namespace DX11Base {
     static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout);
     static bool ValidatePreparedFifthUiHelper(
         uintptr_t layout, uint32_t *descriptorTag = nullptr);
+    static bool TryExtendFifthDialogModelCountSeh(uintptr_t dialog);
 
 
     // Read only PE headers and the bounded CodeView directory, never scan memory.
@@ -2195,10 +2196,19 @@ namespace DX11Base {
           return false;
         }
 
-        AddLog(u8"[책략5UICB] callback 직전 sidecar 준비 완료: dialog=%p layout=%p button=%p",
+        // Build N+1 before the native callback loop consumes the dialog
+        // model. For N<4 this uses an existing physical button; for N==4 it
+        // also publishes the already-registered sidecar.
+        if (g_fiveRuntimeSlotApplied &&
+            g_fiveRuntimeOwner &&
+            g_fiveMetadataAddr)
+          TryExtendFifthDialogModelCountSeh(dialog);
+
+        AddLog(u8"[책략5UICB] callback 직전 UI/model 준비 완료: dialog=%p layout=%p sidecar=%p active=%p",
                reinterpret_cast<void *>(dialog),
                reinterpret_cast<void *>(layout),
-               reinterpret_cast<void *>(g_fifthUiSidecarButton));
+               reinterpret_cast<void *>(g_fifthUiSidecarButton),
+               reinterpret_cast<void *>(g_fifthUiActiveButton.load()));
         return true;
       } __except(EXCEPTION_EXECUTE_HANDLER) {
         AddLog(u8"[책략5UICB] callback 직전 sidecar 준비 중 예외.");
