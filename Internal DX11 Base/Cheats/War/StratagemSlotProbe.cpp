@@ -4553,6 +4553,69 @@ namespace DX11Base {
     AddLog(u8"[책략5UICAP] live layout 캡처 완료.");
   }
 
+  void ResetStratagemFiveSessionRuntime(uintptr_t oldP1,
+                                         uintptr_t newP1) {
+    // A save/load can destroy the entire battle/UI arena before individual
+    // pointers fail VirtualQuery. Never restore through the previous generation.
+    // Keep only the user's requested ON state; all object-bound bookkeeping is
+    // abandoned and will be rebuilt against the next live battle generation.
+    AddLog(u8"[책략5수명] 게임 세대 변경 감지: p1 %p -> %p. 전투/UI 런타임 상태 초기화.",
+           reinterpret_cast<void *>(oldP1),
+           reinterpret_cast<void *>(newP1));
+
+    g_attackInfo = 0;
+    g_defenseInfo = 0;
+
+    g_id5CountApplied = false;
+    g_id5CountAddr = 0;
+    g_id5CountOwner = 0;
+    g_id5CountOriginal = 0;
+
+    g_fiveMetadataApplied = false;
+    g_fiveMetadataAddr = 0;
+    g_fiveMetadataTable = 0;
+    g_fiveRuntimeSlotApplied = false;
+    g_fiveRuntimeSlotAddr = 0;
+    g_fiveRuntimeSlotOriginal = 0;
+    g_fiveRuntimeOwner = 0;
+
+    // Do not call any restore helper here: these addresses belong to the old
+    // save generation and may already have been released/reused.
+    g_fifthUiModelCountAddr = 0;
+    g_fifthUiModelCountOriginal = 0;
+    g_fifthUiModelCountApplied = false;
+    g_fifthUiModelEntryAddr = 0;
+    g_fifthUiModelEntryOriginal[0] = 0;
+    g_fifthUiModelEntryOriginal[1] = 0;
+    g_fifthUiModelEntryApplied = false;
+
+    g_trickUiLayout = 0;
+    g_trickUiDialog = 0;
+    g_trickUiStartX = 0;
+    g_trickUiY = 0;
+    g_trickUiStep = 0;
+    g_lastLoggedUiLayout = 0;
+
+    g_fifthUiSidecarLayout = 0;
+    g_fifthUiSidecarButton = 0;
+    g_fifthUiSidecarAttempted = false;
+    g_fifthUiId7Registered = false;
+
+    g_fifthUiMakerExpanded = false;
+    g_fifthUiMakerAddr = 0;
+    std::memset(g_fifthUiMakerOriginal, 0, sizeof(g_fifthUiMakerOriginal));
+
+    g_fifthUiCompactLogged = false;
+    g_fifthUiResetSignalDumped = false;
+    g_fifthUiOnSelectRuntimeLogged = 0;
+    g_fifthUiOnSelectAnyHits = 0;
+    InterlockedExchange(&g_fifthUiCallbackIndex4Hits, 0);
+
+    // Hooks themselves intentionally stay installed. Their index4 paths now
+    // require exact current-layout ownership and therefore safely fall back
+    // while the new save is loading.
+  }
+
   void RefreshStratagemFiveBattleRuntime() {
     if (!g_id5CountRequested && !g_fiveMetadataRequested)
       return;
