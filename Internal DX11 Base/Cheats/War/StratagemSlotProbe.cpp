@@ -83,6 +83,20 @@ namespace DX11Base {
     static uint8_t g_fifthUiGetButtonOriginal[5] = {};
     static bool g_fifthUiGetButtonHookApplied = false;
 
+    // Installed before Dialog::Initialize ever reaches its callback loop.
+    // The first hook creates/registers the sidecar after Layout::Initialize
+    // returns; the second lets the original callback body execute once more
+    // with edi==4 while substituting the external sidecar for +0x200.
+    static uintptr_t g_fifthUiPreCallbackHookAddr = 0;
+    static uintptr_t g_fifthUiPreCallbackCaveAddr = 0;
+    static uint8_t g_fifthUiPreCallbackOriginal[8] = {};
+    static bool g_fifthUiPreCallbackHookApplied = false;
+    static uintptr_t g_fifthUiCallbackLoadHookAddr = 0;
+    static uintptr_t g_fifthUiCallbackLoadCaveAddr = 0;
+    static uint8_t g_fifthUiCallbackLoadOriginal[8] = {};
+    static uintptr_t g_fifthUiCallbackBoundAddr = 0;
+    static bool g_fifthUiCallbackLoopHookApplied = false;
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -166,6 +180,10 @@ namespace DX11Base {
                                 uintptr_t rva,
                                 size_t offset,
                                 size_t length);
+
+
+    static bool CreateFifthUiSidecarDisplayOnlySeh(uintptr_t layout);
+    static bool ExpandMakerAndRegisterFifthSidecarSeh(uintptr_t layout);
 
 
     // Read only PE headers and the bounded CodeView directory, never scan memory.
@@ -1143,6 +1161,331 @@ namespace DX11Base {
       return true;
     }
 
+
+    static bool GetFifthUiLayoutMetricsSeh(uintptr_t layout,
+                                           int *outStartX,
+                                           int *outY,
+                                           int *outStep) {
+      if (!layout || !outStartX || !outY || !outStep)
+        return false;
+
+      const int liveStep = static_cast<int>(g_trickUiStep);
+      if (liveStep > 0) {
+        *outStartX = static_cast<int>(g_trickUiStartX);
+        *outY = static_cast<int>(g_trickUiY);
+        *outStep = liveStep;
+        return true;
+      }
+
+      __try {
+        uintptr_t descBase = 0;
+        uint32_t count = 0;
+        if (!SafeReadPtrSeh(layout + 0x140, &descBase) ||
+            !SafeCopySeh(layout + 0x150, &count, sizeof(count)) ||
+            count != 8 || !descBase || !IsValidPtr(descBase, 8 * 0x60))
+          return false;
+
+        // ID2..ID5 are descriptor rows 2..5. Runtime logs proved x/y at +4/+8.
+        int x0=0,y0=0,x1=0,y1=0,x2=0,y2=0,x3=0,y3=0;
+        if (!SafeCopySeh(descBase + 2*0x60 + 4, &x0, 4) ||
+            !SafeCopySeh(descBase + 2*0x60 + 8, &y0, 4) ||
+            !SafeCopySeh(descBase + 3*0x60 + 4, &x1, 4) ||
+            !SafeCopySeh(descBase + 3*0x60 + 8, &y1, 4) ||
+            !SafeCopySeh(descBase + 4*0x60 + 4, &x2, 4) ||
+            !SafeCopySeh(descBase + 4*0x60 + 8, &y2, 4) ||
+            !SafeCopySeh(descBase + 5*0x60 + 4, &x3, 4) ||
+            !SafeCopySeh(descBase + 5*0x60 + 8, &y3, 4))
+          return false;
+
+        const int step = x1 - x0;
+        if (step <= 0 || x2-x1 != step || x3-x2 != step ||
+            y0 != y1 || y0 != y2 || y0 != y3 ||
+            x0 < -4096 || x3 > 8192 || y0 < -4096 || y0 > 8192)
+          return false;
+
+        *outStartX=x0;
+        *outY=y0;
+        *outStep=step;
+        return true;
+      } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    static bool PrepareFifthUiBeforeCallbacksSeh(uintptr_t dialog) {
+      __try {
+        if (!dialog || !IsValidPtr(dialog, 0x40))
+          return false;
+
+        uintptr_t layout = 0;
+        if (!SafeReadPtrSeh(dialog + 0x08, &layout) ||
+            !layout || !IsValidPtr(layout, 0x2A8))
+          return false;
+
+        uint32_t count=0;
+        uintptr_t owner=0, helperTable=0, helper7=0;
+        const bool helperReady =
+            SafeCopySeh(layout + 0x150, &count, sizeof(count)) && count == 8 &&
+            SafeReadPtrSeh(layout + 0x158, &owner) && owner == layout &&
+            SafeReadPtrSeh(layout + 0x148, &helperTable) &&
+            helperTable && IsValidPtr(helperTable, 8*sizeof(uintptr_t)) &&
+            SafeReadPtrSeh(helperTable + 7*sizeof(uintptr_t), &helper7) &&
+            helper7 && IsValidPtr(helper7, sizeof(uintptr_t)) &&
+            ValidatePreparedFifthUiHelper(layout);
+
+        if (!helperReady) {
+          AddLog(u8"[책략5UICB] callback 직전 sidecar 준비 거부: layout=%p count=%u helper7=%p",
+                 reinterpret_cast<void *>(layout), (unsigned)count,
+                 reinterpret_cast<void *>(helper7));
+          return false;
+        }
+
+        g_trickUiDialog = dialog;
+        g_trickUiLayout = layout;
+
+        if (!CreateFifthUiSidecarDisplayOnlySeh(layout)) {
+          AddLog(u8"[책략5UICB] callback 직전 sidecar 생성 실패.");
+          return false;
+        }
+        if (!ExpandMakerAndRegisterFifthSidecarSeh(layout)) {
+          AddLog(u8"[책략5UICB] callback 직전 ID7 등록 실패.");
+          return false;
+        }
+
+        AddLog(u8"[책략5UICB] callback 직전 sidecar 준비 완료: dialog=%p layout=%p button=%p",
+               reinterpret_cast<void *>(dialog),
+               reinterpret_cast<void *>(layout),
+               reinterpret_cast<void *>(g_fifthUiSidecarButton));
+        return true;
+      } __except(EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5UICB] callback 직전 sidecar 준비 중 예외.");
+        return false;
+      }
+    }
+
+    static bool EnsureFifthUiPreCallbackHook() {
+      if (g_fifthUiPreCallbackHookApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kDialogInitializeRva = 0x01DF3F20;
+      constexpr uintptr_t kHookOffset = 0x1C4;
+      const uintptr_t hookAddr = exeBase + kDialogInitializeRva + kHookOffset;
+      static const uint8_t expected[8] = {
+          0x41,0x8B,0xFC,                   // mov edi,r12d
+          0x48,0x8D,0x44,0x24,0x30         // lea rax,[rsp+30]
+      };
+      if (!IsValidPtr(hookAddr, sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(hookAddr),
+                      expected, sizeof(expected)) != 0)
+        return false;
+
+      const uintptr_t caveAddr = AllocNear(hookAddr, 256);
+      if (!caveAddr)
+        return false;
+
+      uint8_t *c = reinterpret_cast<uint8_t *>(caveAddr);
+      int i=0;
+      auto e8=[&](uint8_t v){ c[i++]=v; };
+      auto e32=[&](int32_t v){ std::memcpy(c+i,&v,4); i+=4; };
+      auto e64=[&](uintptr_t v){ std::memcpy(c+i,&v,8); i+=8; };
+      auto emitJmp=[&](uintptr_t target){
+        e8(0xE9);
+        const intptr_t rel=static_cast<intptr_t>(target)-
+                           static_cast<intptr_t>(caveAddr+i+4);
+        if(rel<INT32_MIN||rel>INT32_MAX) return false;
+        e32(static_cast<int32_t>(rel));
+        return true;
+      };
+
+      e8(0x9C);                         // pushfq
+      e8(0x50); e8(0x51); e8(0x52);   // push rax,rcx,rdx
+      e8(0x41); e8(0x50);              // push r8
+      e8(0x41); e8(0x51);              // push r9
+      e8(0x41); e8(0x52);              // push r10
+      e8(0x41); e8(0x53);              // push r11
+      e8(0x48); e8(0x81); e8(0xEC); e32(0x80); // sub rsp,80
+
+      const uint8_t xmmStores[][6] = {
+        {0xF3,0x0F,0x7F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x7F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x7F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x7F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x7F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x7F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : xmmStores) {
+        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      e8(0x48); e8(0x8B); e8(0xCE);    // mov rcx,rsi (dialog)
+      e8(0x48); e8(0xB8);
+      e64(reinterpret_cast<uintptr_t>(&PrepareFifthUiBeforeCallbacksSeh));
+      e8(0xFF); e8(0xD0);              // call rax
+
+      const uint8_t xmmLoads[][6] = {
+        {0xF3,0x0F,0x6F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x6F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x6F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x6F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x6F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x6F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : xmmLoads) {
+        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      e8(0x48); e8(0x81); e8(0xC4); e32(0x80); // add rsp,80
+      e8(0x41); e8(0x5B);              // pop r11
+      e8(0x41); e8(0x5A);              // pop r10
+      e8(0x41); e8(0x59);              // pop r9
+      e8(0x41); e8(0x58);              // pop r8
+      e8(0x5A); e8(0x59); e8(0x58);   // pop rdx,rcx,rax
+      e8(0x9D);                         // popfq
+
+      std::memcpy(c+i,expected,sizeof(expected));
+      i+=(int)sizeof(expected);
+      if(!emitJmp(hookAddr+sizeof(expected))) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      FlushInstructionCache(GetCurrentProcess(),c,i);
+      std::memcpy(g_fifthUiPreCallbackOriginal,
+                  reinterpret_cast<const void *>(hookAddr),
+                  sizeof(g_fifthUiPreCallbackOriginal));
+      if(!ApplyJmp(hookAddr,caveAddr,sizeof(expected))) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      g_fifthUiPreCallbackHookAddr=hookAddr;
+      g_fifthUiPreCallbackCaveAddr=caveAddr;
+      g_fifthUiPreCallbackHookApplied=true;
+      return true;
+    }
+
+    static bool EnsureFifthUiCallbackLoopHook() {
+      if (g_fifthUiCallbackLoopHookApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kDialogInitializeRva = 0x01DF3F20;
+      const uintptr_t loadAddr = exeBase + kDialogInitializeRva + 0x203;
+      const uintptr_t continueAddr = exeBase + kDialogInitializeRva + 0x20B;
+      const uintptr_t exitAddr = exeBase + kDialogInitializeRva + 0x36B;
+      const uintptr_t boundAddr = exeBase + kDialogInitializeRva + 0x35B;
+
+      static const uint8_t expectedLoad[8] = {
+          0x48,0x8B,0x46,0x08,             // mov rax,[rsi+8]
+          0x49,0x8B,0x1C,0x06              // mov rbx,[r14+rax]
+      };
+      static const uint8_t expectedBound[3] = {0x83,0xFF,0x04};
+      if (!IsValidPtr(loadAddr,sizeof(expectedLoad)) ||
+          !IsValidPtr(boundAddr,sizeof(expectedBound)) ||
+          std::memcmp(reinterpret_cast<const void *>(loadAddr),
+                      expectedLoad,sizeof(expectedLoad)) != 0 ||
+          std::memcmp(reinterpret_cast<const void *>(boundAddr),
+                      expectedBound,sizeof(expectedBound)) != 0)
+        return false;
+
+      const uintptr_t caveAddr=AllocNear(loadAddr,128);
+      if(!caveAddr) return false;
+      uint8_t *c=reinterpret_cast<uint8_t *>(caveAddr);
+      int i=0;
+      auto e8=[&](uint8_t v){c[i++]=v;};
+      auto e32=[&](int32_t v){std::memcpy(c+i,&v,4);i+=4;};
+      auto e64=[&](uintptr_t v){std::memcpy(c+i,&v,8);i+=8;};
+      auto rel32=[&](int at,int target){
+        const int64_t r=(int64_t)target-(int64_t)(at+4);
+        if(r<INT32_MIN||r>INT32_MAX) return false;
+        const int32_t v=(int32_t)r; std::memcpy(c+at,&v,4); return true;
+      };
+      auto jmpExternal=[&](uintptr_t target){
+        e8(0xE9);
+        const intptr_t r=static_cast<intptr_t>(target)-
+                         static_cast<intptr_t>(caveAddr+i+4);
+        if(r<INT32_MIN||r>INT32_MAX) return false;
+        e32(static_cast<int32_t>(r)); return true;
+      };
+
+      e8(0x9C);                         // pushfq
+      e8(0x83); e8(0xFF); e8(0x04);   // cmp edi,4
+      e8(0x0F); e8(0x84);             // je sidecar
+      const int jeSide=i; e32(0);
+
+      e8(0x9D);                         // popfq
+      std::memcpy(c+i,expectedLoad,sizeof(expectedLoad));
+      i+=(int)sizeof(expectedLoad);
+      if(!jmpExternal(continueAddr)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      const int sideLabel=i;
+      e8(0x48); e8(0xBB);              // mov rbx,&global
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
+      e8(0x48); e8(0x8B); e8(0x1B);   // mov rbx,[rbx]
+      e8(0x48); e8(0x85); e8(0xDB);   // test rbx,rbx
+      e8(0x0F); e8(0x84);             // jz no-sidecar
+      const int jzExit=i; e32(0);
+      e8(0x9D);                         // popfq
+      if(!jmpExternal(continueAddr)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      const int noSideLabel=i;
+      e8(0x48); e8(0x83); e8(0xC4); e8(0x08); // discard saved flags
+      if(!jmpExternal(exitAddr)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      if(!rel32(jeSide,sideLabel) || !rel32(jzExit,noSideLabel)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      FlushInstructionCache(GetCurrentProcess(),c,i);
+      std::memcpy(g_fifthUiCallbackLoadOriginal,
+                  reinterpret_cast<const void *>(loadAddr),
+                  sizeof(g_fifthUiCallbackLoadOriginal));
+      if(!ApplyJmp(loadAddr,caveAddr,sizeof(expectedLoad))) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      // The sidecar-safe load must be active before widening the original loop.
+      DWORD oldProtect=0,tmpProtect=0;
+      if(!VirtualProtect(reinterpret_cast<LPVOID>(boundAddr+2),1,
+                         PAGE_EXECUTE_READWRITE,&oldProtect))
+        return false;
+      *reinterpret_cast<uint8_t *>(boundAddr+2)=0x05;
+      FlushInstructionCache(GetCurrentProcess(),
+                            reinterpret_cast<void *>(boundAddr+2),1);
+      VirtualProtect(reinterpret_cast<LPVOID>(boundAddr+2),1,
+                     oldProtect,&tmpProtect);
+
+      uint8_t verify=0;
+      if(!SafeCopySeh(boundAddr+2,&verify,1) || verify!=0x05)
+        return false;
+
+      g_fifthUiCallbackLoadHookAddr=loadAddr;
+      g_fifthUiCallbackLoadCaveAddr=caveAddr;
+      g_fifthUiCallbackBoundAddr=boundAddr;
+      g_fifthUiCallbackLoopHookApplied=true;
+      return true;
+    }
+
     static void RestoreFifthUiMakerTestSeh() {
       __try {
         if (g_fifthUiMakerExpanded &&
@@ -1307,9 +1650,13 @@ namespace DX11Base {
         }
 
         // Compact the five actual button objects into the existing row.
-        const int oldStart=(int)g_trickUiStartX;
-        const int oldStep=(int)g_trickUiStep;
-        const int y=(int)g_trickUiY;
+        // Before ResetBtnPos has ever executed, derive these values from the
+        // already-proven ID2..ID5 descriptor coordinates.
+        int oldStart=0, oldStep=0, y=0;
+        if (!GetFifthUiLayoutMetricsSeh(layout,&oldStart,&y,&oldStep)) {
+          AddLog(u8"[책략5UITEST] 5버튼 배치 원본 좌표를 얻지 못했습니다.");
+          return false;
+        }
         const int compactStep=(oldStep*11)/14;
         const int oldCenter=oldStart+(oldStep*3)/2;
         const int compactStart=oldCenter-compactStep*2;
@@ -1363,7 +1710,7 @@ namespace DX11Base {
                compactX[0],compactX[1],compactX[2],compactX[3],compactX[4],y);
         AddLog(u8"[책략5UITEST] Dialog::Open index4 sidecar 표시 훅=%s. 책략창을 닫았다가 다시 여세요.",
                openHookReady ? "READY" : "FAILED");
-        AddLog(u8"[책략5UITEST] callback은 아직 미연결입니다. 이번 빌드는 5번째 hover/마우스 인식 변화만 확인하세요.");
+        AddLog(u8"[책략5UITEST] callback 5회 루프는 조기 설치 훅이 담당합니다. 5번째 hover만 먼저 확인하세요.");
         return true;
       } __except(EXCEPTION_EXECUTE_HANDLER) {
         AddLog(u8"[책략5UITEST] ID7 등록 중 예외: stage=%d",(int)stage);
@@ -1496,17 +1843,18 @@ namespace DX11Base {
           return false;
         }
 
-        const int oldStart = static_cast<int>(g_trickUiStartX);
-        const int oldStep = static_cast<int>(g_trickUiStep);
+        int oldStart=0, oldStep=0, y=0;
+        if (!GetFifthUiLayoutMetricsSeh(layout,&oldStart,&y,&oldStep)) {
+          AddLog(u8"[책략5UITEST] sidecar 좌표 원본을 얻지 못했습니다.");
+          return false;
+        }
         const int compactStep = (oldStep * 11) / 14;
         const int oldCenter = oldStart + (oldStep * 3) / 2;
         const int compactStart = oldCenter - compactStep * 2;
         const int x = compactStart + compactStep * 4;
-        const int y = static_cast<int>(g_trickUiY);
-        if (g_trickUiStep <= 0 || x < -4096 || x > 8192 ||
-            y < -4096 || y > 8192) {
-          AddLog(u8"[책략5UITEST] live 좌표 비정상: x=%d y=%d step=%d",
-                 x, y, (int)g_trickUiStep);
+        if (x < -4096 || x > 8192 || y < -4096 || y > 8192) {
+          AddLog(u8"[책략5UITEST] sidecar 좌표 비정상: x=%d y=%d step=%d",
+                 x, y, oldStep);
           return false;
         }
 
@@ -2072,9 +2420,14 @@ namespace DX11Base {
   }
 
   bool PrepareStratagemFiveUiBridge(bool reportFailure) {
-    const bool ready = EnsureTrickUiInitLayoutsBridgeHook(reportFailure);
-    if (!ready && reportFailure)
-      AddLog(u8"[책략5UIHELPER] 초기 브리지 준비 실패. 이 시도에서 call 패치 없음.");
+    const bool initReady = EnsureTrickUiInitLayoutsBridgeHook(reportFailure);
+    const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
+    const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
+    const bool ready = initReady && preCallbackReady && callbackLoopReady;
+    if (!ready && reportFailure) {
+      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d preCallback=%d callbackLoop=%d",
+             initReady?1:0, preCallbackReady?1:0, callbackLoopReady?1:0);
+    }
     return ready;
   }
 

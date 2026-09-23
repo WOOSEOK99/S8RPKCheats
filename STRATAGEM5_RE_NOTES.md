@@ -1833,3 +1833,84 @@ jb loop
 이 결과로 다음 패치에서는 loop의 5번째 iteration에서 r14를 +0x200으로 보내지 않고
 `&g_fifthUiSidecarButton` 슬롯으로 돌려 게임 원본 callback body를 그대로 한 번 더 실행시키는
 tail detour를 설치한다.
+
+
+---
+
+## 33. 2026-09-23 핵심 관문 — Dialog::Initialize 원본 callback body를 5번째에 그대로 실행
+
+직전 GetTrickButton 완전 대체만으로는 화면/마우스 반응이 달라지지 않았다.
+이 결과는 예상 가능한데, 실제 focus/kill-focus/select 시그널은
+`TrickCommandDialog::Initialize`의 별도 4회 루프에서 버튼마다 연결되기 때문이다.
+
+과거 실게임 덤프를 다시 정확히 역어셈블한 결과 callback 구간은 다음과 같다.
+
+```asm
+; r12 = 0, edi = 0, r14 = 0x1E0
++1FD cmp r12d,4
++203 mov rax,[rsi+8]          ; layout
++207 mov rbx,[r14+rax]        ; m_pButtons[index]
+...
+; focus callback AddSig
+; kill-focus callback AddSig
+; select callback AddSig
+...
++355 inc edi
++357 add r14,8
++35B cmp edi,4
++35E lea rcx,...
++365 jb +203
+```
+
+특히 callback closure를 만들 때 `edi` 값 자체를 캡처하므로,
+원본 body를 index 4로 한 번 더 실행시키는 것이 가장 원본에 가까운 방식이다.
+
+### 조기 설치가 필요한 이유
+
+Dialog::Initialize는 사용자가 실험 버튼을 누르기 전에 이미 실행된다.
+따라서 ID7 등록 후 뒤늦게 loop를 패치해도 callback은 생기지 않는다.
+
+이번 변경은 DLL 시작 직후 세 훅을 모두 설치한다.
+
+1. 기존 InitLayouts 7→8 bridge
+2. Dialog::Initialize +0x1C4 pre-callback hook
+3. callback loop의 sidecar-safe 5회 확장
+
+pre-callback hook은 Layout::Initialize가 끝난 직후, callback loop 시작 전에 호출된다.
+이 시점에 원본 helper7가 아직 남아 있으므로:
+
+- descriptor 좌표에서 start/step/y를 읽음
+- sidecar TrickSelectButton 생성
+- helper7로 ID7 RegisterLayout
+- GetTrickButton/Open sidecar hook 설치
+
+까지 끝낸다.
+
+그 뒤 callback loop는 `cmp edi,4 -> 5`로 한 번 더 돈다.
+단, index 4에서 `layout+0x200`을 읽지 않는다.
+
+```text
+index 0..3 -> 원본 [layout+0x1E0 + index*8]
+index 4    -> g_fifthUiSidecarButton
+sidecar null -> 원본 callback loop 즉시 종료
+```
+
+따라서 다섯 번째 iteration에서 게임 원본 focus/kill-focus/select callback body가
+그대로 실행되고 closure에는 index 4가 캡처된다.
+
+### 이번 테스트 성공 기준
+
+전투 진입 후 별도의 책략창 선행 오픈 없이도 로그에:
+
+```text
+[책략5UICB] callback 직전 sidecar 준비 완료
+[책략5UITEST] ID7 정식 등록 성공
+```
+
+가 나타나야 한다.
+
+이후 기존 테스트대로 ID5 데이터/횟수/내부등록을 적용하고 책략창을 열어
+**5번째 위치에 마우스를 올렸을 때 hover/focus 반응이 생기는지만 먼저 확인한다.**
+
+이번에도 hover가 전혀 없다면 다음 병목은 callback이 아니라 parent의 hit-test/child-control
+등록 경로로 좁혀진다. 그 경우 계속 진행 여부를 다시 판단한다.
