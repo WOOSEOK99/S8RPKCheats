@@ -3517,6 +3517,96 @@ namespace DX11Base {
       }
     }
 
+    static bool TryReadFifthPlanForOwnerSeh(
+        uintptr_t owner,
+        StratagemFiveModel::Plan *outPlan,
+        StratagemFiveModel::Entry (*outEntries)[5] = nullptr,
+        uintptr_t (*outCampRows)[5] = nullptr,
+        uintptr_t *outModelBase = nullptr,
+        uintptr_t *outTricksAddr = nullptr) {
+      if (!owner || !outPlan || !g_fiveMetadataTable)
+        return false;
+
+      __try {
+        constexpr uintptr_t kCampImplCampDataOffset = 0x10;
+        constexpr uintptr_t kCampDataTricksOffset = 0x68;
+        constexpr uintptr_t kTrickerOffset = 0xF0;
+        constexpr uintptr_t kEntriesOffset = 0x10;
+        constexpr uintptr_t kCountOffset = 0x60;
+
+        const uintptr_t modelBase = owner + kTrickerOffset;
+        if (!IsValidPtr(modelBase + kEntriesOffset,
+                        5 * sizeof(StratagemFiveModel::Entry)) ||
+            !IsValidPtr(modelBase + kCountOffset, sizeof(uint32_t)))
+          return false;
+
+        uintptr_t campData = 0;
+        if (!SafeReadPtrSeh(owner + kCampImplCampDataOffset, &campData) ||
+            !campData)
+          return false;
+
+        const uintptr_t tricksAddr = campData + kCampDataTricksOffset;
+        if (!IsValidPtr(tricksAddr, 5 * sizeof(uintptr_t)))
+          return false;
+
+        StratagemFiveModel::Entry entries[5] = {};
+        uintptr_t campRows[5] = {};
+        uint32_t count = 0;
+        if (!SafeCopySeh(modelBase + kEntriesOffset, entries, sizeof(entries)) ||
+            !SafeCopySeh(modelBase + kCountOffset, &count, sizeof(count)) ||
+            !SafeCopySeh(tricksAddr, campRows, sizeof(campRows)))
+          return false;
+
+        StratagemFiveModel::Plan plan{};
+        if (!StratagemFiveModel::Prepare(
+                entries, count, campRows, g_fiveMetadataTable, plan))
+          return false;
+
+        *outPlan = plan;
+        if (outEntries)
+          std::memcpy(*outEntries, entries, sizeof(entries));
+        if (outCampRows)
+          std::memcpy(*outCampRows, campRows, sizeof(campRows));
+        if (outModelBase)
+          *outModelBase = modelBase;
+        if (outTricksAddr)
+          *outTricksAddr = tricksAddr;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    static bool TryGetDialogCampOwnerSeh(uintptr_t *outOwner) {
+      if (!outOwner)
+        return false;
+      *outOwner = 0;
+
+      const uintptr_t dialog = g_trickUiDialog;
+      if (!dialog || !IsValidPtr(dialog, 0x40))
+        return false;
+
+      __try {
+        uintptr_t holder = 0;
+        uintptr_t inner = 0;
+        if (!SafeReadPtrSeh(dialog + 0x20, &holder) ||
+            !holder || !IsValidPtr(holder, sizeof(uintptr_t)) ||
+            !SafeReadPtrSeh(holder, &inner) ||
+            !inner)
+          return false;
+
+        const uint8_t side =
+            *reinterpret_cast<const uint8_t *>(inner + kSideOffset);
+        if (side > 1 || !ValidateInfo(inner, side))
+          return false;
+
+        *outOwner = inner;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
     static void DumpSide(const char *name, uintptr_t ptr, uint8_t side) {
       if (!ValidateInfo(ptr, side))
         return;
