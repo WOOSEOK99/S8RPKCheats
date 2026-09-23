@@ -774,3 +774,74 @@ button state(+0x8C) = 모두 1
 다음 진단은 `Dialog::Open +0x130`에서 R15(dialog)를 build-guarded하게
 캡처하고, layout `+0x140..+0x1DF`의 작은 고정 영역 및 그 내부 테이블에서
 기존 4개 button pointer의 위치만 찾는다. 광범위 메모리 스캔은 하지 않는다.
+
+
+---
+
+## 18. 2026-09-23 UI ID/실좌표 확정
+
+`test: verify remaining UI IDs and live button spacing` 실게임 결과:
+
+```text
+ResetBtnPos live:
+startX = 406
+y      = 364
+step   = 280
+5번째 예상 X = 1526
+```
+
+따라서 과거 정적 값 차이로 계산했던 280은 실제 `ResetBtnPos`의 EBX(step)와도 일치한다.
+기존 4개 버튼의 실좌표는 이 루프 기준으로:
+
+- button0: x=406
+- button1: x=686
+- button2: x=966
+- button3: x=1246
+- sidecar 후보: x=1526
+
+이다.
+
+### UI/control ID 점유
+
+live control 확인:
+
+```text
+buttons[0..3] IDs = 2,3,4,5
+layout+0x290 control ID = 6, state=1
+layout+0x280 control ID = 0
+layout+0x288 = 다른 타입의 포인터(동일 필드 해석 금지)
+layout+0x2A0 control ID = 0
+controlCount(+0x150) = 7
+```
+
+따라서 **ID6은 이미 다른 정상 컨트롤이 사용 중**이다.
+5번째 TrickSelectButton에 ID6을 재사용해서는 안 된다.
+
+현재 등록 가능한 ID 범위는 0..6으로 보이며, 새 버튼을 정식 등록하려면
+ID7을 위해 registry를 8칸으로 확장하거나, registry 등록을 우회하는 방식이 필요하다.
+
+### 다음 확인
+
+`Layout::Initialize`에서 `layout+0x140` registry 초기화 시:
+
+```asm
+mov r9, rsi
+mov r8d, 7
+lea rdx, <local descriptors>
+lea rcx, [rsi+0x140]
+call 0x01D13E60
+```
+
+형태가 확인되어 있다.
+
+또 버튼 등록은 PDB 기준 `CUIMaker::RegisterLayout` RVA `0x01D16AA0`을 사용한다.
+
+다음 진단은 이 두 함수의 런타임 코드만 읽어서:
+
+1. count=7이 내부 고정 배열인지 동적 저장소인지
+2. ID7을 추가 등록하려면 저장소 재할당이 필요한지
+3. registry 등록 없이 parent child-control만으로 표시 가능한 구조인지
+
+를 판단한다.
+
+이 진단이 끝나기 전에는 `controlCount 7 -> 8`을 쓰지 않는다.

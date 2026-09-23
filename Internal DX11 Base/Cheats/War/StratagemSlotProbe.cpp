@@ -566,6 +566,15 @@ namespace DX11Base {
                       u8"TrickSelectButton::Initialize",
                       0x01E7FF40, 0x000, 0x160);
 
+      // 4차: ID 0..6이 모두 점유된 것이 확인되어 ID7 확장 가능성을 보기 위해
+      // CUIMaker registry 초기화/등록 함수만 좁게 읽는다. 쓰기 없음.
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"CUIMaker::InitLayouts",
+                      0x01D13E60, 0x000, 0x240);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"CUIMaker::RegisterLayout",
+                      0x01D16AA0, 0x000, 0x1C0);
+
       // Layout::Initialize의 r13가 가리키는 static dword[4].
       // 같은 빌드 EXE .rdata에서도 2,3,4,5가 확인됨.
       constexpr uintptr_t kButtonStaticIdsRva = 0x0270D198;
@@ -582,7 +591,7 @@ namespace DX11Base {
         AddLog(u8"[책략5UISTATIC] Layout button static IDs 읽기 실패.");
       }
 
-      AddLog(u8"[책략5UIDBG] PDB 전투 UI 3차 진단 완료. UISETUP/UIRANGE/UISTATIC 로그를 보내주세요.");
+      AddLog(u8"[책략5UIDBG] PDB 전투 UI 4차 진단 완료. UIRANGE/UIMAKER/UIREG 로그를 보내주세요.");
     }
 
     static bool BuildCaptureCave(uintptr_t hookAddr) {
@@ -1448,18 +1457,29 @@ namespace DX11Base {
       }
     }
 
-    // If the first two qwords look like table pointers, search only 0x200 bytes
-    // for exact occurrences of the four known button pointers.
+    // If the first two qwords look like table pointers, search only a bounded
+    // 0x400-byte region for the known button pointers and the confirmed ID6 control.
+    uintptr_t id6Control = 0;
+    SafeReadPtrSeh(layout + 0x290, &id6Control);
+
     for (int rootIndex = 0; rootIndex < 2; ++rootIndex) {
       const uintptr_t root = registryQ[rootIndex];
-      if (!root || !IsValidPtr(root, 0x200))
+      if (!root || !IsValidPtr(root, 0x400))
         continue;
 
-      uintptr_t table[64] = {};
+      uintptr_t table[128] = {};
       if (!SafeCopySeh(root, table, sizeof(table)))
         continue;
 
-      for (int slot = 0; slot < 64; ++slot) {
+      AddLog(u8"[책략5UIMAKER] root%d=%p firstQ=%p,%p,%p,%p",
+             rootIndex,
+             reinterpret_cast<void *>(root),
+             reinterpret_cast<void *>(table[0]),
+             reinterpret_cast<void *>(table[1]),
+             reinterpret_cast<void *>(table[2]),
+             reinterpret_cast<void *>(table[3]));
+
+      for (int slot = 0; slot < 128; ++slot) {
         for (int b = 0; b < 4; ++b) {
           if (table[slot] == buttons[b]) {
             AddLog(u8"[책략5UIREG] root%d=%p +%03X -> btn%d=%p",
@@ -1469,6 +1489,14 @@ namespace DX11Base {
                    b,
                    reinterpret_cast<void *>(buttons[b]));
           }
+        }
+
+        if (id6Control && table[slot] == id6Control) {
+          AddLog(u8"[책략5UIREG] root%d=%p +%03X -> ID6 control=%p",
+                 rootIndex,
+                 reinterpret_cast<void *>(root),
+                 slot * 8,
+                 reinterpret_cast<void *>(id6Control));
         }
       }
     }
