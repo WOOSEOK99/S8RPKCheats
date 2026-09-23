@@ -528,3 +528,148 @@ RVA `0x01DAF350` 내부에서:
 
 이 커밋은 쓰기 패치가 아니라, 위 함수의 실제 버튼 생성/배치 흐름을 보기 위해
 좁은 범위의 런타임 코드 바이트를 `[책략5UIRANGE]`로 추가 출력한다.
+
+
+---
+
+## 15. 2026-09-23 2차 실전 UI 상세 로그 분석
+
+2차 `[책략5UIRANGE]` 로그와 같은 빌드의 PDB 심볼을 함께 대조한 결과.
+
+### Layout::ResetBtnPos — 4개 재배치 루프 확정
+
+RVA `0x01DAE9F0` 후반:
+
+```asm
+mov ebp, 4
+add rsi, 0x1E0
+
+loop:
+  mov rcx, [rsi]
+  test rcx, rcx
+  je   next
+  mov rax, [rcx]
+  mov r8d, r14d
+  mov edx, edi
+  call qword ptr [rax+0x90]
+
+next:
+  add edi, ebx
+  add rsi, 8
+  sub rbp, 1
+  jne loop
+```
+
+즉 기존 네 버튼을 `this+0x1E0`부터 순차 읽고,
+각 버튼의 virtual `+0x90`에 계산된 위치를 전달한다.
+
+### Layout::Initialize — 버튼 실제 생성 루프 확정
+
+핵심 흐름:
+
+```asm
+lea rdi, [rsi+0x1E0]       ; m_pButtons 시작
+mov qword ptr [rbp-0x40],4 ; 반복 횟수
+...
+; 0x1D8 bytes 객체 할당
+...
+call TrickSelectButton::TrickSelectButton
+mov [rdi], rax
+...
+call TrickSelectButton::Initialize
+...
+call CUIMaker::RegisterLayout
+...
+add rdi,8
+add r13,4
+add r12,0x10
+sub qword ptr [rbp-0x40],1
+jne <button loop>
+```
+
+PDB/심볼로 확인한 직접 대상:
+
+- `TrickSelectButton::TrickSelectButton(eTYPE)` RVA `0x01E7FEC0`
+- `TrickSelectButton::Initialize(int,int,ICmnControl*)` RVA `0x01E7FF40`
+- `TrickSelectButton::SetTrickID(TRICK_ID)` RVA `0x01E7FD90`
+- `CUIMaker::RegisterLayout` RVA `0x01D16AA0`
+
+버튼 객체 할당 크기:
+
+- `0x1D8`
+
+생성 루프가 참조하는 정적 4개 dword 테이블:
+
+- RVA `0x0270D198`
+- raw values = `2,3,4,5`
+
+현재 이 네 값의 정확한 enum 의미는 아직 단정하지 않는다.
+다음 진단에서 생성자와 Initialize 인자 구성 코드와 함께 확정한다.
+
+### Dialog::Open — 데이터 루프는 5까지 돌 수 있으나 UI만 4에서 차단
+
+실제 루프 종료 조건은 전투 데이터 쪽 count 값과 비교한다.
+
+반면 각 반복에서:
+
+```asm
+cmp edi,4
+jae skip_button_logic
+mov rax,[dialog+layout]
+mov rsi,[rax+rsi*8+0x1E0]
+...
+call TrickSelectButton::SetTrickID
+...
+```
+
+형태로 index 4 이상을 UI 처리에서 제외한다.
+
+따라서 **전투 데이터가 5개인 것 자체가 Open 루프를 막는 것은 아니다.**
+5번째 반복도 존재할 수 있지만 현재는 UI 버튼 로직만 통째로 건너뛴다.
+
+### Dialog::Initialize — 버튼별 시그널 연결도 4회
+
+`m_pButtons[index]`를 가져온 뒤 각 버튼에 세 종류의 callback을 연결하고:
+
+- focus 계열
+- kill-focus 계열
+- select 계열
+
+마지막에:
+
+```asm
+inc edi
+add r14,8
+cmp edi,4
+jb <loop>
+```
+
+로 끝난다.
+
+callback 등록 대상 함수는 PDB 기준:
+
+- `CSignalComponent::AddSig` RVA `0x01EDDC90`
+
+따라서 5번째 버튼을 단순히 생성하는 것만으로는 부족하고,
+5번 index를 캡처하는 동일한 callback 연결도 필요하다.
+
+### 현재 설계 판단
+
+기존 객체 내부 `m_pButtons[4]`는 확장할 수 없으므로 sidecar 방향은 유지한다.
+
+필요 구성:
+
+1. 5번째 `TrickSelectButton` 객체를 별도 생성
+2. sidecar에 포인터 보관
+3. `GetTrickButton(4)`는 sidecar 반환
+4. `Dialog::Open`의 index 4도 sidecar를 사용
+5. `Dialog::Initialize`에서 5번용 callback 3종 연결
+6. `ResetBtnPos`에서 5번째 버튼 위치도 갱신
+7. 종료/파괴 시 sidecar 수명 처리
+
+다만 실제 버튼 생성 전에 아래 두 가지를 먼저 확정한다.
+
+- `Layout::Initialize`가 기존 4개에 넘기는 `ButtonLayouts[4]`의 실제 값/패턴
+- `TrickSelectButton` 생성자 및 `Initialize`가 요구하는 eTYPE/레이아웃 인자
+
+다음 코드는 이 부분만 추가로 읽는 **write 없는 3차 진단**으로 진행한다.
