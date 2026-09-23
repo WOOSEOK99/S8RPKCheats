@@ -1078,7 +1078,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        // 4행: 병력수 공방 반영 / 사망장수 및 등용장수 알림
+        // 4행: 병력수 공방 반영
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(u8"병력수 공방 반영", &bTroopCountCombatScaling)) {
@@ -1097,22 +1097,6 @@ namespace DX11Base {
               u8"- 공격/방어 공용 계산 함수에서 게임에 남아 있는 선형 병력 환산 경로를 사용합니다.");
           ImGui::TextUnformatted(
               u8"- 병력이 많을수록 공방 계산에서 더 유리하고, 병력이 적을수록 상대적으로 불리해지는 방향입니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::TableSetColumnIndex(1);
-        if (ImGui::Checkbox(u8"사망장수 및 등용장수 알림", &bOfficerChangeNotify)) {
-          NotifyFeatureToggle(u8"사망장수 및 등용장수 알림", bOfficerChangeNotify);
-          SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                             u8"평정이 끝나고 내정으로 넘어갈 때 장수 변동을 기존 알림창으로 보여줍니다.");
-          ImGui::TextUnformatted(u8"- 새로 사망 상태가 된 장수는 직전 소속 세력/도시를 함께 표시합니다.");
-          ImGui::TextUnformatted(u8"- 소속 세력이 새로 생기거나 다른 세력으로 바뀐 장수는 현재 세력/도시를 표시합니다.");
-          ImGui::TextUnformatted(u8"- 사망 원인이나 세력 변경 원인까지는 구분하지 않고 최종 상태를 기준으로 판정합니다.");
-          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장됩니다.");
           ImGui::EndTooltip();
         }
 
@@ -1921,13 +1905,6 @@ namespace DX11Base {
         SaveConfig();
       }
 
-      if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
-        NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
-        SaveConfig();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-
       if (ImGui::Checkbox(u8"교지 <-> 회계 도로 차단", &bRoadBlock2)) {
         DX11Base::SetRoadBlock2(bRoadBlock2);
         NotifyFeatureToggle(u8"교지 <-> 회계 도로 차단", bRoadBlock2);
@@ -2017,6 +1994,36 @@ namespace DX11Base {
       }
 
       ImGui::Spacing();
+
+      if (ImGui::BeginTable("InfoNotificationRow", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"사망장수 및 등용장수 알림", &bOfficerChangeNotify)) {
+          NotifyFeatureToggle(u8"사망장수 및 등용장수 알림", bOfficerChangeNotify);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"평정이 끝나고 내정으로 넘어갈 때 장수 변동을 기존 알림창으로 보여줍니다.");
+          ImGui::TextUnformatted(u8"- 새로 사망 상태가 된 장수는 직전 소속 세력/도시를 함께 표시합니다.");
+          ImGui::TextUnformatted(u8"- 소속 세력이 새로 생기거나 다른 세력으로 바뀐 장수는 현재 세력/도시를 표시합니다.");
+          ImGui::TextUnformatted(u8"- 사망 원인이나 세력 변경 원인까지는 구분하지 않고 최종 상태를 기준으로 판정합니다.");
+          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
+          NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
+          SaveConfig();
+        }
+
+        ImGui::EndTable();
+      }
 
       ImGui::Spacing();
 
