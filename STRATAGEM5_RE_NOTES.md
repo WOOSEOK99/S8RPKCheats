@@ -1084,3 +1084,56 @@ stage=5는 정확히 임시 maker에 `CUIMaker::InitLayouts(...,8,...)`를 호�
 ```
 
 으로 실제 객체 위치도 압축 배치한다.
+
+
+---
+
+## 23. 2026-09-23 stage=6 원인 확정: RegisterLayout 5번째 인자 누락
+
+수동 registry 확장 실게임 결과:
+
+```text
+sidecar 생성 성공
+stage=6에서 예외
+```
+
+stage=6은 기존 ID0~6 control을 새 maker에 `CUIMaker::RegisterLayout`로
+재등록하는 첫 구간이다.
+
+원본 `Layout::Initialize` 호출부를 다시 대조하면:
+
+```asm
+mov dword ptr [rsp+20], 1 ; 5번째 인자
+mov r9d, 0x14            ; type
+mov r8, [button]          ; control
+mov edx, id
+lea rcx, [maker]
+call CUIMaker::RegisterLayout
+```
+
+이다.
+
+또 `CUIMaker::RegisterLayout` 내부에서도 실제로:
+
+```asm
+mov r8d, [rsp+80]
+```
+
+형태로 5번째 인자를 읽는다.
+
+따라서 기존 실험의 함수 선언:
+
+```cpp
+void(maker,id,control,type)
+```
+
+은 잘못이었고, 실제 호출은:
+
+```cpp
+void(maker,id,control,type,flag)
+```
+
+이며 현재 원본과 동일하게 `flag=1`을 전달한다.
+
+이번 수정에서는 기존 ID0~6 재등록과 ID7 등록 모두 5번째 인자 `1`을 전달한다.
+stage=6에서 어느 ID에서 문제가 생기는지도 바로 확인할 수 있도록 재등록 직전 로그를 추가했다.

@@ -399,7 +399,11 @@ namespace DX11Base {
           return false;
 
         using LookupLayoutFn = uintptr_t(__fastcall *)(uintptr_t, int);
-        using RegisterLayoutFn = void(__fastcall *)(uintptr_t, int, uintptr_t, int);
+        // Original call site passes a fifth argument at [rsp+20] = 1.
+        // RegisterLayout also reads it at runtime (+0xC8), so this must be part
+        // of the real x64 call signature.
+        using RegisterLayoutFn =
+            void(__fastcall *)(uintptr_t, int, uintptr_t, int, int);
         using GetMemoryManagerFn = uintptr_t(__fastcall *)();
         using GameAllocFn = uintptr_t(__fastcall *)(uintptr_t, size_t, void *);
         using SetXYFn = void(__fastcall *)(uintptr_t, int, int);
@@ -581,12 +585,16 @@ namespace DX11Base {
         for (int id = 0; id < 7; ++id) {
           if (!registered[id])
             continue;
-          registerLayout(tempMaker, id, registered[id], types[id]);
+          AddLog(u8"[책략5UITEST] 기존 UI ID%d 재등록: control=%p type=%d flag=1",
+                 id,
+                 reinterpret_cast<void *>(registered[id]),
+                 types[id]);
+          registerLayout(tempMaker, id, registered[id], types[id], 1);
         }
 
         stage = 7;
         registerLayout(tempMaker, 7,
-                       g_fifthUiSidecarButton, types[7]);
+                       g_fifthUiSidecarButton, types[7], 1);
 
         stage = 8;
         const uintptr_t check7 = lookup(tempMaker, 7);
