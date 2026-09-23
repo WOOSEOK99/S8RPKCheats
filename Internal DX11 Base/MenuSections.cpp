@@ -1587,42 +1587,32 @@ namespace DX11Base {
       ImGui::Spacing();
       ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.0f, 1.0f), u8"[ 책략 실험 ]");
       static bool s_spell5HealProbe = false;
-      if (ImGui::Checkbox(u8"5번 책략 데이터 활성화", &s_spell5HealProbe)) {
+      if (ImGui::Checkbox(u8"5번 책략 데이터", &s_spell5HealProbe)) {
         if (!DX11Base::SetSpell5HealProbe(s_spell5HealProbe)) {
           s_spell5HealProbe = !s_spell5HealProbe;
-          AddNotification(u8"5번 책략 데이터 활성화 실패 - 로그 확인");
+          AddNotification(u8"5번 책략 데이터 적용 실패 - 로그 확인");
         } else {
-          NotifyFeatureToggle(u8"5번 책략 데이터 활성화", s_spell5HealProbe);
+          NotifyFeatureToggle(u8"5번 책략 데이터", s_spell5HealProbe);
         }
-      }
-
-      if (ImGui::Button(u8"책략 수량/5번 슬롯 확인", ImVec2(-1.0f, 0.0f))) {
-        DX11Base::ScanStratagemFiveSlotCandidates();
-        AddNotification(u8"책략 수량 슬롯 확인 - 로그 확인");
       }
 
       static bool s_spell5CountTest = false;
-      if (ImGui::Checkbox(u8"5번 책략 횟수 1 테스트", &s_spell5CountTest)) {
+      if (ImGui::Checkbox(u8"5번 책략 횟수 1", &s_spell5CountTest)) {
         if (!DX11Base::SetStratagemFiveCountTest(s_spell5CountTest)) {
           s_spell5CountTest = !s_spell5CountTest;
-          AddNotification(u8"5번 책략 횟수 테스트 적용 실패 - 로그 확인");
+          AddNotification(u8"5번 책략 횟수 적용 실패 - 로그 확인");
         } else {
-          NotifyFeatureToggle(u8"5번 책략 횟수 1 테스트", s_spell5CountTest);
+          NotifyFeatureToggle(u8"5번 책략 횟수 1", s_spell5CountTest);
         }
       }
 
-      if (ImGui::Button(u8"책략 4개 제한 코드 진단", ImVec2(-1.0f, 0.0f))) {
-        DX11Base::ScanStratagemFourLimitCodeCandidates();
-        AddNotification(u8"책략 4개 제한 코드 진단 완료 - 로그 확인");
-      }
-
       static bool s_spell5LoopTest = false;
-      if (ImGui::Checkbox(u8"5번째 책략 UI 루프 테스트", &s_spell5LoopTest)) {
+      if (ImGui::Checkbox(u8"5번째 책략 UI 5개", &s_spell5LoopTest)) {
         if (!DX11Base::SetStratagemFiveLoopTest(s_spell5LoopTest)) {
           s_spell5LoopTest = !s_spell5LoopTest;
-          AddNotification(u8"5번째 책략 UI 루프 테스트 적용 실패 - 로그 확인");
+          AddNotification(u8"5번째 책략 UI 테스트 적용 실패 - 로그 확인");
         } else {
-          NotifyFeatureToggle(u8"5번째 책략 UI 루프 테스트", s_spell5LoopTest);
+          NotifyFeatureToggle(u8"5번째 책략 UI 5개", s_spell5LoopTest);
         }
       }
 
