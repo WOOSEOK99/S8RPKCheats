@@ -3518,8 +3518,16 @@ namespace DX11Base {
       return true;
     }
 
-    if (!EnsureCaptureHook())
-      return false;
+    // Checkbox ON means "keep ID5 count enabled", not "a live battle
+    // object must exist this exact frame". Preserve the user's intent first;
+    // RefreshStratagemFiveBattleRuntime() will apply +0x14C=1 as soon as the
+    // current Camp::Impl becomes available.
+    g_id5CountRequested = true;
+
+    if (!EnsureCaptureHook()) {
+      AddLog(u8"[책략5수명] ID5 수량 ON 요청 저장. 캡처 훅 준비 후 자동 적용 대기.");
+      return true;
+    }
 
     if (!ValidateInfo(g_attackInfo, 0) &&
         !ValidateInfo(g_defenseInfo, 1)) {
@@ -3590,8 +3598,10 @@ namespace DX11Base {
       }
     }
 
-    if (!chosen)
-      return false;
+    if (!chosen) {
+      AddLog(u8"[책략5수명] ID5 수량 ON 요청 저장. 현재 전투 Camp::Impl 미준비 -> 자동 적용 대기.");
+      return true;
+    }
 
     const uintptr_t id5Addr =
         chosen + kFirstStratagemCountOffset + 4 * kStratagemCountStride;
@@ -3939,10 +3949,16 @@ namespace DX11Base {
       return true;
     }
 
+    // Checkbox ON means persistent intent. Battle-local Camp/UI wiring may
+    // not exist yet, so store the request before trying the current generation.
+    g_fiveMetadataRequested = true;
+
     // The DLL worker normally installed this already. This is only a guarded
     // fallback/status report, never an attempt to reinitialize a live maker.
-    if (!PrepareStratagemFiveUiBridge())
-      return false;
+    if (!PrepareStratagemFiveUiBridge()) {
+      AddLog(u8"[책략5수명] ID5 내부등록 ON 요청 저장. UI bridge 준비 후 자동 적용 대기.");
+      return true;
+    }
     LogTrickUiBridgeStatus("metadata-enable");
 
     const uintptr_t liveLayout =
@@ -4067,11 +4083,11 @@ namespace DX11Base {
            reinterpret_cast<void *>(row5));
 
     if (!g_id5CountApplied || !g_id5CountOwner) {
-      AddLog(u8"[책략5PDBDBG] 먼저 '5번 책략 횟수 1'을 켜서 플레이어측 전장 객체를 확정하세요.");
+      AddLog(u8"[책략5수명] ID5 내부등록 ON 요청 저장. ID5 수량/전장 객체 준비 후 자동 연결 대기.");
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
-      return false;
+      return true;
     }
 
     // PDB로 실제 구조 확인:
