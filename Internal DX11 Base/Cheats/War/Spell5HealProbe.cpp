@@ -248,6 +248,14 @@ namespace DX11Base {
     return true;
   }
 
+  void ResetSpell5HealProbeBattleRuntime() {
+    // The TrickData table belongs to the current game/save generation and may
+    // remain valid across battles. Only the unit-list/morale snapshots are
+    // battle-local and must not leak into the next battle.
+    ResetDiagnostics();
+    AddLog(u8"[책략5수명] 전투 종료 확정: 5번 책략 대상/힐 진단 상태 초기화.");
+  }
+
   void ResetSpell5HealProbeSession(uintptr_t oldP1, uintptr_t newP1) {
     if (!g_requested)
       return;
