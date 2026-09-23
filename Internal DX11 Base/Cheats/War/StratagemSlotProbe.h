@@ -14,4 +14,9 @@ namespace DX11Base {
   // references the stratagem-count layout (+10C/+13C/+14C area) and has a
   // nearby hard-coded compare against 4. Used to locate the UI/enumeration cap.
   void ScanStratagemFourLimitCodeCandidates();
+
+  // Candidate #34 from the runtime diagnostic:
+  // a 0x20-stride loop with "cmp r12d,4 / jb ..." near the stratagem fields.
+  // Experimental: change only the loop bound immediate 4 -> 5, reversible.
+  bool SetStratagemFiveLoopTest(bool enable);
 }
