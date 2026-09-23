@@ -50,6 +50,7 @@ namespace DX11Base {
     };
 
     static bool g_applied = false;
+    static bool g_requested = false;
     static uintptr_t g_spell5Addr = 0;
     static SpellRecord g_spell5Original{};
 
@@ -142,8 +143,32 @@ namespace DX11Base {
 
   bool SetSpell5HealProbe(bool enable) {
     if (enable) {
-      if (g_applied)
-        return true;
+      g_requested = true;
+
+      if (g_applied) {
+        const uintptr_t tableNow = ResolveSpellTable();
+        const uintptr_t expectedAddr =
+            tableNow ? tableNow + 4 * kSpellStride : 0;
+        if (expectedAddr &&
+            g_spell5Addr == expectedAddr &&
+            IsValidPtr(expectedAddr, sizeof(SpellRecord))) {
+          const SpellRecord *cur =
+              reinterpret_cast<const SpellRecord *>(expectedAddr);
+          if (cur->code1 == 5 && cur->code2 == 5 && cur->code3 == 5 &&
+              cur->target == 1 &&
+              cur->effect1 == 10 && cur->power1 == 40 &&
+              cur->effect2 == 0 && cur->power2 == 0 &&
+              cur->range == 5) {
+            return true;
+          }
+        }
+
+        AddLog(u8"[책략5수명] 현재 TrickData 세대가 기존 적용과 달라 재적용합니다.");
+        g_applied = false;
+        g_spell5Addr = 0;
+        g_spell5Original = {};
+        ResetDiagnostics();
+      }
 
       const uintptr_t table = ResolveSpellTable();
       if (!table) {
@@ -201,6 +226,8 @@ namespace DX11Base {
       return true;
     }
 
+    g_requested = false;
+
     if (!g_applied)
       return true;
 
@@ -219,6 +246,29 @@ namespace DX11Base {
     g_spell5Original = {};
     ResetDiagnostics();
     return true;
+  }
+
+  void ResetSpell5HealProbeSession(uintptr_t oldP1, uintptr_t newP1) {
+    if (!g_requested)
+      return;
+
+    AddLog(u8"[책략5수명] TrickData 적용 세대 초기화: p1 %p -> %p",
+           reinterpret_cast<void *>(oldP1),
+           reinterpret_cast<void *>(newP1));
+
+    // Do not restore through an address from the old save generation.
+    g_applied = false;
+    g_spell5Addr = 0;
+    g_spell5Original = {};
+    ResetDiagnostics();
+  }
+
+  void RefreshSpell5HealProbe() {
+    if (!g_requested)
+      return;
+
+    if (SetSpell5HealProbe(true))
+      return;
   }
 
   void UpdateSpell5TargetDiagnostics(int unitCount, uintptr_t unitListBase) {
