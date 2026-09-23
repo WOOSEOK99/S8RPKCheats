@@ -2288,3 +2288,36 @@ metadata/layout 상태 조건에 묶여 있어 최신 실행에서 나오지 않
 
 새 코드 detour는 추가하지 않는다.
 기존 안정적인 ResetBtnPos hook 내부의 읽기 진단만 추가한다.
+
+
+---
+
+## 44. 2026-09-23 signal 등록은 정상 — focus callback 실제 target 정적 추적
+
+17:31 실게임 로그에서 사용자가 동일한 3개 실험을 다시 수행했고,
+이번에는 데이터/횟수/내부등록이 모두 실제로 확인됐다.
+
+또 live signal component 비교에서:
+
+- btn0
+- btn3
+- sidecar
+
+세 객체 모두 +0x78 영역의 기본 구조와 등록 상태가 유사하며,
+sidecar도 UI ID7/state1로 정상 등록되어 있다.
+callback loop index4Hits=1도 확인됐다.
+
+따라서 현재 병목은 "signal이 아예 안 붙었다"기보다
+**focus callback 내부에서 index4/model data를 처리하지 못하는 경로** 쪽이 더 유력하다.
+
+이번 커밋은 새로운 실행 detour를 추가하지 않는다.
+Dialog::Initialize +0x1D0..+0x210의 RIP-relative LEA 세트를 읽어서
+callback closure가 사용하는 정적 target을 해석하고, 각 target의 첫 0x100 bytes와
+그 안의 direct CALL 목적지만 read-only로 기록한다.
+
+로그 키:
+
+`[책략5UICBTGT]`
+
+목표는 focus / kill-focus / select closure의 실제 invoker/manager 코드를 분리하고,
+그중 hover 시 적용범위/설명을 갱신하는 함수에서 index4 또는 runtime count 제한을 찾는 것이다.
