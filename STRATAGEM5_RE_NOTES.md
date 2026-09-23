@@ -958,3 +958,72 @@ TrickID=5
 
 아직 callback / Dialog::Open index4 / GetTrickButton(4)는 연결하지 않는다.
 따라서 ID7 등록 후 버튼이 보여도 클릭하지 않는다.
+
+
+---
+
+## 21. 2026-09-23 ID7 1차 실패 원인 대응 + 5버튼 압축 배치
+
+`test: register fifth stratagem sidecar as UI ID7` 실게임 결과:
+
+```text
+표시 전용 sidecar 생성 성공
+registry 확장 중 예외 발생
+화면에는 기존 4개만 표시
+```
+
+또 실제 화면 기준으로 기존 4개는 한 줄 공간을 거의 사용하고 있어,
+기존 `step=280` 그대로 5번째를 `x=1526`에 두는 것은 우측 영역을 벗어날 가능성이 높다.
+
+### registry 예외 대응
+
+이전 실험은 이미 초기화된 live `layout+0x140 CUIMaker`에
+`InitLayouts(...,8,...)`를 직접 다시 호출했다.
+이 경로는 예외가 발생했으므로 더 이상 live maker in-place 재초기화를 하지 않는다.
+
+새 방식:
+
+1. 기존 live maker는 읽기만 함
+2. 별도의 zeroed 임시 maker(0x40 bytes)를 준비
+3. 임시 maker에 `InitLayouts(...,8,layout)`
+4. 기존 ID0~6 control을 임시 maker에 원래 type으로 재등록
+5. sidecar를 ID7/type 0x14로 등록
+6. lookup(7), sidecar ID/state 검증
+7. 모든 검증이 끝난 뒤에만 임시 maker의 0x28-byte 상태를 live `layout+0x140`로 교체
+8. 예외/실패 시 live maker는 건드리지 않거나 원래 0x28 bytes로 복구
+
+추가로 예외 로그에 `stage=N`을 남겨 어느 호출에서 실패했는지 바로 구분한다.
+
+### 5개 버튼 배치
+
+이미지 리소스 자체는 아직 축소하지 않는다.
+먼저 기존 네 버튼의 중심을 유지하면서 간격만 압축한다.
+
+확정 기존 값:
+
+```text
+startX=406
+step=280
+y=364
+```
+
+새 계산:
+
+```text
+compactStep = oldStep * 11 / 14
+oldCenter   = oldStart + oldStep * 3 / 2
+compactStart= oldCenter - compactStep * 2
+```
+
+현재 빌드에서는:
+
+```text
+compactStep=220
+x = 386, 606, 826, 1046, 1266
+y = 364
+```
+
+즉 기존 4개와 5번째를 거의 같은 전체 폭 안에 넣는다.
+프레임/이미지가 실제로 겹치는지는 ID7 등록 성공 후 화면으로 확인한다.
+겹칠 경우 다음 단계에서 `TrickSelectButton`의 실제 scale/size setter를 찾아
+5개 버튼만 동일 비율로 축소한다.
