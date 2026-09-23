@@ -112,6 +112,7 @@ namespace DX11Base {
     static uintptr_t g_fifthUiOnSelectCmpImmAddr = 0;
     static uint8_t g_fifthUiOnSelectCmpOriginal = 0;
     static bool g_fifthUiOnSelectBoundHookApplied = false;
+    static bool g_fifthUiOnSelectProbeDone = false;
 
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
@@ -1182,7 +1183,7 @@ namespace DX11Base {
 
 
     static bool EnsureFifthUiOnTrickSelectBoundHook() {
-      if (g_fifthUiOnSelectBoundHookApplied)
+      if (g_fifthUiOnSelectBoundHookApplied || g_fifthUiOnSelectProbeDone)
         return true;
 
       const uintptr_t exeBase =
@@ -1200,72 +1201,103 @@ namespace DX11Base {
       if (!SafeCopySeh(fn, code, sizeof(code)))
         return false;
 
-      // Refuse if this tiny function performs a direct m_pButtons(+1E0)
-      // access. The only safe index4 path is via our replaced GetTrickButton.
+      // Previous assumption proved wrong in live game: this symbol contains no
+      // direct +1E0 access, no GetTrickButton call and no cmp ...,4. Dump this
+      // tiny function exactly once so the real downstream selection path can
+      // be followed without another broad scan.
+      AddLog(u8"[책략5UISELPROBE] OnTrickSelect RVA=+1DF37B0 size=0x4C raw bytes:");
+      for (size_t p=0; p<sizeof(code); p+=16) {
+        const size_t chunk=((sizeof(code)-p)>16)?16:(sizeof(code)-p);
+        char line[128]={};
+        int pos=0;
+        for(size_t j=0;j<chunk && pos<(int)sizeof(line)-4;++j)
+          pos+=sprintf_s(line+pos,sizeof(line)-pos,"%02X ",(unsigned)code[p+j]);
+        AddLog(u8"[책략5UISELPROBE] +%02llX : %s",
+               (unsigned long long)p,line);
+      }
+
       unsigned directButtonsDisp = 0;
-      for (size_t i=0;i+4<=sizeof(code);++i) {
-        if (code[i]==0xE0 && code[i+1]==0x01 &&
-            code[i+2]==0x00 && code[i+3]==0x00)
-          ++directButtonsDisp;
-      }
-
       unsigned getButtonCalls = 0;
-      for (size_t i=0;i+5<=sizeof(code);++i) {
-        if (code[i] != 0xE8)
-          continue;
-        int32_t rel=0;
-        std::memcpy(&rel, code+i+1, sizeof(rel));
-        const uintptr_t target =
-            fn + i + 5 + static_cast<intptr_t>(rel);
-        if (target == getButton)
-          ++getButtonCalls;
-      }
-
-      // Match only cmp r32,4 encoded as 83 /7 04. On this build the select
-      // handler has one such bounds check. Do not patch any unrelated '4'.
       unsigned cmp4Count = 0;
       uintptr_t cmpImmAddr = 0;
-      for (size_t i=0;i+3<=sizeof(code);++i) {
-        if (code[i] == 0x83 &&
-            (code[i+1] & 0x38) == 0x38 &&
-            code[i+2] == 0x04) {
+      unsigned directCallCount = 0;
+
+      for (size_t i=0; i<sizeof(code); ++i) {
+        if (i+4<=sizeof(code) &&
+            code[i]==0xE0 && code[i+1]==0x01 &&
+            code[i+2]==0x00 && code[i+3]==0x00)
+          ++directButtonsDisp;
+
+        if (i+3<=sizeof(code) &&
+            code[i]==0x83 && (code[i+1]&0x38)==0x38 &&
+            code[i+2]==0x04) {
           ++cmp4Count;
-          cmpImmAddr = fn + i + 2;
+          cmpImmAddr=fn+i+2;
+        }
+
+        if (i+5<=sizeof(code) && code[i]==0xE8) {
+          int32_t rel=0;
+          std::memcpy(&rel,code+i+1,sizeof(rel));
+          const uintptr_t target=fn+i+5+static_cast<intptr_t>(rel);
+          ++directCallCount;
+          if(target==getButton)
+            ++getButtonCalls;
+
+          uint8_t head[24]={};
+          if (target>=exeBase && IsValidPtr(target,sizeof(head)) &&
+              SafeCopySeh(target,head,sizeof(head))) {
+            char line[192]={};
+            int pos=0;
+            for(size_t j=0;j<sizeof(head) && pos<(int)sizeof(line)-4;++j)
+              pos+=sprintf_s(line+pos,sizeof(line)-pos,"%02X ",(unsigned)head[j]);
+            AddLog(u8"[책략5UISELPROBE] call +%02llX -> RVA=+%llX head: %s",
+                   (unsigned long long)i,
+                   (unsigned long long)(target-exeBase),line);
+          } else {
+            AddLog(u8"[책략5UISELPROBE] call +%02llX -> %p",
+                   (unsigned long long)i,reinterpret_cast<void *>(target));
+          }
         }
       }
 
-      if (directButtonsDisp != 0 || getButtonCalls != 1 || cmp4Count != 1) {
-        AddLog(u8"[책략5UISEL] OnTrickSelect 가드 불일치: direct+1E0=%u getButtonCalls=%u cmp4=%u",
-               directButtonsDisp, getButtonCalls, cmp4Count);
-        return false;
+      AddLog(u8"[책략5UISELPROBE] summary: direct+1E0=%u getButtonCalls=%u cmp4=%u directCalls=%u",
+             directButtonsDisp,getButtonCalls,cmp4Count,directCallCount);
+
+      // Keep the originally planned narrow patch only if the exact safe shape
+      // ever appears. Current live build is expected to take the probe-only path.
+      if (directButtonsDisp==0 && getButtonCalls==1 && cmp4Count==1) {
+        uint8_t current=0;
+        if (!SafeCopySeh(cmpImmAddr,&current,1) || current!=0x04)
+          return false;
+
+        DWORD oldProtect=0,tmpProtect=0;
+        if (!VirtualProtect(reinterpret_cast<LPVOID>(cmpImmAddr),1,
+                            PAGE_EXECUTE_READWRITE,&oldProtect))
+          return false;
+        *reinterpret_cast<uint8_t *>(cmpImmAddr)=0x05;
+        FlushInstructionCache(GetCurrentProcess(),
+                              reinterpret_cast<void *>(cmpImmAddr),1);
+        VirtualProtect(reinterpret_cast<LPVOID>(cmpImmAddr),1,
+                       oldProtect,&tmpProtect);
+
+        uint8_t verify=0;
+        if (!SafeCopySeh(cmpImmAddr,&verify,1) || verify!=0x05)
+          return false;
+
+        g_fifthUiOnSelectCmpImmAddr=cmpImmAddr;
+        g_fifthUiOnSelectCmpOriginal=0x04;
+        g_fifthUiOnSelectBoundHookApplied=true;
+        AddLog(u8"[책략5UISEL] OnTrickSelect index 범위 4->5 확장 성공: RVA=+%llX",
+               (unsigned long long)(cmpImmAddr-exeBase));
+        return true;
       }
 
-      uint8_t current=0;
-      if (!SafeCopySeh(cmpImmAddr,&current,1) || current!=0x04)
-        return false;
-
-      DWORD oldProtect=0,tmpProtect=0;
-      if (!VirtualProtect(reinterpret_cast<LPVOID>(cmpImmAddr),1,
-                          PAGE_EXECUTE_READWRITE,&oldProtect))
-        return false;
-      *reinterpret_cast<uint8_t *>(cmpImmAddr)=0x05;
-      FlushInstructionCache(GetCurrentProcess(),
-                            reinterpret_cast<void *>(cmpImmAddr),1);
-      VirtualProtect(reinterpret_cast<LPVOID>(cmpImmAddr),1,
-                     oldProtect,&tmpProtect);
-
-      uint8_t verify=0;
-      if (!SafeCopySeh(cmpImmAddr,&verify,1) || verify!=0x05)
-        return false;
-
-      g_fifthUiOnSelectCmpImmAddr=cmpImmAddr;
-      g_fifthUiOnSelectCmpOriginal=0x04;
-      g_fifthUiOnSelectBoundHookApplied=true;
-      AddLog(u8"[책략5UISEL] OnTrickSelect index 범위 4->5 확장 성공: RVA=+%llX",
-             (unsigned long long)(cmpImmAddr-exeBase));
+      // Not a failure of the already-working fifth UI. Mark the diagnostic as
+      // complete so startup does not retry/spam this probe hundreds of times.
+      g_fifthUiOnSelectProbeDone=true;
+      AddLog(u8"[책략5UISEL] OnTrickSelect 직접 패치 보류. 실제 하위 호출 경로를 위 probe로 추적합니다.");
       return true;
     }
-
 
     static bool GetFifthUiLayoutMetricsSeh(uintptr_t layout,
                                            int *outStartX,

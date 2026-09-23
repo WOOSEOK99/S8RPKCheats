@@ -2059,3 +2059,46 @@ GetTrickButton(4)는 이미 sidecar를 반환하도록 완전 대체되어 있�
 ```
 
 이번 확인 목표는 5번째 클릭 시 하단 설명/현재 선택이 ID5로 전환되는지다.
+
+
+---
+
+## 38. 2026-09-23 OnTrickSelect 가정 탈락 — 실제 하위 호출 경로 1회 덤프
+
+실게임 로그에서 직전 가정이 틀렸음이 확인됐다.
+
+```text
+[책략5UISEL] OnTrickSelect 가드 불일치:
+direct+1E0=0 getButtonCalls=0 cmp4=0
+```
+
+즉 PDB 심볼 `TrickCommandDialog::OnTrickSelect` (RVA 0x01DF37B0, size 0x4C)는
+우리가 예상한 "4개 bounds check + GetTrickButton" 함수가 아니다.
+
+중요하게도 기존 5번째 UI 확장 자체는 계속 정상이다.
+
+- InitLayouts 7->8 성공
+- Layout 내부 sidecar 생성/ID7 등록 성공
+- GetTrickButton(4) sidecar 성공
+- Open index4 sidecar 성공
+- callback loop index4 진입 성공
+- 5개 렌더/hover/click 성공
+
+따라서 이 실패를 UI 회귀로 취급하지 않는다.
+
+이번 커밋은 OnTrickSelect 0x4C 전체 바이트를 시작 시 **딱 한 번만** 기록하고,
+그 안의 모든 direct CALL 대상 RVA와 대상 함수 첫 24바이트도 함께 기록한다.
+
+로그 키:
+
+```text
+[책략5UISELPROBE] OnTrickSelect ...
+[책략5UISELPROBE] call ...
+[책략5UISELPROBE] summary ...
+```
+
+또한 probe 실패를 전체 조기 UI 훅 실패로 취급하지 않으며,
+같은 메시지를 프레임마다 반복 출력하던 spam도 중단한다.
+
+다음 패치는 이 direct-call chain에서 실제 index 4를 거부하거나
+현재 선택/설명 갱신을 0..3으로 제한하는 작은 함수만 정확히 건드린다.
