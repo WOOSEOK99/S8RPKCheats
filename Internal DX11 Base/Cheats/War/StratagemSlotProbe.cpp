@@ -308,6 +308,124 @@ namespace DX11Base {
     return true;
   }
 
+  void ScanStratagemFourLimitCodeCandidates() {
+    const uintptr_t exeBase = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    if (!exeBase) {
+      AddLog(u8"[책략4제한DBG] EXE base를 찾지 못했습니다.");
+      return;
+    }
+
+    MODULEINFO mi{};
+    if (!GetModuleInformation(GetCurrentProcess(),
+                              reinterpret_cast<HMODULE>(exeBase),
+                              &mi, sizeof(mi))) {
+      AddLog(u8"[책략4제한DBG] 모듈 정보 읽기 실패.");
+      return;
+    }
+
+    const uintptr_t imageEnd = exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+    int logged = 0;
+    constexpr int kMaxLogs = 40;
+
+    auto hasCountDisp = [](const uint8_t *p) -> bool {
+      const uint32_t v = *reinterpret_cast<const uint32_t *>(p);
+      return v == 0x10C || v == 0x11C || v == 0x12C ||
+             v == 0x13C || v == 0x14C;
+    };
+
+    auto hasCmp4 = [](const uint8_t *p, size_t n) -> bool {
+      for (size_t i = 0; i + 2 < n; ++i) {
+        // cmp r/m32, 4  => 83 /7 04
+        if (p[i] == 0x83 && (p[i + 1] & 0x38) == 0x38 && p[i + 2] == 0x04)
+          return true;
+        // cmp r/m8, 4 => 80 /7 04
+        if (p[i] == 0x80 && (p[i + 1] & 0x38) == 0x38 && p[i + 2] == 0x04)
+          return true;
+        // cmp al,4
+        if (p[i] == 0x3C && p[i + 1] == 0x04)
+          return true;
+        // cmp eax,4
+        if (i + 4 < n && p[i] == 0x3D &&
+            p[i + 1] == 0x04 && p[i + 2] == 0x00 &&
+            p[i + 3] == 0x00 && p[i + 4] == 0x00)
+          return true;
+      }
+      return false;
+    };
+
+    AddLog(u8"[책략4제한DBG] EXE 코드 진단 시작: +10C~+14C 참조 근처의 하드코딩된 비교값 4를 찾습니다.");
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    uintptr_t cur = exeBase;
+
+    while (cur < imageEnd && logged < kMaxLogs) {
+      if (VirtualQuery(reinterpret_cast<LPCVOID>(cur), &mbi, sizeof(mbi)) != sizeof(mbi))
+        break;
+
+      const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+      uintptr_t regionEnd = regionStart + mbi.RegionSize;
+      if (regionEnd > imageEnd)
+        regionEnd = imageEnd;
+
+      const DWORD prot = mbi.Protect & 0xFF;
+      const bool executable =
+          mbi.State == MEM_COMMIT &&
+          !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) &&
+          (prot == PAGE_EXECUTE ||
+           prot == PAGE_EXECUTE_READ ||
+           prot == PAGE_EXECUTE_READWRITE ||
+           prot == PAGE_EXECUTE_WRITECOPY);
+
+      if (executable && regionEnd > regionStart + 8) {
+        __try {
+          const uint8_t *b = reinterpret_cast<const uint8_t *>(regionStart);
+          const size_t n = (size_t)(regionEnd - regionStart);
+
+          for (size_t i = 0; i + 4 <= n && logged < kMaxLogs; ++i) {
+            if (!hasCountDisp(b + i))
+              continue;
+
+            const size_t from = (i > 0x60) ? i - 0x60 : 0;
+            const size_t to = ((i + 0x60) < n) ? i + 0x60 : n;
+            if (!hasCmp4(b + from, to - from))
+              continue;
+
+            const uintptr_t addr = regionStart + i;
+            const uint32_t disp = *reinterpret_cast<const uint32_t *>(b + i);
+
+            AddLog(u8"[책략4제한DBG] 후보 #%d code=%p disp=+%X",
+                   logged + 1, reinterpret_cast<void *>(addr), (unsigned)disp);
+
+            const uintptr_t dumpStart =
+                (addr > regionStart + 0x20) ? addr - 0x20 : regionStart;
+            const size_t remain = (size_t)(regionEnd - dumpStart);
+            const size_t bytes = remain >= 0x60 ? 0x60 : remain;
+
+            char line[1024] = {};
+            int pos = 0;
+            for (size_t j = 0; j < bytes && pos < (int)sizeof(line) - 4; ++j) {
+              pos += sprintf_s(line + pos, sizeof(line) - pos, "%02X ",
+                               *reinterpret_cast<const uint8_t *>(dumpStart + j));
+            }
+            AddLog(u8"[책략4제한DBG] bytes @ %p : %s",
+                   reinterpret_cast<void *>(dumpStart), line);
+            ++logged;
+          }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+      }
+
+      if (regionEnd <= cur)
+        break;
+      cur = regionEnd;
+    }
+
+    AddLog(u8"[책략4제한DBG] 진단 완료: 후보 %d개.", logged);
+    if (logged == 0) {
+      AddLog(u8"[책략4제한DBG] +10C~+14C 직접 참조와 cmp 4 조합은 없음. 다음은 UI 목록 생성 함수 쪽에서 독립적으로 4 제한을 찾습니다.");
+    }
+  }
+
   void ScanStratagemFiveSlotCandidates() {
     if (!EnsureCaptureHook())
       return;
