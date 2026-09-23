@@ -2194,3 +2194,45 @@ jmp  RVA +1DF3C20
   fifth select signal binding 자체가 빠진 것.
 - 기존 버튼도 OnTrickSelect에 안 들어오면 PDB 함수는 다른 경로이며
   AddSig 주변 closure/invoker 바이트에서 실제 handler를 추적한다.
+
+
+---
+
+## 41. 2026-09-23 실제 첫 실패는 select가 아니라 focus/data binding
+
+사용자 실게임 관찰:
+
+- 기존 1~4 책략은 마우스 hover만 해도 적용 범위가 표시됨
+- 5번째는 hover 자체의 버튼 반응은 있으나 적용 범위가 표시되지 않음
+- 하단 설명도 5번째 데이터가 아니라 다른 내용
+- 카드 그림도 기대한 5번째와 다름
+- 여러 번 클릭해도 OnTrickSelect entry hook에는 진입하지 않음
+
+따라서 click/select를 먼저 추적한 순서는 뒤로 미룬다.
+실제 최초로 깨지는 지점은 **hover/focus와 TrickID/data binding**이다.
+
+현재 Dialog::Initialize에는 실제 AddSig direct call이 정확히 3개 존재하며:
+
+- +0x25E
+- +0x2C9
+- +0x334
+
+첫 closure 생성부는 dialog(RSI)와 index(EDI)를 캡처하고
+button signal component(+0x78)에 AddSig하는 것이 확인됐다.
+
+이번 커밋은 두 가지를 추가한다.
+
+1. `TrickSelectButton::SetTrickID` RVA 0x01E7FD90 entry를 관찰 전용 hook.
+   기존 4개와 sidecar에 실제로 어떤 trickId가 전달되는지 최대 32회 기록한다.
+   로그:
+   `[책략5UIID] SetTrickID ...`
+2. live layout 캡처 때 btn0, btn3, sidecar의 +0x78 signal component 주변 0x60 bytes를 비교 기록한다.
+   로그:
+   `[책략5UISIGSTATE] ...`
+
+다음 판단:
+
+- 기존 4개가 0,1,2,3인데 sidecar만 5라면 sidecar TrickID 오프바이원 문제를 즉시 수정
+- Open에서 sidecar에 4가 정상 전달되는데도 그림/설명이 틀리면 hover callback/model 쪽 문제
+- sidecar signal state가 기존 버튼과 현저히 다르면 callback 등록 자체가 완성되지 않은 것
+- signal state가 유사한데 hover range만 없으면 focus callback 내부의 index4/model count 제한을 추적
