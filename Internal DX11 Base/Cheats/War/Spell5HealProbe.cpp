@@ -172,16 +172,16 @@ namespace DX11Base {
 
       const uintptr_t table = ResolveSpellTable();
       if (!table) {
-        AddLog(u8"[책략5DBG] 책략 테이블 해석/검증 실패. 현재 데이터가 원본 상태인지 확인하세요.");
-        return false;
+        AddLog(u8"[책략5수명] 5번 책략 데이터 ON 요청 유지. TrickData 테이블 미준비 -> 자동 재시도 대기.");
+        return true;
       }
 
       const uintptr_t spell2 = table + 1 * kSpellStride;
       const uintptr_t spell5 = table + 4 * kSpellStride;
       if (!IsValidPtr(spell2, sizeof(SpellRecord)) ||
           !IsValidPtr(spell5, sizeof(SpellRecord))) {
-        AddLog(u8"[책략5DBG] 2/5번 책략 레코드 주소가 유효하지 않습니다.");
-        return false;
+        AddLog(u8"[책략5수명] 5번 책략 데이터 ON 요청 유지. 2/5번 레코드 미준비 -> 자동 재시도 대기.");
+        return true;
       }
 
       std::memcpy(&g_spell5Original, reinterpret_cast<const void *>(spell5), sizeof(g_spell5Original));
@@ -207,8 +207,8 @@ namespace DX11Base {
       clone.range = 5;
 
       if (!WriteRecord(spell5, clone)) {
-        AddLog(u8"[책략5DBG] 실제 5번 레코드에 실험 데이터 쓰기 실패.");
-        return false;
+        AddLog(u8"[책략5수명] 5번 책략 데이터 ON 요청 유지. 현재 세대 쓰기 실패 -> 자동 재시도 대기.");
+        return true;
       }
 
       // 이번 단계에서는 4번 사모위계를 절대 치환하지 않습니다.
