@@ -2392,7 +2392,7 @@ namespace DX11Base {
                       expectedBound,sizeof(expectedBound)) != 0)
         return false;
 
-      const uintptr_t caveAddr=AllocNear(loadAddr,128);
+      const uintptr_t caveAddr=AllocNear(loadAddr,384);
       if(!caveAddr) return false;
       uint8_t *c=reinterpret_cast<uint8_t *>(caveAddr);
       int i=0;
@@ -2412,7 +2412,62 @@ namespace DX11Base {
         e32(static_cast<int32_t>(r)); return true;
       };
 
-      e8(0x9C);                         // pushfq
+      e8(0x9C);                         // pushfq - preserve original flags
+
+      // The older +1C4 pre-callback point can still be too early: live logs
+      // show the dialog owner/model becoming readable only by the time the
+      // actual button callback loop starts here at +203. On the first loop
+      // iteration, advance the ordered ID5 state immediately before native
+      // callback binding. This is event-driven, not time-based.
+      e8(0x85); e8(0xFF);             // test edi,edi
+      e8(0x0F); e8(0x85);             // jne skip-state-call
+      const int jneSkipState=i; e32(0);
+
+      e8(0x50); e8(0x51); e8(0x52);   // push rax,rcx,rdx
+      e8(0x41); e8(0x50);             // push r8
+      e8(0x41); e8(0x51);             // push r9
+      e8(0x41); e8(0x52);             // push r10
+      e8(0x41); e8(0x53);             // push r11
+      e8(0x48); e8(0x81); e8(0xEC); e32(0x80);
+
+      const uint8_t stateXmmStores[][6] = {
+        {0xF3,0x0F,0x7F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x7F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x7F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x7F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x7F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x7F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : stateXmmStores) {
+        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      e8(0x48); e8(0x8B); e8(0xCE);    // mov rcx,rsi (dialog)
+      e8(0x48); e8(0xB8);
+      e64(reinterpret_cast<uintptr_t>(&PrepareFifthUiBeforeCallbacksSeh));
+      e8(0xFF); e8(0xD0);              // call rax
+
+      const uint8_t stateXmmLoads[][6] = {
+        {0xF3,0x0F,0x6F,0x44,0x24,0x20},
+        {0xF3,0x0F,0x6F,0x4C,0x24,0x30},
+        {0xF3,0x0F,0x6F,0x54,0x24,0x40},
+        {0xF3,0x0F,0x6F,0x5C,0x24,0x50},
+        {0xF3,0x0F,0x6F,0x64,0x24,0x60},
+        {0xF3,0x0F,0x6F,0x6C,0x24,0x70}
+      };
+      for (const auto &b : stateXmmLoads) {
+        std::memcpy(c+i,b,sizeof(b)); i+=(int)sizeof(b);
+      }
+
+      e8(0x48); e8(0x81); e8(0xC4); e32(0x80);
+      e8(0x41); e8(0x5B);
+      e8(0x41); e8(0x5A);
+      e8(0x41); e8(0x59);
+      e8(0x41); e8(0x58);
+      e8(0x5A); e8(0x59); e8(0x58);
+
+      const int skipStateLabel=i;
+
       e8(0x83); e8(0xFF); e8(0x04);   // cmp edi,4
       e8(0x0F); e8(0x84);             // je sidecar
       const int jeSide=i; e32(0);
@@ -2458,7 +2513,8 @@ namespace DX11Base {
         return false;
       }
 
-      if(!rel32(jeSide,sideLabel) ||
+      if(!rel32(jneSkipState,skipStateLabel) ||
+         !rel32(jeSide,sideLabel) ||
          !rel32(jneLayoutExit,noSideLabel) ||
          !rel32(jzExit,noSideLabel)) {
         VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
