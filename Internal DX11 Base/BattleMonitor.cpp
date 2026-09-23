@@ -545,6 +545,13 @@ namespace DX11Base {
           DX11Base::ClearBattleEnvCache();
         } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
+        // 전투가 끝나면 5번 책략의 전투 인스턴스 상태도 함께 폐기합니다.
+        // 사용자 ON 요청과 process-wide hook은 유지하므로 다음 전투에서 자동 재결합됩니다.
+        __try {
+          DX11Base::ResetStratagemFiveBattleRuntime();
+          DX11Base::ResetSpell5HealProbeBattleRuntime();
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
         // 전투가 끝나면 특수능력 룰을 원래 데이터(normal)로 안전하게 복구합니다.
         UpdateSpecialAbilities(0, 0, (uintptr_t)GetModuleHandle(NULL));
       }
