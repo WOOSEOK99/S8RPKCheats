@@ -277,11 +277,11 @@ namespace DX11Base {
     }
     //
     // ─────────────────────────────────────────────────────────────
-    void DrawCivilianSection(uintptr_t p1, uintptr_t gameBase, float scale) {
+    void DrawDomesticSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       if (p1) {
         BeginSection();
 
-        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 자원 및 도시 활동 ]");
+        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 내정 ]");
         // DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
         // DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
         // DrawStatRow(u8"우호의 증표", 0xF8, 2, &v_Token, 0, gameBase, scale);
@@ -327,6 +327,10 @@ namespace DX11Base {
           SaveConfig();
         }
 
+        if (ImGui::Button(u8"명품", ImVec2(70.0f * scale, 0.0f))) {
+          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
+        }
+
         // -----------------------
         // ImGui::Separator();
         // ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
@@ -338,15 +342,23 @@ namespace DX11Base {
         }
         bool domesticsHov = ImGui::IsItemHovered(); // SameLine 전에 캡처
 
-        // [도시 정보] 버튼 – 내정 배율 체크박스 오른쪽
+        // [도시 관리] 버튼 – 도시 목록 / 수송 / 무장 배치
         ImGui::SameLine(160.0f * scale);
         ImGui::PushStyleColor(ImGuiCol_Button,
           bShowCityInfoWin ? ImVec4(0.18f, 0.55f, 0.18f, 1.f)
                            : ImVec4(0.15f, 0.30f, 0.55f, 1.f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.80f, 1.f));
-        if (ImGui::Button(u8"도시 정보", ImVec2(70.f * scale, 0.f)))
+        if (ImGui::Button(u8"도시 관리", ImVec2(70.f * scale, 0.f)))
           bShowCityInfoWin = !bShowCityInfoWin;
+        const bool cityManageHov = ImGui::IsItemHovered();
         ImGui::PopStyleColor(2);
+
+        if (cityManageHov) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"도시 목록을 확인하고, 도시 간 수송 및 무장 배치를 관리합니다.");
+          ImGui::EndTooltip();
+        }
 
         if (domesticsHov) {
           ImGui::BeginTooltip();
@@ -450,10 +462,9 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        EndSection();
-
-        BeginSection();
-        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 명성치 편집 ]");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
 
         DrawStatMini(u8"무명", &v_RepM, 0x106, 2, p1, 60, scale);
         ImGui::SameLine(100 * scale);
@@ -467,10 +478,56 @@ namespace DX11Base {
           SaveConfig();
         }
 
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, 60, scale);
+        ImGui::SameLine(160 * scale);
+        if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
+          NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
+          SaveConfig();
+        }
+
+        bool allJewelsOpen = DX11Base::IsAllJewelsOpenPreferred();
+        if (ImGui::Checkbox(u8"보주 전체 개방", &allJewelsOpen)) {
+          if (DX11Base::SetAllJewelsOpen(allJewelsOpen)) {
+            DX11Base::AddNotification(allJewelsOpen ? u8"보주 전체 개방 ON" : u8"보주 전체 개방 OFF");
+            SaveConfig();
+          }
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 보주가 개방됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
+        ImGui::SameLine(160 * scale);
+        if (ImGui::Checkbox(u8"보조 보주 모두 사용", &allSecondaryJewels)) {
+          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels)) {
+            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 모두 사용 ON"
+                                                         : u8"보조 보주 모두 사용 OFF");
+            SaveConfig();
+          }
+        }
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 보주를 사용할수 있도록 설정합니다.");
+          ImGui::EndTooltip();
+        }
+
         EndSection();
 
+      }
+    }
+
+    void DrawCouncilSection(uintptr_t p1, uintptr_t gameBase, float scale) {
+      if (p1) {
         BeginSection();
-        ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 및 진급 관련 ]");
+        ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 ]");
         DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP, p1, gameBase, scale);
         DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
         DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
@@ -619,50 +676,6 @@ namespace DX11Base {
         }
         EndSection(); // 평정 및 진급
       }
-
-      BeginSection();
-
-      if (p1 != 0) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"[ 보주 설정 ]");
-        DrawStatMini(u8"담력", &v_Brave, 0x5BB8, 4, gameBase, 60, scale);
-        ImGui::SameLine(160 * scale);
-        if (ImGui::Checkbox(u8"보주 교체 무제한", &bFastJewel)) {
-          NotifyFeatureToggle(u8"보주 교체 무제한", bFastJewel);
-          SaveConfig();
-        }
-
-        bool allJewelsOpen = DX11Base::IsAllJewelsOpenPreferred();
-        if (ImGui::Checkbox(u8"보주 전체 개방", &allJewelsOpen)) {
-          if (DX11Base::SetAllJewelsOpen(allJewelsOpen)) {
-            DX11Base::AddNotification(allJewelsOpen ? u8"보주 전체 개방 ON" : u8"보주 전체 개방 OFF");
-            SaveConfig();
-          }
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"모든 보주가 개방됩니다.");
-          ImGui::EndTooltip();
-        }
-
-        bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
-        ImGui::SameLine(160 * scale);
-        if (ImGui::Checkbox(u8"보조 보주 모두 사용", &allSecondaryJewels)) {
-          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels)) {
-            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 모두 사용 ON"
-                                                         : u8"보조 보주 모두 사용 OFF");
-            SaveConfig();
-          }
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"모든 보주를 사용할수 있도록 설정합니다.");
-          ImGui::EndTooltip();
-        }
-      }
-
-      EndSection(); // 보주 설정
     }
 
     void DrawSocialSection(uintptr_t p1, uintptr_t gameBase, float scale) {
@@ -1078,7 +1091,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        // 4행: 병력수 공방 반영 / 사망장수 및 등용장수 알림
+        // 4행: 병력수 공방 반영
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         if (ImGui::Checkbox(u8"병력수 공방 반영", &bTroopCountCombatScaling)) {
@@ -1097,22 +1110,6 @@ namespace DX11Base {
               u8"- 공격/방어 공용 계산 함수에서 게임에 남아 있는 선형 병력 환산 경로를 사용합니다.");
           ImGui::TextUnformatted(
               u8"- 병력이 많을수록 공방 계산에서 더 유리하고, 병력이 적을수록 상대적으로 불리해지는 방향입니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::TableSetColumnIndex(1);
-        if (ImGui::Checkbox(u8"사망장수 및 등용장수 알림", &bOfficerChangeNotify)) {
-          NotifyFeatureToggle(u8"사망장수 및 등용장수 알림", bOfficerChangeNotify);
-          SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
-                             u8"평정이 끝나고 내정으로 넘어갈 때 장수 변동을 기존 알림창으로 보여줍니다.");
-          ImGui::TextUnformatted(u8"- 새로 사망 상태가 된 장수는 직전 소속 세력/도시를 함께 표시합니다.");
-          ImGui::TextUnformatted(u8"- 소속 세력이 새로 생기거나 다른 세력으로 바뀐 장수는 현재 세력/도시를 표시합니다.");
-          ImGui::TextUnformatted(u8"- 사망 원인이나 세력 변경 원인까지는 구분하지 않고 최종 상태를 기준으로 판정합니다.");
-          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장됩니다.");
           ImGui::EndTooltip();
         }
 
@@ -1188,12 +1185,351 @@ namespace DX11Base {
       }
 
       ImGui::SameLine();
-      if (ImGui::Button(u8"모든 무장 일괄 편집", ImVec2(-1, 30 * scale))) {
+      if (ImGui::Button(u8"전법 편집", ImVec2(110.0f * scale, 30.0f * scale))) {
+        bShowTacticsEditWin = !bShowTacticsEditWin;
+      }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+
+      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 책략 ]");
+
+      if (ImGui::Checkbox(u8"공격측 책략 게이지 시작 최대", &bMaxAttackStratagemGauge)) {
+        const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
+        if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
+          bMaxAttackStratagemGauge = !bMaxAttackStratagemGauge;
+          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"공격측 책략 게이지 최대", bMaxAttackStratagemGauge);
+          SaveConfig();
+        }
+      }
+
+      ImGui::SameLine();
+
+      if (ImGui::Checkbox(u8"수비측 책략 게이지 시작 최대", &bMaxDefenseStratagemGauge)) {
+        const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
+        if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
+          bMaxDefenseStratagemGauge = !bMaxDefenseStratagemGauge;
+          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"수비측 책략 게이지 최대", bMaxDefenseStratagemGauge);
+          SaveConfig();
+        }
+      }
+
+      static bool s_stratagemFiveEnabled = true;
+      if (ImGui::Checkbox(u8"5번 책략 활성화", &s_stratagemFiveEnabled)) {
+        const bool enable = s_stratagemFiveEnabled;
+        const bool ok = DX11Base::SetStratagemFiveFeature(enable);
+        if (!ok) {
+          s_stratagemFiveEnabled = !enable;
+          AddNotification(enable ? u8"5번 책략 활성화 실패 - 로그 확인"
+                                 : u8"5번 책략 해제 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"5번 책략 활성화", s_stratagemFiveEnabled);
+        }
+      }
+
+      static DX11Base::Spell5CustomSettings s_stratagem5Edit{};
+      ImGui::SameLine();
+      if (ImGui::Button(u8"5번 책략 설정")) {
+        s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
+        ImGui::OpenPopup(u8"5번 책략 설정###Stratagem5SettingsPopup");
+      }
+
+      ImGui::SetNextWindowSize(ImVec2(590.0f * scale, 570.0f * scale),
+                               ImGuiCond_Appearing);
+      if (ImGui::BeginPopupModal(
+              u8"5번 책략 설정###Stratagem5SettingsPopup",
+              nullptr,
+              ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f),
+                           u8"[ 5번 책략 사용자 설정 ]");
+        ImGui::Separator();
+        ImGui::TextDisabled(u8"책략 ID 5/5/5와 사용횟수 1회는 고정합니다.");
+
+        const char *targetNames[] = {u8"아군", u8"적군", u8"피아불문"};
+        int targetIndex = s_stratagem5Edit.target - 1;
+        if (targetIndex < 0 || targetIndex > 2)
+          targetIndex = 0;
+        ImGui::SetNextItemWidth(180.0f * scale);
+        if (ImGui::Combo(u8"대상", &targetIndex,
+                         targetNames, IM_ARRAYSIZE(targetNames))) {
+          s_stratagem5Edit.target = targetIndex + 1;
+        }
+
+        static const int effectCodes[] = {0, 3, 10, 11, 12};
+        const char *effectNames[] = {
+            u8"없음", u8"상태이상", u8"사기 증감", u8"직접 데미지", u8"화계"};
+
+        auto effectIndexFromCode = [&](int code) {
+          for (int i = 0; i < IM_ARRAYSIZE(effectCodes); ++i)
+            if (effectCodes[i] == code)
+              return i;
+          return 0;
+        };
+
+        auto drawEffectEditor = [&](const char *title, const char *idPrefix,
+                                    int &effect, int &power, int &duration) {
+          ImGui::Spacing();
+          ImGui::TextColored(ImVec4(0.55f, 0.9f, 1.0f, 1.0f), "%s", title);
+
+          int effectIndex = effectIndexFromCode(effect);
+          char comboId[64] = {};
+          sprintf_s(comboId, "%s_effect", idPrefix);
+          ImGui::SetNextItemWidth(180.0f * scale);
+          if (ImGui::Combo(comboId, &effectIndex,
+                           effectNames, IM_ARRAYSIZE(effectNames))) {
+            effect = effectCodes[effectIndex];
+            if (effect == 0) {
+              power = 0;
+              duration = 0;
+            } else if (effect == 3) {
+              if (power < 1 || power > 3)
+                power = 1;
+              if (duration < 0)
+                duration = 0;
+            } else if (effect == 12) {
+              if (power < 0 || power > 100)
+                power = 100;
+              duration = 0;
+            } else {
+              duration = 0;
+            }
+          }
+
+          if (effect == 3) {
+            const char *statusNames[] = {u8"저지", u8"혼란", u8"공황"};
+            int statusIndex = power - 1;
+            if (statusIndex < 0 || statusIndex > 2)
+              statusIndex = 0;
+
+            char statusId[64] = {};
+            sprintf_s(statusId, "%s_status", idPrefix);
+            ImGui::SetNextItemWidth(180.0f * scale);
+            if (ImGui::Combo(statusId, &statusIndex,
+                             statusNames, IM_ARRAYSIZE(statusNames))) {
+              power = statusIndex + 1;
+            }
+
+            char durationId[64] = {};
+            sprintf_s(durationId, "%s_duration", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(durationId, &duration, 1, 3)) {
+              if (duration < 0) duration = 0;
+              if (duration > 30) duration = 30;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"지속일");
+          } else if (effect == 10) {
+            char powerId[64] = {};
+            sprintf_s(powerId, "%s_morale", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(powerId, &power, 5, 10)) {
+              if (power < -100) power = -100;
+              if (power > 100) power = 100;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"사기 증감");
+          } else if (effect == 11) {
+            char powerId[64] = {};
+            sprintf_s(powerId, "%s_damage", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(powerId, &power, 50, 100)) {
+              if (power < 0) power = 0;
+              if (power > 10000) power = 10000;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"위력");
+          } else if (effect == 12) {
+            char powerId[64] = {};
+            sprintf_s(powerId, "%s_fire", idPrefix);
+            ImGui::SetNextItemWidth(120.0f * scale);
+            if (ImGui::InputInt(powerId, &power, 5, 10)) {
+              if (power < 0) power = 0;
+              if (power > 100) power = 100;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(u8"발동 확률(%)");
+          } else {
+            ImGui::TextDisabled(u8"추가 설정 없음");
+          }
+        };
+
+        drawEffectEditor(u8"효과 1", "##S5E1",
+                         s_stratagem5Edit.effect1,
+                         s_stratagem5Edit.power1,
+                         s_stratagem5Edit.duration1);
+
+        drawEffectEditor(u8"효과 2", "##S5E2",
+                         s_stratagem5Edit.effect2,
+                         s_stratagem5Edit.power2,
+                         s_stratagem5Edit.duration2);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::SetNextItemWidth(120.0f * scale);
+        if (ImGui::InputInt(u8"범위##S5Range",
+                            &s_stratagem5Edit.range, 1, 1)) {
+          if (s_stratagem5Edit.range < 1) s_stratagem5Edit.range = 1;
+          if (s_stratagem5Edit.range > 100) s_stratagem5Edit.range = 100;
+        }
+
+        ImGui::SetNextItemWidth(140.0f * scale);
+        if (ImGui::InputInt(u8"추가 병력 회복##S5Heal",
+                            &s_stratagem5Edit.healAmount, 100, 500)) {
+          if (s_stratagem5Edit.healAmount < 0)
+            s_stratagem5Edit.healAmount = 0;
+          if (s_stratagem5Edit.healAmount > 65535)
+            s_stratagem5Edit.healAmount = 65535;
+        }
+        ImGui::TextDisabled(
+            u8"※ 추가 병력 회복은 우리가 별도로 넣은 기능이며, 효과1이 '사기 증가'일 때만 적용됩니다.");
+        ImGui::TextDisabled(
+            u8"※ 첫 번째 효과가 직접 데미지/화계 계통이면 원본 게임의 지형 판정 영향을 받을 수 있습니다.");
+
+        ImGui::Spacing();
+        if (ImGui::Button(u8"현재 기본값 복원",
+                          ImVec2(150.0f * scale, 30.0f * scale))) {
+          s_stratagem5Edit = DX11Base::Spell5CustomSettings{};
+        }
+
+        ImGui::Separator();
+
+        if (ImGui::Button(u8"적용 및 저장",
+                          ImVec2(180.0f * scale, 34.0f * scale))) {
+          DX11Base::SetSpell5CustomSettings(s_stratagem5Edit);
+          s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
+          SaveConfig();
+          AddNotification(u8"5번 책략 설정 적용 완료");
+          ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button(u8"취소",
+                          ImVec2(100.0f * scale, 34.0f * scale))) {
+          ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+      }
+
+      EndSection(); // 전쟁
+    }
+
+    void DrawOfficerEditSection(uintptr_t p1, float scale) {
+      BeginSection();
+      ImGui::TextColored(ImVec4(0.75f, 0.6f, 1.0f, 1.0f), u8"[ 무장편집 ]");
+      ImGui::TextDisabled(u8"전법 / 특기 / 기재 / 특수능력 / 기술 편집");
+      ImGui::Spacing();
+
+      float btnHeight = 26.0f * scale;
+
+      if (ImGui::BeginTable("OfficerEditOpenRow", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (p1 != 0) {
+          if (ImGui::Button(u8"주인공", ImVec2(-FLT_MIN, btnHeight))) {
+            bShowOfficerDetail = !bShowOfficerDetail;
+          }
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Button(u8"모든 무장", ImVec2(-FLT_MIN, btnHeight))) {
+          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+        }
+
+        ImGui::EndTable();
+      }
+
+      ImGui::Spacing();
+
+      if (ImGui::Button(u8"전법 및 특기 일괄 변경", ImVec2(-1, 30 * scale))) {
         bShowBatchOfficerEditWin = !bShowBatchOfficerEditWin;
+      }
+
+      if (ImGui::BeginTable("OfficerEditScenarioTools", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
+          DX11Base::SetTechZero(bTechZero);
+          NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"체크한 상태로 새로운 시나리오 시작시 모든 세력의 기술이 초기화 됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin)) {
+          DX11Base::SetUndiscoveredToRonin(bUndiscoveredToRonin);
+          NotifyFeatureToggle(u8"모든 미발견 무장 재야로 변경", bUndiscoveredToRonin);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"<주의사항>");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"체크시 저장된 게임 불러올시에도 적용이 됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
       }
 
       if (ImGui::Button(u8"세력별 기술력 편집", ImVec2(-1, 30 * scale))) {
         bShowFactionTechEditor = !bShowFactionTechEditor;
+      }
+
+      ImGui::Spacing();
+
+      // 기재 관련 공통 편집
+      if (ImGui::BeginTable("WarTraitRow", 2,
+                            ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"기재 3슬롯 활성화", &DX11Base::bTraitViewer)) {
+          const bool requested = DX11Base::bTraitViewer;
+          if (!DX11Base::SetTraitViewerFeature(requested))
+            DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
+          NotifyFeatureToggle(u8"기재 3슬롯 활성화", DX11Base::bTraitViewer);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"기재 슬롯을 2개에서 3개로 확장합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"편집 메뉴에서 3번째 기재를 부여할 수 있습니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Button(u8"기재 이름 편집", ImVec2(-FLT_MIN, btnHeight))) {
+          DX11Base::OpenTraitTextEditorWindow();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"기본 기재 이름및 설명을 편집할수 있습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"적용후 저장까지 하면 게임실행시 자동으로 적용이 됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
       }
 
       ImGui::Spacing();
@@ -1499,518 +1835,215 @@ namespace DX11Base {
       ::DX11Base::DrawBatchOfficerEditWindow(scale);
       ::DX11Base::DrawFactionTechEditor(scale);
 
-      ImGui::Spacing();
-      ImGui::Separator();
-      ImGui::Spacing();
-
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 전법 및 건물 ]");
-      ImGui::SameLine();
-      if (ImGui::Button(u8"수정", ImVec2(100.0f * scale, 25.0f * scale))) {
-        bShowTacticsEditWin = !bShowTacticsEditWin;
-      }
-
-      ImGui::Spacing();
-      ImGui::Separator();
-      ImGui::Spacing();
-
-      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 책략 ]");
-
-      if (ImGui::Checkbox(u8"공격측 책략 게이지 시작 최대", &bMaxAttackStratagemGauge)) {
-        const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
-        if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
-          bMaxAttackStratagemGauge = !bMaxAttackStratagemGauge;
-          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
-        } else {
-          NotifyFeatureToggle(u8"공격측 책략 게이지 최대", bMaxAttackStratagemGauge);
-          SaveConfig();
-        }
-      }
-
-      ImGui::SameLine();
-
-      if (ImGui::Checkbox(u8"수비측 책략 게이지 시작 최대", &bMaxDefenseStratagemGauge)) {
-        const bool wantHook = bMaxAttackStratagemGauge || bMaxDefenseStratagemGauge;
-        if (!DX11Base::SetStratagemGaugeCapture(wantHook)) {
-          bMaxDefenseStratagemGauge = !bMaxDefenseStratagemGauge;
-          AddNotification(u8"책략 게이지 기능 적용 실패 - 로그 확인");
-        } else {
-          NotifyFeatureToggle(u8"수비측 책략 게이지 최대", bMaxDefenseStratagemGauge);
-          SaveConfig();
-        }
-      }
-
-      static bool s_stratagemFiveEnabled = true;
-      if (ImGui::Checkbox(u8"5번 책략 활성화", &s_stratagemFiveEnabled)) {
-        const bool enable = s_stratagemFiveEnabled;
-        const bool ok = DX11Base::SetStratagemFiveFeature(enable);
-        if (!ok) {
-          s_stratagemFiveEnabled = !enable;
-          AddNotification(enable ? u8"5번 책략 활성화 실패 - 로그 확인"
-                                 : u8"5번 책략 해제 실패 - 로그 확인");
-        } else {
-          NotifyFeatureToggle(u8"5번 책략 활성화", s_stratagemFiveEnabled);
-        }
-      }
-
-      static DX11Base::Spell5CustomSettings s_stratagem5Edit{};
-      ImGui::SameLine();
-      if (ImGui::Button(u8"5번 책략 설정")) {
-        s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
-        ImGui::OpenPopup(u8"5번 책략 설정###Stratagem5SettingsPopup");
-      }
-
-      ImGui::SetNextWindowSize(ImVec2(590.0f * scale, 570.0f * scale),
-                               ImGuiCond_Appearing);
-      if (ImGui::BeginPopupModal(
-              u8"5번 책략 설정###Stratagem5SettingsPopup",
-              nullptr,
-              ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f),
-                           u8"[ 5번 책략 사용자 설정 ]");
-        ImGui::Separator();
-        ImGui::TextDisabled(u8"책략 ID 5/5/5와 사용횟수 1회는 고정합니다.");
-
-        const char *targetNames[] = {u8"아군", u8"적군", u8"피아불문"};
-        int targetIndex = s_stratagem5Edit.target - 1;
-        if (targetIndex < 0 || targetIndex > 2)
-          targetIndex = 0;
-        ImGui::SetNextItemWidth(180.0f * scale);
-        if (ImGui::Combo(u8"대상", &targetIndex,
-                         targetNames, IM_ARRAYSIZE(targetNames))) {
-          s_stratagem5Edit.target = targetIndex + 1;
-        }
-
-        static const int effectCodes[] = {0, 3, 10, 11, 12};
-        const char *effectNames[] = {
-            u8"없음", u8"상태이상", u8"사기 증감", u8"직접 데미지", u8"화계"};
-
-        auto effectIndexFromCode = [&](int code) {
-          for (int i = 0; i < IM_ARRAYSIZE(effectCodes); ++i)
-            if (effectCodes[i] == code)
-              return i;
-          return 0;
-        };
-
-        auto drawEffectEditor = [&](const char *title, const char *idPrefix,
-                                    int &effect, int &power, int &duration) {
-          ImGui::Spacing();
-          ImGui::TextColored(ImVec4(0.55f, 0.9f, 1.0f, 1.0f), "%s", title);
-
-          int effectIndex = effectIndexFromCode(effect);
-          char comboId[64] = {};
-          sprintf_s(comboId, "%s_effect", idPrefix);
-          ImGui::SetNextItemWidth(180.0f * scale);
-          if (ImGui::Combo(comboId, &effectIndex,
-                           effectNames, IM_ARRAYSIZE(effectNames))) {
-            effect = effectCodes[effectIndex];
-            if (effect == 0) {
-              power = 0;
-              duration = 0;
-            } else if (effect == 3) {
-              if (power < 1 || power > 3)
-                power = 1;
-              if (duration < 0)
-                duration = 0;
-            } else if (effect == 12) {
-              if (power < 0 || power > 100)
-                power = 100;
-              duration = 0;
-            } else {
-              duration = 0;
-            }
-          }
-
-          if (effect == 3) {
-            const char *statusNames[] = {u8"저지", u8"혼란", u8"공황"};
-            int statusIndex = power - 1;
-            if (statusIndex < 0 || statusIndex > 2)
-              statusIndex = 0;
-
-            char statusId[64] = {};
-            sprintf_s(statusId, "%s_status", idPrefix);
-            ImGui::SetNextItemWidth(180.0f * scale);
-            if (ImGui::Combo(statusId, &statusIndex,
-                             statusNames, IM_ARRAYSIZE(statusNames))) {
-              power = statusIndex + 1;
-            }
-
-            char durationId[64] = {};
-            sprintf_s(durationId, "%s_duration", idPrefix);
-            ImGui::SetNextItemWidth(120.0f * scale);
-            if (ImGui::InputInt(durationId, &duration, 1, 3)) {
-              if (duration < 0) duration = 0;
-              if (duration > 30) duration = 30;
-            }
-            ImGui::SameLine();
-            ImGui::TextUnformatted(u8"지속일");
-          } else if (effect == 10) {
-            char powerId[64] = {};
-            sprintf_s(powerId, "%s_morale", idPrefix);
-            ImGui::SetNextItemWidth(120.0f * scale);
-            if (ImGui::InputInt(powerId, &power, 5, 10)) {
-              if (power < -100) power = -100;
-              if (power > 100) power = 100;
-            }
-            ImGui::SameLine();
-            ImGui::TextUnformatted(u8"사기 증감");
-          } else if (effect == 11) {
-            char powerId[64] = {};
-            sprintf_s(powerId, "%s_damage", idPrefix);
-            ImGui::SetNextItemWidth(120.0f * scale);
-            if (ImGui::InputInt(powerId, &power, 50, 100)) {
-              if (power < 0) power = 0;
-              if (power > 10000) power = 10000;
-            }
-            ImGui::SameLine();
-            ImGui::TextUnformatted(u8"위력");
-          } else if (effect == 12) {
-            char powerId[64] = {};
-            sprintf_s(powerId, "%s_fire", idPrefix);
-            ImGui::SetNextItemWidth(120.0f * scale);
-            if (ImGui::InputInt(powerId, &power, 5, 10)) {
-              if (power < 0) power = 0;
-              if (power > 100) power = 100;
-            }
-            ImGui::SameLine();
-            ImGui::TextUnformatted(u8"발동 확률(%)");
-          } else {
-            ImGui::TextDisabled(u8"추가 설정 없음");
-          }
-        };
-
-        drawEffectEditor(u8"효과 1", "##S5E1",
-                         s_stratagem5Edit.effect1,
-                         s_stratagem5Edit.power1,
-                         s_stratagem5Edit.duration1);
-
-        drawEffectEditor(u8"효과 2", "##S5E2",
-                         s_stratagem5Edit.effect2,
-                         s_stratagem5Edit.power2,
-                         s_stratagem5Edit.duration2);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::SetNextItemWidth(120.0f * scale);
-        if (ImGui::InputInt(u8"범위##S5Range",
-                            &s_stratagem5Edit.range, 1, 1)) {
-          if (s_stratagem5Edit.range < 1) s_stratagem5Edit.range = 1;
-          if (s_stratagem5Edit.range > 100) s_stratagem5Edit.range = 100;
-        }
-
-        ImGui::SetNextItemWidth(140.0f * scale);
-        if (ImGui::InputInt(u8"추가 병력 회복##S5Heal",
-                            &s_stratagem5Edit.healAmount, 100, 500)) {
-          if (s_stratagem5Edit.healAmount < 0)
-            s_stratagem5Edit.healAmount = 0;
-          if (s_stratagem5Edit.healAmount > 65535)
-            s_stratagem5Edit.healAmount = 65535;
-        }
-        ImGui::TextDisabled(
-            u8"※ 추가 병력 회복은 우리가 별도로 넣은 기능이며, 효과1이 '사기 증가'일 때만 적용됩니다.");
-        ImGui::TextDisabled(
-            u8"※ 첫 번째 효과가 직접 데미지/화계 계통이면 원본 게임의 지형 판정 영향을 받을 수 있습니다.");
-
-        ImGui::Spacing();
-        if (ImGui::Button(u8"현재 기본값 복원",
-                          ImVec2(150.0f * scale, 30.0f * scale))) {
-          s_stratagem5Edit = DX11Base::Spell5CustomSettings{};
-        }
-
-        ImGui::Separator();
-
-        if (ImGui::Button(u8"적용 및 저장",
-                          ImVec2(180.0f * scale, 34.0f * scale))) {
-          DX11Base::SetSpell5CustomSettings(s_stratagem5Edit);
-          s_stratagem5Edit = DX11Base::GetSpell5CustomSettings();
-          SaveConfig();
-          AddNotification(u8"5번 책략 설정 적용 완료");
-          ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button(u8"취소",
-                          ImVec2(100.0f * scale, 34.0f * scale))) {
-          ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-      }
-
-      EndSection(); // 전쟁
+      EndSection(); // 무장편집
     }
 
     void DrawScenarioSection(uintptr_t p1, float scale) {
       BeginSection();
       ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.0f, 1.0f), u8"[ 시나리오 ]");
 
-      ImGui::PushID(u8"ScenarioDate");
-      {
-        static int s_scenarioYearEdit = 200;
-        static int s_scenarioMonthEdit = 1;
+      if (ImGui::BeginTable(
+              "ScenarioLayout",
+              2,
+              ImGuiTableFlags_SizingStretchSame |
+                  ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn(
+            "ScenarioLeft",
+            ImGuiTableColumnFlags_WidthStretch,
+            1.0f);
+        ImGui::TableSetupColumn(
+            "ScenarioRight",
+            ImGuiTableColumnFlags_WidthStretch,
+            1.0f);
 
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("[");
-        ImGui::SameLine(0, 0);
-        ImGui::SetNextItemWidth(40.0f * scale);
-        ImGui::InputInt(u8"##scY", &s_scenarioYearEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
-        const bool yearDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
-        const bool yearActive = ImGui::IsItemActive();
-
-        ImGui::SameLine(0, 0);
-        ImGui::TextUnformatted("]");
-        ImGui::SameLine(0, 4.0f * scale);
-        ImGui::Text(u8"년");
-        ImGui::SameLine(0, 10.0f * scale);
-        ImGui::TextUnformatted("[");
-        ImGui::SameLine(0, 0);
-        ImGui::SetNextItemWidth(20.0f * scale);
-        ImGui::InputInt(u8"##scM", &s_scenarioMonthEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
-        const bool monthDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
-        const bool monthActive = ImGui::IsItemActive();
-
-        ImGui::SameLine(0, 0);
-        ImGui::TextUnformatted("]");
-        ImGui::SameLine(0, 4.0f * scale);
-        ImGui::Text(u8"월");
-
-        if (yearDeactivatedAfterEdit)
-          UpdateYear((unsigned short)s_scenarioYearEdit);
-        if (monthDeactivatedAfterEdit) {
-          if (s_scenarioMonthEdit >= 1 && s_scenarioMonthEdit <= 12)
-            UpdateMonth((uint8_t)s_scenarioMonthEdit);
-          else
-            DX11Base::AddLog(u8"[시나리오 날짜] 월은 1~12만 가능합니다.");
-        }
-
-        // 매 프레임 VirtualQuery 폭주 방지: 짧게 스로틀 + 한 번에 연·월 읽기
-        if (!yearActive && !yearDeactivatedAfterEdit && !monthActive && !monthDeactivatedAfterEdit) {
-          static unsigned long long s_lastScenarioDatePoll = 0;
-          const unsigned long long now = GetTickCount64();
-          if (now - s_lastScenarioDatePoll >= 250ull) {
-            s_lastScenarioDatePoll = now;
-            unsigned short cy = 0;
-            uint8_t cm = 0;
-            if (ReadScenarioDate(&cy, &cm)) {
-              if ((int)cy != s_scenarioYearEdit)
-                s_scenarioYearEdit = (int)cy;
-              if ((int)cm != s_scenarioMonthEdit)
-                s_scenarioMonthEdit = (int)cm;
-            }
-          }
-        }
-      }
-      ImGui::PopID();
-
-      ImGui::SameLine(160.0f * scale);
-      if (ImGui::Checkbox(u8"세력 군주 보너스 자동 배정", &bFactionLordBonus)) {
-        DX11Base::SetFactionLordBonus(bFactionLordBonus);
-        NotifyFeatureToggle(u8"세력 군주 보너스 자동 배정", bFactionLordBonus);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"관작 보너스");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"황제 : 모든 능력치 +5, 병력 +5000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"왕 : 모든 능력치 +4, 병력 +3000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"공 : 모든 능력치 +3, 병력 +2000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"주목 : 모든 능력치 +2, 병력 +1000");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"그냥 군주 : 모든 능력치 +1");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 지역별 왕이나 공의 차이는 없음");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 군주 관작 중 승상, 대장군은 주목과 동격");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 방랑군 두령은 보너스를 적용받지 않음");
-
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
-        DX11Base::SetStartSetting(bStartSetting);
-        NotifyFeatureToggle(u8"시나리오 수정", bStartSetting);
-        SaveConfig();
-      }
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"시나리오 설정");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), u8"체크시 새로운 시나리오 시작시 자동으로 적용이 됩니다.");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"※ 시나리오 변경(수정) 내용 ※");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"관우진군 : 관우-조홍 원수 버그 수정");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지장집결 : 제갈량의 기술력 (연노병, 투석기까지 개발)");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"범장집결 : 전예 재야 신분으로 주인공 선택 가능");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"삼의 삼국지 : 환씨 조앙군으로 이적");
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"네 군주 마지막 전쟁 : 반동탁 연합 해산, 네군주 우호도 0");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"모든 미발견 무장 재야로 변경", &bUndiscoveredToRonin)) {
-        DX11Base::SetUndiscoveredToRonin(bUndiscoveredToRonin);
-        NotifyFeatureToggle(u8"모든 미발견 무장 재야로 변경", bUndiscoveredToRonin);
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"<주의사항>");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"체크시 저장된 게임 불러올시에도 적용이 됩니다.");
-        ImGui::EndTooltip();
-      }
-
-      if (ImGui::Checkbox(u8"모든 세력 기술 초기화", &bTechZero)) {
-        DX11Base::SetTechZero(bTechZero);
-        NotifyFeatureToggle(u8"모든 세력 기술 초기화", bTechZero);
-        SaveConfig();
-      }
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                           u8"체크한 상태로 새로운 시나리오 시작시 모든 세력의 기술이 초기화 됩니다.");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"교지 <-> 건녕 도로 차단", &bRoadBlock)) {
-        DX11Base::SetRoadBlock(bRoadBlock);
-        NotifyFeatureToggle(u8"교지 <-> 건녕 도로 차단", bRoadBlock);
-        SaveConfig();
-      }
-
-      if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
-        NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
-        SaveConfig();
-      }
-
-      ImGui::SameLine(160.0f * scale);
-
-      if (ImGui::Checkbox(u8"교지 <-> 회계 도로 차단", &bRoadBlock2)) {
-        DX11Base::SetRoadBlock2(bRoadBlock2);
-        NotifyFeatureToggle(u8"교지 <-> 회계 도로 차단", bRoadBlock2);
-        SaveConfig();
-      }
-
-      // [신규] 데모플레이 제어 버튼
-      float demoBtnWidth = 140.0f * scale;
-      if (ImGui::Button(u8"데모플레이 중지", ImVec2(demoBtnWidth, 26.0f * scale))) {
-        uintptr_t gBase = DX11Base::GetGameBase();
-        uintptr_t p1_ptr = gBase + 0xE0;
-        if (DX11Base::g_savedHeroAddr > 0x10000 && DX11Base::IsValidPtr(p1_ptr, 8)) {
-          DWORD oldP;
-          if (VirtualProtect((LPVOID)p1_ptr, 8, PAGE_READWRITE, &oldP)) {
-            *(uintptr_t *)p1_ptr = DX11Base::g_savedHeroAddr;
-            VirtualProtect((LPVOID)p1_ptr, 8, oldP, &oldP);
-            DX11Base::AddLog(u8"[데모] 데모 플레이 중지 (주인공 주소 복원 완료: %p)",
-                             (void *)DX11Base::g_savedHeroAddr);
-          }
-        } else if (DX11Base::g_savedHeroAddr <= 0x10000) {
-          DX11Base::AddLog(u8"[데모] 복원할 백업 주소가 없습니다.");
-        }
-      }
-
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"[사용 방법]");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"데모플레이 중 중지 버튼을 눌러 데모플레이를 중지합니다.");
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"저장을 한뒤에 불러오기를 하면 정상적으로 플레이가 가능합니다.");
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), u8"[ 주의 사항 ]");
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f),
-                           u8"마우스 우측키를 눌러 일시 정지후에 중지 버튼을 누르면 까만화면으로 바뀝니다.");
-        ImGui::EndTooltip();
-      }
-
-      EndSection(); // 시나리오
-
-      BeginSection();
-      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 설정 ]");
-
-      ImGui::SetNextItemWidth(150.0f * scale);
-      if (ImGui::SliderFloat(u8"알림 속도", &DX11Base::g_notificationSpeed, 20.0f, 500.0f, "%.0f px/s")) {
-        SaveConfig();
-      }
-
-      ImGui::SameLine(0, 20.0f * scale);
-      if (ImGui::Button(u8"알림 비우기", ImVec2(100.0f * scale, 0))) {
-        g_notifications.clear();
-        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
-      }
-      EndSection(); // 알림
-    }
-
-    void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
-      BeginSection();
-
-      float btnHeight = 26.0f * scale;
-
-      ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 정보 ]");
-
-      // 1행: 명품 / 주인공 / 모든 무장 - 3열 균등 배치
-      if (ImGui::BeginTable("InfoTopRow", 3,
-                            ImGuiTableFlags_SizingStretchSame |
-                            ImGuiTableFlags_NoSavedSettings)) {
+        // 1행: 시나리오 날짜 / 세력 군주 보너스 자동 배정
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        if (p1 != 0) {
-          if (ImGui::Button(u8"명품", ImVec2(-FLT_MIN, btnHeight))) {
-            bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
+        ImGui::PushID(u8"ScenarioDate");
+        {
+          static int s_scenarioYearEdit = 200;
+          static int s_scenarioMonthEdit = 1;
+
+          ImGui::AlignTextToFramePadding();
+          ImGui::TextUnformatted("[");
+          ImGui::SameLine(0, 0);
+          ImGui::SetNextItemWidth(40.0f * scale);
+          ImGui::InputInt(u8"##scY", &s_scenarioYearEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+          const bool yearDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
+          const bool yearActive = ImGui::IsItemActive();
+
+          ImGui::SameLine(0, 0);
+          ImGui::TextUnformatted("]");
+          ImGui::SameLine(0, 4.0f * scale);
+          ImGui::Text(u8"년");
+          ImGui::SameLine(0, 10.0f * scale);
+          ImGui::TextUnformatted("[");
+          ImGui::SameLine(0, 0);
+          ImGui::SetNextItemWidth(20.0f * scale);
+          ImGui::InputInt(u8"##scM", &s_scenarioMonthEdit, 0, 0, ImGuiInputTextFlags_CharsDecimal);
+          const bool monthDeactivatedAfterEdit = ImGui::IsItemDeactivatedAfterEdit();
+          const bool monthActive = ImGui::IsItemActive();
+
+          ImGui::SameLine(0, 0);
+          ImGui::TextUnformatted("]");
+          ImGui::SameLine(0, 4.0f * scale);
+          ImGui::Text(u8"월");
+
+          if (yearDeactivatedAfterEdit)
+            UpdateYear((unsigned short)s_scenarioYearEdit);
+          if (monthDeactivatedAfterEdit) {
+            if (s_scenarioMonthEdit >= 1 && s_scenarioMonthEdit <= 12)
+              UpdateMonth((uint8_t)s_scenarioMonthEdit);
+            else
+              DX11Base::AddLog(u8"[시나리오 날짜] 월은 1~12만 가능합니다.");
           }
+
+          // 매 프레임 VirtualQuery 폭주 방지: 짧게 스로틀 + 한 번에 연·월 읽기
+          if (!yearActive && !yearDeactivatedAfterEdit && !monthActive && !monthDeactivatedAfterEdit) {
+            static unsigned long long s_lastScenarioDatePoll = 0;
+            const unsigned long long now = GetTickCount64();
+            if (now - s_lastScenarioDatePoll >= 250ull) {
+              s_lastScenarioDatePoll = now;
+              unsigned short cy = 0;
+              uint8_t cm = 0;
+              if (ReadScenarioDate(&cy, &cm)) {
+                if ((int)cy != s_scenarioYearEdit)
+                  s_scenarioYearEdit = (int)cy;
+                if ((int)cm != s_scenarioMonthEdit)
+                  s_scenarioMonthEdit = (int)cm;
+              }
+            }
+          }
+        }
+        ImGui::PopID();
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"세력 군주 보너스 자동 배정", &bFactionLordBonus)) {
+          DX11Base::SetFactionLordBonus(bFactionLordBonus);
+          NotifyFeatureToggle(u8"세력 군주 보너스 자동 배정", bFactionLordBonus);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"관작 보너스");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"황제 : 모든 능력치 +5, 병력 +5000");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"왕 : 모든 능력치 +4, 병력 +3000");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"공 : 모든 능력치 +3, 병력 +2000");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"주목 : 모든 능력치 +2, 병력 +1000");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"그냥 군주 : 모든 능력치 +1");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 지역별 왕이나 공의 차이는 없음");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 군주 관작 중 승상, 대장군은 주목과 동격");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f), u8"※ 방랑군 두령은 보너스를 적용받지 않음");
+          ImGui::EndTooltip();
+        }
+
+        // 2행: 시나리오 수정 / 데모플레이 중지
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"시나리오 수정", &bStartSetting)) {
+          DX11Base::SetStartSetting(bStartSetting);
+          NotifyFeatureToggle(u8"시나리오 수정", bStartSetting);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"시나리오 설정");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), u8"체크시 새로운 시나리오 시작시 자동으로 적용이 됩니다.");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), u8"※ 시나리오 변경(수정) 내용 ※");
+          ImGui::Separator();
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"관우진군 : 관우-조홍 원수 버그 수정");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"지장집결 : 제갈량의 기술력 (연노병, 투석기까지 개발)");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"범장집결 : 전예 재야 신분으로 주인공 선택 가능");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"삼의 삼국지 : 환씨 조앙군으로 이적");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"네 군주 마지막 전쟁 : 반동탁 연합 해산, 네군주 우호도 0");
+          ImGui::EndTooltip();
         }
 
         ImGui::TableSetColumnIndex(1);
-        if (p1 != 0) {
-          if (ImGui::Button(u8"주인공", ImVec2(-FLT_MIN, btnHeight))) {
-            bShowOfficerDetail = !bShowOfficerDetail;
+        if (ImGui::Button(u8"데모플레이 중지", ImVec2(-FLT_MIN, 26.0f * scale))) {
+          uintptr_t gBase = DX11Base::GetGameBase();
+          uintptr_t p1_ptr = gBase + 0xE0;
+          if (DX11Base::g_savedHeroAddr > 0x10000 && DX11Base::IsValidPtr(p1_ptr, 8)) {
+            DWORD oldP;
+            if (VirtualProtect((LPVOID)p1_ptr, 8, PAGE_READWRITE, &oldP)) {
+              *(uintptr_t *)p1_ptr = DX11Base::g_savedHeroAddr;
+              VirtualProtect((LPVOID)p1_ptr, 8, oldP, &oldP);
+              DX11Base::AddLog(u8"[데모] 데모 플레이 중지 (주인공 주소 복원 완료: %p)",
+                               (void *)DX11Base::g_savedHeroAddr);
+            }
+          } else if (DX11Base::g_savedHeroAddr <= 0x10000) {
+            DX11Base::AddLog(u8"[데모] 복원할 백업 주소가 없습니다.");
           }
         }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"[사용 방법]");
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"데모플레이 중 중지 버튼을 눌러 데모플레이를 중지합니다.");
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"저장을 한뒤에 불러오기를 하면 정상적으로 플레이가 가능합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), u8"[ 주의 사항 ]");
+          ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f),
+                             u8"마우스 우측키를 눌러 일시 정지후에 중지 버튼을 누르면 까만화면으로 바뀝니다.");
+          ImGui::EndTooltip();
+        }
 
-        ImGui::TableSetColumnIndex(2);
-        if (ImGui::Button(u8"모든 무장", ImVec2(-FLT_MIN, btnHeight))) {
-          DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
+        // 3행: 도로 차단 2종
+        ImGui::TableNextRow();
+
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Checkbox(u8"교지 <-> 건녕 도로 차단", &bRoadBlock)) {
+          DX11Base::SetRoadBlock(bRoadBlock);
+          NotifyFeatureToggle(u8"교지 <-> 건녕 도로 차단", bRoadBlock);
+          SaveConfig();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Checkbox(u8"교지 <-> 회계 도로 차단", &bRoadBlock2)) {
+          DX11Base::SetRoadBlock2(bRoadBlock2);
+          NotifyFeatureToggle(u8"교지 <-> 회계 도로 차단", bRoadBlock2);
+          SaveConfig();
         }
 
         ImGui::EndTable();
       }
 
-      ImGui::Spacing();
+      EndSection(); // 시나리오
+    }
 
-      // 2행: 기재 3슬롯 / 기재 이름 편집 - 2열 균등 배치
-      if (ImGui::BeginTable("InfoTraitRow", 2,
+    void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
+      BeginSection();
+
+      ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 정보 ]");
+
+      if (ImGui::BeginTable("InfoNotificationRow", 2,
                             ImGuiTableFlags_SizingStretchSame |
                             ImGuiTableFlags_NoSavedSettings)) {
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        if (ImGui::Checkbox(u8"기재 3슬롯 활성화", &DX11Base::bTraitViewer)) {
-          const bool requested = DX11Base::bTraitViewer;
-          if (!DX11Base::SetTraitViewerFeature(requested))
-            DX11Base::bTraitViewer = DX11Base::IsTraitViewerFeatureApplied();
-          NotifyFeatureToggle(u8"기재 3슬롯 활성화", DX11Base::bTraitViewer);
+        if (ImGui::Checkbox(u8"사망장수 및 등용장수 알림", &bOfficerChangeNotify)) {
+          NotifyFeatureToggle(u8"사망장수 및 등용장수 알림", bOfficerChangeNotify);
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"기재 슬롯을 2개에서 3개로 확장합니다.");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),u8"편집 메뉴에서 3번째 기재를 부여할 수 있습니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"평정이 끝나고 내정으로 넘어갈 때 장수 변동을 기존 알림창으로 보여줍니다.");
+          ImGui::TextUnformatted(u8"- 새로 사망 상태가 된 장수는 직전 소속 세력/도시를 함께 표시합니다.");
+          ImGui::TextUnformatted(u8"- 소속 세력이 새로 생기거나 다른 세력으로 바뀐 장수는 현재 세력/도시를 표시합니다.");
+          ImGui::TextUnformatted(u8"- 사망 원인이나 세력 변경 원인까지는 구분하지 않고 최종 상태를 기준으로 판정합니다.");
+          ImGui::TextUnformatted(u8"- 체크 상태는 설정 파일에 저장됩니다.");
           ImGui::EndTooltip();
         }
 
         ImGui::TableSetColumnIndex(1);
-        if (ImGui::Button(u8"기재 이름 편집", ImVec2(-FLT_MIN, btnHeight))) {
-          DX11Base::OpenTraitTextEditorWindow();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"기본 기재 이름및 설명을 편집할수 있습니다.");
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"적용후 저장까지 하면 게임실행시 자동으로 적용이 됩니다.");
-          ImGui::EndTooltip();
+        if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
+          NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
+          SaveConfig();
         }
 
         ImGui::EndTable();
@@ -2022,32 +2055,6 @@ namespace DX11Base {
       DX11Base::TickTraitTextEditorAutoApply();
       DX11Base::DrawTraitTextEditorWindow(scale);
       DX11Base::DrawBatchRandomTraitAssignmentWindow(scale);
-
-      BeginSection();
-      ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
-      if (ImGui::Checkbox(u8"전기취소##WIDGET", &DX11Base::bShowWidgetTengi)) {
-        NotifyFeatureToggle(u8"위젯: 전기취소", DX11Base::bShowWidgetTengi);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"주인공##WIDGET", &DX11Base::bShowWidgetHero)) {
-        NotifyFeatureToggle(u8"위젯: 주인공", DX11Base::bShowWidgetHero);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"모든무장##WIDGET", &DX11Base::bShowWidgetAllOfficers)) {
-        NotifyFeatureToggle(u8"위젯: 모든 무장", DX11Base::bShowWidgetAllOfficers);
-        SaveConfig();
-      }
-
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"알림확인##WIDGET", &DX11Base::bShowWidgetNotif)) {
-        NotifyFeatureToggle(u8"위젯: 알림확인", DX11Base::bShowWidgetNotif);
-        SaveConfig();
-      }
-      EndSection(); // 위젯
 
     }
   } // namespace MenuSections

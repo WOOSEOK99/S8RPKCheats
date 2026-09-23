@@ -211,6 +211,7 @@
     <ClInclude Include="Menu.h" />
     <ClInclude Include="MenuState.h" />
     <ClInclude Include="MenuSections.h" />
+    <ClInclude Include="MainColumns.h" />
     <ClInclude Include="Cheats\Officer\OfficerData.h" />
     <ClInclude Include="Cheats\Officer\OfficerDetail.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerWidths.h" />
@@ -329,6 +330,9 @@
     <ClCompile Include="Menu.cpp" />
     <ClCompile Include="MenuState.cpp" />
     <ClCompile Include="MenuSections.cpp" />
+    <ClCompile Include="MainColumn1.cpp" />
+    <ClCompile Include="MainColumn2.cpp" />
+    <ClCompile Include="MainColumn3.cpp" />
     <ClCompile Include="Cheats\Officer\OfficerData.cpp" />
     <ClCompile Include="Cheats\Officer\SpecialAbilityAutoAssign.cpp" />
     <ClCompile Include="Cheats\Officer\AIOfficerGrowth.cpp" />
