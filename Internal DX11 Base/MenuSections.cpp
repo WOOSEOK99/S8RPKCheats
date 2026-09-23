@@ -1231,6 +1231,15 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"5번 책략 활성화", s_stratagemFiveEnabled);
         }
       }
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(u8"전투 시작 전에 활성화하면 5번째 책략을 사용할 수 있습니다.");
+        ImGui::TextUnformatted(u8"전투 중에 체크하거나 해제한 경우에는 현재 전투에는 적용되지 않습니다.");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                           u8"변경 내용은 전투 종료 후 다음 전투부터 적용됩니다.");
+        ImGui::TextDisabled(u8"※ 전투 중 저장한 세이브 파일을 불러온 경우에도 현재 전투에는 적용하지 않습니다.");
+        ImGui::EndTooltip();
+      }
 
       static DX11Base::Spell5CustomSettings s_stratagem5Edit{};
       ImGui::SameLine();
