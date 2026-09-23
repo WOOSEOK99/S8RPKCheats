@@ -21,6 +21,7 @@
 #include "Cheats/War/Battleunitcapture.h"
 #include "Cheats/War/Defbuildingboost.h"
 #include "Cheats/War/SiegeWarfare.h"
+#include "Cheats/War/StratagemSlotProbe.h"
 #include "Config.h"
 #include "Engine.h"
 #include "Menu.h"
