@@ -1624,6 +1624,17 @@ namespace DX11Base {
       }
       ImGui::TextDisabled(u8"읽기 전용입니다. 로그의 [책략4제한DBG] 후보/bytes를 보내주세요.");
 
+      static bool s_spell5LoopTest = false;
+      if (ImGui::Checkbox(u8"5번째 책략 UI 루프 테스트", &s_spell5LoopTest)) {
+        if (!DX11Base::SetStratagemFiveLoopTest(s_spell5LoopTest)) {
+          s_spell5LoopTest = !s_spell5LoopTest;
+          AddNotification(u8"5번째 책략 UI 루프 테스트 적용 실패 - 로그 확인");
+        } else {
+          NotifyFeatureToggle(u8"5번째 책략 UI 루프 테스트", s_spell5LoopTest);
+        }
+      }
+      ImGui::TextDisabled(u8"진단 후보 #34의 0x20 간격 루프만 4→5로 바꿉니다. 저장하지 말고 전투 UI만 확인하세요.");
+
       EndSection(); // 전쟁
     }
 
