@@ -322,7 +322,42 @@ namespace DX11Base {
                       u8"Dialog::Initialize",
                       0x01DF3F20, 0x1D0, 0x200);
 
-      AddLog(u8"[책략5UIDBG] PDB 전투 UI 진단 완료. UIDBG/UIRANGE 로그를 보내주세요.");
+      // 2차 로그에서 버튼 생성 루프 자체가 확정됨.
+      // 다음은 기존 4개 ButtonLayouts 인자와 TrickSelectButton 생성/초기화 코드를
+      // 정확히 확인한다. 모두 read-only 진단.
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"Layout::Initialize pre-button setup",
+                      0x01DAF350, 0x8E0, 0x260);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"Dialog::Initialize pre-callback setup",
+                      0x01DF3F20, 0x000, 0x1D0);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"TrickSelectButton::SetTrickID",
+                      0x01E7FD90, 0x000, 0x130);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"TrickSelectButton::ctor",
+                      0x01E7FEC0, 0x000, 0x080);
+      LogUiProbeRange(exeBase, imageEnd,
+                      u8"TrickSelectButton::Initialize",
+                      0x01E7FF40, 0x000, 0x160);
+
+      // Layout::Initialize의 r13가 가리키는 static dword[4].
+      // 같은 빌드 EXE .rdata에서도 2,3,4,5가 확인됨.
+      constexpr uintptr_t kButtonStaticIdsRva = 0x0270D198;
+      uint32_t buttonStaticIds[4] = {};
+      if (IsValidPtr(exeBase + kButtonStaticIdsRva, sizeof(buttonStaticIds)) &&
+          SafeCopySeh(exeBase + kButtonStaticIdsRva,
+                      buttonStaticIds, sizeof(buttonStaticIds))) {
+        AddLog(u8"[책략5UISTATIC] Layout button static IDs RVA=+270D198 : %u,%u,%u,%u",
+               (unsigned)buttonStaticIds[0],
+               (unsigned)buttonStaticIds[1],
+               (unsigned)buttonStaticIds[2],
+               (unsigned)buttonStaticIds[3]);
+      } else {
+        AddLog(u8"[책략5UISTATIC] Layout button static IDs 읽기 실패.");
+      }
+
+      AddLog(u8"[책략5UIDBG] PDB 전투 UI 3차 진단 완료. UISETUP/UIRANGE/UISTATIC 로그를 보내주세요.");
     }
 
     static bool BuildCaptureCave(uintptr_t hookAddr) {
