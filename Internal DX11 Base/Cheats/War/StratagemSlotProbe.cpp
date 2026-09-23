@@ -55,6 +55,18 @@ namespace DX11Base {
       }
     }
 
+    static bool SafeCopySeh(uintptr_t addr, void *dst, size_t bytes) {
+      if (!addr || !dst || bytes == 0)
+        return false;
+
+      __try {
+        std::memcpy(dst, reinterpret_cast<const void *>(addr), bytes);
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
     static bool BuildCaptureCave(uintptr_t hookAddr) {
       g_caveAddr = AllocNear(hookAddr, 128);
       if (!g_caveAddr)
@@ -735,34 +747,30 @@ namespace DX11Base {
     uintptr_t matchedOld5 = 0;
     int matches = 0;
 
+    constexpr size_t kScanBytes = 0x800;
+    alignas(uintptr_t) uint8_t snapshot[kScanBytes] = {};
+
     for (int oi = 0; oi < objectCount; ++oi) {
       const uintptr_t obj = objects[oi];
 
-      // m_pTricks is expected to be a compact five-pointer array.
-      // Scan only the first 0x800 bytes of each validated object.
-      for (uintptr_t off = 0; off + 5 * sizeof(uintptr_t) <= 0x800;
-           off += sizeof(uintptr_t)) {
-        const uintptr_t slot = obj + off;
-        if (!IsValidPtr(slot, 5 * sizeof(uintptr_t)))
-          continue;
+      // IMPORTANT: no VirtualQuery/IsValidPtr inside the inner loop.
+      // The previous version did tens of thousands of protection queries on
+      // the ImGui thread and could make the game appear frozen.
+      if (!SafeCopySeh(obj, snapshot, sizeof(snapshot)))
+        continue;
 
+      for (size_t off = 0;
+           off + 5 * sizeof(uintptr_t) <= sizeof(snapshot);
+           off += sizeof(uintptr_t)) {
         uintptr_t v[5] = {};
-        bool readOk = true;
-        for (int k = 0; k < 5; ++k) {
-          if (!SafeReadPtrSeh(slot + (uintptr_t)k * sizeof(uintptr_t), &v[k])) {
-            readOk = false;
-            break;
-          }
-        }
-        if (!readOk)
-          continue;
+        std::memcpy(v, snapshot + off, sizeof(v));
 
         if (v[0] == row1 && v[1] == row2 &&
             v[2] == row3 && v[3] == row4 &&
             (v[4] == 0 || v[4] == row5)) {
           ++matches;
           matchedObject = obj;
-          matchedSlot = slot + 4 * sizeof(uintptr_t);
+          matchedSlot = obj + off + 4 * sizeof(uintptr_t);
           matchedOld5 = v[4];
 
           AddLog(u8"[책략5PDBDBG] 5칸 포인터 배열 후보 #%d object=%p offset=+%llX values=%p,%p,%p,%p,%p",
