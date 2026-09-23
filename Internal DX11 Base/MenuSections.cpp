@@ -46,6 +46,7 @@
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/War/Spell5HealProbe.h"
 #include "Cheats/War/StratagemGaugeMax.h"
+#include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
@@ -1596,6 +1597,14 @@ namespace DX11Base {
       }
       ImGui::TextDisabled(u8"아군 사기+40 / 범위5는 그대로 두고, 실제 영향 대상에게 병력 +2000을 적용합니다.");
       ImGui::TextDisabled(u8"병력은 최대병력을 넘지 않습니다. 로그의 [책략5힐DBG] 전/후 병력과 최대값을 확인하세요.");
+
+      ImGui::Spacing();
+      if (ImGui::Button(u8"책략 5슬롯 구조 스캔", ImVec2(-1.0f, 0.0f))) {
+        DX11Base::ScanStratagemFiveSlotCandidates();
+        AddNotification(u8"책략 5슬롯 후보 스캔 완료 - 로그 확인");
+      }
+      ImGui::TextDisabled(u8"전투 준비 화면에서 기본 책략 1,2,3,4를 모두 선택한 상태로 누르세요.");
+      ImGui::TextDisabled(u8"읽기 전용입니다. 로그의 [책략5슬롯DBG] 후보 주소/bytes를 보내주세요.");
 
       EndSection(); // 전쟁
     }
