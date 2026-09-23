@@ -1805,6 +1805,76 @@ namespace DX11Base {
           }
         }
       }
+
+      // The second trace showed that +1D8F560 dispatches through +171CEC0,
+      // while the detail refresh +1E12D90 immediately reaches +1D78070 and
+      // +D1A80. Dump only those three next-hop functions. This remains
+      // read-only: no candidate is invoked or patched.
+      constexpr uintptr_t kTextNextHopRvas[] = {
+          0x0171CEC0,
+          0x01D78070,
+          0x000D1A80,
+      };
+      for (uintptr_t rva : kTextNextHopRvas) {
+        const uintptr_t target = exeBase + rva;
+        if (!IsExecutableAddress(target))
+          continue;
+
+        uint8_t head[0x200] = {};
+        if (!SafeCopySeh(target, head, sizeof(head)))
+          continue;
+
+        AddLog(u8"[책략5UITEXT3] next RVA=+%llX size=0x%llX",
+               (unsigned long long)rva,
+               (unsigned long long)sizeof(head));
+
+        for (size_t off = 0; off < sizeof(head); off += 0x20) {
+          char line[256] = {};
+          int pos = 0;
+          for (size_t j = 0; j < 0x20 &&
+                             pos < (int)sizeof(line) - 4; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos,
+                             "%02X ", (unsigned)head[off + j]);
+          }
+          AddLog(u8"[책략5UITEXT3] +%llX +%03llX : %s",
+                 (unsigned long long)rva,
+                 (unsigned long long)off,
+                 line);
+        }
+
+        for (size_t off = 0; off + 7 <= sizeof(head); ++off) {
+          if (head[off] == 0xE8 || head[off] == 0xE9) {
+            int32_t rel = 0;
+            std::memcpy(&rel, head + off + 1, sizeof(rel));
+            const uintptr_t nested =
+                target + off + 5 + static_cast<intptr_t>(rel);
+            if (nested >= exeBase && nested < imageEnd) {
+              AddLog(u8"[책략5UITEXT3] +%llX %s +%03llX -> RVA=+%llX",
+                     (unsigned long long)rva,
+                     head[off] == 0xE8 ? "CALL" : "JMP",
+                     (unsigned long long)off,
+                     (unsigned long long)(nested - exeBase));
+            }
+          }
+
+          const uint8_t rex = head[off];
+          if ((rex == 0x48 || rex == 0x4C) &&
+              (head[off + 1] == 0x8D || head[off + 1] == 0x8B) &&
+              (head[off + 2] & 0xC7) == 0x05) {
+            int32_t disp = 0;
+            std::memcpy(&disp, head + off + 3, sizeof(disp));
+            const uintptr_t ripTarget =
+                target + off + 7 + static_cast<intptr_t>(disp);
+            if (ripTarget >= exeBase && ripTarget < imageEnd) {
+              AddLog(u8"[책략5UITEXT3] +%llX RIP-%s +%03llX -> RVA=+%llX",
+                     (unsigned long long)rva,
+                     head[off + 1] == 0x8D ? "LEA" : "MOV",
+                     (unsigned long long)off,
+                     (unsigned long long)(ripTarget - exeBase));
+            }
+          }
+        }
+      }
     }
 
     static void LogFifthTrickDataVtableCandidates(uintptr_t row5) {
