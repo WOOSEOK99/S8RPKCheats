@@ -5,6 +5,7 @@
 #include "../../showlog.h"
 #include "StratagemSlotProbe.h"
 #include "StratagemFiveModel.h"
+#include "Spell5HealProbe.h"
 
 #include <psapi.h>
 #include <atomic>
@@ -3677,6 +3678,89 @@ namespace DX11Base {
         AddLog(u8"[책략5NDBG] plan 실패 snapshot 읽기 중 예외: owner=%p",
                reinterpret_cast<void *>(owner));
       }
+    }
+
+    enum class FifthRuntimeStage : uint8_t {
+      WaitingData = 0,
+      WaitingOwner,
+      WaitingCount,
+      WaitingCamp,
+      WaitingModel,
+      Ready
+    };
+
+    static std::atomic<FifthRuntimeStage> g_fifthRuntimeStage{
+        FifthRuntimeStage::WaitingData};
+
+    static bool AdvanceFifthRuntimeStateSeh(uintptr_t dialog) {
+      // Idempotent, order-driven progression. No sleeps/ticks are involved:
+      // every caller advances only as far as the currently verified objects
+      // permit, and later lifecycle events can call it again.
+      if (!g_id5CountRequested.load() ||
+          !g_fiveMetadataRequested.load()) {
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingData);
+        return false;
+      }
+
+      if (!IsSpell5HealProbeReady()) {
+        SetSpell5HealProbe(true);
+        if (!IsSpell5HealProbeReady()) {
+          g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingData);
+          return false;
+        }
+      }
+
+      // Resolve/verify the canonical TrickData table before deriving N.
+      if (!g_fiveMetadataTable || !g_fiveMetadataAddr)
+        SetStratagemFiveMetadataTest(true);
+      if (!g_fiveMetadataTable || !g_fiveMetadataAddr) {
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingData);
+        return false;
+      }
+
+      uintptr_t owner = 0;
+      if (dialog && IsValidPtr(dialog, 0x40)) {
+        g_trickUiDialog = dialog;
+        uintptr_t layout = 0;
+        if (SafeReadPtrSeh(dialog + 0x08, &layout) &&
+            layout && IsValidPtr(layout, 0x2A8))
+          g_trickUiLayout = layout;
+
+        TryGetDialogCampOwnerSeh(&owner);
+      }
+
+      if (!owner) {
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingOwner);
+        return false;
+      }
+
+      // Count selection is now deterministic because dialog identifies the
+      // current player-side Camp owner.
+      SetStratagemFiveCountTest(true);
+      if (!g_id5CountApplied ||
+          g_id5CountOwner != owner ||
+          g_id5CountEntryIndex >= 5) {
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingCount);
+        return false;
+      }
+
+      SetStratagemFiveMetadataTest(true);
+      if (!g_fiveRuntimeSlotApplied ||
+          g_fiveRuntimeOwner != owner ||
+          !g_fiveRuntimeSlotAddr ||
+          *reinterpret_cast<const uintptr_t *>(g_fiveRuntimeSlotAddr) !=
+              g_fiveMetadataAddr) {
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingCamp);
+        return false;
+      }
+
+      if (!TryExtendFifthDialogModelCountSeh(dialog)) {
+        g_fifthRuntimeStage.store(FifthRuntimeStage::WaitingModel);
+        return false;
+      }
+
+      g_fifthRuntimeStage.store(FifthRuntimeStage::Ready);
+      return true;
     }
 
     static bool TryGetDialogCampOwnerSeh(uintptr_t *outOwner) {
