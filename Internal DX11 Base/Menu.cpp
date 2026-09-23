@@ -720,11 +720,13 @@ namespace DX11Base {
       if (gameBase) {
         if (ImGui::BeginTable(
                 "MainLayoutTable",
-                3,
+                5,
                 ImGuiTableFlags_SizingStretchSame |
                     ImGuiTableFlags_NoSavedSettings)) {
           ImGui::TableSetupColumn("Column1", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+          ImGui::TableSetupColumn("Gap1", ImGuiTableColumnFlags_WidthFixed, 10.0f * scale);
           ImGui::TableSetupColumn("Column2", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+          ImGui::TableSetupColumn("Gap2", ImGuiTableColumnFlags_WidthFixed, 10.0f * scale);
           ImGui::TableSetupColumn("Column3", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 
           ImGui::TableNextRow();
@@ -732,10 +734,10 @@ namespace DX11Base {
           ImGui::TableSetColumnIndex(0);
           MainColumns::DrawColumn1(p1, gameBase, scale);
 
-          ImGui::TableSetColumnIndex(1);
+          ImGui::TableSetColumnIndex(2);
           MainColumns::DrawColumn2(p1, gameBase, scale);
 
-          ImGui::TableSetColumnIndex(2);
+          ImGui::TableSetColumnIndex(4);
           MainColumns::DrawColumn3(p1, gameBase, scale);
 
           ImGui::EndTable();
