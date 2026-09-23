@@ -42,6 +42,21 @@ namespace DX11Base {
     static uintptr_t g_fiveRuntimeSlotAddr = 0;
     static uintptr_t g_fiveRuntimeSlotOriginal = 0;
 
+    static bool SafeCallGetTricks(GetTricksFn fn, uintptr_t object,
+                                  TrickRangeProbe *outRange) {
+      if (!fn || !object || !outRange)
+        return false;
+
+      __try {
+        *outRange = fn(reinterpret_cast<const void *>(object));
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        outRange->first = nullptr;
+        outRange->last = nullptr;
+        return false;
+      }
+    }
+
     static bool BuildCaptureCave(uintptr_t hookAddr) {
       g_caveAddr = AllocNear(hookAddr, 128);
       if (!g_caveAddr)
@@ -720,14 +735,8 @@ namespace DX11Base {
         return false;
 
       TrickRangeProbe range{};
-      bool called = false;
-      __try {
-        range = getTricks(reinterpret_cast<const void *>(object));
-        called = true;
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        called = false;
-      }
-      if (!called || !range.first || !range.last)
+      if (!SafeCallGetTricks(getTricks, object, &range) ||
+          !range.first || !range.last)
         return false;
 
       const uintptr_t begin =
