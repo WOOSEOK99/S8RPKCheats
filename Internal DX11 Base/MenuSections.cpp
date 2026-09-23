@@ -1603,8 +1603,8 @@ namespace DX11Base {
         DX11Base::ScanStratagemFiveSlotCandidates();
         AddNotification(u8"책략 수량 슬롯 확인 - 로그 확인");
       }
-      ImGui::TextDisabled(u8"의기저상/신산화계/초목개병/사모위계 수량을 1/2/1/1로 둔 뒤 누르세요.");
-      ImGui::TextDisabled(u8"첫 클릭은 캡처 훅 설치일 수 있습니다. 책략 화면에서 수량을 한 번 바꾼 뒤 다시 눌러 로그를 확인하세요.");
+      ImGui::TextDisabled(u8"책략 수량 1/2/1/1로 전투를 시작한 뒤, 1일차 전장 화면에서 다시 누르세요.");
+      ImGui::TextDisabled(u8"전투 준비 화면 값은 아직 0일 수 있습니다. 실제 전투 시작 후 ID1~4가 1/2/1/1인지 확인합니다.");
 
       EndSection(); // 전쟁
     }
