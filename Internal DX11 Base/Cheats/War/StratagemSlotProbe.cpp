@@ -42,6 +42,12 @@ namespace DX11Base {
     static uintptr_t g_fiveRuntimeSlotAddr = 0;
     static uintptr_t g_fiveRuntimeSlotOriginal = 0;
 
+    struct TrickRangeProbe {
+      const uintptr_t *first;
+      const uintptr_t *last;
+    };
+    using GetTricksFn = TrickRangeProbe(__fastcall *)(const void *);
+
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
         return false;
@@ -590,12 +596,6 @@ namespace DX11Base {
     // RVA 0x1D5DBC0
     // Return type is range<const TrickData* const*> over std::array<...,5>.
     constexpr uintptr_t kCampGetTricksRva = 0x01D5DBC0;
-
-    struct TrickRangeProbe {
-      const uintptr_t *first;
-      const uintptr_t *last;
-    };
-    using GetTricksFn = TrickRangeProbe(__fastcall *)(const void *);
 
     auto restoreRuntimeSlot = [&]() {
       if (!g_fiveRuntimeSlotApplied)
