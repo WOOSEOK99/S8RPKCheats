@@ -141,6 +141,80 @@ namespace DX11Base {
     }
   }
 
+  static bool ApplySpell5ToResolvedTable(uintptr_t table) {
+    if (!ValidateSpellTable(table))
+      return false;
+
+    const uintptr_t spell2 = table + 1 * kSpellStride;
+    const uintptr_t spell5 = table + 4 * kSpellStride;
+    if (!IsValidPtr(spell2, sizeof(SpellRecord)) ||
+        !IsValidPtr(spell5, sizeof(SpellRecord)))
+      return false;
+
+    if (g_applied && g_spell5Addr == spell5 &&
+        IsValidPtr(spell5, sizeof(SpellRecord))) {
+      const SpellRecord *cur =
+          reinterpret_cast<const SpellRecord *>(spell5);
+      if (cur->code1 == 5 && cur->code2 == 5 && cur->code3 == 5 &&
+          cur->target == 1 &&
+          cur->effect1 == 10 && cur->power1 == 40 &&
+          cur->effect2 == 0 && cur->power2 == 0 &&
+          cur->range == 5)
+        return true;
+    }
+
+    if (g_applied && g_spell5Addr != spell5) {
+      g_applied = false;
+      g_spell5Addr = 0;
+      g_spell5Original = {};
+      ResetDiagnostics();
+    }
+
+    if (!g_applied)
+      std::memcpy(&g_spell5Original,
+                  reinterpret_cast<const void *>(spell5),
+                  sizeof(g_spell5Original));
+
+    SpellRecord clone{};
+    std::memcpy(&clone,
+                reinterpret_cast<const void *>(spell2),
+                sizeof(clone));
+    clone.code1 = 5;
+    clone.code2 = 5;
+    clone.code3 = 5;
+    clone.target = 1;
+    clone.effect1 = 10;
+    clone.power1 = 40;
+    clone.duration1 = 0;
+    clone.effect2 = 0;
+    clone.power2 = 0;
+    clone.duration2 = 0;
+    clone.range = 5;
+
+    if (!WriteRecord(spell5, clone))
+      return false;
+
+    g_spell5Addr = spell5;
+    g_applied = true;
+    ResetDiagnostics();
+    return true;
+  }
+
+  bool SetSpell5HealProbeFromMetadataTable(uintptr_t metadataTable) {
+    g_requested = true;
+    if (!metadataTable || !IsValidPtr(metadataTable, 5 * kSpellStride))
+      return false;
+
+    const uintptr_t payloadTable = metadataTable + 0x08;
+    if (!ApplySpell5ToResolvedTable(payloadTable))
+      return false;
+
+    AddLog(u8"[책략5STATE] live TrickData table에서 ID5 데이터 즉시 준비: table=%p row5=%p",
+           reinterpret_cast<void *>(metadataTable),
+           reinterpret_cast<void *>(metadataTable + 4 * kSpellStride));
+    return true;
+  }
+
   bool SetSpell5HealProbe(bool enable) {
     if (enable) {
       g_requested = true;
