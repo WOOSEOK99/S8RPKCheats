@@ -1914,3 +1914,42 @@ sidecar null -> 원본 callback loop 즉시 종료
 
 이번에도 hover가 전혀 없다면 다음 병목은 callback이 아니라 parent의 hit-test/child-control
 등록 경로로 좁혀진다. 그 경우 계속 진행 여부를 다시 판단한다.
+
+
+---
+
+## 34. 2026-09-23 callback 준비 성공 이후: sidecar 생성 시점을 Layout::Initialize 내부로 이동
+
+실게임 로그에서 InitLayouts 7->8, helper7, sidecar 생성, ID7 등록,
+GetTrickButton/Open sidecar 우회, callback 직전 준비까지 모두 성공했다.
+
+그러나 화면/마우스 반응이 여전히 없었다.
+
+따라서 다음 가설은 **sidecar 생성 시점이 너무 늦다**는 것이다.
+원본 4개 버튼은 `TrickCommandDialogLayout::Initialize` 내부에서 생성된 뒤,
+같은 함수의 후속 child/control 초기화와 finalize 단계를 함께 통과한다.
+기존 sidecar는 이 함수가 끝난 뒤 Dialog::Initialize에서 생성했으므로
+그 후속 lifecycle에서 빠졌을 가능성이 있다.
+
+이번 변경은 원본 4버튼 생성 루프가 끝난 직후인
+`Layout::Initialize +0xCF3`의 정확한 direct call을 build-guarded hook한다.
+
+그 call 직전에:
+
+- helper7/count8 검증
+- sidecar 생성
+- ID7 RegisterLayout
+- Open/GetTrickButton sidecar hook 준비
+
+를 끝낸 뒤, 원래 +0xCF3 call과 나머지 Layout::Initialize 코드를 그대로 진행한다.
+
+또 callback loop의 index4 sidecar 분기 실제 진입 횟수를 카운트한다.
+
+성공 기준:
+
+```text
+[책략5UILAYOUT] Layout::Initialize 내부에서 5번째 생성/ID7 등록 완료
+[책략5UICB] live callback index4Hits=1 이상
+```
+
+두 조건이 맞는데도 hover/render가 없으면 다음 병목은 별도 parent child/hit-test container로 좁혀진다.

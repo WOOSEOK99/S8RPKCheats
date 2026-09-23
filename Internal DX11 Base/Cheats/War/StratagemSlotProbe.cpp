@@ -97,6 +97,12 @@ namespace DX11Base {
     static uintptr_t g_fifthUiCallbackBoundAddr = 0;
     static bool g_fifthUiCallbackLoopHookApplied = false;
 
+    static uintptr_t g_fifthUiLayoutPostButtonsHookAddr = 0;
+    static uintptr_t g_fifthUiLayoutPostButtonsCaveAddr = 0;
+    static uint8_t g_fifthUiLayoutPostButtonsOriginal[5] = {};
+    static bool g_fifthUiLayoutPostButtonsHookApplied = false;
+    static volatile LONG g_fifthUiCallbackIndex4Hits = 0;
+
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
     // constructs a matching one-shot helper for UI ID7. The input tag and the
@@ -1214,6 +1220,132 @@ namespace DX11Base {
       }
     }
 
+
+    static bool PrepareFifthUiDuringLayoutInitializeSeh(uintptr_t layout) {
+      __try {
+        if (!layout || !IsValidPtr(layout, 0x2A8))
+          return false;
+
+        if (g_fifthUiId7Registered &&
+            g_fifthUiSidecarLayout == layout &&
+            g_fifthUiSidecarButton &&
+            IsValidPtr(g_fifthUiSidecarButton, 0x1D8))
+          return true;
+
+        uint32_t count=0;
+        uintptr_t owner=0, helperTable=0, helper7=0;
+        const bool helperReady =
+            SafeCopySeh(layout + 0x150, &count, sizeof(count)) && count == 8 &&
+            SafeReadPtrSeh(layout + 0x158, &owner) && owner == layout &&
+            SafeReadPtrSeh(layout + 0x148, &helperTable) &&
+            helperTable && IsValidPtr(helperTable, 8*sizeof(uintptr_t)) &&
+            SafeReadPtrSeh(helperTable + 7*sizeof(uintptr_t), &helper7) &&
+            helper7 && IsValidPtr(helper7, sizeof(uintptr_t)) &&
+            ValidatePreparedFifthUiHelper(layout);
+
+        if (!helperReady) {
+          AddLog(u8"[책략5UILAYOUT] 4버튼 생성 직후 sidecar 준비 거부: layout=%p count=%u helper7=%p",
+                 reinterpret_cast<void *>(layout), (unsigned)count,
+                 reinterpret_cast<void *>(helper7));
+          return false;
+        }
+
+        g_trickUiLayout = layout;
+
+        if (!CreateFifthUiSidecarDisplayOnlySeh(layout)) {
+          AddLog(u8"[책략5UILAYOUT] 4버튼 생성 직후 sidecar 생성 실패.");
+          return false;
+        }
+        if (!ExpandMakerAndRegisterFifthSidecarSeh(layout)) {
+          AddLog(u8"[책략5UILAYOUT] 4버튼 생성 직후 ID7 등록 실패.");
+          return false;
+        }
+
+        AddLog(u8"[책략5UILAYOUT] Layout::Initialize 내부에서 5번째 생성/ID7 등록 완료: layout=%p button=%p",
+               reinterpret_cast<void *>(layout),
+               reinterpret_cast<void *>(g_fifthUiSidecarButton));
+        return true;
+      } __except(EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5UILAYOUT] Layout::Initialize 내부 sidecar 준비 중 예외.");
+        return false;
+      }
+    }
+
+    static bool EnsureFifthUiLayoutPostButtonsHook() {
+      if (g_fifthUiLayoutPostButtonsHookApplied)
+        return true;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return false;
+
+      constexpr uintptr_t kLayoutInitializeRva = 0x01DAF350;
+      constexpr uintptr_t kHookOffset = 0x0CF3;
+      const uintptr_t hookAddr = exeBase + kLayoutInitializeRva + kHookOffset;
+      static const uint8_t expected[5] = {0xE8,0x8A,0x4E,0x26,0xFE};
+
+      if (!IsValidPtr(hookAddr,sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(hookAddr),
+                      expected,sizeof(expected)) != 0) {
+        AddLog(u8"[책략5UILAYOUT] post-buttons hook 바이트 검증 실패: %p",
+               reinterpret_cast<void *>(hookAddr));
+        return false;
+      }
+
+      int32_t rel=0;
+      std::memcpy(&rel,expected+1,sizeof(rel));
+      const uintptr_t originalTarget =
+          hookAddr + 5 + static_cast<intptr_t>(rel);
+
+      const uintptr_t caveAddr=AllocNear(hookAddr,96);
+      if(!caveAddr)
+        return false;
+
+      uint8_t *c=reinterpret_cast<uint8_t *>(caveAddr);
+      int i=0;
+      auto e8=[&](uint8_t v){c[i++]=v;};
+      auto e32=[&](int32_t v){std::memcpy(c+i,&v,4);i+=4;};
+      auto e64=[&](uintptr_t v){std::memcpy(c+i,&v,8);i+=8;};
+      auto emitJmp=[&](uintptr_t target){
+        e8(0xE9);
+        const intptr_t r=static_cast<intptr_t>(target)-
+                         static_cast<intptr_t>(caveAddr+i+4);
+        if(r<INT32_MIN||r>INT32_MAX) return false;
+        e32(static_cast<int32_t>(r));
+        return true;
+      };
+
+      // RSI is the live layout here. The displaced instruction is itself a
+      // direct call, so caller-saved registers are not live across this point.
+      e8(0x48); e8(0x8B); e8(0xCE); // mov rcx,rsi
+      e8(0x48); e8(0xB8); e64(reinterpret_cast<uintptr_t>(&PrepareFifthUiDuringLayoutInitializeSeh));
+      e8(0xFF); e8(0xD0);           // call rax
+
+      e8(0x48); e8(0xB8); e64(originalTarget);
+      e8(0xFF); e8(0xD0);           // replay original call
+
+      if(!emitJmp(hookAddr+5)) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      FlushInstructionCache(GetCurrentProcess(),c,i);
+      std::memcpy(g_fifthUiLayoutPostButtonsOriginal,
+                  reinterpret_cast<const void *>(hookAddr),
+                  sizeof(g_fifthUiLayoutPostButtonsOriginal));
+      if(!ApplyJmp(hookAddr,caveAddr,sizeof(expected))) {
+        VirtualFree(reinterpret_cast<LPVOID>(caveAddr),0,MEM_RELEASE);
+        return false;
+      }
+
+      g_fifthUiLayoutPostButtonsHookAddr=hookAddr;
+      g_fifthUiLayoutPostButtonsCaveAddr=caveAddr;
+      g_fifthUiLayoutPostButtonsHookApplied=true;
+      AddLog(u8"[책략5UILAYOUT] Layout::Initialize 4버튼 생성 직후 훅 설치 완료.");
+      return true;
+    }
+
     static bool PrepareFifthUiBeforeCallbacksSeh(uintptr_t dialog) {
       __try {
         if (!dialog || !IsValidPtr(dialog, 0x40))
@@ -1223,6 +1355,19 @@ namespace DX11Base {
         if (!SafeReadPtrSeh(dialog + 0x08, &layout) ||
             !layout || !IsValidPtr(layout, 0x2A8))
           return false;
+
+        if (g_fifthUiId7Registered &&
+            g_fifthUiSidecarLayout == layout &&
+            g_fifthUiSidecarButton &&
+            IsValidPtr(g_fifthUiSidecarButton, 0x1D8)) {
+          g_trickUiDialog = dialog;
+          g_trickUiLayout = layout;
+          AddLog(u8"[책략5UICB] callback 직전 sidecar 이미 준비됨: dialog=%p layout=%p button=%p",
+                 reinterpret_cast<void *>(dialog),
+                 reinterpret_cast<void *>(layout),
+                 reinterpret_cast<void *>(g_fifthUiSidecarButton));
+          return true;
+        }
 
         uint32_t count=0;
         uintptr_t owner=0, helperTable=0, helper7=0;
@@ -1433,6 +1578,11 @@ namespace DX11Base {
       }
 
       const int sideLabel=i;
+      e8(0x50);                         // push rax
+      e8(0x48); e8(0xB8);              // mov rax,&hitCounter
+      e64(reinterpret_cast<uintptr_t>(&g_fifthUiCallbackIndex4Hits));
+      e8(0xF0); e8(0xFF); e8(0x00);    // lock inc dword ptr [rax]
+      e8(0x58);                         // pop rax
       e8(0x48); e8(0xBB);              // mov rbx,&global
       e64(reinterpret_cast<uintptr_t>(&g_fifthUiSidecarButton));
       e8(0x48); e8(0x8B); e8(0x1B);   // mov rbx,[rbx]
@@ -1704,7 +1854,9 @@ namespace DX11Base {
 
         const bool getButtonHookReady = EnsureFifthUiGetTrickButtonHook();
         const bool openHookReady = EnsureFifthUiOpenDisplayHook();
-        LogFifthUiCallbackLoopCandidate();
+        AddLog(u8"[책략5UICB] callback loop 조기 훅=%s / index4Hits=%ld",
+               g_fifthUiCallbackLoopHookApplied ? "READY" : "FAILED",
+               (long)g_fifthUiCallbackIndex4Hits);
         AddLog(u8"[책략5UITEST] ID7 정식 등록 성공. helper7 소모 및 5버튼 압축 배치 완료.");
         AddLog(u8"[책략5UITEST] GetTrickButton index4 sidecar 훅=%s.",
                getButtonHookReady ? "READY" : "FAILED");
@@ -2423,12 +2575,14 @@ namespace DX11Base {
 
   bool PrepareStratagemFiveUiBridge(bool reportFailure) {
     const bool initReady = EnsureTrickUiInitLayoutsBridgeHook(reportFailure);
+    const bool layoutPostReady = EnsureFifthUiLayoutPostButtonsHook();
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
-    const bool ready = initReady && preCallbackReady && callbackLoopReady;
+    const bool ready = initReady && layoutPostReady && preCallbackReady && callbackLoopReady;
     if (!ready && reportFailure) {
-      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d preCallback=%d callbackLoop=%d",
-             initReady?1:0, preCallbackReady?1:0, callbackLoopReady?1:0);
+      AddLog(u8"[책략5UIHELPER] 조기 UI 훅 준비 실패: init=%d layoutPost=%d preCallback=%d callbackLoop=%d",
+             initReady?1:0, layoutPostReady?1:0,
+             preCallbackReady?1:0, callbackLoopReady?1:0);
     }
     return ready;
   }
@@ -3094,6 +3248,11 @@ namespace DX11Base {
       return;
 
     LogTrickUiBridgeStatus("live-layout");
+
+    AddLog(u8"[책략5UICB] live callback index4Hits=%ld / sidecar=%p id7=%d",
+           (long)g_fifthUiCallbackIndex4Hits,
+           reinterpret_cast<void *>(g_fifthUiSidecarButton),
+           g_fifthUiId7Registered ? 1 : 0);
 
     AddLog(u8"[책략5UICAP] Layout=%p controlCount(+150)=%u / buttons=%p,%p,%p,%p",
            reinterpret_cast<void *>(layout),
