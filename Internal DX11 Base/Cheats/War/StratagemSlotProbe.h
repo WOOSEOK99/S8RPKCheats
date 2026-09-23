@@ -29,6 +29,10 @@ namespace DX11Base {
   // Reversible test: clone a valid row into row 5 and set ID/name/desc IDs to 5.
   bool SetStratagemFiveMetadataTest(bool enable);
 
+  // Explicit game/save generation reset. Keeps user-requested ON state but
+  // abandons all battle/UI object pointers from the previous p1 generation.
+  void ResetStratagemFiveSessionRuntime(uintptr_t oldP1, uintptr_t newP1);
+
   // Keeps the requested ID5 count/metadata attached to the current battle
   // generation. Old pointers are abandoned across save/load transitions.
   void RefreshStratagemFiveBattleRuntime();
