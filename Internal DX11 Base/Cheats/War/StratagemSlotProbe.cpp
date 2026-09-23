@@ -29,6 +29,10 @@ namespace DX11Base {
     static uintptr_t g_id5CountAddr = 0;
     static uint8_t g_id5CountOriginal = 0;
 
+    static bool g_fiveLoopApplied = false;
+    static uintptr_t g_fiveLoopImmAddr = 0;
+    static uint8_t g_fiveLoopOriginal = 0;
+
     static bool BuildCaptureCave(uintptr_t hookAddr) {
       g_caveAddr = AllocNear(hookAddr, 128);
       if (!g_caveAddr)
@@ -424,6 +428,115 @@ namespace DX11Base {
     if (logged == 0) {
       AddLog(u8"[책략4제한DBG] +10C~+14C 직접 참조와 cmp 4 조합은 없음. 다음은 UI 목록 생성 함수 쪽에서 독립적으로 4 제한을 찾습니다.");
     }
+  }
+
+  bool SetStratagemFiveLoopTest(bool enable) {
+    if (enable) {
+      if (g_fiveLoopApplied)
+        return true;
+
+      const uintptr_t exeBase = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase)
+        return false;
+
+      MODULEINFO mi{};
+      if (!GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return false;
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      // Runtime candidate #34:
+      // ... mov rax,[rsi+50]
+      //     call qword ptr [rax+20]
+      //     mov r9,[rbp+18]
+      //     lea r14,[r14+20]
+      //     inc r12d
+      //     add r15,20
+      //     cmp r12d,04
+      //     jb  <loop>
+      //
+      // Both iterators advance by 0x20, which matches the confirmed
+      // SpellRecord stride. Patch only the immediate 04 -> 05.
+      const char *pat =
+          "48 8B 46 50 FF 50 20 4C 8B 4D 18 "
+          "4D 8D 76 20 41 FF C4 49 83 C7 20 "
+          "41 83 FC 04 72 ?";
+
+      const uintptr_t found = FindPattern(exeBase, imageEnd, pat);
+      if (!found) {
+        AddLog(u8"[책략5루프DBG] 후보 #34 시그니처를 찾지 못했습니다.");
+        return false;
+      }
+
+      // "41 83 FC 04" starts at found+21, immediate byte is +24.
+      const uintptr_t immAddr = found + 24;
+      if (!IsValidPtr(immAddr, 1) ||
+          *reinterpret_cast<const uint8_t *>(immAddr) != 0x04) {
+        AddLog(u8"[책략5루프DBG] 비교값 검증 실패: found=%p imm=%p value=%02X",
+               reinterpret_cast<void *>(found),
+               reinterpret_cast<void *>(immAddr),
+               IsValidPtr(immAddr, 1)
+                   ? (unsigned)*reinterpret_cast<const uint8_t *>(immAddr)
+                   : 0xFFu);
+        return false;
+      }
+
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(immAddr), 1,
+                          PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        AddLog(u8"[책략5루프DBG] VirtualProtect 실패: %p",
+               reinterpret_cast<void *>(immAddr));
+        return false;
+      }
+
+      g_fiveLoopOriginal = *reinterpret_cast<const uint8_t *>(immAddr);
+      *reinterpret_cast<uint8_t *>(immAddr) = 0x05;
+      FlushInstructionCache(GetCurrentProcess(),
+                            reinterpret_cast<LPCVOID>(immAddr), 1);
+      VirtualProtect(reinterpret_cast<LPVOID>(immAddr), 1,
+                     oldProtect, &tmpProtect);
+
+      if (*reinterpret_cast<const uint8_t *>(immAddr) != 0x05) {
+        AddLog(u8"[책략5루프DBG] 4 -> 5 쓰기 검증 실패.");
+        return false;
+      }
+
+      g_fiveLoopImmAddr = immAddr;
+      g_fiveLoopApplied = true;
+
+      AddLog(u8"[책략5루프DBG] 후보 #34 루프 제한 4 -> 5 적용 성공: code=%p imm=%p",
+             reinterpret_cast<void *>(found),
+             reinterpret_cast<void *>(immAddr));
+      AddLog(u8"[책략5루프DBG] 5번 데이터/횟수 테스트를 켠 상태에서 책략 UI를 다시 열어 5개가 보이는지 확인하세요.");
+      return true;
+    }
+
+    if (!g_fiveLoopApplied)
+      return true;
+
+    if (g_fiveLoopImmAddr && IsValidPtr(g_fiveLoopImmAddr, 1)) {
+      DWORD oldProtect = 0;
+      DWORD tmpProtect = 0;
+      if (VirtualProtect(reinterpret_cast<LPVOID>(g_fiveLoopImmAddr), 1,
+                         PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        *reinterpret_cast<uint8_t *>(g_fiveLoopImmAddr) =
+            g_fiveLoopOriginal;
+        FlushInstructionCache(GetCurrentProcess(),
+                              reinterpret_cast<LPCVOID>(g_fiveLoopImmAddr), 1);
+        VirtualProtect(reinterpret_cast<LPVOID>(g_fiveLoopImmAddr), 1,
+                       oldProtect, &tmpProtect);
+      }
+    }
+
+    AddLog(u8"[책략5루프DBG] 후보 #34 루프 제한 원복 완료.");
+    g_fiveLoopApplied = false;
+    g_fiveLoopImmAddr = 0;
+    g_fiveLoopOriginal = 0;
+    return true;
   }
 
   void ScanStratagemFiveSlotCandidates() {
