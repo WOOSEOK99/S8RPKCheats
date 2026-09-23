@@ -4628,16 +4628,11 @@ namespace DX11Base {
     AddLog(u8"[책략5UICAP] live layout 캡처 완료.");
   }
 
-  void ResetStratagemFiveSessionRuntime(uintptr_t oldP1,
-                                         uintptr_t newP1) {
-    // A save/load can destroy the entire battle/UI arena before individual
-    // pointers fail VirtualQuery. Never restore through the previous generation.
-    // Keep only the user's requested ON state; all object-bound bookkeeping is
-    // abandoned and will be rebuilt against the next live battle generation.
-    AddLog(u8"[책략5수명] 게임 세대 변경 감지: p1 %p -> %p. 전투/UI 런타임 상태 초기화.",
-           reinterpret_cast<void *>(oldP1),
-           reinterpret_cast<void *>(newP1));
-
+  static void AbandonStratagemFiveBattleRuntimeState() {
+    // Never restore through battle/UI addresses here. This helper is used only
+    // after a battle generation is ending or a game/save generation changed,
+    // where those objects may already be destroyed or reused. Keep the user's
+    // requested ON flags and the process-wide hooks; drop only instance state.
     g_attackInfo = 0;
     g_defenseInfo = 0;
 
@@ -4654,8 +4649,6 @@ namespace DX11Base {
     g_fiveRuntimeSlotOriginal = 0;
     g_fiveRuntimeOwner = 0;
 
-    // Do not call any restore helper here: these addresses belong to the old
-    // save generation and may already have been released/reused.
     g_fifthUiModelCountAddr = 0;
     g_fifthUiModelCountOriginal = 0;
     g_fifthUiModelCountApplied = false;
@@ -4685,6 +4678,20 @@ namespace DX11Base {
     g_fifthUiOnSelectRuntimeLogged = 0;
     g_fifthUiOnSelectAnyHits = 0;
     InterlockedExchange(&g_fifthUiCallbackIndex4Hits, 0);
+  }
+
+  void ResetStratagemFiveBattleRuntime() {
+    AbandonStratagemFiveBattleRuntimeState();
+    AddLog(u8"[책략5수명] 전투 종료 확정: 전투별 Camp/UI/model/sidecar 상태 폐기. ON 요청은 유지.");
+  }
+
+  void ResetStratagemFiveSessionRuntime(uintptr_t oldP1,
+                                         uintptr_t newP1) {
+    AddLog(u8"[책략5수명] 게임 세대 변경 감지: p1 %p -> %p. 전투/UI 런타임 상태 초기화.",
+           reinterpret_cast<void *>(oldP1),
+           reinterpret_cast<void *>(newP1));
+
+    AbandonStratagemFiveBattleRuntimeState();
 
     // Hooks themselves intentionally stay installed. Their index4 paths now
     // require exact current-layout ownership and therefore safely fall back
