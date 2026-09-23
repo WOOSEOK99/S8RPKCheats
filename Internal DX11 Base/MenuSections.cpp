@@ -327,6 +327,10 @@ namespace DX11Base {
           SaveConfig();
         }
 
+        if (ImGui::Button(u8"명품", ImVec2(70.0f * scale, 0.0f))) {
+          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
+        }
+
         // -----------------------
         // ImGui::Separator();
         // ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
@@ -1979,17 +1983,7 @@ namespace DX11Base {
     void DrawOfficerDetailSection(uintptr_t p1, ImVec2 mPos, ImVec2 mSize, float scale) {
       BeginSection();
 
-      float btnHeight = 26.0f * scale;
-
       ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 정보 ]");
-
-      if (p1 != 0) {
-        if (ImGui::Button(u8"명품", ImVec2(-FLT_MIN, btnHeight))) {
-          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
-        }
-      }
-
-      ImGui::Spacing();
 
       if (ImGui::BeginTable("InfoNotificationRow", 2,
                             ImGuiTableFlags_SizingStretchSame |
