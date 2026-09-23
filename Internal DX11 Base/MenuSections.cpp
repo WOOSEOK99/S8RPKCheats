@@ -1595,15 +1595,11 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"5번 책략 데이터 활성화", s_spell5HealProbe);
         }
       }
-      ImGui::TextDisabled(u8"아군 사기+40 / 범위5는 그대로 두고, 실제 영향 대상에게 병력 +2000을 적용합니다.");
-      ImGui::TextDisabled(u8"병력은 최대병력을 넘지 않습니다. 로그의 [책략5힐DBG] 전/후 병력과 최대값을 확인하세요.");
 
       if (ImGui::Button(u8"책략 수량/5번 슬롯 확인", ImVec2(-1.0f, 0.0f))) {
         DX11Base::ScanStratagemFiveSlotCandidates();
         AddNotification(u8"책략 수량 슬롯 확인 - 로그 확인");
       }
-      ImGui::TextDisabled(u8"책략 수량 1/2/1/1로 전투를 시작한 뒤, 1일차 전장 화면에서 다시 누르세요.");
-      ImGui::TextDisabled(u8"전투 준비 화면 값은 아직 0일 수 있습니다. 실제 전투 시작 후 ID1~4가 1/2/1/1인지 확인합니다.");
 
       static bool s_spell5CountTest = false;
       if (ImGui::Checkbox(u8"5번 책략 횟수 1 테스트", &s_spell5CountTest)) {
@@ -1614,14 +1610,11 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"5번 책략 횟수 1 테스트", s_spell5CountTest);
         }
       }
-      ImGui::TextDisabled(u8"ID1~4가 정확히 1/2/1/1인 진영에만 ID5(+14C)=1을 씁니다.");
-      ImGui::TextDisabled(u8"5번 데이터 활성화와 함께 켠 뒤, 전투 책략 UI에 1~5가 동시에 보이는지 확인하세요.");
 
       if (ImGui::Button(u8"책략 4개 제한 코드 진단", ImVec2(-1.0f, 0.0f))) {
         DX11Base::ScanStratagemFourLimitCodeCandidates();
         AddNotification(u8"책략 4개 제한 코드 진단 완료 - 로그 확인");
       }
-      ImGui::TextDisabled(u8"읽기 전용입니다. 로그의 [책략4제한DBG] 후보/bytes를 보내주세요.");
 
       static bool s_spell5LoopTest = false;
       if (ImGui::Checkbox(u8"5번째 책략 UI 루프 테스트", &s_spell5LoopTest)) {
@@ -1632,7 +1625,6 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"5번째 책략 UI 루프 테스트", s_spell5LoopTest);
         }
       }
-      ImGui::TextDisabled(u8"진단 후보 #34의 0x20 간격 루프만 4→5로 바꿉니다. 저장하지 말고 전투 UI만 확인하세요.");
 
       EndSection(); // 전쟁
     }
