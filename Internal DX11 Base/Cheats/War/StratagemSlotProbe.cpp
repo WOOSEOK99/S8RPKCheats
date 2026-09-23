@@ -2807,8 +2807,16 @@ namespace DX11Base {
         g_fifthUiRegisteredEpoch=ReadTrickUiInitTrace().hit;
         std::memcpy(g_fifthUiOriginalButtons,buttons,sizeof(buttons));
 
-        // RegisterLayout may apply the descriptor's initial visibility. Reassert
-        // visible after registration before the next Dialog::Open test.
+        // Callback registration is a one-shot Dialog::Initialize event and can
+        // happen before the battle model is ready. Publish the verified ID7
+        // sidecar immediately for callback setup only; visibility is still
+        // controlled later by the resolved native count N.
+        g_fifthUiActiveLayout.store(layout);
+        g_fifthUiActiveButton.store(g_fifthUiSidecarButton);
+
+        // RegisterLayout may apply the descriptor's initial visibility. Keep
+        // the sidecar hidden until N is resolved; callback binding does not
+        // require it to be visible.
         const uintptr_t sidecarVt =
             *reinterpret_cast<const uintptr_t *>(g_fifthUiSidecarButton);
         if (sidecarVt && IsValidPtr(sidecarVt + 0x108, sizeof(uintptr_t))) {
