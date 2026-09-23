@@ -119,6 +119,9 @@
     <ClInclude Include="MenuSections.h">
       <Filter>Menu</Filter>
     </ClInclude>
+    <ClInclude Include="MainColumns.h">
+      <Filter>Menu</Filter>
+    </ClInclude>
     <ClInclude Include="BattleMonitor.h">
       <Filter>Menu</Filter>
     </ClInclude>
@@ -402,6 +405,15 @@
     </ClCompile>
     <ClCompile Include="MenuSections.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MainColumn1.cpp">
+      <Filter>Menu</Filter>
+    </ClCompile>
+    <ClCompile Include="MainColumn2.cpp">
+      <Filter>Menu</Filter>
+    </ClCompile>
+    <ClCompile Include="MainColumn3.cpp">
+      <Filter>Menu</Filter>
     </ClCompile>
     <ClCompile Include="BattleMonitor.cpp">
       <Filter>Source Files</Filter>
