@@ -342,15 +342,23 @@ namespace DX11Base {
         }
         bool domesticsHov = ImGui::IsItemHovered(); // SameLine 전에 캡처
 
-        // [도시 정보] 버튼 – 내정 배율 체크박스 오른쪽
+        // [도시 관리] 버튼 – 도시 목록 / 수송 / 무장 배치
         ImGui::SameLine(160.0f * scale);
         ImGui::PushStyleColor(ImGuiCol_Button,
           bShowCityInfoWin ? ImVec4(0.18f, 0.55f, 0.18f, 1.f)
                            : ImVec4(0.15f, 0.30f, 0.55f, 1.f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.80f, 1.f));
-        if (ImGui::Button(u8"도시 정보", ImVec2(70.f * scale, 0.f)))
+        if (ImGui::Button(u8"도시 관리", ImVec2(70.f * scale, 0.f)))
           bShowCityInfoWin = !bShowCityInfoWin;
+        const bool cityManageHov = ImGui::IsItemHovered();
         ImGui::PopStyleColor(2);
+
+        if (cityManageHov) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"도시 목록을 확인하고, 도시 간 수송 및 무장 배치를 관리합니다.");
+          ImGui::EndTooltip();
+        }
 
         if (domesticsHov) {
           ImGui::BeginTooltip();
@@ -1176,14 +1184,8 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
-      ImGui::Spacing();
-      ImGui::Separator();
-      ImGui::Spacing();
-
-      ImGui::AlignTextToFramePadding();
-      ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.0f, 1.0f), u8"[ 전법 및 건물 ]");
       ImGui::SameLine();
-      if (ImGui::Button(u8"수정", ImVec2(100.0f * scale, 25.0f * scale))) {
+      if (ImGui::Button(u8"전법 편집", ImVec2(110.0f * scale, 30.0f * scale))) {
         bShowTacticsEditWin = !bShowTacticsEditWin;
       }
 
