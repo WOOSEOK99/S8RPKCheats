@@ -3702,6 +3702,26 @@ namespace DX11Base {
     return true;
   }
 
+  static void RestoreFifthUiModelCountSeh() {
+    if(!g_fifthUiModelCountApplied)
+      return;
+
+    const uintptr_t addr=g_fifthUiModelCountAddr;
+    const uint32_t original=g_fifthUiModelCountOriginal;
+
+    __try {
+      if(addr && IsValidPtr(addr,sizeof(uint32_t)) &&
+         *reinterpret_cast<const uint32_t *>(addr)==5) {
+        *reinterpret_cast<uint32_t *>(addr)=original;
+      }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+
+    g_fifthUiModelCountAddr=0;
+    g_fifthUiModelCountOriginal=0;
+    g_fifthUiModelCountApplied=false;
+  }
+
   bool SetStratagemFiveMetadataTest(bool enable) {
     constexpr uintptr_t kStratagemMetadataOffset = 0x9D30;
     constexpr uintptr_t kRecordStride = 0x20;
@@ -3733,19 +3753,7 @@ namespace DX11Base {
     };
 
     if (!enable) {
-      if(g_fifthUiModelCountApplied &&
-         g_fifthUiModelCountAddr &&
-         IsValidPtr(g_fifthUiModelCountAddr,sizeof(uint32_t))) {
-        __try {
-          if(*reinterpret_cast<uint32_t *>(g_fifthUiModelCountAddr)==5)
-            *reinterpret_cast<uint32_t *>(g_fifthUiModelCountAddr)=
-                g_fifthUiModelCountOriginal;
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
-        }
-      }
-      g_fifthUiModelCountAddr=0;
-      g_fifthUiModelCountOriginal=0;
-      g_fifthUiModelCountApplied=false;
+      RestoreFifthUiModelCountSeh();
 
       RestoreFifthUiMakerTestSeh();
       restoreRuntimeSlot();
