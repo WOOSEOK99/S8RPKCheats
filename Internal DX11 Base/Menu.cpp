@@ -748,182 +748,202 @@ namespace DX11Base {
       ImGui::Separator();
       ImGui::Spacing();
 
-      ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
-      ImGui::SameLine(0.0f, 10.0f * scale);
+      if (ImGui::BeginTable(
+              "FooterPrimaryLayout",
+              2,
+              ImGuiTableFlags_SizingStretchSame |
+                  ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("FooterWidgets", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("FooterNotifications", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableNextRow();
 
-      if (ImGui::Checkbox(u8"전기취소##FOOTER_WIDGET", &DX11Base::bShowWidgetTengi)) {
-        NotifyFeatureToggle(u8"위젯: 전기취소", DX11Base::bShowWidgetTengi);
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"주인공##FOOTER_WIDGET", &DX11Base::bShowWidgetHero)) {
-        NotifyFeatureToggle(u8"위젯: 주인공", DX11Base::bShowWidgetHero);
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"모든무장##FOOTER_WIDGET", &DX11Base::bShowWidgetAllOfficers)) {
-        NotifyFeatureToggle(u8"위젯: 모든 무장", DX11Base::bShowWidgetAllOfficers);
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      if (ImGui::Checkbox(u8"알림확인##FOOTER_WIDGET", &DX11Base::bShowWidgetNotif)) {
-        NotifyFeatureToggle(u8"위젯: 알림확인", DX11Base::bShowWidgetNotif);
-        SaveConfig();
-      }
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
+        ImGui::SameLine(0.0f, 10.0f * scale);
 
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextDisabled(u8"|");
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 ]");
-      ImGui::SameLine(0.0f, 10.0f * scale);
-      ImGui::TextDisabled(u8"속도");
-      ImGui::SameLine(0.0f, 6.0f * scale);
-      ImGui::SetNextItemWidth(150.0f * scale);
-      if (ImGui::SliderFloat(u8"##FooterNotificationSpeed", &DX11Base::g_notificationSpeed,
-                             20.0f, 500.0f, "%.0f px/s")) {
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      if (ImGui::Button(u8"알림 비우기##Footer", ImVec2(100.0f * scale, 0))) {
-        g_notifications.clear();
-        AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
+        if (ImGui::Checkbox(u8"전기취소##FOOTER_WIDGET", &DX11Base::bShowWidgetTengi)) {
+          NotifyFeatureToggle(u8"위젯: 전기취소", DX11Base::bShowWidgetTengi);
+          SaveConfig();
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox(u8"주인공##FOOTER_WIDGET", &DX11Base::bShowWidgetHero)) {
+          NotifyFeatureToggle(u8"위젯: 주인공", DX11Base::bShowWidgetHero);
+          SaveConfig();
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox(u8"모든무장##FOOTER_WIDGET", &DX11Base::bShowWidgetAllOfficers)) {
+          NotifyFeatureToggle(u8"위젯: 모든 무장", DX11Base::bShowWidgetAllOfficers);
+          SaveConfig();
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox(u8"알림확인##FOOTER_WIDGET", &DX11Base::bShowWidgetNotif)) {
+          NotifyFeatureToggle(u8"위젯: 알림확인", DX11Base::bShowWidgetNotif);
+          SaveConfig();
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), u8"[ 알림 ]");
+        ImGui::SameLine(0.0f, 10.0f * scale);
+        ImGui::TextDisabled(u8"속도");
+        ImGui::SameLine(0.0f, 6.0f * scale);
+        ImGui::SetNextItemWidth(150.0f * scale);
+        if (ImGui::SliderFloat(u8"##FooterNotificationSpeed", &DX11Base::g_notificationSpeed,
+                               20.0f, 500.0f, "%.0f px/s")) {
+          SaveConfig();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(u8"알림 비우기##Footer", ImVec2(100.0f * scale, 0))) {
+          g_notifications.clear();
+          AddLog(u8"[알림] 모든 내역을 초기화했습니다.");
+        }
+
+        ImGui::EndTable();
       }
 
       // 하단 고정 2행: 로그 + 게임 속도 + UI + 시작 설정
       ImGui::Spacing();
 
-      ImGui::TextColored(ImVec4(0.75f, 0.75f, 0.75f, 1.0f), u8"[ 로그 ]");
-      ImGui::SameLine(0.0f, 10.0f * scale);
-      if (ImGui::Checkbox(u8"파일 로그 출력", &bFileLog)) {
-        SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::Text(u8"에포크 초기화 오류 파악용 로그(S8RPK_cheat.log)를 자동 저장합니다.");
-        ImGui::EndTooltip();
-      }
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextDisabled(u8"|");
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.0f, 1.0f), u8"[ 게임 속도 ]");
-      ImGui::SameLine(0.0f, 10.0f * scale);
+      if (ImGui::BeginTable(
+              "FooterSecondaryLayout",
+              4,
+              ImGuiTableFlags_SizingStretchProp |
+                  ImGuiTableFlags_NoSavedSettings)) {
+        ImGui::TableSetupColumn("FooterLog", ImGuiTableColumnFlags_WidthStretch, 1.8f);
+        ImGui::TableSetupColumn("FooterSpeed", ImGuiTableColumnFlags_WidthStretch, 3.2f);
+        ImGui::TableSetupColumn("FooterUI", ImGuiTableColumnFlags_WidthStretch, 2.8f);
+        ImGui::TableSetupColumn("FooterStart", ImGuiTableColumnFlags_WidthStretch, 2.2f);
+        ImGui::TableNextRow();
 
-      ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextColored(ImVec4(0.75f, 0.75f, 0.75f, 1.0f), u8"[ 로그 ]");
+        ImGui::SameLine(0.0f, 8.0f * scale);
+        if (ImGui::Checkbox(u8"파일 로그 출력", &bFileLog)) {
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::Text(u8"에포크 초기화 오류 파악용 로그(S8RPK_cheat.log)를 자동 저장합니다.");
+          ImGui::EndTooltip();
+        }
 
-      if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {
-        NotifyFeatureToggle(u8"배속", bSpeedHack);
-        SpeedHack_Update(p1);
-        SaveConfig();
-      }
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.0f, 1.0f), u8"[ 게임 속도 ]");
+        ImGui::SameLine(0.0f, 8.0f * scale);
 
-      ImGui::PopStyleColor();
-
-      // 실제 적용 배율과 선택 중인 배율을 분리합니다.
-      // +/-는 선택값만 바꾸고 [적용]을 눌렀을 때 한 번만 실제 속도를 변경합니다.
-      static bool s_speedPendingInitialized = false;
-      static float s_speedPending = 1.0f;
-      static float s_speedAppliedSnapshot = 1.0f;
-
-      const float normalizedApplied =
-          SpeedHack_NormalizeMultiplier(g_speedMultiplier);
-      if (!s_speedPendingInitialized ||
-          normalizedApplied != s_speedAppliedSnapshot) {
-        s_speedPending = normalizedApplied;
-        s_speedAppliedSnapshot = normalizedApplied;
-        s_speedPendingInitialized = true;
-      }
-
-      ImGui::SameLine();
-
-      if (s_speedPending <= 1.0f)
-        ImGui::BeginDisabled();
-      if (ImGui::Button("-##SpeedMinus", ImVec2(25 * scale, 0)))
-        s_speedPending =
-            SpeedHack_NormalizeMultiplier(s_speedPending - 0.5f);
-      if (s_speedPending <= 1.0f)
-        ImGui::EndDisabled();
-
-      ImGui::SameLine();
-      ImGui::Text(u8"%.1fx", s_speedPending);
-      ImGui::SameLine();
-
-      if (s_speedPending >= 5.0f)
-        ImGui::BeginDisabled();
-      if (ImGui::Button("+##SpeedPlus", ImVec2(25 * scale, 0)))
-        s_speedPending =
-            SpeedHack_NormalizeMultiplier(s_speedPending + 0.5f);
-      if (s_speedPending >= 5.0f)
-        ImGui::EndDisabled();
-
-      ImGui::SameLine();
-      const bool hasPendingChange =
-          s_speedPending != normalizedApplied;
-      if (!hasPendingChange)
-        ImGui::BeginDisabled();
-      if (ImGui::Button(u8"적용##SpeedApply", ImVec2(55 * scale, 0))) {
-        g_speedMultiplier =
-            SpeedHack_NormalizeMultiplier(s_speedPending);
-        s_speedAppliedSnapshot = g_speedMultiplier;
-
-        if (bSpeedHack)
+        ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0f, 0.75f, 0.0f, 1.0f));
+        if (ImGui::Checkbox(u8"배속", &bSpeedHack)) {
+          NotifyFeatureToggle(u8"배속", bSpeedHack);
           SpeedHack_Update(p1);
+          SaveConfig();
+        }
+        ImGui::PopStyleColor();
 
-        AddLog(u8"[SpeedHack] 사용자 배율 적용: %.1fx",
-               g_speedMultiplier);
-        SaveConfig();
-      }
-      if (!hasPendingChange)
-        ImGui::EndDisabled();
+        // 실제 적용 배율과 선택 중인 배율을 분리합니다.
+        // +/-는 선택값만 바꾸고 [적용]을 눌렀을 때 한 번만 실제 속도를 변경합니다.
+        static bool s_speedPendingInitialized = false;
+        static float s_speedPending = 1.0f;
+        static float s_speedAppliedSnapshot = 1.0f;
 
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(
-            ImVec4(1, 1, 0, 1),
-            u8"1.0x가 기본 속도이며 0.5x 단위로 최대 5.0x까지 설정합니다.");
-        ImGui::TextUnformatted(
-            u8"+/-로 배율을 선택한 뒤 [적용]을 눌렀을 때만 실제 속도가 변경됩니다.");
-        ImGui::TextDisabled(
-            u8"※ 배속 체크를 끄면 게임은 1.0x로 동작하며, 선택한 배율 값은 다음 사용을 위해 저장됩니다.");
-        ImGui::EndTooltip();
-      }
+        const float normalizedApplied =
+            SpeedHack_NormalizeMultiplier(g_speedMultiplier);
+        if (!s_speedPendingInitialized ||
+            normalizedApplied != s_speedAppliedSnapshot) {
+          s_speedPending = normalizedApplied;
+          s_speedAppliedSnapshot = normalizedApplied;
+          s_speedPendingInitialized = true;
+        }
 
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextDisabled(u8"|");
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), u8"[ UI ]");
-      ImGui::SameLine(0.0f, 10.0f * scale);
-      ImGui::Text(u8"배율");
-      ImGui::SameLine();
-      float scaleBtnSize = 25.0f * scale;
-      if (ImGui::Button("-##ScaleDown", ImVec2(scaleBtnSize, 0))) {
-        io.FontGlobalScale = (std::max)(0.5f, io.FontGlobalScale - 0.1f);
-      }
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(90.0f * scale);
-      if (ImGui::SliderFloat(u8"##UIScale", &io.FontGlobalScale, 0.5f, 3.0f, "%.1f")) {
-        SaveConfig();
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("+##ScaleUp", ImVec2(scaleBtnSize, 0))) {
-        io.FontGlobalScale = (std::min)(3.0f, io.FontGlobalScale + 0.1f);
-      }
+        ImGui::SameLine();
 
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextDisabled(u8"|");
-      ImGui::SameLine(0.0f, 20.0f * scale);
-      ImGui::TextColored(ImVec4(0.65f, 1.0f, 0.65f, 1.0f), u8"[ 시작 ]");
-      ImGui::SameLine(0.0f, 10.0f * scale);
-      if (ImGui::Checkbox(u8"시작 시 치트창 표시", &DX11Base::bAutoLoadMenu)) {
-        NotifyFeatureToggle(u8"시작 시 치트창 표시", DX11Base::bAutoLoadMenu);
-        DX11Base::SaveConfig();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(
-            u8"체크하면 게임 시작 시 치트창을 자동으로 표시합니다.");
-        ImGui::TextDisabled(
-            u8"※ 저장된 치트 설정 자체는 이 옵션과 관계없이 항상 불러옵니다.");
-        ImGui::EndTooltip();
+        if (s_speedPending <= 1.0f)
+          ImGui::BeginDisabled();
+        if (ImGui::Button("-##SpeedMinus", ImVec2(25 * scale, 0)))
+          s_speedPending =
+              SpeedHack_NormalizeMultiplier(s_speedPending - 0.5f);
+        if (s_speedPending <= 1.0f)
+          ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::Text(u8"%.1fx", s_speedPending);
+        ImGui::SameLine();
+
+        if (s_speedPending >= 5.0f)
+          ImGui::BeginDisabled();
+        if (ImGui::Button("+##SpeedPlus", ImVec2(25 * scale, 0)))
+          s_speedPending =
+              SpeedHack_NormalizeMultiplier(s_speedPending + 0.5f);
+        if (s_speedPending >= 5.0f)
+          ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        const bool hasPendingChange =
+            s_speedPending != normalizedApplied;
+        if (!hasPendingChange)
+          ImGui::BeginDisabled();
+        if (ImGui::Button(u8"적용##SpeedApply", ImVec2(55 * scale, 0))) {
+          g_speedMultiplier =
+              SpeedHack_NormalizeMultiplier(s_speedPending);
+          s_speedAppliedSnapshot = g_speedMultiplier;
+
+          if (bSpeedHack)
+            SpeedHack_Update(p1);
+
+          AddLog(u8"[SpeedHack] 사용자 배율 적용: %.1fx",
+                 g_speedMultiplier);
+          SaveConfig();
+        }
+        if (!hasPendingChange)
+          ImGui::EndDisabled();
+
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(
+              ImVec4(1, 1, 0, 1),
+              u8"1.0x가 기본 속도이며 0.5x 단위로 최대 5.0x까지 설정합니다.");
+          ImGui::TextUnformatted(
+              u8"+/-로 배율을 선택한 뒤 [적용]을 눌렀을 때만 실제 속도가 변경됩니다.");
+          ImGui::TextDisabled(
+              u8"※ 배속 체크를 끄면 게임은 1.0x로 동작하며, 선택한 배율 값은 다음 사용을 위해 저장됩니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), u8"[ UI ]");
+        ImGui::SameLine(0.0f, 8.0f * scale);
+        ImGui::Text(u8"배율");
+        ImGui::SameLine();
+
+        float scaleBtnSize = 25.0f * scale;
+        if (ImGui::Button("-##ScaleDown", ImVec2(scaleBtnSize, 0))) {
+          io.FontGlobalScale = (std::max)(0.5f, io.FontGlobalScale - 0.1f);
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90.0f * scale);
+        if (ImGui::SliderFloat(u8"##UIScale", &io.FontGlobalScale, 0.5f, 3.0f, "%.1f")) {
+          SaveConfig();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("+##ScaleUp", ImVec2(scaleBtnSize, 0))) {
+          io.FontGlobalScale = (std::min)(3.0f, io.FontGlobalScale + 0.1f);
+        }
+
+        ImGui::TableSetColumnIndex(3);
+        ImGui::TextColored(ImVec4(0.65f, 1.0f, 0.65f, 1.0f), u8"[ 시작 ]");
+        ImGui::SameLine(0.0f, 8.0f * scale);
+        if (ImGui::Checkbox(u8"시작 시 치트창 표시", &DX11Base::bAutoLoadMenu)) {
+          NotifyFeatureToggle(u8"시작 시 치트창 표시", DX11Base::bAutoLoadMenu);
+          DX11Base::SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(
+              u8"체크하면 게임 시작 시 치트창을 자동으로 표시합니다.");
+          ImGui::TextDisabled(
+              u8"※ 저장된 치트 설정 자체는 이 옵션과 관계없이 항상 불러옵니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::EndTable();
       }
     }
 
