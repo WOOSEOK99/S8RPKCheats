@@ -2161,3 +2161,36 @@ jmp  RVA +1DF3C20
 3. count=5인데 선택 실패 -> +1DF3C20 후속 상태 갱신 경로 확인
 
 으로 다음 수정이 즉시 결정된다.
+
+
+---
+
+## 40. 2026-09-23 5번째 여러 번 클릭해도 OnTrickSelect 미진입
+
+실게임에서 OnTrickSelect entry hook 설치는 성공했지만,
+5번째 버튼을 여러 번 클릭해도 `[책략5UISELRT] index4 click`이 전혀 찍히지 않았다.
+
+따라서 사용자의 클릭 실수가 아니라, 현재 5번째 select signal이
+`TrickCommandDialog::OnTrickSelect`까지 도달하지 않는 것으로 판단한다.
+
+이번 진단은 두 가지를 동시에 확인한다.
+
+1. OnTrickSelect hook은 이제 index 4뿐 아니라 처음 12회까지 모든 index 호출을 로그한다.
+   기존 1~4 버튼을 눌렀을 때도 이 함수가 실제 selection handler인지 즉시 확인 가능하다.
+2. Dialog::Initialize 전체에서 `CSignalComponent::AddSig` RVA 0x01EDDC90으로 향하는
+   direct CALL들을 정확히 찾아 각 call 주변 바이트를 한 번만 출력한다.
+
+로그 키:
+
+```text
+[책략5UISELRT] OnTrickSelect 호출 #...
+[책략5UISIG] AddSig call #...
+[책략5UISIG] Dialog::Initialize AddSig direct-call count=...
+```
+
+다음 판정:
+
+- 기존 1~4 버튼 클릭은 OnTrickSelect에 들어오고 5번째만 안 들어오면
+  fifth select signal binding 자체가 빠진 것.
+- 기존 버튼도 OnTrickSelect에 안 들어오면 PDB 함수는 다른 경로이며
+  AddSig 주변 closure/invoker 바이트에서 실제 handler를 추적한다.

@@ -119,6 +119,8 @@ namespace DX11Base {
     static uint8_t g_fifthUiOnSelectRuntimeOriginal[7] = {};
     static bool g_fifthUiOnSelectRuntimeHookApplied = false;
     static volatile LONG g_fifthUiOnSelectRuntimeLogged = 0;
+    static volatile LONG g_fifthUiOnSelectAnyHits = 0;
+    static bool g_fifthUiSignalCallsitesLogged = false;
 
     // Pre-initialization bridge: expand only TrickCommandDialogLayout's original
     // CUIMaker::InitLayouts call from 7 descriptors to 8, so the game itself
@@ -1191,14 +1193,20 @@ namespace DX11Base {
 
     static void ProbeFifthOnTrickSelectRuntimeSeh(uintptr_t self,
                                                   uint32_t index) {
-      if (index != 4)
+      const LONG hit=InterlockedIncrement(&g_fifthUiOnSelectAnyHits);
+      if(hit<=12) {
+        AddLog(u8"[책략5UISELRT] OnTrickSelect 호출 #%ld: self=%p index=%u",
+               (long)hit,reinterpret_cast<void *>(self),(unsigned)index);
+      }
+
+      if(index!=4)
         return;
-      if (InterlockedCompareExchange(&g_fifthUiOnSelectRuntimeLogged,1,0) != 0)
+      if(InterlockedCompareExchange(&g_fifthUiOnSelectRuntimeLogged,1,0)!=0)
         return;
 
       __try {
-        uintptr_t p8=0, holder=0, inner=0, selected=0;
-        uint32_t state=0, count=0;
+        uintptr_t p8=0,holder=0,inner=0,selected=0;
+        uint32_t state=0,count=0;
         if(!SafeReadPtrSeh(self+0x08,&p8) ||
            !SafeCopySeh(self+0x18,&state,sizeof(state)) ||
            !SafeReadPtrSeh(self+0x20,&holder) ||
@@ -1218,7 +1226,6 @@ namespace DX11Base {
 
         const uintptr_t base=inner+0xF0;
         SafeCopySeh(base+0x60,&count,sizeof(count));
-
         AddLog(u8"[책략5UISELRT] index4 click: self=%p p8=%p state=%u holder=%p inner=%p base=%p count=%u selected(before)=%p",
                reinterpret_cast<void *>(self),
                reinterpret_cast<void *>(p8),
@@ -1235,10 +1242,8 @@ namespace DX11Base {
           SafeCopySeh(e,&q0,sizeof(q0));
           SafeCopySeh(e+8,&q1,sizeof(q1));
           AddLog(u8"[책략5UISELRT] entry%d @%p = %016llX %016llX",
-                 n,
-                 reinterpret_cast<void *>(e),
-                 (unsigned long long)q0,
-                 (unsigned long long)q1);
+                 n,reinterpret_cast<void *>(e),
+                 (unsigned long long)q0,(unsigned long long)q1);
         }
 
         uint64_t tail[4]={};
@@ -1248,18 +1253,57 @@ namespace DX11Base {
                (unsigned long long)tail[1],
                (unsigned long long)tail[2],
                (unsigned long long)tail[3]);
-
-        if(g_fiveMetadataTable && g_fiveMetadataAddr){
-          AddLog(u8"[책략5UISELRT] native rows=%p,%p,%p,%p,%p",
-                 reinterpret_cast<void *>(g_fiveMetadataTable+0x00),
-                 reinterpret_cast<void *>(g_fiveMetadataTable+0x20),
-                 reinterpret_cast<void *>(g_fiveMetadataTable+0x40),
-                 reinterpret_cast<void *>(g_fiveMetadataTable+0x60),
-                 reinterpret_cast<void *>(g_fiveMetadataAddr));
-        }
       } __except(EXCEPTION_EXECUTE_HANDLER) {
         AddLog(u8"[책략5UISELRT] index4 런타임 모델 probe 예외.");
       }
+    }
+
+    static void LogFifthUiSignalCallsites() {
+      if(g_fifthUiSignalCallsitesLogged)
+        return;
+      g_fifthUiSignalCallsitesLogged=true;
+
+      const uintptr_t exeBase=
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if(!exeBase || !IsSupportedTrickUiBuild(exeBase))
+        return;
+
+      constexpr uintptr_t kDialogInitializeRva=0x01DF3F20;
+      constexpr size_t kDialogInitializeSize=0x4C9;
+      constexpr uintptr_t kAddSigRva=0x01EDDC90;
+      const uintptr_t fn=exeBase+kDialogInitializeRva;
+      const uintptr_t addSig=exeBase+kAddSigRva;
+
+      uint8_t code[kDialogInitializeSize]={};
+      if(!SafeCopySeh(fn,code,sizeof(code)))
+        return;
+
+      unsigned found=0;
+      for(size_t i=0;i+5<=sizeof(code);++i){
+        if(code[i]!=0xE8)
+          continue;
+        int32_t rel=0;
+        std::memcpy(&rel,code+i+1,sizeof(rel));
+        const uintptr_t target=fn+i+5+static_cast<intptr_t>(rel);
+        if(target!=addSig)
+          continue;
+
+        ++found;
+        const size_t from=(i>0x50)?i-0x50:0;
+        const size_t to=((i+0x30)<sizeof(code))?i+0x30:sizeof(code);
+        AddLog(u8"[책략5UISIG] AddSig call #%u at Dialog::Initialize +%llX",
+               found,(unsigned long long)i);
+
+        for(size_t p=from;p<to;p+=0x20){
+          const size_t chunk=((to-p)>0x20)?0x20:(to-p);
+          char line[256]={}; int pos=0;
+          for(size_t j=0;j<chunk && pos<(int)sizeof(line)-4;++j)
+            pos+=sprintf_s(line+pos,sizeof(line)-pos,"%02X ",(unsigned)code[p+j]);
+          AddLog(u8"[책략5UISIG] +%03llX : %s",
+                 (unsigned long long)p,line);
+        }
+      }
+      AddLog(u8"[책략5UISIG] Dialog::Initialize AddSig direct-call count=%u",found);
     }
 
     static bool EnsureFifthUiOnTrickSelectRuntimeHook() {
@@ -3017,6 +3061,7 @@ namespace DX11Base {
     const bool resetCompactReady = EnsureFifthUiResetCompactHook();
     const bool onSelectReady = EnsureFifthUiOnTrickSelectBoundHook();
     const bool onSelectRuntimeReady = EnsureFifthUiOnTrickSelectRuntimeHook();
+    LogFifthUiSignalCallsites();
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
     const bool ready = initReady && layoutPostReady && resetCompactReady &&
