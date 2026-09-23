@@ -527,7 +527,7 @@ namespace DX11Base {
     void DrawCouncilSection(uintptr_t p1, uintptr_t gameBase, float scale) {
       if (p1) {
         BeginSection();
-        ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 및 진급 관련 ]");
+        ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 ]");
         DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP, p1, gameBase, scale);
         DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
         DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
