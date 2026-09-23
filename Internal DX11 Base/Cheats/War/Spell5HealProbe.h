@@ -7,6 +7,14 @@ namespace DX11Base {
   // keeps effect #20 only as a secondary healing candidate.
   bool SetSpell5HealProbe(bool enable);
 
+  // Save/load generation reset. Keeps the user's requested ON state but drops
+  // any TrickData address that belonged to the previous game generation.
+  void ResetSpell5HealProbeSession(uintptr_t oldP1, uintptr_t newP1);
+
+  // Reapplies the requested ID5 data to the current TrickData table when a
+  // new battle/game generation is ready.
+  void RefreshSpell5HealProbe();
+
   // Read-only target diagnostic. While the probe is enabled, watches battle
   // units and logs units whose morale changes exactly like the +40 probe
   // (including cap-at-100 cases). This does not modify unit data.
