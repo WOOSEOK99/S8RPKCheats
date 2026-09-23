@@ -4,7 +4,7 @@
 > 새 채팅/세션에서는 EXE/PDB 재업로드를 요청하기 전에 반드시 이 문서와
 > `Internal DX11 Base/Cheats/War/StratagemSlotProbe.cpp`,
 > `Internal DX11 Base/Cheats/War/Spell5HealProbe.cpp`를 먼저 확인한다.
-> 최신 조기 설치 실험과 테스트 순서는 **28절**을 우선 확인한다.
+> 최신 실게임 결과와 초기 실패 진단은 **29절**, 조기 설치 설계는 **28절**을 확인한다.
 >
 > 바이너리를 다시 요청하는 경우는 **게임 빌드가 바뀌었거나**, 이 문서/코드에
 > 아직 추출되지 않은 새 PDB 심볼이 반드시 필요한 경우로 제한한다.
@@ -1488,3 +1488,103 @@ live maker 재초기화, 임시 maker 복제, count만 수정, null helper 등�
   SEH 전파 시 원본 호출 1회, 다른 EXE 빌드 거부. 실제 hook 설치는 호출하지 않는다.
 - 이 검증은 게임의 원본 InitLayouts ABI, helper 생성/소유권, 렌더 성공을 입증하지 않는다.
   **실게임 검증은 대기 중이며 최종 5번 선택/사용 기능은 아직 완료되지 않았다.**
+
+---
+
+## 29. 2026-09-23 조기 브리지 진입 확인, 초기 실패 원인 지연 출력
+
+### 1. 이번 실게임에서 확정된 것
+
+`eeea7dd` 테스트 로그:
+
+```text
+상태(metadata-enable): installed=1 installTick=10274218 hits=1 expanded=0
+lastOwner=000002546B3B4250
+Layout=000002546B3B4250 controlCount(+150)=7
+Dialog=000002540586ED30 dialog+08(layout)=000002546B3B4250 match=1
+표시 실험 중단: ... count=7 helper7=0 hits=1 expanded=0
+```
+
+브리지가 한 번 실행됐고, 그 owner 주소와 현재 live layout 주소가 일치한다.
+따라서 이번 시도의 핵심 문제를 계속 "설치됐지만 브리지에 한 번도 안 들어감"으로
+분류하지 않는다. 다만 객체 주소 일치만으로 다른 시점의 주소 재사용까지 배제하는 것은 아니다.
+
+현재 문제는 **해당 호출에서 확장 성공 카운터가 올라가지 않은 이유**다.
+인자 검사, descriptor 복사/type 검사, 확장 후 count/helper 검사 중 어느 분기인지는
+사용자가 제공한 로그만으로 확정할 수 없다. 기존 count=7 상태에서 sidecar 할당/등록은
+예정대로 중단됐으며, 데이터/수량/기존 네 버튼 상태는 정상으로 관찰됐다.
+
+### 2. 실패 이유가 로그에 없는 이유와 해결 방향
+
+제공된 로그는 디버그 모드 활성화부터 시작한다. `showlog.cpp::AddLog()`는
+디버그와 파일 로그가 모두 꺼져 있으면 메시지를 저장하지 않고 반환한다.
+초기 실패 메시지는 파일 로그가 켜져 있었다면 파일에만 남을 수도 있다.
+이번 작업 공간에는 해당 게임 로그가 없어 초기 분기를 직접 확인하지 못했다.
+
+기존 atomic 카운터는 남아 있어서 `hits=1/expanded=0`만 나중에 볼 수 있었다.
+이를 해결하기 위해 마지막 초기 호출의 인자·중단 이유·복사한 입력 일부·반환 결과를
+DLL의 고정 크기 저장소에 보관하고 `LogTrickUiBridgeStatus()`에서 재출력한다.
+저장 자체는 로그 옵션과 무관하다. 가드를 완화하거나 다른 초기화 경로를 추가하지 않는다.
+
+### 3. 수정 함수/파일
+
+- `StratagemSlotProbe.cpp`: `TrickUiInitTrace` 및 SRW lock으로 보호하는 값 복사 저장소 추가.
+  lock은 복사 때만 잡으며 게임 함수 호출·AddLog 호출 동안에는 잡지 않는다.
+- `TrickUiInitLayoutsBridge`: 각 기존 분기에서 reason을 저장한다. descriptor를 이미
+  읽은 경우에만 그 사본에서 `+0x000,+0x060,...,+0x240` 각 위치의 앞 0x20 bytes를 보관한다.
+  예외 코드도 재초기화 없이 기록하고 전파한다.
+- `LogTrickUiBridgeStatus`: 내부등록 및 live layout 확인 때 `[책략5UIINIT]`로 저장값을 출력.
+  descriptor 원래 주소는 숫자로만 보여주고, 나중에 그 주소를 다시 역참조하지 않는다.
+- `STRATAGEM5_RE_NOTES.md`: 이번 관찰과 아래 판정 기준 기록.
+
+| reason | 의미 |
+|---|---|
+| `entered` / `calling-expanded` | 해당 호출이 아직 진행 중인 시점의 스냅샷일 수 있음 |
+| `missing-original` | 원본 함수 주소가 준비되지 않음 |
+| `owner-range` | owner의 0x2A8 범위 검증 실패 |
+| `maker-owner` | maker가 owner+0x140과 다름 |
+| `input-count` | 전달 count가 7이 아님 |
+| `descriptor-range` / `descriptor-copy` | 입력 descriptor 범위/읽기 실패 |
+| `descriptor-types` | 현재 가정한 +0x0C0/+0x120/+0x180/+0x1E0의 type이 모두 20은 아님 |
+| `expanded-result` | 원본 count=8 호출 후 count/helper7 검증 실패 |
+| `init-exception` | 원본 확장 호출에서 예외; 원본 함수 재호출 없음 |
+| `expanded-ok` | count=8 및 유효한 helper7 확인 |
+
+### 4. 위험 요소와 아직 미확정인 입력 해석
+
+`InitLayouts`의 **결과 저장소**가 count×0x60이라는 점과
+**입력 배열의 stride/필드 배치/배열 순서가 UI ID와 일치**한다는 것은 구분해야 한다.
+현재 코드는 후자도 0x60/첫 dword type/ID순서라고 가정하고 검사한다.
+이번 로그에는 그 검사값이 없으므로 잘못된 stride나 순서를 실패 원인으로 단정하지 않는다.
+새 출력의 `가정 stride=60`도 확정 구조 선언이 아니라 기존 검사의 실제 읽기 위치를 뜻한다.
+type 검사 실패라면 저장된 값과 원본 소비 코드를 대조한 뒤 다음 변경을 결정한다.
+
+이번 변경은 초기 실패를 관찰하기 위한 것이다. 확장 알고리즘과 등록 조건은 그대로이며,
+다섯 번째 버튼 표시나 선택/사용이 해결됐다는 의미가 아니다. 28절의 수명/실게임 제한도 유지된다.
+
+### 5. 기존 실패 접근과의 차이 및 다음 테스트
+
+같은 maker의 InitLayouts 재호출, count만 수정, null helper 등록, type 가드 제거를 하지 않는다.
+새 게임 메모리 탐색도 없다. 이미 읽은 입력 값의 일부를 보관하여 사라졌던 초기 증거를 얻는다.
+
+1. 게임을 완전히 종료한 뒤 이번 DLL로 교체하고 재실행한다.
+2. 전투에서 디버그를 켜고 기존 데이터 → 횟수 1 → 내부등록 순서로 진행한다.
+   파일 로그를 켜두면 초기 원문도 남지만, 꺼져 있었어도 저장된 원인은 내부등록 시 출력된다.
+3. `[책략5UIINIT] 저장된 초기 호출(metadata-enable): ... reason=...`부터
+   `초기 입력 +...`, `초기 확장 반환/예외`까지 **UIINIT 전체 줄**을 보낸다.
+4. 책략창을 열어 나온 `상태(live-layout)`과 Layout/count 줄도 함께 보낸다.
+   이번에도 다섯 번째 버튼이 보이기 전에는 callback/Open/GetTrickButton 확장을 진행하지 않는다.
+
+지연 출력 예상 형식(실제 reason은 다음 실게임에서 판정):
+
+```text
+[책략5UIINIT] 저장된 초기 호출(metadata-enable): hit=1 reason=<실제 분기> ... maker=... owner=... owner+140일치=... descriptors=... count=...
+[책략5UIINIT] 초기 입력 +000 (가정 stride=60, 앞20): ...
+...
+[책략5UIINIT] 초기 입력 +240 (가정 stride=60, 앞20): ...
+```
+
+입력 복사 전에 거부됐다면 `초기 입력` 줄이 없는 것이 정상이다.
+로컬 smoke test는 기존 7개에 **초기 로그 OFF 후 원인/입력 사본 재출력**과
+**이전 호출이 최신 스냅샷을 덮어쓰지 않음**을 추가하여 9개가 통과했다.
+이 PC의 MSBuild `Release|x64` / `hid` 빌드·링크도 종료 코드 0을 확인했다.

@@ -80,6 +80,41 @@ namespace DX11Base {
     static std::atomic<unsigned> g_trickInitLayoutsExpanded{0};
     static std::atomic<uintptr_t> g_lastInitLayoutsOwner{0};
 
+    // AddLog drops early messages while both logging options are off. Retain
+    // value copies, never dereference the original stack descriptor later.
+    struct TrickUiInitTrace {
+      unsigned hit;
+      ULONGLONG tick;
+      DWORD thread;
+      const char *reason;
+      uintptr_t maker, descriptors, owner;
+      int count;
+      bool inputCopied;
+      uint32_t inputHead[7][8]; // first 0x20 bytes at each assumed 0x60 stride
+      bool resultReturned;
+      bool resultRead;
+      uint32_t resultCount;
+      uintptr_t resultOwner, resultTable, helper7;
+      DWORD exceptionCode;
+    };
+    static SRWLOCK g_trickUiInitTraceLock = SRWLOCK_INIT;
+    static TrickUiInitTrace g_trickUiInitTrace{};
+
+    static void SaveTrickUiInitTrace(const TrickUiInitTrace &trace) {
+      AcquireSRWLockExclusive(&g_trickUiInitTraceLock);
+      if (trace.hit >= g_trickUiInitTrace.hit)
+        g_trickUiInitTrace = trace;
+      ReleaseSRWLockExclusive(&g_trickUiInitTraceLock);
+    }
+
+    static TrickUiInitTrace ReadTrickUiInitTrace() {
+      TrickUiInitTrace trace{};
+      AcquireSRWLockShared(&g_trickUiInitTraceLock);
+      trace = g_trickUiInitTrace;
+      ReleaseSRWLockShared(&g_trickUiInitTraceLock);
+      return trace;
+    }
+
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
         return false;
@@ -173,9 +208,34 @@ namespace DX11Base {
              g_trickInitLayoutsInstallTick, g_trickInitLayoutsHits.load(),
              g_trickInitLayoutsExpanded.load(),
              reinterpret_cast<void *>(g_lastInitLayoutsOwner.load()));
+
+      const TrickUiInitTrace trace = ReadTrickUiInitTrace();
+      if (!trace.hit)
+        return;
+      AddLog(u8"[책략5UIINIT] 저장된 초기 호출(%s): hit=%u reason=%s tick=%llu thread=%lu maker=%p owner=%p owner+140일치=%d descriptors=%p count=%d",
+             context, trace.hit, trace.reason, trace.tick, trace.thread,
+             reinterpret_cast<void *>(trace.maker), reinterpret_cast<void *>(trace.owner),
+             trace.owner && trace.maker == trace.owner + 0x140 ? 1 : 0,
+             reinterpret_cast<void *>(trace.descriptors), trace.count);
+      if (trace.inputCopied) {
+        for (unsigned row = 0; row < 7; ++row) {
+          const uint32_t *v = trace.inputHead[row];
+          AddLog(u8"[책략5UIINIT] 초기 입력 +%03X (가정 stride=60, 앞20): %08X %08X %08X %08X %08X %08X %08X %08X",
+                 row * 0x60, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
+        }
+      }
+      if (trace.resultReturned)
+        AddLog(u8"[책략5UIINIT] 초기 확장 반환: readOk=%d count=%u owner=%p table=%p helper7=%p",
+               trace.resultRead ? 1 : 0, trace.resultCount, reinterpret_cast<void *>(trace.resultOwner),
+               reinterpret_cast<void *>(trace.resultTable), reinterpret_cast<void *>(trace.helper7));
+      if (trace.exceptionCode)
+        AddLog(u8"[책략5UIINIT] 초기 확장 예외: code=%08X", static_cast<unsigned>(trace.exceptionCode));
     }
 
-    static int LogTrickUiInitException(DWORD code) {
+    static int LogTrickUiInitException(DWORD code, TrickUiInitTrace *trace) {
+      trace->reason = "init-exception";
+      trace->exceptionCode = code;
+      SaveTrickUiInitTrace(*trace);
       AddLog(u8"[책략5UIHELPER] 확장 InitLayouts 예외: code=%08X. 부분 초기화 maker 재호출 금지; 예외 전파.",
              static_cast<unsigned>(code));
       return EXCEPTION_CONTINUE_SEARCH;
@@ -188,22 +248,43 @@ namespace DX11Base {
       using InitLayoutsFn =
           void(__fastcall *)(uintptr_t, const void *, int, uintptr_t);
 
+      const unsigned hit = ++g_trickInitLayoutsHits;
+      TrickUiInitTrace trace{};
+      trace.hit = hit;
+      trace.tick = GetTickCount64();
+      trace.thread = GetCurrentThreadId();
+      trace.reason = "entered";
+      trace.maker = maker;
+      trace.descriptors = reinterpret_cast<uintptr_t>(descriptors);
+      trace.owner = owner;
+      trace.count = count;
+      SaveTrickUiInitTrace(trace);
+      g_lastInitLayoutsOwner.store(owner);
+
       const auto original =
           reinterpret_cast<InitLayoutsFn>(g_originalInitLayoutsAddr.load());
-      if (!original)
+      if (!original) {
+        trace.reason = "missing-original";
+        SaveTrickUiInitTrace(trace);
         return;
-
-      const unsigned hit = ++g_trickInitLayoutsHits;
-      g_lastInitLayoutsOwner.store(owner);
+      }
       AddLog(u8"[책략5UIHELPER] 브리지 진입: hit=%u tick=%llu thread=%lu maker=%p owner=%p count=%d",
              hit, GetTickCount64(), GetCurrentThreadId(),
              reinterpret_cast<void *>(maker), reinterpret_cast<void *>(owner), count);
 
-      if (!owner || !IsValidPtr(owner, 0x2A8) || maker != owner + 0x140 ||
-          count != 7 ||
-          !descriptors ||
-          !IsValidPtr(reinterpret_cast<uintptr_t>(descriptors), 7 * 0x60)) {
-        AddLog(u8"[책략5UIHELPER] 인자/owner+140/descriptor 검증 실패. 원본 인자로 1회 통과.");
+      const char *argumentFailure = nullptr;
+      if (!owner || !IsValidPtr(owner, 0x2A8))
+        argumentFailure = "owner-range";
+      else if (maker != owner + 0x140)
+        argumentFailure = "maker-owner";
+      else if (count != 7)
+        argumentFailure = "input-count";
+      else if (!descriptors || !IsValidPtr(trace.descriptors, 7 * 0x60))
+        argumentFailure = "descriptor-range";
+      if (argumentFailure) {
+        trace.reason = argumentFailure;
+        SaveTrickUiInitTrace(trace);
+        AddLog(u8"[책략5UIHELPER] 인자 검증 실패: reason=%s. 원본 인자로 1회 통과.", argumentFailure);
         original(maker, descriptors, count, owner);
         return;
       }
@@ -211,10 +292,15 @@ namespace DX11Base {
       alignas(16) uint8_t expanded[8 * 0x60] = {};
       if (!SafeCopySeh(reinterpret_cast<uintptr_t>(descriptors),
                        expanded, 7 * 0x60)) {
+        trace.reason = "descriptor-copy";
+        SaveTrickUiInitTrace(trace);
         AddLog(u8"[책략5UIHELPER] descriptor 복사 실패. 원본 인자로 1회 통과.");
         original(maker, descriptors, count, owner);
         return;
       }
+      trace.inputCopied = true;
+      for (unsigned row = 0; row < 7; ++row)
+        std::memcpy(trace.inputHead[row], expanded + row * 0x60, sizeof(trace.inputHead[row]));
 
       // The existing stratagem buttons are UI IDs 2..5 and all use type 0x14.
       // Clone ID5's descriptor into the new ID7 slot. Position is adjusted
@@ -227,6 +313,8 @@ namespace DX11Base {
 
       if (type2 != 0x14 || type3 != 0x14 ||
           type4 != 0x14 || type5 != 0x14) {
+        trace.reason = "descriptor-types";
+        SaveTrickUiInitTrace(trace);
         AddLog(u8"[책략5UIHELPER] 초기 7칸 descriptor type 검증 실패: %d/%d/%d/%d",
                type2, type3, type4, type5);
         original(maker, descriptors, count, owner);
@@ -237,26 +325,38 @@ namespace DX11Base {
                   expanded + 5 * 0x60,
                   0x60);
 
+      trace.reason = "calling-expanded";
+      SaveTrickUiInitTrace(trace);
       __try {
         original(maker, expanded, 8, owner);
-      } __except (LogTrickUiInitException(GetExceptionCode())) {
+      } __except (LogTrickUiInitException(GetExceptionCode(), &trace)) {
         // Never retry InitLayouts on a possibly partially initialized maker.
       }
 
       uint32_t newCount = 0;
       uintptr_t pointerTable = 0;
       uintptr_t helper7 = 0;
-      SafeCopySeh(maker + 0x10, &newCount, sizeof(newCount));
-      SafeReadPtrSeh(maker + 0x08, &pointerTable);
+      trace.resultReturned = true;
+      trace.resultRead = SafeCopySeh(maker + 0x10, &newCount, sizeof(newCount));
+      trace.resultRead = SafeReadPtrSeh(maker + 0x08, &pointerTable) && trace.resultRead;
+      trace.resultRead = SafeReadPtrSeh(maker + 0x18, &trace.resultOwner) && trace.resultRead;
       if (pointerTable && IsValidPtr(pointerTable, 8 * sizeof(uintptr_t)))
         SafeReadPtrSeh(pointerTable + 7 * sizeof(uintptr_t), &helper7);
 
+      trace.resultCount = newCount;
+      trace.resultTable = pointerTable;
+      trace.helper7 = helper7;
+
       if (newCount != 8 || !helper7 || !IsValidPtr(helper7, sizeof(uintptr_t))) {
+        trace.reason = "expanded-result";
+        SaveTrickUiInitTrace(trace);
         AddLog(u8"[책략5UIHELPER] 확장 결과 검증 실패: count=%u helper7=%p. 재초기화하지 않습니다.",
                static_cast<unsigned>(newCount), reinterpret_cast<void *>(helper7));
         return;
       }
       ++g_trickInitLayoutsExpanded;
+      trace.reason = "expanded-ok";
+      SaveTrickUiInitTrace(trace);
 
       AddLog(u8"[책략5UIHELPER] 초기 InitLayouts 7->8 완료: maker=%p owner=%p count=%u helper7=%p",
              reinterpret_cast<void *>(maker),
