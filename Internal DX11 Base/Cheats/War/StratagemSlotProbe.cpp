@@ -42,12 +42,6 @@ namespace DX11Base {
     static uintptr_t g_fiveRuntimeSlotAddr = 0;
     static uintptr_t g_fiveRuntimeSlotOriginal = 0;
 
-    struct TrickRangeProbe {
-      const uintptr_t *first;
-      const uintptr_t *last;
-    };
-    using GetTricksFn = TrickRangeProbe(__fastcall *)(const void *);
-
     static bool SafeReadPtrSeh(uintptr_t addr, uintptr_t *outValue) {
       if (!addr || !outValue)
         return false;
@@ -57,21 +51,6 @@ namespace DX11Base {
         return true;
       } __except (EXCEPTION_EXECUTE_HANDLER) {
         *outValue = 0;
-        return false;
-      }
-    }
-
-    static bool SafeCallGetTricks(GetTricksFn fn, uintptr_t object,
-                                  TrickRangeProbe *outRange) {
-      if (!fn || !object || !outRange)
-        return false;
-
-      __try {
-        *outRange = fn(reinterpret_cast<const void *>(object));
-        return true;
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        outRange->first = nullptr;
-        outRange->last = nullptr;
         return false;
       }
     }
@@ -591,12 +570,6 @@ namespace DX11Base {
     constexpr uintptr_t kId2 = 0x0A;
     constexpr uintptr_t kId3 = 0x0C;
 
-    // Matching PDB / EXE:
-    // san8r::war::CampData::GetTricks() const
-    // RVA 0x1D5DBC0
-    // Return type is range<const TrickData* const*> over std::array<...,5>.
-    constexpr uintptr_t kCampGetTricksRva = 0x01D5DBC0;
-
     auto restoreRuntimeSlot = [&]() {
       if (!g_fiveRuntimeSlotApplied)
         return;
@@ -614,7 +587,7 @@ namespace DX11Base {
         }
       }
 
-      AddLog(u8"[책략5PDBDBG] CampData 5번째 포인터 원복.");
+      AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터 원복.");
       g_fiveRuntimeSlotApplied = false;
       g_fiveRuntimeSlotAddr = 0;
       g_fiveRuntimeSlotOriginal = 0;
@@ -674,11 +647,8 @@ namespace DX11Base {
         *reinterpret_cast<const uint32_t *>(found + 4);
     const uintptr_t pointerAddr =
         gameBase + static_cast<uintptr_t>(troopTypePointerOffset);
-
     if (!IsValidPtr(pointerAddr, sizeof(uintptr_t))) {
-      AddLog(u8"[책략5메타DBG] troopType 포인터 주소 무효: offset=0x%X addr=%p",
-             (unsigned)troopTypePointerOffset,
-             reinterpret_cast<void *>(pointerAddr));
+      AddLog(u8"[책략5메타DBG] troopType 포인터 주소 무효.");
       return false;
     }
 
@@ -689,15 +659,12 @@ namespace DX11Base {
 
     if (!troopTypeBase || troopTypeBase == UINTPTR_MAX ||
         !IsValidPtr(table, kRecordStride * 5)) {
-      AddLog(u8"[책략5메타DBG] troopType base/책략 테이블 범위 무효: offset=0x%X base=%p",
-             (unsigned)troopTypePointerOffset,
-             reinterpret_cast<void *>(troopTypeBase));
+      AddLog(u8"[책략5메타DBG] 책략 테이블 범위 무효: base=%p table=%p",
+             reinterpret_cast<void *>(troopTypeBase),
+             reinterpret_cast<void *>(table));
       return false;
     }
 
-    // PDB가 보여준 실제 구조:
-    // TrickData object = 0x20 bytes, +0x00 vptr, +0x08부터 payload.
-    // 이미 게임 자체에 1~11번 TrickData 객체가 존재합니다.
     for (int i = 0; i < 5; ++i) {
       const uintptr_t row = table + (uintptr_t)i * kRecordStride;
       const uint8_t expected = (uint8_t)(i + 1);
@@ -711,12 +678,17 @@ namespace DX11Base {
       }
     }
 
+    const uintptr_t row1 = table + 0 * kRecordStride;
+    const uintptr_t row2 = table + 1 * kRecordStride;
+    const uintptr_t row3 = table + 2 * kRecordStride;
+    const uintptr_t row4 = table + 3 * kRecordStride;
     const uintptr_t row5 = table + 4 * kRecordStride;
+
     g_fiveMetadataTable = table;
     g_fiveMetadataAddr = row5;
     g_fiveMetadataApplied = true;
 
-    AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p / 별도 메타 복제 없음",
+    AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
            reinterpret_cast<void *>(row5));
 
@@ -728,83 +700,27 @@ namespace DX11Base {
       return false;
     }
 
-    const uintptr_t getTricksAddr = exeBase + kCampGetTricksRva;
-    if (!IsValidPtr(getTricksAddr, 0x24)) {
-      AddLog(u8"[책략5PDBDBG] CampData::GetTricks RVA가 유효하지 않습니다: %p",
-             reinterpret_cast<void *>(getTricksAddr));
-      g_fiveMetadataApplied = false;
-      g_fiveMetadataAddr = 0;
-      g_fiveMetadataTable = 0;
-      return false;
-    }
-
-    GetTricksFn getTricks =
-        reinterpret_cast<GetTricksFn>(getTricksAddr);
-
-    auto rangeMatches = [&](uintptr_t object,
-                            uintptr_t *outSlotAddr,
-                            uintptr_t *outOld5) -> bool {
-      if (!object || !IsValidPtr(object, 0x40))
-        return false;
-
-      TrickRangeProbe range{};
-      if (!SafeCallGetTricks(getTricks, object, &range) ||
-          !range.first || !range.last)
-        return false;
-
-      const uintptr_t begin =
-          reinterpret_cast<uintptr_t>(range.first);
-      const uintptr_t end =
-          reinterpret_cast<uintptr_t>(range.last);
-      if (end < begin ||
-          end - begin != 5 * sizeof(uintptr_t) ||
-          !IsValidPtr(begin, 5 * sizeof(uintptr_t)))
-        return false;
-
-      bool seen[4] = {};
-      for (int i = 0; i < 4; ++i) {
-        const uintptr_t v = range.first[i];
-        int matched = -1;
-        for (int j = 0; j < 4; ++j) {
-          if (v == table + (uintptr_t)j * kRecordStride) {
-            matched = j;
-            break;
-          }
-        }
-        if (matched < 0 || seen[matched])
-          return false;
-        seen[matched] = true;
-      }
-
-      const uintptr_t fifth = range.first[4];
-      if (fifth != 0 && fifth != row5)
-        return false;
-
-      if (outSlotAddr)
-        *outSlotAddr =
-            begin + 4 * sizeof(uintptr_t);
-      if (outOld5)
-        *outOld5 = fifth;
-      return true;
-    };
-
-    uintptr_t objects[160] = {};
+    // IMPORTANT:
+    // 이전 버전은 추정한 객체에 CampData::GetTricks()를 직접 호출해서
+    // 잘못된 this 포인터가 들어가면 게임이 멈출 수 있었습니다.
+    // 이번 버전은 게임 함수를 단 한 번도 호출하지 않고,
+    // 캡처된 전장 객체와 그 1단계 포인터들의 작은 메모리 범위만 읽습니다.
+    uintptr_t objects[96] = {};
     int objectCount = 0;
 
     auto addObject = [&](uintptr_t p) {
-      if (!p || p <= 0x10000 || !IsValidPtr(p, 0x40))
+      if (!p || p <= 0x10000 || !IsValidPtr(p, 0x100))
         return;
-      for (int i = 0; i < objectCount; ++i)
+      for (int i = 0; i < objectCount; ++i) {
         if (objects[i] == p)
           return;
+      }
       if (objectCount < (int)(sizeof(objects) / sizeof(objects[0])))
         objects[objectCount++] = p;
     };
 
     addObject(g_id5CountOwner);
 
-    // The battle-side object captured by the old CT may own CampData directly
-    // or through one pointer member. Search only a small bounded prefix.
     if (IsValidPtr(g_id5CountOwner, 0x300)) {
       for (uintptr_t off = 0; off + sizeof(uintptr_t) <= 0x300;
            off += sizeof(uintptr_t)) {
@@ -814,38 +730,78 @@ namespace DX11Base {
       }
     }
 
-    uintptr_t matchedObject = 0;
     uintptr_t matchedSlot = 0;
+    uintptr_t matchedObject = 0;
     uintptr_t matchedOld5 = 0;
     int matches = 0;
 
-    for (int i = 0; i < objectCount; ++i) {
-      uintptr_t slot = 0;
-      uintptr_t old5 = 0;
-      if (!rangeMatches(objects[i], &slot, &old5))
-        continue;
+    for (int oi = 0; oi < objectCount; ++oi) {
+      const uintptr_t obj = objects[oi];
 
-      ++matches;
-      matchedObject = objects[i];
-      matchedSlot = slot;
-      matchedOld5 = old5;
+      // m_pTricks is expected to be a compact five-pointer array.
+      // Scan only the first 0x800 bytes of each validated object.
+      for (uintptr_t off = 0; off + 5 * sizeof(uintptr_t) <= 0x800;
+           off += sizeof(uintptr_t)) {
+        const uintptr_t slot = obj + off;
+        if (!IsValidPtr(slot, 5 * sizeof(uintptr_t)))
+          continue;
+
+        uintptr_t v[5] = {};
+        bool readOk = true;
+        for (int k = 0; k < 5; ++k) {
+          if (!SafeReadPtrSeh(slot + (uintptr_t)k * sizeof(uintptr_t), &v[k])) {
+            readOk = false;
+            break;
+          }
+        }
+        if (!readOk)
+          continue;
+
+        if (v[0] == row1 && v[1] == row2 &&
+            v[2] == row3 && v[3] == row4 &&
+            (v[4] == 0 || v[4] == row5)) {
+          ++matches;
+          matchedObject = obj;
+          matchedSlot = slot + 4 * sizeof(uintptr_t);
+          matchedOld5 = v[4];
+
+          AddLog(u8"[책략5PDBDBG] 5칸 포인터 배열 후보 #%d object=%p offset=+%llX values=%p,%p,%p,%p,%p",
+                 matches,
+                 reinterpret_cast<void *>(obj),
+                 (unsigned long long)off,
+                 reinterpret_cast<void *>(v[0]),
+                 reinterpret_cast<void *>(v[1]),
+                 reinterpret_cast<void *>(v[2]),
+                 reinterpret_cast<void *>(v[3]),
+                 reinterpret_cast<void *>(v[4]));
+        }
+      }
     }
 
     if (matches != 1) {
-      AddLog(u8"[책략5PDBDBG] CampData 후보=%d개 (검사 객체=%d). 정확히 1개가 아니어서 쓰기 중단.",
+      AddLog(u8"[책략5PDBDBG] 직접 메모리 검사 결과 후보=%d / 검사객체=%d. 쓰기하지 않았습니다.",
              matches, objectCount);
-      AddLog(u8"[책략5PDBDBG] PDB 확인사항: CampData::m_pTricks는 5칸 배열, 전투 AI Trick cache도 5칸입니다.");
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
       return false;
     }
 
+    if (matchedOld5 == row5) {
+      g_fiveRuntimeSlotAddr = matchedSlot;
+      g_fiveRuntimeSlotOriginal = row5;
+      g_fiveRuntimeSlotApplied = true;
+      AddLog(u8"[책략5PDBDBG] 5번째 내부 포인터가 이미 row5입니다: camp=%p slot5=%p",
+             reinterpret_cast<void *>(matchedObject),
+             reinterpret_cast<void *>(matchedSlot));
+      return true;
+    }
+
     DWORD oldProtect = 0;
     DWORD tmpProtect = 0;
     if (!VirtualProtect(reinterpret_cast<LPVOID>(matchedSlot),
                         sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
-      AddLog(u8"[책략5PDBDBG] 5번째 CampData 포인터 쓰기 권한 변경 실패.");
+      AddLog(u8"[책략5PDBDBG] 5번째 포인터 쓰기 권한 변경 실패.");
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
@@ -857,7 +813,7 @@ namespace DX11Base {
                    sizeof(uintptr_t), oldProtect, &tmpProtect);
 
     if (*reinterpret_cast<const uintptr_t *>(matchedSlot) != row5) {
-      AddLog(u8"[책략5PDBDBG] CampData 5번째 포인터 쓰기 검증 실패.");
+      AddLog(u8"[책략5PDBDBG] 5번째 포인터 쓰기 검증 실패.");
       g_fiveMetadataApplied = false;
       g_fiveMetadataAddr = 0;
       g_fiveMetadataTable = 0;
@@ -868,12 +824,11 @@ namespace DX11Base {
     g_fiveRuntimeSlotOriginal = matchedOld5;
     g_fiveRuntimeSlotApplied = true;
 
-    AddLog(u8"[책략5PDBDBG] CampData 5슬롯 연결 성공: camp=%p slot5=%p old=%p new(row5)=%p",
+    AddLog(u8"[책략5PDBDBG] 5슬롯 연결 성공: object=%p slot5=%p old=%p new=%p",
            reinterpret_cast<void *>(matchedObject),
            reinterpret_cast<void *>(matchedSlot),
            reinterpret_cast<void *>(matchedOld5),
            reinterpret_cast<void *>(row5));
-    AddLog(u8"[책략5PDBDBG] 이제 책략 UI를 닫았다 다시 열어 5개 표시 여부를 확인하세요.");
     return true;
   }
 
