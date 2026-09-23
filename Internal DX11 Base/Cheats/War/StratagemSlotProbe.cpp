@@ -27,6 +27,7 @@ namespace DX11Base {
 
     static bool g_id5CountApplied = false;
     static uintptr_t g_id5CountAddr = 0;
+    static uintptr_t g_id5CountOwner = 0;
     static uint8_t g_id5CountOriginal = 0;
 
     static bool g_fiveLoopApplied = false;
@@ -35,7 +36,11 @@ namespace DX11Base {
 
     static bool g_fiveMetadataApplied = false;
     static uintptr_t g_fiveMetadataAddr = 0;
-    static uint8_t g_fiveMetadataOriginal[0x20] = {};
+    static uintptr_t g_fiveMetadataTable = 0;
+
+    static bool g_fiveRuntimeSlotApplied = false;
+    static uintptr_t g_fiveRuntimeSlotAddr = 0;
+    static uintptr_t g_fiveRuntimeSlotOriginal = 0;
 
     static bool BuildCaptureCave(uintptr_t hookAddr) {
       g_caveAddr = AllocNear(hookAddr, 128);
@@ -289,6 +294,7 @@ namespace DX11Base {
       }
 
       g_id5CountAddr = id5Addr;
+      g_id5CountOwner = chosen;
       g_id5CountApplied = true;
 
       AddLog(u8"[책략5슬롯DBG] %s ID5 후보(+14C) 수량 0 -> 1 적용 성공: %p",
@@ -312,6 +318,7 @@ namespace DX11Base {
     AddLog(u8"[책략5슬롯DBG] ID5 수량 테스트 원복.");
     g_id5CountApplied = false;
     g_id5CountAddr = 0;
+    g_id5CountOwner = 0;
     g_id5CountOriginal = 0;
     return true;
   }
@@ -549,184 +556,307 @@ namespace DX11Base {
     constexpr uintptr_t kId1 = 0x08;
     constexpr uintptr_t kId2 = 0x0A;
     constexpr uintptr_t kId3 = 0x0C;
-    constexpr uintptr_t kFlag = 0x0E;
 
-    if (enable) {
-      if (g_fiveMetadataApplied)
-        return true;
+    // Matching PDB / EXE:
+    // san8r::war::CampData::GetTricks() const
+    // RVA 0x1D5DBC0
+    // Return type is range<const TrickData* const*> over std::array<...,5>.
+    constexpr uintptr_t kCampGetTricksRva = 0x01D5DBC0;
 
-      const uintptr_t gameBase = GetGameBase();
-      const uintptr_t exeBase =
-          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-      if (!gameBase || !exeBase) {
-        AddLog(u8"[책략5메타DBG] gameBase/EXE base를 찾지 못했습니다.");
-        return false;
-      }
+    struct TrickRangeProbe {
+      const uintptr_t *first;
+      const uintptr_t *last;
+    };
+    using GetTricksFn = TrickRangeProbe(__fastcall *)(const void *);
 
-      MODULEINFO mi{};
-      if (!GetModuleInformation(GetCurrentProcess(),
-                                reinterpret_cast<HMODULE>(exeBase),
-                                &mi, sizeof(mi))) {
-        AddLog(u8"[책략5메타DBG] 모듈 정보 읽기 실패.");
-        return false;
-      }
+    auto restoreRuntimeSlot = [&]() {
+      if (!g_fiveRuntimeSlotApplied)
+        return;
 
-      const uintptr_t imageEnd =
-          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
-
-      // Old CT's bytes8 copied byte-for-byte. Our FindPattern accepts
-      // compact CE-style ?? wildcards, so do not manually expand it.
-      // CT:
-      // 488B????????????E8????????488B??4883????5BC333??488B??E8????????488B??4883????5BC3E8??????????????????????4053
-      // and reads the dynamic offset from found+4.
-      const char *troopTypePat =
-          "488B????????????E8????????488B??4883????5BC333??488B??E8????????488B??4883????5BC3E8??????????????????????4053";
-
-      uintptr_t scanStart = exeBase + 0x58E000;
-      uintptr_t scanEnd = exeBase + 0x59E000;
-      if (scanStart >= imageEnd)
-        scanStart = exeBase;
-      if (scanEnd > imageEnd)
-        scanEnd = imageEnd;
-
-      uintptr_t found = FindPattern(scanStart, scanEnd, troopTypePat);
-      if (!found) {
-        // Version drift fallback: same exact signature across the full image.
-        found = FindPattern(exeBase, imageEnd, troopTypePat);
-      }
-
-      if (!found || !IsValidPtr(found + 4, sizeof(uint32_t))) {
-        AddLog(u8"[책략5메타DBG] CT 원본 troopTypePointerOffset 패턴도 찾지 못했습니다.");
-        return false;
-      }
-
-      AddLog(u8"[책략5메타DBG] troopType 패턴 발견: %p / +4=%02X %02X %02X %02X",
-             reinterpret_cast<void *>(found),
-             (unsigned)*reinterpret_cast<const uint8_t *>(found + 4),
-             (unsigned)*reinterpret_cast<const uint8_t *>(found + 5),
-             (unsigned)*reinterpret_cast<const uint8_t *>(found + 6),
-             (unsigned)*reinterpret_cast<const uint8_t *>(found + 7));
-
-      const uint32_t troopTypePointerOffset =
-          *reinterpret_cast<const uint32_t *>(found + 4);
-      const uintptr_t pointerAddr =
-          gameBase + static_cast<uintptr_t>(troopTypePointerOffset);
-
-      if (!IsValidPtr(pointerAddr, sizeof(uintptr_t))) {
-        AddLog(u8"[책략5메타DBG] troopType 포인터 주소 무효: offset=0x%X addr=%p",
-               (unsigned)troopTypePointerOffset,
-               reinterpret_cast<void *>(pointerAddr));
-        return false;
-      }
-
-      const uintptr_t troopTypeBase =
-          *reinterpret_cast<const uintptr_t *>(pointerAddr);
-      if (!troopTypeBase || troopTypeBase == UINTPTR_MAX ||
-          !IsValidPtr(troopTypeBase + kStratagemMetadataOffset,
-                      kRecordStride * 5)) {
-        AddLog(u8"[책략5메타DBG] troopType base/책략 메타 범위 무효: offset=0x%X base=%p",
-               (unsigned)troopTypePointerOffset,
-               reinterpret_cast<void *>(troopTypeBase));
-        return false;
-      }
-
-      const uintptr_t table = troopTypeBase + kStratagemMetadataOffset;
-      AddLog(u8"[책략5메타DBG] 동적 troopTypeOffset=0x%X base=%p table=%p",
-             (unsigned)troopTypePointerOffset,
-             reinterpret_cast<void *>(troopTypeBase),
-             reinterpret_cast<void *>(table));
-      if (!IsValidPtr(table, kRecordStride * 5)) {
-        AddLog(u8"[책략5메타DBG] 책략 메타 테이블 범위가 유효하지 않습니다: %p",
-               reinterpret_cast<void *>(table));
-        return false;
-      }
-
-      // Strong validation from the CT layout: rows 1..4 must carry
-      // ID/name/description IDs 1,2,3,4 at +08/+0A/+0C.
-      for (int i = 0; i < 4; ++i) {
-        const uintptr_t row = table + (uintptr_t)i * kRecordStride;
-        const uint8_t expected = (uint8_t)(i + 1);
-        const uint8_t a = *reinterpret_cast<const uint8_t *>(row + kId1);
-        const uint8_t b = *reinterpret_cast<const uint8_t *>(row + kId2);
-        const uint8_t d = *reinterpret_cast<const uint8_t *>(row + kId3);
-        if (a != expected || b != expected || d != expected) {
-          AddLog(u8"[책략5메타DBG] 메타 테이블 검증 실패 row=%d IDs=%u/%u/%u",
-                 i + 1, (unsigned)a, (unsigned)b, (unsigned)d);
-          return false;
+      if (g_fiveRuntimeSlotAddr &&
+          IsValidPtr(g_fiveRuntimeSlotAddr, sizeof(uintptr_t))) {
+        DWORD oldProtect = 0;
+        DWORD tmpProtect = 0;
+        if (VirtualProtect(reinterpret_cast<LPVOID>(g_fiveRuntimeSlotAddr),
+                           sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
+          *reinterpret_cast<uintptr_t *>(g_fiveRuntimeSlotAddr) =
+              g_fiveRuntimeSlotOriginal;
+          VirtualProtect(reinterpret_cast<LPVOID>(g_fiveRuntimeSlotAddr),
+                         sizeof(uintptr_t), oldProtect, &tmpProtect);
         }
       }
 
-      const uintptr_t source = table + 3 * kRecordStride; // valid row 4
-      const uintptr_t row5 = table + 4 * kRecordStride;
+      AddLog(u8"[책략5PDBDBG] CampData 5번째 포인터 원복.");
+      g_fiveRuntimeSlotApplied = false;
+      g_fiveRuntimeSlotAddr = 0;
+      g_fiveRuntimeSlotOriginal = 0;
+    };
 
-      std::memcpy(g_fiveMetadataOriginal,
-                  reinterpret_cast<const void *>(row5),
-                  sizeof(g_fiveMetadataOriginal));
-
-      uint8_t clone[0x20] = {};
-      std::memcpy(clone, reinterpret_cast<const void *>(source), sizeof(clone));
-      clone[kId1] = 5;
-      clone[kId2] = 5;
-      clone[kId3] = 5;
-
-      const uint8_t sourceFlag =
-          *reinterpret_cast<const uint8_t *>(source + kFlag);
-      clone[kFlag] = sourceFlag;
-
-      DWORD oldProtect = 0;
-      DWORD tmpProtect = 0;
-      if (!VirtualProtect(reinterpret_cast<LPVOID>(row5), sizeof(clone),
-                          PAGE_READWRITE, &oldProtect)) {
-        AddLog(u8"[책략5메타DBG] 5번 메타 행 쓰기 권한 변경 실패.");
-        return false;
-      }
-
-      std::memcpy(reinterpret_cast<void *>(row5), clone, sizeof(clone));
-      VirtualProtect(reinterpret_cast<LPVOID>(row5), sizeof(clone),
-                     oldProtect, &tmpProtect);
-
-      if (*reinterpret_cast<const uint8_t *>(row5 + kId1) != 5 ||
-          *reinterpret_cast<const uint8_t *>(row5 + kId2) != 5 ||
-          *reinterpret_cast<const uint8_t *>(row5 + kId3) != 5 ||
-          *reinterpret_cast<const uint8_t *>(row5 + kFlag) != sourceFlag) {
-        AddLog(u8"[책략5메타DBG] 5번 메타 행 쓰기 검증 실패.");
-        return false;
-      }
-
-      g_fiveMetadataAddr = row5;
-      g_fiveMetadataApplied = true;
-
-      AddLog(u8"[책략5메타DBG] 적용 성공 table=%p row5=%p IDs=5/5/5 flag=%u",
-             reinterpret_cast<void *>(table),
-             reinterpret_cast<void *>(row5),
-             (unsigned)sourceFlag);
-      AddLog(u8"[책략5메타DBG] 4번 메타 행을 복제하고 ID/이름/설명 ID만 5로 변경했습니다.");
+    if (!enable) {
+      restoreRuntimeSlot();
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      AddLog(u8"[책략5메타DBG] 5번 내부 등록 해제.");
       return true;
     }
 
-    if (!g_fiveMetadataApplied)
+    if (g_fiveMetadataApplied && g_fiveRuntimeSlotApplied)
       return true;
 
-    if (g_fiveMetadataAddr &&
-        IsValidPtr(g_fiveMetadataAddr, sizeof(g_fiveMetadataOriginal))) {
-      DWORD oldProtect = 0;
-      DWORD tmpProtect = 0;
-      if (VirtualProtect(reinterpret_cast<LPVOID>(g_fiveMetadataAddr),
-                         sizeof(g_fiveMetadataOriginal),
-                         PAGE_READWRITE, &oldProtect)) {
-        std::memcpy(reinterpret_cast<void *>(g_fiveMetadataAddr),
-                    g_fiveMetadataOriginal,
-                    sizeof(g_fiveMetadataOriginal));
-        VirtualProtect(reinterpret_cast<LPVOID>(g_fiveMetadataAddr),
-                       sizeof(g_fiveMetadataOriginal),
-                       oldProtect, &tmpProtect);
+    const uintptr_t gameBase = GetGameBase();
+    const uintptr_t exeBase =
+        reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    if (!gameBase || !exeBase) {
+      AddLog(u8"[책략5메타DBG] gameBase/EXE base를 찾지 못했습니다.");
+      return false;
+    }
+
+    MODULEINFO mi{};
+    if (!GetModuleInformation(GetCurrentProcess(),
+                              reinterpret_cast<HMODULE>(exeBase),
+                              &mi, sizeof(mi))) {
+      AddLog(u8"[책략5메타DBG] 모듈 정보 읽기 실패.");
+      return false;
+    }
+
+    const uintptr_t imageEnd =
+        exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+    const char *troopTypePat =
+        "488B????????????E8????????488B??4883????5BC333??488B??E8????????488B??4883????5BC3E8??????????????????????4053";
+
+    uintptr_t scanStart = exeBase + 0x58E000;
+    uintptr_t scanEnd = exeBase + 0x59E000;
+    if (scanStart >= imageEnd)
+      scanStart = exeBase;
+    if (scanEnd > imageEnd)
+      scanEnd = imageEnd;
+
+    uintptr_t found = FindPattern(scanStart, scanEnd, troopTypePat);
+    if (!found)
+      found = FindPattern(exeBase, imageEnd, troopTypePat);
+
+    if (!found || !IsValidPtr(found + 4, sizeof(uint32_t))) {
+      AddLog(u8"[책략5메타DBG] CT 원본 troopTypePointerOffset 패턴을 찾지 못했습니다.");
+      return false;
+    }
+
+    const uint32_t troopTypePointerOffset =
+        *reinterpret_cast<const uint32_t *>(found + 4);
+    const uintptr_t pointerAddr =
+        gameBase + static_cast<uintptr_t>(troopTypePointerOffset);
+
+    if (!IsValidPtr(pointerAddr, sizeof(uintptr_t))) {
+      AddLog(u8"[책략5메타DBG] troopType 포인터 주소 무효: offset=0x%X addr=%p",
+             (unsigned)troopTypePointerOffset,
+             reinterpret_cast<void *>(pointerAddr));
+      return false;
+    }
+
+    const uintptr_t troopTypeBase =
+        *reinterpret_cast<const uintptr_t *>(pointerAddr);
+    const uintptr_t table =
+        troopTypeBase + kStratagemMetadataOffset;
+
+    if (!troopTypeBase || troopTypeBase == UINTPTR_MAX ||
+        !IsValidPtr(table, kRecordStride * 5)) {
+      AddLog(u8"[책략5메타DBG] troopType base/책략 테이블 범위 무효: offset=0x%X base=%p",
+             (unsigned)troopTypePointerOffset,
+             reinterpret_cast<void *>(troopTypeBase));
+      return false;
+    }
+
+    // PDB가 보여준 실제 구조:
+    // TrickData object = 0x20 bytes, +0x00 vptr, +0x08부터 payload.
+    // 이미 게임 자체에 1~11번 TrickData 객체가 존재합니다.
+    for (int i = 0; i < 5; ++i) {
+      const uintptr_t row = table + (uintptr_t)i * kRecordStride;
+      const uint8_t expected = (uint8_t)(i + 1);
+      const uint8_t a = *reinterpret_cast<const uint8_t *>(row + kId1);
+      const uint8_t b = *reinterpret_cast<const uint8_t *>(row + kId2);
+      const uint8_t d = *reinterpret_cast<const uint8_t *>(row + kId3);
+      if (a != expected || b != expected || d != expected) {
+        AddLog(u8"[책략5메타DBG] TrickData 검증 실패 row=%d IDs=%u/%u/%u",
+               i + 1, (unsigned)a, (unsigned)b, (unsigned)d);
+        return false;
       }
     }
 
-    AddLog(u8"[책략5메타DBG] 5번 메타 행 원복 완료.");
-    g_fiveMetadataApplied = false;
-    g_fiveMetadataAddr = 0;
-    std::memset(g_fiveMetadataOriginal, 0, sizeof(g_fiveMetadataOriginal));
+    const uintptr_t row5 = table + 4 * kRecordStride;
+    g_fiveMetadataTable = table;
+    g_fiveMetadataAddr = row5;
+    g_fiveMetadataApplied = true;
+
+    AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p / 별도 메타 복제 없음",
+           reinterpret_cast<void *>(table),
+           reinterpret_cast<void *>(row5));
+
+    if (!g_id5CountApplied || !g_id5CountOwner) {
+      AddLog(u8"[책략5PDBDBG] 먼저 '5번 책략 횟수 1'을 켜서 플레이어측 전장 객체를 확정하세요.");
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
+    }
+
+    const uintptr_t getTricksAddr = exeBase + kCampGetTricksRva;
+    if (!IsValidPtr(getTricksAddr, 0x24)) {
+      AddLog(u8"[책략5PDBDBG] CampData::GetTricks RVA가 유효하지 않습니다: %p",
+             reinterpret_cast<void *>(getTricksAddr));
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
+    }
+
+    GetTricksFn getTricks =
+        reinterpret_cast<GetTricksFn>(getTricksAddr);
+
+    auto rangeMatches = [&](uintptr_t object,
+                            uintptr_t *outSlotAddr,
+                            uintptr_t *outOld5) -> bool {
+      if (!object || !IsValidPtr(object, 0x40))
+        return false;
+
+      TrickRangeProbe range{};
+      bool called = false;
+      __try {
+        range = getTricks(reinterpret_cast<const void *>(object));
+        called = true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        called = false;
+      }
+      if (!called || !range.first || !range.last)
+        return false;
+
+      const uintptr_t begin =
+          reinterpret_cast<uintptr_t>(range.first);
+      const uintptr_t end =
+          reinterpret_cast<uintptr_t>(range.last);
+      if (end < begin ||
+          end - begin != 5 * sizeof(uintptr_t) ||
+          !IsValidPtr(begin, 5 * sizeof(uintptr_t)))
+        return false;
+
+      bool seen[4] = {};
+      for (int i = 0; i < 4; ++i) {
+        const uintptr_t v = range.first[i];
+        int matched = -1;
+        for (int j = 0; j < 4; ++j) {
+          if (v == table + (uintptr_t)j * kRecordStride) {
+            matched = j;
+            break;
+          }
+        }
+        if (matched < 0 || seen[matched])
+          return false;
+        seen[matched] = true;
+      }
+
+      const uintptr_t fifth = range.first[4];
+      if (fifth != 0 && fifth != row5)
+        return false;
+
+      if (outSlotAddr)
+        *outSlotAddr =
+            begin + 4 * sizeof(uintptr_t);
+      if (outOld5)
+        *outOld5 = fifth;
+      return true;
+    };
+
+    uintptr_t objects[160] = {};
+    int objectCount = 0;
+
+    auto addObject = [&](uintptr_t p) {
+      if (!p || p <= 0x10000 || !IsValidPtr(p, 0x40))
+        return;
+      for (int i = 0; i < objectCount; ++i)
+        if (objects[i] == p)
+          return;
+      if (objectCount < (int)(sizeof(objects) / sizeof(objects[0])))
+        objects[objectCount++] = p;
+    };
+
+    addObject(g_id5CountOwner);
+
+    // The battle-side object captured by the old CT may own CampData directly
+    // or through one pointer member. Search only a small bounded prefix.
+    if (IsValidPtr(g_id5CountOwner, 0x300)) {
+      for (uintptr_t off = 0; off + sizeof(uintptr_t) <= 0x300;
+           off += sizeof(uintptr_t)) {
+        uintptr_t p = 0;
+        __try {
+          p = *reinterpret_cast<const uintptr_t *>(
+              g_id5CountOwner + off);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+          p = 0;
+        }
+        addObject(p);
+      }
+    }
+
+    uintptr_t matchedObject = 0;
+    uintptr_t matchedSlot = 0;
+    uintptr_t matchedOld5 = 0;
+    int matches = 0;
+
+    for (int i = 0; i < objectCount; ++i) {
+      uintptr_t slot = 0;
+      uintptr_t old5 = 0;
+      if (!rangeMatches(objects[i], &slot, &old5))
+        continue;
+
+      ++matches;
+      matchedObject = objects[i];
+      matchedSlot = slot;
+      matchedOld5 = old5;
+    }
+
+    if (matches != 1) {
+      AddLog(u8"[책략5PDBDBG] CampData 후보=%d개 (검사 객체=%d). 정확히 1개가 아니어서 쓰기 중단.",
+             matches, objectCount);
+      AddLog(u8"[책략5PDBDBG] PDB 확인사항: CampData::m_pTricks는 5칸 배열, 전투 AI Trick cache도 5칸입니다.");
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
+    }
+
+    DWORD oldProtect = 0;
+    DWORD tmpProtect = 0;
+    if (!VirtualProtect(reinterpret_cast<LPVOID>(matchedSlot),
+                        sizeof(uintptr_t), PAGE_READWRITE, &oldProtect)) {
+      AddLog(u8"[책략5PDBDBG] 5번째 CampData 포인터 쓰기 권한 변경 실패.");
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
+    }
+
+    *reinterpret_cast<uintptr_t *>(matchedSlot) = row5;
+    VirtualProtect(reinterpret_cast<LPVOID>(matchedSlot),
+                   sizeof(uintptr_t), oldProtect, &tmpProtect);
+
+    if (*reinterpret_cast<const uintptr_t *>(matchedSlot) != row5) {
+      AddLog(u8"[책략5PDBDBG] CampData 5번째 포인터 쓰기 검증 실패.");
+      g_fiveMetadataApplied = false;
+      g_fiveMetadataAddr = 0;
+      g_fiveMetadataTable = 0;
+      return false;
+    }
+
+    g_fiveRuntimeSlotAddr = matchedSlot;
+    g_fiveRuntimeSlotOriginal = matchedOld5;
+    g_fiveRuntimeSlotApplied = true;
+
+    AddLog(u8"[책략5PDBDBG] CampData 5슬롯 연결 성공: camp=%p slot5=%p old=%p new(row5)=%p",
+           reinterpret_cast<void *>(matchedObject),
+           reinterpret_cast<void *>(matchedSlot),
+           reinterpret_cast<void *>(matchedOld5),
+           reinterpret_cast<void *>(row5));
+    AddLog(u8"[책략5PDBDBG] 이제 책략 UI를 닫았다 다시 열어 5개 표시 여부를 확인하세요.");
     return true;
   }
 
