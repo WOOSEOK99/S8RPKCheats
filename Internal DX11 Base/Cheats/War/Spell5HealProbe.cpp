@@ -337,11 +337,24 @@ namespace DX11Base {
   }
 
   void ResetSpell5HealProbeBattleRuntime() {
-    // The TrickData table belongs to the current game/save generation and may
-    // remain valid across battles. Only the unit-list/morale snapshots are
-    // battle-local and must not leak into the next battle.
+    // Treat ID5 data as battle-scoped too. Restore the row while the address is
+    // still valid, but keep the user's persistent ON request so the next battle
+    // can rebuild from its own live TrickData table.
+    bool restored = false;
+    if (g_applied && g_spell5Addr &&
+        IsValidPtr(g_spell5Addr, sizeof(SpellRecord)))
+      restored = WriteRecord(g_spell5Addr, g_spell5Original);
+
+    if (g_applied) {
+      AddLog(restored
+                 ? u8"[책략5수명] 전투 종료: ID5 TrickData 원복 완료. ON 요청은 유지."
+                 : u8"[책략5수명] 전투 종료: ID5 TrickData 주소가 유효하지 않아 쓰지 않고 폐기. ON 요청은 유지.");
+    }
+
+    g_applied = false;
+    g_spell5Addr = 0;
+    g_spell5Original = {};
     ResetDiagnostics();
-    AddLog(u8"[책략5수명] 전투 종료 확정: 5번 책략 대상/힐 진단 상태 초기화.");
   }
 
   void ResetSpell5HealProbeSession(uintptr_t oldP1, uintptr_t newP1) {
