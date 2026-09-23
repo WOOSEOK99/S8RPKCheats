@@ -3611,6 +3611,73 @@ namespace DX11Base {
       }
     }
 
+    static void LogFifthPlanSnapshotSeh(
+        uintptr_t owner, const char *reason) {
+      static uintptr_t s_lastOwner = 0;
+      static ULONGLONG s_lastTick = 0;
+
+      const ULONGLONG now = GetTickCount64();
+      if (!owner || (owner == s_lastOwner && now - s_lastTick < 3000))
+        return;
+      s_lastOwner = owner;
+      s_lastTick = now;
+
+      __try {
+        const uintptr_t modelBase = owner + 0xF0;
+        uintptr_t campData = 0;
+        uint32_t count = 0;
+        StratagemFiveModel::Entry entries[5] = {};
+        uintptr_t campRows[5] = {};
+
+        const bool modelOk =
+            IsValidPtr(modelBase + 0x10, sizeof(entries)) &&
+            IsValidPtr(modelBase + 0x60, sizeof(count)) &&
+            SafeCopySeh(modelBase + 0x10, entries, sizeof(entries)) &&
+            SafeCopySeh(modelBase + 0x60, &count, sizeof(count));
+
+        const bool campOk =
+            SafeReadPtrSeh(owner + 0x10, &campData) &&
+            campData &&
+            IsValidPtr(campData + 0x68, sizeof(campRows)) &&
+            SafeCopySeh(campData + 0x68, campRows, sizeof(campRows));
+
+        AddLog(u8"[책략5NDBG] plan 실패 snapshot: reason=%s owner=%p modelOk=%d campOk=%d count=%u table=%p",
+               reason ? reason : "?",
+               reinterpret_cast<void *>(owner),
+               modelOk ? 1 : 0, campOk ? 1 : 0,
+               (unsigned)count,
+               reinterpret_cast<void *>(g_fiveMetadataTable));
+
+        if (modelOk) {
+          for (int i = 0; i < 5; ++i) {
+            uint32_t rowId = 0;
+            const bool rowOk =
+                StratagemFiveModel::RowId(
+                    entries[i].data, g_fiveMetadataTable, rowId);
+            AddLog(u8"[책략5NDBG] entry%d data=%p rowId=%s%u index=%u available=%u",
+                   i,
+                   reinterpret_cast<void *>(entries[i].data),
+                   rowOk ? "" : "INVALID/",
+                   rowOk ? (unsigned)rowId : 0u,
+                   (unsigned)entries[i].index,
+                   (unsigned)entries[i].available);
+          }
+        }
+
+        if (campOk) {
+          AddLog(u8"[책략5NDBG] CampData rows=%p,%p,%p,%p,%p",
+                 reinterpret_cast<void *>(campRows[0]),
+                 reinterpret_cast<void *>(campRows[1]),
+                 reinterpret_cast<void *>(campRows[2]),
+                 reinterpret_cast<void *>(campRows[3]),
+                 reinterpret_cast<void *>(campRows[4]));
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        AddLog(u8"[책략5NDBG] plan 실패 snapshot 읽기 중 예외: owner=%p",
+               reinterpret_cast<void *>(owner));
+      }
+    }
+
     static bool TryGetDialogCampOwnerSeh(uintptr_t *outOwner) {
       if (!outOwner)
         return false;
@@ -3801,6 +3868,8 @@ namespace DX11Base {
         chosen = dialogOwner;
         chosenName = u8"현재 dialog측";
         chosenPlan = plan;
+      } else {
+        LogFifthPlanSnapshotSeh(dialogOwner, "count-dialog-owner");
       }
     }
 
@@ -4349,6 +4418,7 @@ namespace DX11Base {
     if (!TryReadFifthPlanForOwnerSeh(
             g_id5CountOwner, &plan, &entries, &campRows,
             &modelBase, &tricksAddr)) {
+      LogFifthPlanSnapshotSeh(g_id5CountOwner, "metadata-owner");
       AddLog(u8"[책략5수명] ID5 내부등록 대기: 현재 owner의 원본 책략 목록 N/row 매핑 검증 실패.");
       return true;
     }
