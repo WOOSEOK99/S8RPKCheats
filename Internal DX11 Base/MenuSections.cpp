@@ -281,7 +281,7 @@ namespace DX11Base {
       if (p1) {
         BeginSection();
 
-        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 자원 및 도시 활동 ]");
+        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), u8"[ 내정 ]");
         // DrawStatRow(u8"금", 0x300, 2, &v_Gold, p1, gameBase, scale);
         // DrawStatRow(u8"행동력", 0xEE, 1, &v_AP, p1, gameBase, scale);
         // DrawStatRow(u8"우호의 증표", 0xF8, 2, &v_Token, 0, gameBase, scale);
@@ -454,10 +454,9 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        EndSection();
-
-        BeginSection();
-        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), u8"[ 명성치 편집 ]");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
 
         DrawStatMini(u8"무명", &v_RepM, 0x106, 2, p1, 60, scale);
         ImGui::SameLine(100 * scale);
