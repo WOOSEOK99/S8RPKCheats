@@ -7,6 +7,23 @@ namespace DX11Base {
   // keeps effect #20 only as a secondary healing candidate.
   bool SetSpell5HealProbe(bool enable);
 
+  // Editable ID5 payload. Defaults are the already verified working values:
+  // ally / morale +40 / no second effect / range 5 / injected troop heal +2000.
+  struct Spell5CustomSettings {
+    int target = 1;       // 1 ally, 2 enemy, 3 both
+    int effect1 = 10;     // 0 none, 3 status, 10 morale, 11 damage, 12 fire
+    int power1 = 40;
+    int duration1 = 0;
+    int effect2 = 0;
+    int power2 = 0;
+    int duration2 = 0;
+    int range = 5;
+    int healAmount = 2000; // separate injected heal, not native TrickData
+  };
+
+  Spell5CustomSettings GetSpell5CustomSettings();
+  void SetSpell5CustomSettings(const Spell5CustomSettings &settings);
+
   // True only when the current game generation actually contains the verified
   // ID5 TrickData record. A persistent ON request by itself is not "ready".
   bool IsSpell5HealProbeReady();
