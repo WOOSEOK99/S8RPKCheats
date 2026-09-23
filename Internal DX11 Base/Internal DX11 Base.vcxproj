@@ -230,6 +230,7 @@
     <ClInclude Include="Cheats\Social\Resonancecave.h" />
     <ClInclude Include="Cheats\War\Selfheal.h" />
     <ClInclude Include="Cheats\War\StratagemGaugeMax.h" />
+    <ClInclude Include="Cheats\War\StratagemSlotProbe.h" />
     <ClInclude Include="Cheats\War\Spell5HealProbe.h" />
     <ClInclude Include="Cheats\War\ShortBattleCooldown.h" />
     <ClInclude Include="Cheats\War\TotalWarCycleShortening.h" />
@@ -360,6 +361,7 @@
     <ClCompile Include="Cheats\Social\Resonancecave.cpp" />
     <ClCompile Include="Cheats\War\Selfheal.cpp" />
     <ClCompile Include="Cheats\War\StratagemGaugeMax.cpp" />
+    <ClCompile Include="Cheats\War\StratagemSlotProbe.cpp" />
     <ClCompile Include="Cheats\War\Spell5HealProbe.cpp" />
     <ClCompile Include="Cheats\War\ShortBattleCooldown.cpp" />
     <ClCompile Include="Cheats\War\TotalWarCycleShortening.cpp" />
