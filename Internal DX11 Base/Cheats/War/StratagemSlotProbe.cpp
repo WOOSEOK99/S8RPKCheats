@@ -574,12 +574,13 @@ namespace DX11Base {
       const uintptr_t imageEnd =
           exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
 
-      // Old CT's troopTypePointerOffsetCheck, ported exactly.
-      // The CT reads the current troop-type pointer offset from found+4.
+      // Old CT's bytes8 copied byte-for-byte. Our FindPattern accepts
+      // compact CE-style ?? wildcards, so do not manually expand it.
+      // CT:
+      // 488B????????????E8????????488B??4883????5BC333??488B??E8????????488B??4883????5BC3E8??????????????????????4053
+      // and reads the dynamic offset from found+4.
       const char *troopTypePat =
-          "48 8B ? ? ? ? ? ? E8 ? ? ? ? 48 8B ? "
-          "48 83 ? ? 5B C3 33 ? 48 8B ? E8 ? ? ? ? "
-          "48 8B ? 48 83 ? ? 5B C3 E8 ? ? ? ? ? ? ? ? ? ? ? 40 53";
+          "488B????????????E8????????488B??4883????5BC333??488B??E8????????488B??4883????5BC3E8??????????????????????4053";
 
       uintptr_t scanStart = exeBase + 0x58E000;
       uintptr_t scanEnd = exeBase + 0x59E000;
@@ -588,12 +589,23 @@ namespace DX11Base {
       if (scanEnd > imageEnd)
         scanEnd = imageEnd;
 
-      const uintptr_t found =
-          FindPattern(scanStart, scanEnd, troopTypePat);
+      uintptr_t found = FindPattern(scanStart, scanEnd, troopTypePat);
+      if (!found) {
+        // Version drift fallback: same exact signature across the full image.
+        found = FindPattern(exeBase, imageEnd, troopTypePat);
+      }
+
       if (!found || !IsValidPtr(found + 4, sizeof(uint32_t))) {
-        AddLog(u8"[책략5메타DBG] troopTypePointerOffset 패턴을 찾지 못했습니다.");
+        AddLog(u8"[책략5메타DBG] CT 원본 troopTypePointerOffset 패턴도 찾지 못했습니다.");
         return false;
       }
+
+      AddLog(u8"[책략5메타DBG] troopType 패턴 발견: %p / +4=%02X %02X %02X %02X",
+             reinterpret_cast<void *>(found),
+             (unsigned)*reinterpret_cast<const uint8_t *>(found + 4),
+             (unsigned)*reinterpret_cast<const uint8_t *>(found + 5),
+             (unsigned)*reinterpret_cast<const uint8_t *>(found + 6),
+             (unsigned)*reinterpret_cast<const uint8_t *>(found + 7));
 
       const uint32_t troopTypePointerOffset =
           *reinterpret_cast<const uint32_t *>(found + 4);
