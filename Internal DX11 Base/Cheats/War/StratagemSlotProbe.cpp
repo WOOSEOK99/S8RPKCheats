@@ -2300,8 +2300,12 @@ namespace DX11Base {
         size_t size;
       };
       const Target targets[] = {
-          {u8"focus-callback", 0x007594B0, 0x180},
-          {u8"detail-update",  0x01DF3C20, 0x280},
+          // +7594B0 writes the hovered model entry into detailObject+0x28
+          // and then calls +1E12D90. +1DF3C20 is selection/state update,
+          // not the hover description renderer.
+          {u8"detail-panel",   0x01E12D90, 0x300},
+          {u8"detail-text-a",  0x01D78070, 0x240},
+          {u8"detail-text-b",  0x000D1A80, 0x240},
       };
 
       g_fifthFocusDetailPathLogged = true;
