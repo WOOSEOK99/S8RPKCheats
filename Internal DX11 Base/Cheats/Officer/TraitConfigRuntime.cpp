@@ -30,6 +30,9 @@ constexpr std::size_t kMetadataOffset = 0x2E;
 constexpr std::size_t kMetadataSize = 0x12;
 constexpr uint32_t kTraitsPointerOffsetFallback = 0x57A4B8;
 constexpr int kDefaultCloneSource = 30; // version.dll Normalize()와 동일한 기본 donor index
+constexpr uintptr_t kNameGetterOffset = 0x170E2D0;
+constexpr uintptr_t kNameGetterPointerOffset = 0x170E2D6;
+constexpr uint8_t kNameGetterStub[] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
 
 #pragma pack(push, 1)
 struct TraitEffect {
@@ -50,6 +53,7 @@ struct TraitConfigEntry {
 struct TraitMetaEntry {
   bool present = false;
   bool hasCustomText = false;
+  std::string name;
   int cloneSrc = -1;
   int bgTrait = -1;
   int grade = -1;
@@ -73,11 +77,236 @@ struct RuntimeState {
 
   ULONGLONG lastTickMs = 0;
   ULONGLONG lastConfigProbeMs = 0;
+
+  std::array<const wchar_t *, kTraitCount> nativeNamePtrs{};
+  bool nameHookInstalled = false;
+  bool nameHookFailureLogged = false;
+  uintptr_t originalNameGetter = 0;
 };
 
 RuntimeState &State() {
   static RuntimeState state;
   return state;
+}
+
+
+using TraitNameGetter = const wchar_t *(__fastcall *)(void *);
+
+bool IsExecutableAddress(uintptr_t address) {
+  if (address < 0x10000)
+    return false;
+
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (VirtualQuery(reinterpret_cast<const void *>(address), &mbi, sizeof(mbi)) != sizeof(mbi))
+    return false;
+  if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+    return false;
+
+  const DWORD protect = mbi.Protect & 0xFF;
+  return protect == PAGE_EXECUTE ||
+         protect == PAGE_EXECUTE_READ ||
+         protect == PAGE_EXECUTE_READWRITE ||
+         protect == PAGE_EXECUTE_WRITECOPY;
+}
+
+bool ReadMemorySafe(uintptr_t address, void *out, std::size_t size) {
+  if (!address || !out || size == 0)
+    return false;
+  __try {
+    std::memcpy(out, reinterpret_cast<const void *>(address), size);
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    std::memset(out, 0, size);
+    return false;
+  }
+}
+
+bool WritePointerSafe(uintptr_t address, uintptr_t value) {
+  DWORD oldProtect = 0;
+  void *dst = reinterpret_cast<void *>(address);
+  if (!VirtualProtect(dst, sizeof(value), PAGE_EXECUTE_READWRITE, &oldProtect))
+    return false;
+
+  bool ok = true;
+  __try {
+    std::memcpy(dst, &value, sizeof(value));
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    ok = false;
+  }
+
+  DWORD ignored = 0;
+  VirtualProtect(dst, sizeof(value), oldProtect, &ignored);
+  if (ok)
+    FlushInstructionCache(GetCurrentProcess(), dst, sizeof(value));
+  return ok;
+}
+
+const wchar_t *__fastcall CustomTraitNameGetter(void *traitObject) {
+  uint16_t id = 0;
+  if (traitObject) {
+    __try {
+      id = *reinterpret_cast<const uint16_t *>(
+          reinterpret_cast<uintptr_t>(traitObject) + kTraitIdOffset);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+      id = 0;
+    }
+  }
+
+  RuntimeState &state = State();
+  if (id >= 1 && id <= kTraitCount) {
+    const wchar_t *custom = state.nativeNamePtrs[static_cast<std::size_t>(id - 1)];
+    if (custom && custom[0] != L'\0')
+      return custom;
+  }
+
+  const uintptr_t original = state.originalNameGetter;
+  if (!original)
+    return L"";
+  return reinterpret_cast<TraitNameGetter>(original)(traitObject);
+}
+
+bool Utf8ToWide(const std::string &text, std::wstring &out) {
+  out.clear();
+  if (text.empty())
+    return true;
+
+  const int count = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS,
+      text.data(), static_cast<int>(text.size()),
+      nullptr, 0);
+  if (count <= 0)
+    return false;
+
+  out.resize(static_cast<std::size_t>(count));
+  return MultiByteToWideChar(
+             CP_UTF8, MB_ERR_INVALID_CHARS,
+             text.data(), static_cast<int>(text.size()),
+             out.data(), count) == count;
+}
+
+const wchar_t *AllocateStableWideString(const std::string &utf8) {
+  std::wstring wide;
+  if (!Utf8ToWide(utf8, wide) || wide.empty())
+    return nullptr;
+
+  const std::size_t bytes = (wide.size() + 1) * sizeof(wchar_t);
+  void *memory = VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  if (!memory)
+    return nullptr;
+
+  std::memcpy(memory, wide.c_str(), bytes);
+  return reinterpret_cast<const wchar_t *>(memory);
+}
+
+bool PublishNativeNames(const std::array<TraitMetaEntry, kTraitCount> &meta) {
+  RuntimeState &state = State();
+  std::array<const wchar_t *, kTraitCount> next{};
+
+  int published = 0;
+  for (int i = 0; i < kTraitCount; ++i) {
+    if (!meta[i].present || meta[i].name.empty())
+      continue;
+
+    const wchar_t *wide = AllocateStableWideString(meta[i].name);
+    if (!wide) {
+      AddLog(u8"[기재JSON/이름] UTF-8 이름 변환/할당 실패: index=%d", i);
+      return false;
+    }
+
+    next[i] = wide;
+    ++published;
+  }
+
+  // 이전 문자열은 게임 UI가 포인터를 보유할 수 있으므로 해제하지 않습니다.
+  // 새 포인터 배열만 원자 크기 포인터 쓰기로 교체합니다.
+  state.nativeNamePtrs = next;
+  AddLog(u8"[기재JSON/이름] JSON 이름 준비 완료: %d개", published);
+  return true;
+}
+
+bool HasPublishedCustomNames() {
+  RuntimeState &state = State();
+  for (const wchar_t *name : state.nativeNamePtrs) {
+    if (name && name[0] != L'\0')
+      return true;
+  }
+  return false;
+}
+
+bool EnsureCustomNameHook() {
+  RuntimeState &state = State();
+  if (!HasPublishedCustomNames())
+    return true;
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase)
+    return false;
+
+  const uintptr_t stubAddress = gameBase + kNameGetterOffset;
+  uint8_t stub[sizeof(kNameGetterStub)] = {};
+  if (!ReadMemorySafe(stubAddress, stub, sizeof(stub)) ||
+      std::memcmp(stub, kNameGetterStub, sizeof(stub)) != 0) {
+    if (!state.nameHookFailureLogged) {
+      AddLog(u8"[기재JSON/이름] 이름 getter 스텁 검증 실패 (+170E2D0). 사용자 기재 적용을 보류합니다.");
+      state.nameHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  const uintptr_t pointerAddress = gameBase + kNameGetterPointerOffset;
+  uintptr_t currentTarget = 0;
+  if (!ReadMemorySafe(pointerAddress, &currentTarget, sizeof(currentTarget)))
+    return false;
+
+  const uintptr_t hookTarget =
+      reinterpret_cast<uintptr_t>(&CustomTraitNameGetter);
+
+  if (currentTarget == hookTarget) {
+    state.nameHookInstalled = true;
+    state.nameHookFailureLogged = false;
+    return true;
+  }
+
+  if (state.nameHookInstalled) {
+    // 다른 기능이 이름 getter를 바꿨다면 서로 덮어쓰지 않습니다.
+    if (currentTarget != state.originalNameGetter) {
+      if (!state.nameHookFailureLogged) {
+        AddLog(u8"[기재JSON/이름] 이름 getter가 다른 패치로 변경되어 재설치를 보류합니다: %p",
+               reinterpret_cast<void *>(currentTarget));
+        state.nameHookFailureLogged = true;
+      }
+      return false;
+    }
+  } else {
+    if (!IsExecutableAddress(currentTarget)) {
+      if (!state.nameHookFailureLogged) {
+        AddLog(u8"[기재JSON/이름] 원본 이름 getter 주소가 실행 가능 메모리가 아닙니다: %p",
+               reinterpret_cast<void *>(currentTarget));
+        state.nameHookFailureLogged = true;
+      }
+      return false;
+    }
+    state.originalNameGetter = currentTarget;
+  }
+
+  if (!WritePointerSafe(pointerAddress, hookTarget)) {
+    if (!state.nameHookFailureLogged) {
+      AddLog(u8"[기재JSON/이름] 이름 getter 포인터 교체 실패. 사용자 기재 적용을 보류합니다.");
+      state.nameHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  state.nameHookInstalled = true;
+  state.nameHookFailureLogged = false;
+  AddLog(u8"[기재JSON/이름] 원본 UI 이름 훅 설치 완료: original=%p hook=%p",
+         reinterpret_cast<void *>(state.originalNameGetter),
+         reinterpret_cast<void *>(hookTarget));
+  return true;
 }
 
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
@@ -244,6 +473,7 @@ bool ParseCustomMetaLine(const std::string &line, int &index, TraitMetaEntry &en
   std::string desc;
   ReadJsonStringValue(line, "name", name);
   ReadJsonStringValue(line, "desc", desc);
+  parsed.name = name;
   parsed.hasCustomText = !name.empty() || !desc.empty();
 
   ReadJsonIntValue(line, "cloneSrc", parsed.cloneSrc);
@@ -371,6 +601,11 @@ bool LoadConfig(bool &changed) {
         break;
       }
     }
+  }
+
+  if (!PublishNativeNames(meta)) {
+    AddLog(u8"[기재JSON/이름] JSON 이름 준비 실패. 기재 테이블 적용을 중지합니다.");
+    return false;
   }
 
   state.traits = std::move(traits);
@@ -621,6 +856,11 @@ void TickTraitConfigRuntime() {
     if (changed)
       state.applyPending = true;
   }
+
+  // 커스텀 ID가 원본 UI에서 조회되기 전에 이름 getter를 먼저 가로챕니다.
+  // 이 훅이 실패하면 71~254 슬롯을 활성화하지 않아 원본 사실무장 편집 UI 프리징을 방지합니다.
+  if (!EnsureCustomNameHook())
+    return;
 
   const uintptr_t gameDataRoot = GetGameBaseFast();
   const uintptr_t tableBase = ResolveTraitTable(gameDataRoot);
