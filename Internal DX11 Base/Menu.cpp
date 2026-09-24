@@ -11,7 +11,7 @@
 #include "Cheats/Officer/OfficerData.h"
 #include "Cheats/Officer/RoninMonitor.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
-#include "Cheats/Officer/StatMonitor.h"
+#include "Cheats/Officer/StatMonitor.h"\n#include "Cheats/Officer/TraitConfigRuntime.h"
 #include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SpeedHack.h"
