@@ -146,6 +146,7 @@ namespace DX11Base {
     static bool g_fifthTrickDataTextVirtualsLogged = false;
     static bool g_fifthTextResourceLookupLogged = false;
     static bool g_fifthSetTrickIdPathLogged = false;
+    static bool g_fifthFocusDetailPathLogged = false;
     static std::atomic<uintptr_t> g_fifthTitleNameGetterOriginal{0};
     static std::atomic<bool> g_fifthTitleNameGetterProbeInstalled{false};
     static std::atomic<uintptr_t> g_fifthTitleSeenCallers[16]{};
@@ -2270,6 +2271,118 @@ namespace DX11Base {
                      head[off + 1] == 0x8D ? "LEA" : "MOV",
                      (unsigned long long)off,
                      (unsigned long long)(ripTarget - exeBase));
+            }
+          }
+        }
+      }
+    }
+
+
+    static void LogFifthFocusDetailPath() {
+      if (g_fifthFocusDetailPathLogged)
+        return;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      MODULEINFO mi{};
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase) ||
+          !GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return;
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+
+      struct Target {
+        const char *name;
+        uintptr_t rva;
+        size_t size;
+      };
+      const Target targets[] = {
+          {u8"focus-callback", 0x007594B0, 0x180},
+          {u8"detail-update",  0x01DF3C20, 0x280},
+      };
+
+      g_fifthFocusDetailPathLogged = true;
+
+      for (const auto &t : targets) {
+        const uintptr_t fn = exeBase + t.rva;
+        if (!IsValidPtr(fn, t.size) || !IsExecutableAddress(fn)) {
+          AddLog(u8"[책략5DETAIL] %s RVA=+%llX 읽기 실패",
+                 t.name, (unsigned long long)t.rva);
+          continue;
+        }
+
+        std::vector<uint8_t> code(t.size);
+        if (!SafeCopySeh(fn, code.data(), code.size()))
+          continue;
+
+        AddLog(u8"[책략5DETAIL] %s RVA=+%llX size=0x%llX",
+               t.name,
+               (unsigned long long)t.rva,
+               (unsigned long long)t.size);
+
+        for (size_t off = 0; off < code.size(); off += 0x20) {
+          char line[256] = {};
+          int pos = 0;
+          const size_t chunk =
+              (off + 0x20 <= code.size()) ? 0x20 : (code.size() - off);
+          for (size_t j = 0; j < chunk &&
+                             pos < (int)sizeof(line) - 4; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos,
+                             "%02X ", (unsigned)code[off + j]);
+          }
+          AddLog(u8"[책략5DETAIL] %s +%03llX : %s",
+                 t.name, (unsigned long long)off, line);
+        }
+
+        for (size_t off = 0; off + 7 <= code.size(); ++off) {
+          if (code[off] == 0xE8 || code[off] == 0xE9) {
+            int32_t rel = 0;
+            std::memcpy(&rel, code.data() + off + 1, sizeof(rel));
+            const uintptr_t target =
+                fn + off + 5 + static_cast<intptr_t>(rel);
+            if (target >= exeBase && target < imageEnd) {
+              AddLog(u8"[책략5DETAIL] %s %s +%03llX -> RVA=+%llX",
+                     t.name,
+                     code[off] == 0xE8 ? "CALL" : "JMP",
+                     (unsigned long long)off,
+                     (unsigned long long)(target - exeBase));
+            }
+          }
+
+          if (off + 3 <= code.size() &&
+              code[off] == 0xFF && code[off + 1] == 0x50) {
+            AddLog(u8"[책략5DETAIL] %s VCALL +%03llX [rax+0x%02X]",
+                   t.name,
+                   (unsigned long long)off,
+                   (unsigned)code[off + 2]);
+          }
+          if (off + 6 <= code.size() &&
+              code[off] == 0xFF && code[off + 1] == 0x90) {
+            int32_t disp = 0;
+            std::memcpy(&disp, code.data() + off + 2, sizeof(disp));
+            AddLog(u8"[책략5DETAIL] %s VCALL +%03llX [rax+0x%X]",
+                   t.name,
+                   (unsigned long long)off,
+                   (unsigned)disp);
+          }
+
+          const uint8_t rex = code[off];
+          if ((rex == 0x48 || rex == 0x4C) &&
+              (code[off + 1] == 0x8D || code[off + 1] == 0x8B) &&
+              (code[off + 2] & 0xC7) == 0x05) {
+            int32_t disp = 0;
+            std::memcpy(&disp, code.data() + off + 3, sizeof(disp));
+            const uintptr_t target =
+                fn + off + 7 + static_cast<intptr_t>(disp);
+            if (target >= exeBase && target < imageEnd) {
+              AddLog(u8"[책략5DETAIL] %s RIP-%s +%03llX -> RVA=+%llX",
+                     t.name,
+                     code[off + 1] == 0x8D ? "LEA" : "MOV",
+                     (unsigned long long)off,
+                     (unsigned long long)(target - exeBase));
             }
           }
         }
@@ -6017,6 +6130,7 @@ namespace DX11Base {
     // already renders the fifth card title/image correctly. Do not detour it:
     // its entry hook previously froze the stratagem menu.
     LogFifthSetTrickIdPath();
+    LogFifthFocusDetailPath();
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
