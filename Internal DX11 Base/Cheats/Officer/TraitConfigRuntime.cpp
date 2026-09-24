@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <intrin.h>
 #include <string>
 #include <utility>
 
@@ -33,6 +34,12 @@ constexpr uint32_t kTraitsPointerOffsetFallback = 0x57A4B8;
 constexpr int kDefaultCloneSource = 30; // version.dll Normalize()와 동일한 기본 donor index
 constexpr uintptr_t kNameGetterOffset = 0x170E2D0;
 constexpr uintptr_t kDescMapGetterOffset = 0x171E070;
+constexpr uintptr_t kTraitEffectQueryOffset = 0x17AAD60;
+constexpr uintptr_t kTraitEffectQuerySkipCallerOffset = 0x1C7A135;
+
+constexpr uint8_t kTraitEffectQueryPrologue[] = {
+    0x48, 0x89, 0x5C, 0x24, 0x08
+};
 constexpr uintptr_t kDescTextPointerFallbackOffset = 0x2C34EC0;
 constexpr uint32_t kDescNormalIndexBase = 0x2E73;
 constexpr uint32_t kDescFormatIndexBase = 0x3005;
@@ -104,6 +111,10 @@ struct RuntimeState {
   bool descTablesSynced = false;
   bool descTableFailureLogged = false;
   uintptr_t descTextPointerAddress = 0;
+
+  bool traitEffectHookInstalled = false;
+  bool traitEffectHookFailureLogged = false;
+  uintptr_t originalTraitEffectQuery = 0;
 };
 
 RuntimeState &State() {
@@ -114,6 +125,15 @@ RuntimeState &State() {
 
 using TraitNameGetter = const wchar_t *(__fastcall *)(void *);
 using TraitDescMapGetter = const wchar_t *(__fastcall *)(void *, int, uint8_t);
+using TraitEffectQuery = bool(__fastcall *)(void *, uint16_t);
+
+struct TraitEffectMatchCache {
+  bool valid = false;
+  uint16_t requestedTraitId = 0;
+  uint16_t matchedCustomTraitId = 0;
+};
+
+thread_local TraitEffectMatchCache g_traitEffectMatchCache;
 
 bool IsExecutableAddress(uintptr_t address) {
   if (address < 0x10000)
@@ -771,6 +791,215 @@ bool EnsureCustomDescHook() {
 }
 
 
+
+bool ReadTraitRecordId(uintptr_t record, uint16_t &id) {
+  id = 0;
+  if (record < 0x10000)
+    return false;
+  return ReadMemorySafe(record + kTraitIdOffset, &id, sizeof(id));
+}
+
+bool ReadTraitEffectType(uintptr_t record, std::size_t slot, uint16_t &type) {
+  type = 0;
+  if (record < 0x10000 || slot >= kEffectCount)
+    return false;
+  return ReadMemorySafe(
+      record + kEffectOffset + slot * kEffectSize,
+      &type, sizeof(type));
+}
+
+bool HasMatchingEffectType(uintptr_t customRecord, uintptr_t requestedRecord) {
+  std::array<uint16_t, kEffectCount> requestedTypes{};
+  std::size_t requestedCount = 0;
+
+  for (std::size_t i = 0; i < kEffectCount; ++i) {
+    uint16_t type = 0;
+    if (!ReadTraitEffectType(requestedRecord, i, type))
+      return false;
+    if (type != 0)
+      requestedTypes[requestedCount++] = type;
+  }
+
+  if (requestedCount == 0)
+    return false;
+
+  for (std::size_t i = 0; i < kEffectCount; ++i) {
+    uint16_t customType = 0;
+    if (!ReadTraitEffectType(customRecord, i, customType))
+      return false;
+    if (customType == 0)
+      continue;
+
+    for (std::size_t j = 0; j < requestedCount; ++j) {
+      if (customType == requestedTypes[j])
+        return true;
+    }
+  }
+
+  return false;
+}
+
+bool __fastcall CustomTraitEffectQuery(
+    void *officer, uint16_t requestedTraitId) {
+  RuntimeState &state = State();
+  g_traitEffectMatchCache = {};
+
+  const uintptr_t original = state.originalTraitEffectQuery;
+  if (original) {
+    if (reinterpret_cast<TraitEffectQuery>(original)(
+            officer, requestedTraitId)) {
+      return true;
+    }
+  }
+
+  if (!officer ||
+      requestedTraitId < 1 ||
+      requestedTraitId > kTraitCount ||
+      state.lastTableBase < 0x10000) {
+    return false;
+  }
+
+  // version.dll은 특정 내부 호출(+1C7A135)에서는 fallback 검사를 건너뜁니다.
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t returnAddress =
+      reinterpret_cast<uintptr_t>(_ReturnAddress());
+  if (gameBase &&
+      returnAddress == gameBase + kTraitEffectQuerySkipCallerOffset) {
+    return false;
+  }
+
+  const uintptr_t requestedRecord =
+      state.lastTableBase +
+      static_cast<uintptr_t>(requestedTraitId) * kTraitStride;
+
+  uint16_t requestedRecordId = 0;
+  if (!ReadTraitRecordId(requestedRecord, requestedRecordId) ||
+      requestedRecordId != requestedTraitId) {
+    return false;
+  }
+
+  const uintptr_t officerBase =
+      reinterpret_cast<uintptr_t>(officer);
+
+  for (int slot = 0; slot < 3; ++slot) {
+    uintptr_t heldRecord = 0;
+    if (!ReadMemorySafe(
+            officerBase + 0x88 +
+                static_cast<uintptr_t>(slot) * sizeof(uintptr_t),
+            &heldRecord, sizeof(heldRecord)) ||
+        heldRecord < 0x10000) {
+      continue;
+    }
+
+    uint16_t heldId = 0;
+    if (!ReadTraitRecordId(heldRecord, heldId))
+      continue;
+
+    // version.dll은 71~300을 대상으로 하지만 현재 JSON/런타임 테이블은 254까지 사용합니다.
+    if (heldId < 71 || heldId > kTraitCount)
+      continue;
+
+    if (!HasMatchingEffectType(heldRecord, requestedRecord))
+      continue;
+
+    g_traitEffectMatchCache.valid = true;
+    g_traitEffectMatchCache.requestedTraitId = requestedTraitId;
+    g_traitEffectMatchCache.matchedCustomTraitId = heldId;
+    return true;
+  }
+
+  return false;
+}
+
+bool EnsureTraitEffectHook() {
+  RuntimeState &state = State();
+  if (state.traitEffectHookInstalled)
+    return true;
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase)
+    return false;
+
+  const uintptr_t target =
+      gameBase + kTraitEffectQueryOffset;
+
+  uint8_t prologue[sizeof(kTraitEffectQueryPrologue)] = {};
+  if (!ReadMemorySafe(target, prologue, sizeof(prologue)) ||
+      std::memcmp(prologue, kTraitEffectQueryPrologue,
+                  sizeof(kTraitEffectQueryPrologue)) != 0) {
+    if (!state.traitEffectHookFailureLogged) {
+      AddLog(u8"[기재JSON/효과] +17AAD60 원본 바이트 불일치. 메인 효과 훅 설치 보류.");
+      state.traitEffectHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  const MH_STATUS initStatus = MH_Initialize();
+  if (initStatus != MH_OK &&
+      initStatus != MH_ERROR_ALREADY_INITIALIZED) {
+    if (!state.traitEffectHookFailureLogged) {
+      AddLog(u8"[기재JSON/효과] MinHook 초기화 실패: %s",
+             MH_StatusToString(initStatus));
+      state.traitEffectHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  LPVOID original = nullptr;
+  const MH_STATUS createStatus =
+      MH_CreateHook(
+          reinterpret_cast<LPVOID>(target),
+          reinterpret_cast<LPVOID>(&CustomTraitEffectQuery),
+          &original);
+  if (createStatus != MH_OK) {
+    if (!state.traitEffectHookFailureLogged) {
+      AddLog(u8"[기재JSON/효과] +17AAD60 훅 생성 실패: %s",
+             MH_StatusToString(createStatus));
+      state.traitEffectHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  if (!original ||
+      !IsExecutableAddress(
+          reinterpret_cast<uintptr_t>(original))) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    if (!state.traitEffectHookFailureLogged) {
+      AddLog(u8"[기재JSON/효과] +17AAD60 trampoline 검증 실패.");
+      state.traitEffectHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  state.originalTraitEffectQuery =
+      reinterpret_cast<uintptr_t>(original);
+
+  const MH_STATUS enableStatus =
+      MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  if (enableStatus != MH_OK &&
+      enableStatus != MH_ERROR_ENABLED) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    state.originalTraitEffectQuery = 0;
+    if (!state.traitEffectHookFailureLogged) {
+      AddLog(u8"[기재JSON/효과] +17AAD60 훅 활성화 실패: %s",
+             MH_StatusToString(enableStatus));
+      state.traitEffectHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  state.traitEffectHookInstalled = true;
+  state.traitEffectHookFailureLogged = false;
+
+  AddLog(u8"[기재JSON/효과] TraitEffect 메인 훅 설치 완료: +17AAD60 target=%p trampoline=%p",
+         reinterpret_cast<void *>(target),
+         reinterpret_cast<void *>(
+             state.originalTraitEffectQuery));
+  return true;
+}
+
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
   const std::string key = std::string("\"") + field + "\"";
   std::size_t p = text.find(key);
@@ -1366,6 +1595,8 @@ void TickTraitConfigRuntime() {
     AddLog(u8"[기재JSON] 기재 설정 적용 완료: table=%p",
            reinterpret_cast<void *>(tableBase));
   }
+
+  EnsureTraitEffectHook();
 }
 
 } // namespace DX11Base
