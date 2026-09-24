@@ -215,6 +215,7 @@
     <ClInclude Include="Cheats\Officer\OfficerData.h" />
     <ClInclude Include="Cheats\Officer\OfficerDetail.h" />
     <ClInclude Include="Cheats\Officer\TraitViewerWidths.h" />
+    <ClInclude Include="Cheats\Officer\TraitConfigRuntime.h" />
     <ClInclude Include="Cheats\Officer\TraitTextEditorData.h" />
     <ClInclude Include="Cheats\Officer\TraitTextNameHook.h" />
     <ClInclude Include="Cheats\Officer\TraitTextDescHook.h" />
@@ -338,6 +339,7 @@
     <ClCompile Include="Cheats\Officer\AIOfficerGrowth.cpp" />
     <ClCompile Include="Cheats\Officer\OfficerDetail.cpp" />
     <ClCompile Include="Cheats\Officer\TraitViewerWidths.cpp" />
+    <ClCompile Include="Cheats\Officer\TraitConfigRuntime.cpp" />
     <ClCompile Include="Cheats\Officer\TraitTextEditorData.cpp" />
     <ClCompile Include="Cheats\Officer\TraitTextNameHook.cpp" />
     <ClCompile Include="Cheats\Officer\TraitTextDescHook.cpp" />
