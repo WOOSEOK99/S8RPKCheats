@@ -144,6 +144,7 @@ namespace DX11Base {
     static bool g_fifthUiTextPathLogged = false;
     static bool g_fifthTrickDataVtableLogged = false;
     static bool g_fifthTrickDataTextVirtualsLogged = false;
+    static bool g_fifthTextResourceLookupLogged = false;
     static std::atomic<uintptr_t> g_fifthTitleNameGetterOriginal{0};
     static std::atomic<bool> g_fifthTitleNameGetterProbeInstalled{false};
     static std::atomic<uintptr_t> g_fifthTitleSeenCallers[16]{};
@@ -2273,6 +2274,187 @@ namespace DX11Base {
         }
       }
     }
+
+
+    static bool TryReadUtf16ForLogSeh(uintptr_t addr,
+                                      char *utf8,
+                                      size_t utf8Size) {
+      if (!addr || !utf8 || utf8Size < 2 || !IsValidPtr(addr, 2))
+        return false;
+
+      wchar_t local[160] = {};
+      size_t len = 0;
+      bool terminated = false;
+      __try {
+        for (; len + 1 < _countof(local); ++len) {
+          const wchar_t ch = *reinterpret_cast<const wchar_t *>(addr + len * 2);
+          if (ch == L'\0') {
+            terminated = true;
+            break;
+          }
+
+          // Reject obvious binary/control data. Korean/CJK and normal
+          // punctuation are intentionally accepted.
+          if (ch < 0x20 && ch != L'\t')
+            return false;
+          local[len] = ch;
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+
+      if (!terminated || len == 0)
+        return false;
+
+      const int n = WideCharToMultiByte(
+          CP_UTF8, 0, local, static_cast<int>(len),
+          utf8, static_cast<int>(utf8Size - 1),
+          nullptr, nullptr);
+      if (n <= 0)
+        return false;
+      utf8[n] = '\0';
+      return true;
+    }
+
+    static bool ResolveObservedTextResourceSeh(uint32_t resourceId,
+                                               uintptr_t *outPtr) {
+      if (outPtr)
+        *outPtr = 0;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!exeBase || resourceId > 0x5823)
+        return false;
+
+      __try {
+        // Reproduces the read-only lookup observed at +16F2060:
+        // manager = [exe+2C64390]
+        // ptr = manager + baseOff +
+        //       *(u32*)(manager + baseOff + resourceId * stride)
+        const uintptr_t manager =
+            *reinterpret_cast<const uintptr_t *>(exeBase + 0x02C64390);
+        if (!manager || !IsValidPtr(manager, 0x20))
+          return false;
+        if (*reinterpret_cast<const uint8_t *>(manager + 0x0C) != 1 ||
+            *reinterpret_cast<const uint8_t *>(manager + 0x14) != 0)
+          return false;
+
+        const uint16_t stride =
+            *reinterpret_cast<const uint16_t *>(manager + 0x0A);
+        const uint32_t baseOff =
+            *reinterpret_cast<const uint32_t *>(manager + 0x10);
+        if (stride == 0)
+          return false;
+
+        const uintptr_t entry =
+            manager + static_cast<uintptr_t>(baseOff) +
+            static_cast<uintptr_t>(resourceId) * stride;
+        if (!IsValidPtr(entry, sizeof(uint32_t)))
+          return false;
+
+        const uint32_t rel =
+            *reinterpret_cast<const uint32_t *>(entry);
+        const uintptr_t result =
+            manager + static_cast<uintptr_t>(baseOff) + rel;
+        if (!result || !IsValidPtr(result, 1))
+          return false;
+
+        if (outPtr)
+          *outPtr = result;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    static void LogObservedResourcePayload(uint32_t resourceId,
+                                           uintptr_t ptr,
+                                           const char *family,
+                                           int rowIndex) {
+      AddLog(u8"[책략5RES] row=%d family=%s resourceId=0x%X ptr=%p",
+             rowIndex, family, resourceId,
+             reinterpret_cast<void *>(ptr));
+
+      if (!ptr || !IsValidPtr(ptr, 0x20))
+        return;
+
+      uint8_t raw[0x60] = {};
+      if (SafeCopySeh(ptr, raw, sizeof(raw))) {
+        for (size_t off = 0; off < sizeof(raw); off += 0x20) {
+          char line[256] = {};
+          int pos = 0;
+          for (size_t j = 0; j < 0x20; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos,
+                             "%02X ", (unsigned)raw[off + j]);
+          }
+          AddLog(u8"[책략5RES] row=%d %s +%02llX : %s",
+                 rowIndex, family,
+                 (unsigned long long)off, line);
+        }
+      }
+
+      char direct[768] = {};
+      if (TryReadUtf16ForLogSeh(ptr, direct, sizeof(direct))) {
+        AddLog(u8"[책략5RES] row=%d %s directUTF16=\"%s\"",
+               rowIndex, family, direct);
+      }
+
+      // Some resource entries are small objects containing a pointer to their
+      // actual UTF-16 payload. Check only the first 0x40 bytes, read-only.
+      for (uintptr_t off = 0; off < 0x40; off += sizeof(uintptr_t)) {
+        uintptr_t nested = 0;
+        if (!SafeReadPtrSeh(ptr + off, &nested) ||
+            !nested || nested == ptr || !IsValidPtr(nested, 2))
+          continue;
+
+        char text[768] = {};
+        if (TryReadUtf16ForLogSeh(nested, text, sizeof(text))) {
+          AddLog(u8"[책략5RES] row=%d %s ptr+0x%llX -> %p UTF16=\"%s\"",
+                 rowIndex, family,
+                 (unsigned long long)off,
+                 reinterpret_cast<void *>(nested), text);
+        }
+      }
+    }
+
+    static void LogFifthTextResourceLookup(uintptr_t table) {
+      if (g_fifthTextResourceLookupLogged || !table ||
+          !IsValidPtr(table, 5 * 0x20))
+        return;
+
+      g_fifthTextResourceLookupLogged = true;
+      AddLog(u8"[책략5RES] TrickData 리소스 ID 비교 시작: table=%p",
+             reinterpret_cast<void *>(table));
+
+      for (int i = 0; i < 5; ++i) {
+        const uintptr_t row = table + static_cast<uintptr_t>(i) * 0x20;
+        uint8_t code1 = 0;
+        uint16_t code3 = 0;
+        __try {
+          code1 = *reinterpret_cast<const uint8_t *>(row + 0x08);
+          code3 = *reinterpret_cast<const uint16_t *>(row + 0x0C);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+          continue;
+        }
+
+        const uint32_t idA = 0x4B76u + static_cast<uint32_t>(code1);
+        const uint32_t idB = 0x4B61u + static_cast<uint32_t>(code3);
+        uintptr_t ptrA = 0, ptrB = 0;
+        const bool okA = ResolveObservedTextResourceSeh(idA, &ptrA);
+        const bool okB = ResolveObservedTextResourceSeh(idB, &ptrB);
+
+        AddLog(u8"[책략5RES] row=%d code1=%u code3=%u -> A=0x%X(%s) B=0x%X(%s)",
+               i + 1, (unsigned)code1, (unsigned)code3,
+               idA, okA ? "OK" : "FAIL",
+               idB, okB ? "OK" : "FAIL");
+
+        if (okA)
+          LogObservedResourcePayload(idA, ptrA, "A", i + 1);
+        if (okB)
+          LogObservedResourcePayload(idB, ptrB, "B", i + 1);
+      }
+    }
+
 
     static void LogFifthTrickDataTextVirtuals(uintptr_t row5) {
       if (g_fifthTrickDataTextVirtualsLogged || !row5 ||
@@ -5675,9 +5857,9 @@ namespace DX11Base {
 
     // Read-only text-path diagnostics. These do not call any unknown virtual
     // method and do not patch the game; they only record executable targets.
-    LogFifthUiTextPathCandidates();
-    LogFifthTrickDataVtableCandidates(row5);
-    LogFifthTrickDataTextVirtuals(row5);
+    // Earlier code/vtable dumps established two resource-ID lookup
+    // families keyed by TrickData code1/code3. Compare those directly now.
+    LogFifthTextResourceLookup(table);
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
