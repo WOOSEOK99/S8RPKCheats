@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../../EmbeddedJsonResources.h"
+
 namespace DX11Base {
 
 extern HMODULE g_hModule;
@@ -118,12 +120,25 @@ struct Cache {
   std::filesystem::file_time_type writeTime{};
   bool hasWriteTime = false;
   bool loaded = false;
+  bool fromEmbedded = false;
   ULONGLONG lastCheckMs = 0;
 };
 
 inline Cache &GetCache() {
   static Cache cache;
   return cache;
+}
+
+inline bool HasExternalGameVersionDll() {
+  wchar_t exePath[MAX_PATH] = {};
+  const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+  if (len == 0 || len >= MAX_PATH)
+    return false;
+
+  std::error_code ec;
+  const std::filesystem::path p =
+      std::filesystem::path(exePath).parent_path() / L"version.dll";
+  return std::filesystem::is_regular_file(p, ec) && !ec;
 }
 
 inline std::filesystem::path ResolveConfigPath() {
@@ -150,32 +165,54 @@ inline bool ReloadIfNeeded() {
   Cache &cache = GetCache();
   const ULONGLONG now = GetTickCount64();
   if (cache.loaded && now - cache.lastCheckMs < 2000)
-    return true;
+    return !cache.byIndex.empty();
   cache.lastCheckMs = now;
 
   const std::filesystem::path path = ResolveConfigPath();
-  if (path.empty()) {
-    cache.loaded = true;
-    cache.byIndex.clear();
-    cache.hasWriteTime = false;
-    return false;
+  std::error_code ec;
+  std::filesystem::file_time_type currentWriteTime{};
+  bool haveWriteTime = false;
+
+  if (!path.empty()) {
+    currentWriteTime = std::filesystem::last_write_time(path, ec);
+    haveWriteTime = !ec;
+    if (cache.loaded && !cache.fromEmbedded &&
+        haveWriteTime && cache.hasWriteTime &&
+        currentWriteTime == cache.writeTime) {
+      return !cache.byIndex.empty();
+    }
+  } else if (cache.loaded && cache.fromEmbedded) {
+    return !cache.byIndex.empty();
   }
 
-  std::error_code ec;
-  const auto currentWriteTime = std::filesystem::last_write_time(path, ec);
-  const bool haveWriteTime = !ec;
-  if (cache.loaded && haveWriteTime && cache.hasWriteTime && currentWriteTime == cache.writeTime)
-    return true;
+  std::string jsonText;
+  bool fromEmbedded = false;
+  if (!path.empty()) {
+    if (!ReadUtf8TextFile(path, jsonText))
+      jsonText.clear();
+  }
 
-  std::ifstream file(path, std::ios::binary);
-  if (!file.is_open()) {
-    cache.loaded = true;
-    cache.byIndex.clear();
-    cache.hasWriteTime = false;
-    return false;
+  if (jsonText.empty()) {
+    if (HasExternalGameVersionDll()) {
+      cache.loaded = true;
+      cache.fromEmbedded = false;
+      cache.byIndex.clear();
+      cache.hasWriteTime = false;
+      return false;
+    }
+
+    if (!LoadEmbeddedJsonResource(IDR_JSON_TRAITS_DEFAULT, jsonText)) {
+      cache.loaded = true;
+      cache.fromEmbedded = false;
+      cache.byIndex.clear();
+      cache.hasWriteTime = false;
+      return false;
+    }
+    fromEmbedded = true;
   }
 
   std::unordered_map<int, CustomTraitDisplayInfo> parsed;
+  std::istringstream file(jsonText);
   std::string line;
   bool inCustomNames = false;
 
@@ -205,14 +242,14 @@ inline bool ReloadIfNeeded() {
     try {
       parsed[std::stoi(key)] = std::move(info);
     } catch (...) {
-      // 숫자 범위를 벗어난 비정상 키는 무시합니다.
     }
   }
 
   cache.byIndex.swap(parsed);
   cache.loaded = true;
-  cache.hasWriteTime = haveWriteTime;
-  if (haveWriteTime)
+  cache.fromEmbedded = fromEmbedded;
+  cache.hasWriteTime = !fromEmbedded && haveWriteTime;
+  if (cache.hasWriteTime)
     cache.writeTime = currentWriteTime;
   return !cache.byIndex.empty();
 }
@@ -236,7 +273,12 @@ inline bool GetCustomTraitDisplayInfo(uint16_t traitId, CustomTraitDisplayInfo &
 }
 
 inline bool HasCustomTraitConfigFile() {
-  return !CustomTraitDisplayDetail::ResolveConfigPath().empty();
+  if (!CustomTraitDisplayDetail::ResolveConfigPath().empty())
+    return true;
+  if (CustomTraitDisplayDetail::HasExternalGameVersionDll())
+    return false;
+  std::string embedded;
+  return LoadEmbeddedJsonResource(IDR_JSON_TRAITS_DEFAULT, embedded);
 }
 
 // customNames에 실제 이름이 등록된 항목만 "사용 가능한 커스텀 기재"로 취급합니다.
