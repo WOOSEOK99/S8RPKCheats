@@ -4,6 +4,7 @@
 #include "../../Cheats.h"
 #include "../../MemoryUtils.h"
 #include "../../showlog.h"
+#include "../../EmbeddedJsonResources.h"
 #include "pch.h"
 #include <filesystem>
 #include <fstream>
@@ -1649,54 +1650,72 @@ namespace DX11Base {
     void LoadOfficerNames() {
         if (g_namesLoaded) return;
         g_namesLoaded = true;
-        char path[MAX_PATH];
+
+        std::string jsonText;
+        bool loaded = false;
+        char path[MAX_PATH] = {};
         if (GetModuleFileNameA(g_hModule, path, MAX_PATH)) {
-            std::string jsonPath = std::filesystem::path(path).parent_path().append("S8RPK_cheat_char.json").string();
-            std::ifstream file(jsonPath);
-            if (file.is_open()) {
-                std::string line;
-                int currentId = -1;
-                std::string currentName = "";
-                std::string currentJa = "";
-                while (std::getline(file, line)) {
-                    if (line.find("{") != std::string::npos) { currentId = -1; currentName = ""; currentJa = ""; }
-                    size_t idPos = line.find("\"id\"");
-                    if (idPos != std::string::npos) {
-                        size_t colon = line.find(":", idPos);
-                        if (colon != std::string::npos) { try { currentId = std::stoi(line.substr(colon + 1)); } catch (...) { currentId = -1; } }
-                    }
-                    size_t namePos = line.find("\"name\"");
-                    if (namePos != std::string::npos) {
-                        size_t colon = line.find(":", namePos);
-                        if (colon != std::string::npos) {
-                            size_t firstQuote = line.find("\"", colon);
-                            if (firstQuote != std::string::npos) {
-                                size_t secondQuote = line.find("\"", firstQuote + 1);
-                                if (secondQuote != std::string::npos) currentName = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
-                            }
-                        }
-                    }
-                    size_t jaPos = line.find("\"ja\"");
-                    if (jaPos != std::string::npos) {
-                        size_t colon = line.find(":", jaPos);
-                        if (colon != std::string::npos) {
-                            size_t firstQuote = line.find("\"", colon);
-                            if (firstQuote != std::string::npos) {
-                                size_t secondQuote = line.find("\"", firstQuote + 1);
-                                if (secondQuote != std::string::npos) currentJa = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
-                            }
-                        }
-                    }
-                    if (line.find("}") != std::string::npos && currentId != -1) {
-                        if (!currentName.empty()) {
-                            std::string u8Name = NormalizeUtf8(AnsiToUtf8(currentName));
-                            std::string u8Ja = NormalizeUtf8(AnsiToUtf8(currentJa));
-                            if (!u8Ja.empty()) g_officerNames[currentId] = u8Name + u8"(" + u8Ja + u8")";
-                            else g_officerNames[currentId] = u8Name;
-                        }
+            const std::filesystem::path jsonPath =
+                std::filesystem::path(path).parent_path() / "S8RPK_cheat_char.json";
+            loaded = ReadUtf8TextFile(jsonPath, jsonText);
+        }
+        if (!loaded)
+            loaded = LoadEmbeddedJsonResource(IDR_JSON_CHEAT_CHAR, jsonText);
+        if (!loaded)
+            return;
+
+        std::istringstream file(jsonText);
+        std::string line;
+        int currentId = -1;
+        std::string currentName = "";
+        std::string currentJa = "";
+        while (std::getline(file, line)) {
+            if (line.find("{") != std::string::npos) {
+                currentId = -1;
+                currentName = "";
+                currentJa = "";
+            }
+            size_t idPos = line.find("\"id\"");
+            if (idPos != std::string::npos) {
+                size_t colon = line.find(":", idPos);
+                if (colon != std::string::npos) {
+                    try { currentId = std::stoi(line.substr(colon + 1)); }
+                    catch (...) { currentId = -1; }
+                }
+            }
+            size_t namePos = line.find("\"name\"");
+            if (namePos != std::string::npos) {
+                size_t colon = line.find(":", namePos);
+                if (colon != std::string::npos) {
+                    size_t firstQuote = line.find("\"", colon);
+                    if (firstQuote != std::string::npos) {
+                        size_t secondQuote = line.find("\"", firstQuote + 1);
+                        if (secondQuote != std::string::npos)
+                            currentName = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
                     }
                 }
-                file.close();
+            }
+            size_t jaPos = line.find("\"ja\"");
+            if (jaPos != std::string::npos) {
+                size_t colon = line.find(":", jaPos);
+                if (colon != std::string::npos) {
+                    size_t firstQuote = line.find("\"", colon);
+                    if (firstQuote != std::string::npos) {
+                        size_t secondQuote = line.find("\"", firstQuote + 1);
+                        if (secondQuote != std::string::npos)
+                            currentJa = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+                    }
+                }
+            }
+            if (line.find("}") != std::string::npos && currentId != -1) {
+                if (!currentName.empty()) {
+                    std::string u8Name = NormalizeUtf8(AnsiToUtf8(currentName));
+                    std::string u8Ja = NormalizeUtf8(AnsiToUtf8(currentJa));
+                    if (!u8Ja.empty())
+                        g_officerNames[currentId] = u8Name + u8"(" + u8Ja + u8")";
+                    else
+                        g_officerNames[currentId] = u8Name;
+                }
             }
         }
     }
@@ -1861,66 +1880,81 @@ namespace DX11Base {
     void LoadEffectDefinitions() {
         if (g_effectsLoaded) return;
         g_effectsLoaded = true;
-        char path[MAX_PATH];
+
+        std::string jsonText;
+        bool loaded = false;
+        char path[MAX_PATH] = {};
         if (GetModuleFileNameA(g_hModule, path, MAX_PATH)) {
-            std::string jsonPath = std::filesystem::path(path).parent_path().append("effect_definitions.json").string();
-            std::ifstream file(jsonPath);
-            if (file.is_open()) {
-                std::string line; 
-                EffectDef currentDef = { -1 }; 
-                std::string currentKey = "";
-                while (std::getline(file, line)) {
-                    if (line.find("{") != std::string::npos && line.find(":") == std::string::npos) { currentDef = { -1 }; currentKey = ""; }
-                    size_t typePos = line.find("\"type\"");
-                    if (typePos != std::string::npos) {
-                        size_t colon = line.find(":", typePos);
-                        if (colon != std::string::npos) {
-                            try {
-                                std::string valStr = line.substr(colon + 1);
-                                size_t comma = valStr.find(",");
-                                if (comma != std::string::npos) valStr = valStr.substr(0, comma);
-                                currentDef.type = std::stoi(valStr);
-                            } catch (...) {}
-                        }
+            const std::filesystem::path jsonPath =
+                std::filesystem::path(path).parent_path() / "effect_definitions.json";
+            loaded = ReadUtf8TextFile(jsonPath, jsonText);
+        }
+        if (!loaded)
+            loaded = LoadEmbeddedJsonResource(IDR_JSON_EFFECT_DEFINITIONS, jsonText);
+        if (!loaded)
+            return;
+
+        std::istringstream file(jsonText);
+        std::string line;
+        EffectDef currentDef = { -1 };
+        std::string currentKey = "";
+        while (std::getline(file, line)) {
+            if (line.find("{") != std::string::npos && line.find(":") == std::string::npos) {
+                currentDef = { -1 };
+                currentKey = "";
+            }
+            size_t typePos = line.find("\"type\"");
+            if (typePos != std::string::npos) {
+                size_t colon = line.find(":", typePos);
+                if (colon != std::string::npos) {
+                    try {
+                        std::string valStr = line.substr(colon + 1);
+                        size_t comma = valStr.find(",");
+                        if (comma != std::string::npos) valStr = valStr.substr(0, comma);
+                        currentDef.type = std::stoi(valStr);
+                    } catch (...) {}
+                }
+            }
+            size_t tempPos = line.find("\"template\"");
+            if (tempPos != std::string::npos) {
+                size_t colon = line.find(":", tempPos);
+                if (colon != std::string::npos) {
+                    size_t firstQuote = line.find("\"", colon);
+                    if (firstQuote != std::string::npos) {
+                        size_t secondQuote = line.find("\"", firstQuote + 1);
+                        if (secondQuote != std::string::npos)
+                            currentDef.templateStr = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
                     }
-                    size_t tempPos = line.find("\"template\"");
-                    if (tempPos != std::string::npos) {
-                        size_t colon = line.find(":", tempPos);
-                        if (colon != std::string::npos) {
-                            size_t firstQuote = line.find("\"", colon);
-                            if (firstQuote != std::string::npos) {
-                                size_t secondQuote = line.find("\"", firstQuote + 1);
-                                if (secondQuote != std::string::npos) currentDef.templateStr = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+                }
+            }
+            if (line.find("\"valueMap\"") != std::string::npos) currentKey = "v";
+            else if (line.find("\"paramMap\"") != std::string::npos) currentKey = "p";
+            if (currentKey != "") {
+                size_t firstQuote = line.find("\""), colon = line.find(":");
+                if (firstQuote != std::string::npos && colon != std::string::npos && firstQuote < colon) {
+                    size_t secondQuote = line.find("\"", firstQuote + 1);
+                    if (secondQuote != std::string::npos && secondQuote < colon) {
+                        std::string keyStr = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+                        size_t valFirstQuote = line.find("\"", colon);
+                        if (valFirstQuote != std::string::npos) {
+                            size_t valSecondQuote = line.find("\"", valFirstQuote + 1);
+                            if (valSecondQuote != std::string::npos) {
+                                std::string valStr = line.substr(valFirstQuote + 1, valSecondQuote - valFirstQuote - 1);
+                                try {
+                                    int k = std::stoi(keyStr);
+                                    if (currentKey == "v") currentDef.valueMap[k] = valStr;
+                                    else currentDef.paramMap[k] = valStr;
+                                } catch (...) {}
                             }
                         }
                     }
-                    if (line.find("\"valueMap\"") != std::string::npos) currentKey = "v";
-                    else if (line.find("\"paramMap\"") != std::string::npos) currentKey = "p";
-                    if (currentKey != "") {
-                        size_t firstQuote = line.find("\""), colon = line.find(":");
-                        if (firstQuote != std::string::npos && colon != std::string::npos && firstQuote < colon) {
-                            size_t secondQuote = line.find("\"", firstQuote + 1);
-                            if (secondQuote != std::string::npos && secondQuote < colon) {
-                                std::string keyStr = line.substr(firstQuote + 1, secondQuote - firstQuote - 1);
-                                size_t valFirstQuote = line.find("\"", colon);
-                                if (valFirstQuote != std::string::npos) {
-                                    size_t valSecondQuote = line.find("\"", valFirstQuote + 1);
-                                    if (valSecondQuote != std::string::npos) {
-                                        std::string valStr = line.substr(valFirstQuote + 1, valSecondQuote - valFirstQuote - 1);
-                                        try {
-                                            int k = std::stoi(keyStr);
-                                            if (currentKey == "v") currentDef.valueMap[k] = valStr;
-                                            else currentDef.paramMap[k] = valStr;
-                                        } catch (...) {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (line.find("}") != std::string::npos) {
-                        if (currentKey != "") currentKey = "";
-                        else if (currentDef.type != -1) { g_effectDefs[currentDef.type] = currentDef; currentDef.type = -1; }
-                    }
+                }
+            }
+            if (line.find("}") != std::string::npos) {
+                if (currentKey != "") currentKey = "";
+                else if (currentDef.type != -1) {
+                    g_effectDefs[currentDef.type] = currentDef;
+                    currentDef.type = -1;
                 }
             }
         }
