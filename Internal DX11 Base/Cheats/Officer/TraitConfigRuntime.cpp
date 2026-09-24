@@ -42,6 +42,8 @@ constexpr uintptr_t kTraitMessageSetterOffset = 0x13F91E0;
 constexpr uintptr_t kTraitDataGetterOffset = 0x16E63F0;
 constexpr uintptr_t kMonthlyTraitUpdateOffset = 0x1C79C90;
 constexpr uintptr_t kTransferTraitEventOffset = 0x18A5E30;
+constexpr uintptr_t kTraitEligibilityPatchAOffset = 0x17C03E7;
+constexpr uintptr_t kTraitEligibilityPatchBOffset = 0x17C042F;
 
 constexpr uint8_t kTraitEffectQueryPrologue[] = {
     0x48, 0x89, 0x5C, 0x24, 0x08
@@ -60,6 +62,9 @@ constexpr uint8_t kMonthlyTraitUpdatePrologue[] = {
 };
 constexpr uint8_t kTransferTraitEventPrologue[] = {
     0x40, 0x53, 0x55, 0x56, 0x57, 0x41, 0x56
+};
+constexpr uint8_t kTraitEligibilityExpected[] = {
+    0x81, 0xFE, 0x95, 0x00, 0x00, 0x00
 };
 constexpr uintptr_t kDescTextPointerFallbackOffset = 0x2C34EC0;
 constexpr uint32_t kDescNormalIndexBase = 0x2E73;
@@ -156,6 +161,11 @@ struct RuntimeState {
   bool transferHookInstalled = false;
   bool transferHookFailureLogged = false;
   uintptr_t originalTransferEvent = 0;
+
+  bool eligibilityPatchAActive = false;
+  bool eligibilityPatchBActive = false;
+  bool eligibilityPatchAFailureLogged = false;
+  bool eligibilityPatchBFailureLogged = false;
 };
 
 RuntimeState &State() {
@@ -254,6 +264,31 @@ bool WriteMemoryProtected(uintptr_t address, const void *data, std::size_t size)
   VirtualProtect(dst, size, oldProtect, &ignored);
   return ok;
 }
+
+bool WriteExecutableByteProtected(uintptr_t address, uint8_t value) {
+  if (!address)
+    return false;
+
+  DWORD oldProtect = 0;
+  void *dst = reinterpret_cast<void *>(address);
+  if (!VirtualProtect(dst, sizeof(value), PAGE_EXECUTE_READWRITE, &oldProtect))
+    return false;
+
+  bool ok = true;
+  __try {
+    *reinterpret_cast<volatile uint8_t *>(address) = value;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    ok = false;
+  }
+
+  DWORD ignored = 0;
+  VirtualProtect(dst, sizeof(value), oldProtect, &ignored);
+  if (ok)
+    FlushInstructionCache(GetCurrentProcess(), dst, sizeof(value));
+  return ok;
+}
+
 
 
 const wchar_t *__fastcall CustomTraitNameGetter(void *traitObject) {
@@ -1480,6 +1515,77 @@ bool InstallCompatibilityHook(uintptr_t offset, const uint8_t *prologue,
   return true;
 }
 
+
+bool MaintainTraitEligibilityPatch(
+    uintptr_t offset, bool &active, bool &failureLogged, const char *role) {
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase)
+    return false;
+
+  const uintptr_t address = gameBase + offset;
+  std::array<uint8_t, sizeof(kTraitEligibilityExpected)> bytes{};
+  if (!ReadMemorySafe(address, bytes.data(), bytes.size())) {
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s 메모리 읽기 실패: +%llX",
+             role, static_cast<unsigned long long>(offset));
+      failureLogged = true;
+    }
+    active = false;
+    return false;
+  }
+
+  for (std::size_t i = 0; i < bytes.size(); ++i) {
+    if (i == 2)
+      continue;
+    if (bytes[i] != kTraitEligibilityExpected[i]) {
+      if (!failureLogged) {
+        AddLog(u8"[기재JSON/호환] %s 원본 바이트 불일치: +%llX (패치 보류)",
+               role, static_cast<unsigned long long>(offset));
+        failureLogged = true;
+      }
+      active = false;
+      return false;
+    }
+  }
+
+  if (bytes[2] == 0x01) {
+    active = true;
+    failureLogged = false;
+    return true;
+  }
+
+  if (bytes[2] != 0x95) {
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s 임계값 상태 미확인: +%llX value=0x%02X",
+             role, static_cast<unsigned long long>(offset),
+             static_cast<unsigned>(bytes[2]));
+      failureLogged = true;
+    }
+    active = false;
+    return false;
+  }
+
+  const bool wasActive = active;
+  if (!WriteExecutableByteProtected(address + 2, 0x01)) {
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s 적용 실패: +%llX",
+             role, static_cast<unsigned long long>(offset));
+      failureLogged = true;
+    }
+    active = false;
+    return false;
+  }
+
+  active = true;
+  failureLogged = false;
+  AddLog(wasActive
+             ? u8"[기재JSON/호환] %s 복원 감지 -> 재적용: +%llX"
+             : u8"[기재JSON/호환] %s 적용 완료: +%llX",
+         role, static_cast<unsigned long long>(offset));
+  return true;
+}
+
 void EnsureExtendedTraitCompatibility() {
   RuntimeState &state = State();
   InstallCompatibilityHook(
@@ -1516,6 +1622,17 @@ void EnsureExtendedTraitCompatibility() {
       reinterpret_cast<void *>(&CustomTransferTraitEvent),
       state.originalTransferEvent, state.transferHookInstalled,
       state.transferHookFailureLogged, u8"특수 연출 연결");
+
+  MaintainTraitEligibilityPatch(
+      kTraitEligibilityPatchAOffset,
+      state.eligibilityPatchAActive,
+      state.eligibilityPatchAFailureLogged,
+      u8"기재 사용 조건 A");
+  MaintainTraitEligibilityPatch(
+      kTraitEligibilityPatchBOffset,
+      state.eligibilityPatchBActive,
+      state.eligibilityPatchBFailureLogged,
+      u8"기재 사용 조건 B");
 }
 
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
