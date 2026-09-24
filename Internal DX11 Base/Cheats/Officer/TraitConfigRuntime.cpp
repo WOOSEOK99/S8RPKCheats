@@ -944,31 +944,70 @@ bool __fastcall CustomTraitEffectQuery(
   RuntimeState &state = State();
   g_traitEffectMatchCache = {};
 
-  const uintptr_t original = state.originalTraitEffectQuery;
-  if (original &&
-      reinterpret_cast<TraitEffectQuery>(original)(officer, requestedTraitId)) {
-    return true;
-  }
-
   const uintptr_t gameBase =
       reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   const uintptr_t returnAddress =
       reinterpret_cast<uintptr_t>(_ReturnAddress());
+  const uintptr_t callerRva =
+      gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
+
+  auto logId1State = [&](const char *source, uint16_t matchedId) {
+    if (requestedTraitId != 1)
+      return;
+
+    uint16_t heldIds[3] = {};
+    const uintptr_t officerBase = reinterpret_cast<uintptr_t>(officer);
+    if (officerBase >= 0x10000) {
+      for (int slot = 0; slot < 3; ++slot) {
+        uintptr_t heldRecord = 0;
+        if (ReadMemorySafe(
+                officerBase + 0x88 +
+                    static_cast<uintptr_t>(slot) * sizeof(uintptr_t),
+                &heldRecord, sizeof(heldRecord)) &&
+            heldRecord >= 0x10000) {
+          ReadTraitRecordId(heldRecord, heldIds[slot]);
+        }
+      }
+    }
+
+    static thread_local unsigned logCount = 0;
+    if (logCount < 40) {
+      AddLog(u8"[기재JSON/ID1진단] %s officer=%p held=%u/%u/%u matched=%u caller=+%llX",
+             source, officer,
+             static_cast<unsigned>(heldIds[0]),
+             static_cast<unsigned>(heldIds[1]),
+             static_cast<unsigned>(heldIds[2]),
+             static_cast<unsigned>(matchedId),
+             static_cast<unsigned long long>(callerRva));
+      ++logCount;
+    }
+  };
+
+  const uintptr_t original = state.originalTraitEffectQuery;
+  if (original &&
+      reinterpret_cast<TraitEffectQuery>(original)(officer, requestedTraitId)) {
+    logId1State("ORIGINAL_TRUE", 0);
+    return true;
+  }
+
   // 월별 갱신의 이 호출 위치는 원본의 별도 검사 범위를 유지합니다.
   if (gameBase &&
       returnAddress == gameBase + kTraitEffectQuerySkipCallerOffset) {
+    logId1State("SKIP_FALSE", 0);
     return false;
   }
 
   uint16_t matchedId = 0;
-  if (!FindMatchingCustomTrait(officer, requestedTraitId, matchedId))
+  if (!FindMatchingCustomTrait(officer, requestedTraitId, matchedId)) {
+    logId1State("ORIGINAL_FALSE_FALLBACK_FALSE", 0);
     return false;
+  }
 
+  logId1State("FALLBACK_TRUE", matchedId);
   g_traitEffectMatchCache.valid = true;
   g_traitEffectMatchCache.requestedTraitId = requestedTraitId;
   g_traitEffectMatchCache.matchedCustomTraitId = matchedId;
-  g_traitEffectMatchCache.queryReturnRva =
-      gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
+  g_traitEffectMatchCache.queryReturnRva = callerRva;
   return true;
 }
 
@@ -1173,6 +1212,25 @@ void __fastcall CustomTraitMessageSetter(void *message, uint32_t requestedId) {
   const uintptr_t original = state.originalTraitMessageSetter;
   if (!original)
     return;
+
+  if (requestedId == 1) {
+    const uintptr_t gameBase =
+        reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    const uintptr_t returnAddress =
+        reinterpret_cast<uintptr_t>(_ReturnAddress());
+    const uintptr_t callerRva =
+        gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
+    static thread_local unsigned id1MessageLogCount = 0;
+    if (id1MessageLogCount < 20) {
+      AddLog(u8"[기재JSON/ID1진단] MESSAGE id=1 caller=+%llX cache=%d req=%u matched=%u query=+%llX",
+             static_cast<unsigned long long>(callerRva),
+             g_traitEffectMatchCache.valid ? 1 : 0,
+             static_cast<unsigned>(g_traitEffectMatchCache.requestedTraitId),
+             static_cast<unsigned>(g_traitEffectMatchCache.matchedCustomTraitId),
+             static_cast<unsigned long long>(g_traitEffectMatchCache.queryReturnRva));
+      ++id1MessageLogCount;
+    }
+  }
 
   uint16_t matchedId = 0;
   const bool bridge = TakeMatchedBridgeId(
