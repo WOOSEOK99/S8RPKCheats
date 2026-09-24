@@ -145,6 +145,7 @@ namespace DX11Base {
     static bool g_fifthTrickDataVtableLogged = false;
     static bool g_fifthTrickDataTextVirtualsLogged = false;
     static bool g_fifthTextResourceLookupLogged = false;
+    static bool g_fifthSetTrickIdPathLogged = false;
     static std::atomic<uintptr_t> g_fifthTitleNameGetterOriginal{0};
     static std::atomic<bool> g_fifthTitleNameGetterProbeInstalled{false};
     static std::atomic<uintptr_t> g_fifthTitleSeenCallers[16]{};
@@ -2270,6 +2271,163 @@ namespace DX11Base {
                      (unsigned long long)off,
                      (unsigned long long)(ripTarget - exeBase));
             }
+          }
+        }
+      }
+    }
+
+
+    static void LogFifthSetTrickIdPath() {
+      if (g_fifthSetTrickIdPathLogged)
+        return;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      MODULEINFO mi{};
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase) ||
+          !GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return;
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+      constexpr uintptr_t kSetTrickIdRva = 0x01E7FD90;
+      constexpr size_t kSetTrickIdSize = 0x130;
+      const uintptr_t fn = exeBase + kSetTrickIdRva;
+
+      static const uint8_t expected[] =
+          {0x48,0x89,0x5C,0x24,0x08,0x57};
+      if (!IsValidPtr(fn, sizeof(expected)) ||
+          std::memcmp(reinterpret_cast<const void *>(fn),
+                      expected, sizeof(expected)) != 0) {
+        AddLog(u8"[책략5SETID] SetTrickID 빌드 가드 불일치.");
+        return;
+      }
+
+      uint8_t code[kSetTrickIdSize] = {};
+      if (!SafeCopySeh(fn, code, sizeof(code)))
+        return;
+
+      g_fifthSetTrickIdPathLogged = true;
+      AddLog(u8"[책략5SETID] TrickSelectButton::SetTrickID RVA=+%llX size=0x%llX",
+             (unsigned long long)kSetTrickIdRva,
+             (unsigned long long)sizeof(code));
+
+      for (size_t off = 0; off < sizeof(code); off += 0x20) {
+        char line[256] = {};
+        int pos = 0;
+        const size_t chunk =
+            (off + 0x20 <= sizeof(code)) ? 0x20 : (sizeof(code) - off);
+        for (size_t j = 0; j < chunk &&
+                           pos < (int)sizeof(line) - 4; ++j) {
+          pos += sprintf_s(line + pos, sizeof(line) - pos,
+                           "%02X ", (unsigned)code[off + j]);
+        }
+        AddLog(u8"[책략5SETID] +%03llX : %s",
+               (unsigned long long)off, line);
+      }
+
+      uintptr_t directTargets[32] = {};
+      unsigned directCount = 0;
+
+      for (size_t off = 0; off + 7 <= sizeof(code); ++off) {
+        if (code[off] == 0xE8 || code[off] == 0xE9) {
+          int32_t rel = 0;
+          std::memcpy(&rel, code + off + 1, sizeof(rel));
+          const uintptr_t target =
+              fn + off + 5 + static_cast<intptr_t>(rel);
+          if (target >= exeBase && target < imageEnd) {
+            AddLog(u8"[책략5SETID] %s +%03llX -> RVA=+%llX",
+                   code[off] == 0xE8 ? "CALL" : "JMP",
+                   (unsigned long long)off,
+                   (unsigned long long)(target - exeBase));
+
+            bool duplicate = false;
+            for (unsigned i = 0; i < directCount; ++i)
+              if (directTargets[i] == target)
+                duplicate = true;
+            if (!duplicate && directCount < 32)
+              directTargets[directCount++] = target;
+          }
+        }
+
+        // Common x64 virtual dispatch forms:
+        // FF 50 xx       call qword ptr [rax+imm8]
+        // FF 90 xx..xx   call qword ptr [rax+imm32]
+        if (off + 3 <= sizeof(code) &&
+            code[off] == 0xFF && code[off + 1] == 0x50) {
+          AddLog(u8"[책략5SETID] VCALL +%03llX [rax+0x%02X]",
+                 (unsigned long long)off,
+                 (unsigned)code[off + 2]);
+        }
+        if (off + 6 <= sizeof(code) &&
+            code[off] == 0xFF && code[off + 1] == 0x90) {
+          int32_t disp = 0;
+          std::memcpy(&disp, code + off + 2, sizeof(disp));
+          AddLog(u8"[책략5SETID] VCALL +%03llX [rax+0x%X]",
+                 (unsigned long long)off,
+                 (unsigned)disp);
+        }
+
+        const uint8_t rex = code[off];
+        if ((rex == 0x48 || rex == 0x4C) &&
+            (code[off + 1] == 0x8D || code[off + 1] == 0x8B) &&
+            (code[off + 2] & 0xC7) == 0x05) {
+          int32_t disp = 0;
+          std::memcpy(&disp, code + off + 3, sizeof(disp));
+          const uintptr_t target =
+              fn + off + 7 + static_cast<intptr_t>(disp);
+          if (target >= exeBase && target < imageEnd) {
+            AddLog(u8"[책략5SETID] RIP-%s +%03llX -> RVA=+%llX",
+                   code[off + 1] == 0x8D ? "LEA" : "MOV",
+                   (unsigned long long)off,
+                   (unsigned long long)(target - exeBase));
+          }
+        }
+      }
+
+      AddLog(u8"[책략5SETID] unique direct targets=%u", directCount);
+
+      // One bounded level deeper. Do not execute or patch any target.
+      for (unsigned i = 0; i < directCount; ++i) {
+        const uintptr_t target = directTargets[i];
+        if (!IsExecutableAddress(target))
+          continue;
+
+        uint8_t head[0xC0] = {};
+        if (!SafeCopySeh(target, head, sizeof(head)))
+          continue;
+
+        AddLog(u8"[책략5SETID] target%u RVA=+%llX",
+               i + 1,
+               (unsigned long long)(target - exeBase));
+
+        for (size_t off = 0; off < sizeof(head); off += 0x20) {
+          char line[256] = {};
+          int pos = 0;
+          for (size_t j = 0; j < 0x20 &&
+                             pos < (int)sizeof(line) - 4; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos,
+                             "%02X ", (unsigned)head[off + j]);
+          }
+          AddLog(u8"[책략5SETID] target%u +%03llX : %s",
+                 i + 1, (unsigned long long)off, line);
+        }
+
+        for (size_t off = 0; off + 5 <= sizeof(head); ++off) {
+          if (head[off] != 0xE8 && head[off] != 0xE9)
+            continue;
+          int32_t rel = 0;
+          std::memcpy(&rel, head + off + 1, sizeof(rel));
+          const uintptr_t nested =
+              target + off + 5 + static_cast<intptr_t>(rel);
+          if (nested >= exeBase && nested < imageEnd) {
+            AddLog(u8"[책략5SETID] target%u %s +%03llX -> RVA=+%llX",
+                   i + 1,
+                   head[off] == 0xE8 ? "CALL" : "JMP",
+                   (unsigned long long)off,
+                   (unsigned long long)(nested - exeBase));
           }
         }
       }
@@ -5855,11 +6013,10 @@ namespace DX11Base {
     g_fiveMetadataAddr = row5;
     g_fiveMetadataApplied = true;
 
-    // Read-only text-path diagnostics. These do not call any unknown virtual
-    // method and do not patch the game; they only record executable targets.
-    // Earlier code/vtable dumps established two resource-ID lookup
-    // families keyed by TrickData code1/code3. Compare those directly now.
-    LogFifthTextResourceLookup(table);
+    // Read-only title-path diagnostic. SetTrickID is the confirmed path that
+    // already renders the fifth card title/image correctly. Do not detour it:
+    // its entry hook previously froze the stratagem menu.
+    LogFifthSetTrickIdPath();
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
