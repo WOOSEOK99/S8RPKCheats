@@ -1587,15 +1587,17 @@ void TickTraitConfigRuntime() {
     state.applyPending = true;
   }
 
-  if (!state.applyPending)
-    return;
-
-  if (ApplyConfig(tableBase)) {
-    state.applyPending = false;
-    AddLog(u8"[기재JSON] 기재 설정 적용 완료: table=%p",
-           reinterpret_cast<void *>(tableBase));
+  if (state.applyPending) {
+    if (ApplyConfig(tableBase)) {
+      state.applyPending = false;
+      AddLog(u8"[기재JSON] 기재 설정 적용 완료: table=%p",
+             reinterpret_cast<void *>(tableBase));
+    } else {
+      return;
+    }
   }
 
+  // 설치 실패 시에도 다음 tick에서 다시 시도합니다.
   EnsureTraitEffectHook();
 }
 
