@@ -81,7 +81,7 @@ RuntimeState &State() {
 }
 
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
-  const std::string key = std::string(""") + field + """;
+  const std::string key = std::string("\"") + field + "\"";
   std::size_t p = text.find(key);
   if (p == std::string::npos)
     return false;
@@ -112,7 +112,7 @@ bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
 }
 
 bool ReadJsonStringValue(const std::string &text, const char *field, std::string &out) {
-  const std::string key = std::string(""") + field + """;
+  const std::string key = std::string("\"") + field + "\"";
   std::size_t p = text.find(key);
   if (p == std::string::npos)
     return false;
@@ -162,7 +162,7 @@ bool ReadJsonStringValue(const std::string &text, const char *field, std::string
 }
 
 bool ParseTraitLine(const std::string &line, int &index, TraitConfigEntry &entry) {
-  if (line.find(""effects"") == std::string::npos)
+  if (line.find("\"effects\"") == std::string::npos)
     return false;
 
   int id = 0;
@@ -173,7 +173,7 @@ bool ParseTraitLine(const std::string &line, int &index, TraitConfigEntry &entry
     return false;
   }
 
-  const std::size_t effectsKey = line.find(""effects"");
+  const std::size_t effectsKey = line.find("\"effects\"");
   const std::size_t arrayStart = line.find('[', effectsKey);
   const std::size_t arrayEnd = line.find(']', arrayStart);
   if (arrayStart == std::string::npos || arrayEnd == std::string::npos)
@@ -319,7 +319,7 @@ bool LoadConfig(bool &changed) {
 
   while (std::getline(file, line)) {
     if (!inCustomNames) {
-      if (line.find(""customNames"") != std::string::npos) {
+      if (line.find("\"customNames\"") != std::string::npos) {
         inCustomNames = true;
         continue;
       }
