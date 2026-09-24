@@ -3,6 +3,7 @@
 #include "../../Cheats.h"
 #include "../../Hooking/MinHook.h"
 #include "../../showlog.h"
+#include "../../EmbeddedJsonResources.h"
 #include "TraitConfigRuntime.h"
 
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <intrin.h>
 #include <iterator>
 #include <string>
+#include <sstream>
 #include <utility>
 
 namespace DX11Base {
@@ -111,6 +113,7 @@ struct RuntimeState {
   std::filesystem::file_time_type configWriteTime{};
   bool hasWriteTime = false;
   bool configLoaded = false;
+  bool configFromEmbedded = false;
   bool applyPending = false;
 
   uint32_t traitsPointerOffset = 0;
@@ -979,70 +982,30 @@ bool __fastcall CustomTraitEffectQuery(
   RuntimeState &state = State();
   g_traitEffectMatchCache = {};
 
+  const uintptr_t original = state.originalTraitEffectQuery;
+  if (original &&
+      reinterpret_cast<TraitEffectQuery>(original)(officer, requestedTraitId)) {
+    return true;
+  }
+
   const uintptr_t gameBase =
       reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   const uintptr_t returnAddress =
       reinterpret_cast<uintptr_t>(_ReturnAddress());
-  const uintptr_t callerRva =
-      gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
-
-  auto logId1State = [&](const char *source, uint16_t matchedId) {
-    if (requestedTraitId != 1)
-      return;
-
-    uint16_t heldIds[3] = {};
-    const uintptr_t officerBase = reinterpret_cast<uintptr_t>(officer);
-    if (officerBase >= 0x10000) {
-      for (int slot = 0; slot < 3; ++slot) {
-        uintptr_t heldRecord = 0;
-        if (ReadMemorySafe(
-                officerBase + 0x88 +
-                    static_cast<uintptr_t>(slot) * sizeof(uintptr_t),
-                &heldRecord, sizeof(heldRecord)) &&
-            heldRecord >= 0x10000) {
-          ReadTraitRecordId(heldRecord, heldIds[slot]);
-        }
-      }
-    }
-
-    static thread_local unsigned logCount = 0;
-    if (logCount < 40) {
-      AddLog(u8"[기재JSON/ID1진단] %s officer=%p held=%u/%u/%u matched=%u caller=+%llX",
-             source, officer,
-             static_cast<unsigned>(heldIds[0]),
-             static_cast<unsigned>(heldIds[1]),
-             static_cast<unsigned>(heldIds[2]),
-             static_cast<unsigned>(matchedId),
-             static_cast<unsigned long long>(callerRva));
-      ++logCount;
-    }
-  };
-
-  const uintptr_t original = state.originalTraitEffectQuery;
-  if (original &&
-      reinterpret_cast<TraitEffectQuery>(original)(officer, requestedTraitId)) {
-    logId1State("ORIGINAL_TRUE", 0);
-    return true;
-  }
-
-  // 월별 갱신의 이 호출 위치는 원본의 별도 검사 범위를 유지합니다.
   if (gameBase &&
       returnAddress == gameBase + kTraitEffectQuerySkipCallerOffset) {
-    logId1State("SKIP_FALSE", 0);
     return false;
   }
 
   uint16_t matchedId = 0;
-  if (!FindMatchingCustomTrait(officer, requestedTraitId, matchedId)) {
-    logId1State("ORIGINAL_FALSE_FALLBACK_FALSE", 0);
+  if (!FindMatchingCustomTrait(officer, requestedTraitId, matchedId))
     return false;
-  }
 
-  logId1State("FALLBACK_TRUE", matchedId);
   g_traitEffectMatchCache.valid = true;
   g_traitEffectMatchCache.requestedTraitId = requestedTraitId;
   g_traitEffectMatchCache.matchedCustomTraitId = matchedId;
-  g_traitEffectMatchCache.queryReturnRva = callerRva;
+  g_traitEffectMatchCache.queryReturnRva =
+      gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
   return true;
 }
 
@@ -1247,25 +1210,6 @@ void __fastcall CustomTraitMessageSetter(void *message, uint32_t requestedId) {
   const uintptr_t original = state.originalTraitMessageSetter;
   if (!original)
     return;
-
-  if (requestedId == 1) {
-    const uintptr_t gameBase =
-        reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-    const uintptr_t returnAddress =
-        reinterpret_cast<uintptr_t>(_ReturnAddress());
-    const uintptr_t callerRva =
-        gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
-    static thread_local unsigned id1MessageLogCount = 0;
-    if (id1MessageLogCount < 20) {
-      AddLog(u8"[기재JSON/ID1진단] MESSAGE id=1 caller=+%llX cache=%d req=%u matched=%u query=+%llX",
-             static_cast<unsigned long long>(callerRva),
-             g_traitEffectMatchCache.valid ? 1 : 0,
-             static_cast<unsigned>(g_traitEffectMatchCache.requestedTraitId),
-             static_cast<unsigned>(g_traitEffectMatchCache.matchedCustomTraitId),
-             static_cast<unsigned long long>(g_traitEffectMatchCache.queryReturnRva));
-      ++id1MessageLogCount;
-    }
-  }
 
   uint16_t matchedId = 0;
   const bool bridge = TakeMatchedBridgeId(
@@ -1811,6 +1755,18 @@ bool ParseCustomMetaLine(const std::string &line, int &index, TraitMetaEntry &en
   return true;
 }
 
+bool HasExternalGameVersionDll() {
+  wchar_t exePath[MAX_PATH] = {};
+  const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+  if (len == 0 || len >= MAX_PATH)
+    return false;
+
+  const std::filesystem::path versionPath =
+      std::filesystem::path(exePath).parent_path() / L"version.dll";
+  std::error_code ec;
+  return std::filesystem::is_regular_file(versionPath, ec) && !ec;
+}
+
 std::filesystem::path ResolveConfigPath() {
   wchar_t modulePath[MAX_PATH] = {};
   const DWORD len = GetModuleFileNameW(g_hModule, modulePath, MAX_PATH);
@@ -1839,99 +1795,133 @@ bool LoadConfig(bool &changed) {
   RuntimeState &state = State();
 
   const std::filesystem::path path = ResolveConfigPath();
-  if (path.empty()) {
-    if (state.configLoaded) {
-      AddLog(u8"[기재JSON] san8r_traits_config.json이 없어 런타임 적용을 중지합니다.");
-    }
-    state.configLoaded = false;
-    state.applyPending = false;
-    state.configPath.clear();
-    state.hasWriteTime = false;
-    state.sentinelIndex = -1;
-    return false;
-  }
-
   std::error_code ec;
-  const auto writeTime = std::filesystem::last_write_time(path, ec);
-  const bool haveWriteTime = !ec;
+  std::filesystem::file_time_type writeTime{};
+  bool haveWriteTime = false;
 
-  if (state.configLoaded &&
-      path == state.configPath &&
-      haveWriteTime && state.hasWriteTime &&
-      writeTime == state.configWriteTime) {
+  if (!path.empty()) {
+    writeTime = std::filesystem::last_write_time(path, ec);
+    haveWriteTime = !ec;
+    if (state.configLoaded &&
+        path == state.configPath &&
+        haveWriteTime && state.hasWriteTime &&
+        writeTime == state.configWriteTime) {
+      return true;
+    }
+  } else if (state.configLoaded && state.configFromEmbedded) {
     return true;
   }
 
-  std::ifstream file(path, std::ios::binary);
-  if (!file.is_open())
-    return false;
+  auto parseText = [&](const std::string &jsonText,
+                       std::array<TraitConfigEntry, kTraitCount> &traits,
+                       std::array<TraitMetaEntry, kTraitCount> &meta,
+                       int &traitCount,
+                       int &customCount,
+                       int &sentinel) -> bool {
+    traits = {};
+    meta = {};
+    traitCount = 0;
+    customCount = 0;
+    sentinel = -1;
 
-  std::array<TraitConfigEntry, kTraitCount> traits{};
-  std::array<TraitMetaEntry, kTraitCount> meta{};
+    std::istringstream file(jsonText);
+    bool inCustomNames = false;
+    std::string line;
 
-  bool inCustomNames = false;
-  int traitCount = 0;
-  int customCount = 0;
-  std::string line;
+    while (std::getline(file, line)) {
+      if (!inCustomNames) {
+        if (line.find("\"customNames\"") != std::string::npos) {
+          inCustomNames = true;
+          continue;
+        }
 
-  while (std::getline(file, line)) {
-    if (!inCustomNames) {
-      if (line.find("\"customNames\"") != std::string::npos) {
-        inCustomNames = true;
+        int index = -1;
+        TraitConfigEntry entry;
+        if (ParseTraitLine(line, index, entry)) {
+          traits[index] = entry;
+          ++traitCount;
+        }
         continue;
       }
 
       int index = -1;
-      TraitConfigEntry entry;
-      if (ParseTraitLine(line, index, entry)) {
-        traits[index] = entry;
-        ++traitCount;
+      TraitMetaEntry entry;
+      if (ParseCustomMetaLine(line, index, entry)) {
+        meta[index] = entry;
+        ++customCount;
       }
-      continue;
     }
 
-    int index = -1;
-    TraitMetaEntry entry;
-    if (ParseCustomMetaLine(line, index, entry)) {
-      meta[index] = entry;
-      ++customCount;
-    }
-  }
-
-  if (traitCount == 0) {
-    AddLog(u8"[기재JSON] traits 항목을 읽지 못했습니다. 파일 형식을 확인하세요.");
-    return false;
-  }
-
-  // 잘못된 파일을 기재 테이블 전체에 쓰는 것을 막기 위해 index/id 대응을 확인합니다.
-  for (int i = 0; i < kTraitCount; ++i) {
-    if (!traits[i].present)
-      continue;
-    if (traits[i].id != i + 1) {
-      AddLog(u8"[기재JSON] index=%d / id=%d 불일치. 적용을 중지합니다.",
-             i, traits[i].id);
+    if (traitCount == 0)
       return false;
-    }
-  }
 
-  int sentinel = -1;
-  for (int i = 0; i < kTraitCount; ++i) {
-    if (traits[i].present && meta[i].present && meta[i].hasCustomText) {
-      sentinel = i;
-      break;
-    }
-  }
-  if (sentinel < 0) {
     for (int i = 0; i < kTraitCount; ++i) {
-      if (traits[i].present) {
+      if (!traits[i].present)
+        continue;
+      if (traits[i].id != i + 1)
+        return false;
+    }
+
+    for (int i = 0; i < kTraitCount; ++i) {
+      if (traits[i].present && meta[i].present && meta[i].hasCustomText) {
         sentinel = i;
         break;
       }
     }
+    if (sentinel < 0) {
+      for (int i = 0; i < kTraitCount; ++i) {
+        if (traits[i].present) {
+          sentinel = i;
+          break;
+        }
+      }
+    }
+    return true;
+  };
+
+  std::string jsonText;
+  bool usingEmbedded = false;
+  bool loaded = false;
+
+  if (!path.empty()) {
+    loaded = ReadUtf8TextFile(path, jsonText);
+    if (!loaded) {
+      AddLog(u8"[기재JSON] 외부 설정 읽기 실패. 내장 기본값으로 전환합니다.");
+    }
+  }
+
+  if (!loaded) {
+    usingEmbedded = true;
+    loaded = LoadEmbeddedJsonResource(IDR_JSON_TRAITS_DEFAULT, jsonText);
+    if (!loaded) {
+      AddLog(u8"[기재JSON] 내장 기본 설정을 읽지 못했습니다.");
+      return false;
+    }
+  }
+
+  std::array<TraitConfigEntry, kTraitCount> traits{};
+  std::array<TraitMetaEntry, kTraitCount> meta{};
+  int traitCount = 0;
+  int customCount = 0;
+  int sentinel = -1;
+
+  if (!parseText(jsonText, traits, meta, traitCount, customCount, sentinel)) {
+    if (!usingEmbedded) {
+      AddLog(u8"[기재JSON] 외부 설정 형식 오류. 내장 기본값으로 전환합니다.");
+      usingEmbedded = true;
+      if (!LoadEmbeddedJsonResource(IDR_JSON_TRAITS_DEFAULT, jsonText) ||
+          !parseText(jsonText, traits, meta, traitCount, customCount, sentinel)) {
+        AddLog(u8"[기재JSON] 내장 기본 설정 형식을 읽지 못했습니다.");
+        return false;
+      }
+    } else {
+      AddLog(u8"[기재JSON] 내장 기본 설정 형식을 읽지 못했습니다.");
+      return false;
+    }
   }
 
   if (!PublishNativeTexts(meta)) {
-    AddLog(u8"[기재JSON/문구] JSON 이름/설명 준비 실패. 기재 테이블 적용을 중지합니다.");
+    AddLog(u8"[기재JSON/문구] 이름/설명 준비 실패. 기재 테이블 적용을 중지합니다.");
     return false;
   }
 
@@ -1939,15 +1929,17 @@ bool LoadConfig(bool &changed) {
   state.meta = std::move(meta);
   state.configPath = path;
   state.configLoaded = true;
+  state.configFromEmbedded = usingEmbedded;
   state.configWriteTime = writeTime;
-  state.hasWriteTime = haveWriteTime;
+  state.hasWriteTime = !path.empty() && haveWriteTime;
   state.sentinelIndex = sentinel;
   state.applyPending = true;
   state.descTablesSynced = false;
   state.descTableFailureLogged = false;
   changed = true;
 
-  AddLog(u8"[기재JSON] 설정 로드: traits %d개 / customNames %d개 / 감시 index %d",
+  AddLog(u8"[기재JSON] 설정 로드: %s / traits %d개 / customNames %d개 / 감시 index %d",
+         usingEmbedded ? u8"내장 기본값" : u8"외부 san8r_traits_config.json",
          traitCount, customCount, sentinel);
   return true;
 }
@@ -2176,6 +2168,18 @@ void TickTraitConfigRuntime() {
   if (now - state.lastTickMs < 500ull)
     return;
   state.lastTickMs = now;
+
+  static bool externalVersionDllChecked = false;
+  static bool externalVersionDllDetected = false;
+  if (!externalVersionDllChecked) {
+    externalVersionDllChecked = true;
+    externalVersionDllDetected = HasExternalGameVersionDll();
+    if (externalVersionDllDetected) {
+      AddLog(u8"[기재JSON] 게임 폴더의 외부 version.dll 감지. S8RCheats 내장 기재 런타임을 사용하지 않습니다.");
+    }
+  }
+  if (externalVersionDllDetected)
+    return;
 
   if (!state.configLoaded || now - state.lastConfigProbeMs >= 2000ull) {
     state.lastConfigProbeMs = now;
