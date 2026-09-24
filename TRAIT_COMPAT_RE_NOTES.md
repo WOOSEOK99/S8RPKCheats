@@ -22,3 +22,19 @@ The message and data bridges require both a matching cached base trait ID and an
 Hook target signatures and first bytes were checked against the live EXE. A mismatched prologue leaves that hook uninstalled and logs the reason. The installation is retried from `TickTraitConfigRuntime()`.
 
 The Release `hid.dll` build validates compilation and linkage. Gameplay outcomes still need an in-game run with a custom trait carrying each relevant effect type. In particular, the current `san8r_traits_config.json` has no custom effect type 166, so the monthly supplement cannot be exercised with that file unchanged.
+
+
+## Extended eligibility thresholds
+
+The compatibility DLL contains seven threshold-patch descriptors, but its current TraitEffect installation/maintenance path actively processes only descriptor indices 5 and 6. Those correspond to:
+
+| Game RVA | Verified bytes | Compatibility value | Current handling |
+| --- | --- | --- | --- |
+| `+17C03E7` | `81 FE 95 00 00 00` (`cmp esi,149`) | immediate changed to `1` | Validate the remaining instruction bytes, patch only the low immediate byte, and reapply if the game restores `149` |
+| `+17C042F` | `81 FE 95 00 00 00` (`cmp esi,149`) | immediate changed to `1` | Same guarded maintenance logic |
+
+The compatibility DLL's maintenance routine checks the byte at `+17C03E9` and `+17C0431` (the low byte of each `imm32`) and reapplies the corresponding descriptor only when the value has reverted. The new implementation mirrors that behavior from the existing 500 ms runtime tick and does not rewrite code when the expected value is already present.
+
+Five older descriptors also exist in the binary around `+1F02B7A`, `+1F15EBA`, `+1F0516A`, `+1F059CB`, and `+1C3B6C9`, but no call from the current TraitEffect installation/maintenance path was found for descriptor indices 0 through 4. They are therefore intentionally left untouched instead of applying unverified legacy patches.
+
+The two active comparisons are treated as internal trait eligibility/range compatibility conditions. Their exact high-level game variable represented by ESI is not asserted here without live SAN8RPK.exe instructions surrounding those RVAs; the implementation only mirrors the two currently-active, byte-verified compatibility changes.
