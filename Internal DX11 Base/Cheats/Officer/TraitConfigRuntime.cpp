@@ -32,6 +32,12 @@ constexpr std::size_t kMetadataSize = 0x12;
 constexpr uint32_t kTraitsPointerOffsetFallback = 0x57A4B8;
 constexpr int kDefaultCloneSource = 30; // version.dll Normalize()와 동일한 기본 donor index
 constexpr uintptr_t kNameGetterOffset = 0x170E2D0;
+constexpr uintptr_t kDescMapGetterOffset = 0x171E070;
+
+// version.dll descmap 설치 시 검증하는 +171E070 원본 5바이트와 동일.
+constexpr uint8_t kDescMapGetterPrologue[] = {
+    0x48, 0x89, 0x5C, 0x24, 0x08
+};
 
 #pragma pack(push, 1)
 struct TraitEffect {
@@ -53,6 +59,7 @@ struct TraitMetaEntry {
   bool present = false;
   bool hasCustomText = false;
   std::string name;
+  std::string desc;
   int cloneSrc = -1;
   int bgTrait = -1;
   int grade = -1;
@@ -78,9 +85,16 @@ struct RuntimeState {
   ULONGLONG lastConfigProbeMs = 0;
 
   std::array<const wchar_t *, kTraitCount> nativeNamePtrs{};
+  std::array<const wchar_t *, kTraitCount> nativeDescPtrs{};
+  std::array<const wchar_t *, kTraitCount> nativeDescFormatPtrs{};
+
   bool nameHookInstalled = false;
   bool nameHookFailureLogged = false;
   uintptr_t originalNameGetter = 0;
+
+  bool descHookInstalled = false;
+  bool descHookFailureLogged = false;
+  uintptr_t originalDescMapGetter = 0;
 };
 
 RuntimeState &State() {
@@ -90,6 +104,7 @@ RuntimeState &State() {
 
 
 using TraitNameGetter = const wchar_t *(__fastcall *)(void *);
+using TraitDescMapGetter = const wchar_t *(__fastcall *)(void *, int, uint8_t);
 
 bool IsExecutableAddress(uintptr_t address) {
   if (address < 0x10000)
@@ -167,6 +182,28 @@ const wchar_t *__fastcall CustomTraitNameGetter(void *traitObject) {
   return reinterpret_cast<TraitNameGetter>(original)(traitObject);
 }
 
+const wchar_t *__fastcall CustomTraitDescMapGetter(
+    void *context, int traitId, uint8_t kind) {
+  RuntimeState &state = State();
+
+  if (traitId >= 1 && traitId <= kTraitCount) {
+    const std::size_t index = static_cast<std::size_t>(traitId - 1);
+    const wchar_t *custom =
+        (kind == 2) ? state.nativeDescFormatPtrs[index]
+                    : state.nativeDescPtrs[index];
+    if (custom && custom[0] != L'\0')
+      return custom;
+  }
+
+  const uintptr_t original = state.originalDescMapGetter;
+  if (!original)
+    return nullptr;
+
+  return reinterpret_cast<TraitDescMapGetter>(original)(
+      context, traitId, kind);
+}
+
+
 bool Utf8ToWide(const std::string &text, std::wstring &out) {
   out.clear();
   if (text.empty())
@@ -186,13 +223,13 @@ bool Utf8ToWide(const std::string &text, std::wstring &out) {
              out.data(), count) == count;
 }
 
-const wchar_t *AllocateStableWideString(const std::string &utf8) {
-  std::wstring wide;
-  if (!Utf8ToWide(utf8, wide) || wide.empty())
+const wchar_t *AllocateStableWideText(const std::wstring &wide) {
+  if (wide.empty())
     return nullptr;
 
   const std::size_t bytes = (wide.size() + 1) * sizeof(wchar_t);
-  void *memory = VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  void *memory =
+      VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
   if (!memory)
     return nullptr;
 
@@ -200,29 +237,76 @@ const wchar_t *AllocateStableWideString(const std::string &utf8) {
   return reinterpret_cast<const wchar_t *>(memory);
 }
 
-bool PublishNativeNames(const std::array<TraitMetaEntry, kTraitCount> &meta) {
-  RuntimeState &state = State();
-  std::array<const wchar_t *, kTraitCount> next{};
+const wchar_t *AllocateStableWideString(const std::string &utf8) {
+  std::wstring wide;
+  if (!Utf8ToWide(utf8, wide) || wide.empty())
+    return nullptr;
+  return AllocateStableWideText(wide);
+}
 
-  int published = 0;
+const wchar_t *AllocateStableFormatWideString(const std::string &utf8) {
+  std::wstring wide;
+  if (!Utf8ToWide(utf8, wide) || wide.empty())
+    return nullptr;
+
+  // version.dll descmap은 kind==2 경로에서 '%'를 '%%'로 복제한 문자열을 사용합니다.
+  std::wstring escaped;
+  escaped.reserve(wide.size() + 8);
+  for (wchar_t ch : wide) {
+    escaped.push_back(ch);
+    if (ch == L'%')
+      escaped.push_back(L'%');
+  }
+  return AllocateStableWideText(escaped);
+}
+
+bool PublishNativeTexts(
+    const std::array<TraitMetaEntry, kTraitCount> &meta) {
+  RuntimeState &state = State();
+
+  std::array<const wchar_t *, kTraitCount> nextNames{};
+  std::array<const wchar_t *, kTraitCount> nextDescs{};
+  std::array<const wchar_t *, kTraitCount> nextFormatDescs{};
+
+  int nameCount = 0;
+  int descCount = 0;
+
   for (int i = 0; i < kTraitCount; ++i) {
-    if (!meta[i].present || meta[i].name.empty())
+    if (!meta[i].present)
       continue;
 
-    const wchar_t *wide = AllocateStableWideString(meta[i].name);
-    if (!wide) {
-      AddLog(u8"[기재JSON/이름] UTF-8 이름 변환/할당 실패: index=%d", i);
-      return false;
+    if (!meta[i].name.empty()) {
+      const wchar_t *wide = AllocateStableWideString(meta[i].name);
+      if (!wide) {
+        AddLog(u8"[기재JSON/문구] 이름 UTF-8 변환/할당 실패: index=%d", i);
+        return false;
+      }
+      nextNames[i] = wide;
+      ++nameCount;
     }
 
-    next[i] = wide;
-    ++published;
+    if (!meta[i].desc.empty()) {
+      const wchar_t *wide = AllocateStableWideString(meta[i].desc);
+      const wchar_t *formatWide =
+          AllocateStableFormatWideString(meta[i].desc);
+      if (!wide || !formatWide) {
+        AddLog(u8"[기재JSON/문구] 설명 UTF-8 변환/할당 실패: index=%d", i);
+        return false;
+      }
+      nextDescs[i] = wide;
+      nextFormatDescs[i] = formatWide;
+      ++descCount;
+    }
   }
 
-  // 이전 문자열은 게임 UI가 포인터를 보유할 수 있으므로 해제하지 않습니다.
-  // 새 포인터 배열만 원자 크기 포인터 쓰기로 교체합니다.
-  state.nativeNamePtrs = next;
-  AddLog(u8"[기재JSON/이름] JSON 이름 준비 완료: %d개", published);
+  // 게임 UI가 이전 반환 문자열 포인터를 보유할 수 있으므로 이전 VirtualAlloc 문자열은
+  // 즉시 해제하지 않고 새 포인터 배열만 교체합니다.
+  state.nativeNamePtrs = nextNames;
+  state.nativeDescPtrs = nextDescs;
+  state.nativeDescFormatPtrs = nextFormatDescs;
+
+  AddLog(u8"[기재JSON/문구] JSON 문구 준비 완료: 이름 %d개 / 설명 %d개",
+         nameCount, descCount);
   return true;
 }
 
@@ -316,6 +400,101 @@ bool EnsureCustomNameHook() {
          reinterpret_cast<void *>(state.originalNameGetter));
   return true;
 }
+
+bool EnsureCustomDescHook() {
+  RuntimeState &state = State();
+  if (state.descHookInstalled)
+    return true;
+
+  bool hasDescriptions = false;
+  for (const wchar_t *desc : state.nativeDescPtrs) {
+    if (desc && desc[0] != L'\0') {
+      hasDescriptions = true;
+      break;
+    }
+  }
+  if (!hasDescriptions)
+    return true;
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase)
+    return false;
+
+  const uintptr_t target = gameBase + kDescMapGetterOffset;
+
+  uint8_t prologue[sizeof(kDescMapGetterPrologue)] = {};
+  if (!ReadMemorySafe(target, prologue, sizeof(prologue)) ||
+      std::memcmp(prologue, kDescMapGetterPrologue,
+                  sizeof(kDescMapGetterPrologue)) != 0) {
+    if (!state.descHookFailureLogged) {
+      AddLog(u8"[기재JSON/설명] descmap 원본 바이트 불일치: +171E070");
+      state.descHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  const MH_STATUS initStatus = MH_Initialize();
+  if (initStatus != MH_OK &&
+      initStatus != MH_ERROR_ALREADY_INITIALIZED) {
+    if (!state.descHookFailureLogged) {
+      AddLog(u8"[기재JSON/설명] MinHook 초기화 실패: %s",
+             MH_StatusToString(initStatus));
+      state.descHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  LPVOID original = nullptr;
+  const MH_STATUS createStatus =
+      MH_CreateHook(reinterpret_cast<LPVOID>(target),
+                    reinterpret_cast<LPVOID>(&CustomTraitDescMapGetter),
+                    &original);
+  if (createStatus != MH_OK) {
+    if (!state.descHookFailureLogged) {
+      AddLog(u8"[기재JSON/설명] descmap 훅 생성 실패: %s / target=%p",
+             MH_StatusToString(createStatus),
+             reinterpret_cast<void *>(target));
+      state.descHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  if (!original ||
+      !IsExecutableAddress(reinterpret_cast<uintptr_t>(original))) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    if (!state.descHookFailureLogged) {
+      AddLog(u8"[기재JSON/설명] descmap trampoline 검증 실패.");
+      state.descHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  state.originalDescMapGetter =
+      reinterpret_cast<uintptr_t>(original);
+
+  const MH_STATUS enableStatus =
+      MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  if (enableStatus != MH_OK &&
+      enableStatus != MH_ERROR_ENABLED) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    state.originalDescMapGetter = 0;
+    if (!state.descHookFailureLogged) {
+      AddLog(u8"[기재JSON/설명] descmap 훅 활성화 실패: %s",
+             MH_StatusToString(enableStatus));
+      state.descHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  state.descHookInstalled = true;
+  state.descHookFailureLogged = false;
+  AddLog(u8"[기재JSON/설명] 원본 게임 descmap 직접 훅 설치 완료: target=%p trampoline=%p",
+         reinterpret_cast<void *>(target),
+         reinterpret_cast<void *>(state.originalDescMapGetter));
+  return true;
+}
+
 
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
   const std::string key = std::string("\"") + field + "\"";
@@ -482,6 +661,7 @@ bool ParseCustomMetaLine(const std::string &line, int &index, TraitMetaEntry &en
   ReadJsonStringValue(line, "name", name);
   ReadJsonStringValue(line, "desc", desc);
   parsed.name = name;
+  parsed.desc = desc;
   parsed.hasCustomText = !name.empty() || !desc.empty();
 
   ReadJsonIntValue(line, "cloneSrc", parsed.cloneSrc);
@@ -611,8 +791,8 @@ bool LoadConfig(bool &changed) {
     }
   }
 
-  if (!PublishNativeNames(meta)) {
-    AddLog(u8"[기재JSON/이름] JSON 이름 준비 실패. 기재 테이블 적용을 중지합니다.");
+  if (!PublishNativeTexts(meta)) {
+    AddLog(u8"[기재JSON/문구] JSON 이름/설명 준비 실패. 기재 테이블 적용을 중지합니다.");
     return false;
   }
 
@@ -868,6 +1048,12 @@ void TickTraitConfigRuntime() {
   // 커스텀 ID가 원본 UI에서 조회되기 전에 이름 getter를 먼저 가로챕니다.
   // 이 훅이 실패하면 71~254 슬롯을 활성화하지 않아 원본 사실무장 편집 UI 프리징을 방지합니다.
   if (!EnsureCustomNameHook())
+    return;
+
+  // version.dll의 descmap(+171E070)과 같은 경로를 직접 훅합니다.
+  // JSON 설명이 있는 ID는 원본 조회 전에 즉시 반환하므로 201 이후 빈 설명 조회로
+  // 목록 스크롤이 멎는 경로도 함께 차단합니다.
+  if (!EnsureCustomDescHook())
     return;
 
   const uintptr_t gameDataRoot = GetGameBaseFast();
