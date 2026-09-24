@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <intrin.h>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -30,15 +31,35 @@ constexpr std::size_t kEffectCount = 6;
 constexpr std::size_t kEffectSize = 0x06;
 constexpr std::size_t kMetadataOffset = 0x2E;
 constexpr std::size_t kMetadataSize = 0x12;
-constexpr uint32_t kTraitsPointerOffsetFallback = 0x57A4B8;
+constexpr uint32_t kTraitsPointerOffsetFallback = 0x57A4D0;
 constexpr int kDefaultCloneSource = 30; // version.dll Normalize()와 동일한 기본 donor index
 constexpr uintptr_t kNameGetterOffset = 0x170E2D0;
 constexpr uintptr_t kDescMapGetterOffset = 0x171E070;
 constexpr uintptr_t kTraitEffectQueryOffset = 0x17AAD60;
 constexpr uintptr_t kTraitEffectQuerySkipCallerOffset = 0x1C7A135;
+constexpr uintptr_t kOfficerTraitQueryOffset = 0x170C080;
+constexpr uintptr_t kTraitMessageSetterOffset = 0x13F91E0;
+constexpr uintptr_t kTraitDataGetterOffset = 0x16E63F0;
+constexpr uintptr_t kMonthlyTraitUpdateOffset = 0x1C79C90;
+constexpr uintptr_t kTransferTraitEventOffset = 0x18A5E30;
 
 constexpr uint8_t kTraitEffectQueryPrologue[] = {
     0x48, 0x89, 0x5C, 0x24, 0x08
+};
+constexpr uint8_t kOfficerTraitQueryPrologue[] = {
+    0x48, 0x89, 0x5C, 0x24, 0x08
+};
+constexpr uint8_t kTraitMessageSetterPrologue[] = {
+    0x40, 0x53, 0x48, 0x83, 0xEC, 0x20
+};
+constexpr uint8_t kTraitDataGetterPrologue[] = {
+    0x48, 0x83, 0xEC, 0x28, 0x8D, 0x42, 0xFF
+};
+constexpr uint8_t kMonthlyTraitUpdatePrologue[] = {
+    0x4C, 0x8B, 0xDC, 0x53, 0x41, 0x54, 0x41, 0x57
+};
+constexpr uint8_t kTransferTraitEventPrologue[] = {
+    0x40, 0x53, 0x55, 0x56, 0x57, 0x41, 0x56
 };
 constexpr uintptr_t kDescTextPointerFallbackOffset = 0x2C34EC0;
 constexpr uint32_t kDescNormalIndexBase = 0x2E73;
@@ -115,6 +136,26 @@ struct RuntimeState {
   bool traitEffectHookInstalled = false;
   bool traitEffectHookFailureLogged = false;
   uintptr_t originalTraitEffectQuery = 0;
+
+  bool officerTraitHookInstalled = false;
+  bool officerTraitHookFailureLogged = false;
+  uintptr_t originalOfficerTraitQuery = 0;
+
+  bool traitMessageHookInstalled = false;
+  bool traitMessageHookFailureLogged = false;
+  uintptr_t originalTraitMessageSetter = 0;
+
+  bool traitDataHookInstalled = false;
+  bool traitDataHookFailureLogged = false;
+  uintptr_t originalTraitDataGetter = 0;
+
+  bool monthlyHookInstalled = false;
+  bool monthlyHookFailureLogged = false;
+  uintptr_t originalMonthlyUpdate = 0;
+
+  bool transferHookInstalled = false;
+  bool transferHookFailureLogged = false;
+  uintptr_t originalTransferEvent = 0;
 };
 
 RuntimeState &State() {
@@ -126,11 +167,17 @@ RuntimeState &State() {
 using TraitNameGetter = const wchar_t *(__fastcall *)(void *);
 using TraitDescMapGetter = const wchar_t *(__fastcall *)(void *, int, uint8_t);
 using TraitEffectQuery = bool(__fastcall *)(void *, uint16_t);
+using OfficerTraitQuery = int(__fastcall *)(void *, uint32_t);
+using TraitMessageSetter = void(__fastcall *)(void *, uint32_t);
+using TraitDataGetter = void *(__fastcall *)(void *, uint32_t);
+using MonthlyTraitUpdate = int(__fastcall *)(void *);
+using TransferTraitEvent = int(__fastcall *)(void *, void *, void *, void *, void *);
 
 struct TraitEffectMatchCache {
   bool valid = false;
   uint16_t requestedTraitId = 0;
   uint16_t matchedCustomTraitId = 0;
+  uintptr_t queryReturnRva = 0;
 };
 
 thread_local TraitEffectMatchCache g_traitEffectMatchCache;
@@ -839,33 +886,15 @@ bool HasMatchingEffectType(uintptr_t customRecord, uintptr_t requestedRecord) {
   return false;
 }
 
-bool __fastcall CustomTraitEffectQuery(
-    void *officer, uint16_t requestedTraitId) {
+bool FindMatchingCustomTrait(
+    void *officer, uint16_t requestedTraitId, uint16_t &matchedId) {
+  matchedId = 0;
   RuntimeState &state = State();
-  g_traitEffectMatchCache = {};
-
-  const uintptr_t original = state.originalTraitEffectQuery;
-  if (original) {
-    if (reinterpret_cast<TraitEffectQuery>(original)(
-            officer, requestedTraitId)) {
-      return true;
-    }
-  }
-
   if (!officer ||
+      !state.configLoaded ||
       requestedTraitId < 1 ||
       requestedTraitId > kTraitCount ||
       state.lastTableBase < 0x10000) {
-    return false;
-  }
-
-  // version.dll은 특정 내부 호출(+1C7A135)에서는 fallback 검사를 건너뜁니다.
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-  const uintptr_t returnAddress =
-      reinterpret_cast<uintptr_t>(_ReturnAddress());
-  if (gameBase &&
-      returnAddress == gameBase + kTraitEffectQuerySkipCallerOffset) {
     return false;
   }
 
@@ -903,13 +932,44 @@ bool __fastcall CustomTraitEffectQuery(
     if (!HasMatchingEffectType(heldRecord, requestedRecord))
       continue;
 
-    g_traitEffectMatchCache.valid = true;
-    g_traitEffectMatchCache.requestedTraitId = requestedTraitId;
-    g_traitEffectMatchCache.matchedCustomTraitId = heldId;
+    matchedId = heldId;
     return true;
   }
 
   return false;
+}
+
+bool __fastcall CustomTraitEffectQuery(
+    void *officer, uint16_t requestedTraitId) {
+  RuntimeState &state = State();
+  g_traitEffectMatchCache = {};
+
+  const uintptr_t original = state.originalTraitEffectQuery;
+  if (original &&
+      reinterpret_cast<TraitEffectQuery>(original)(officer, requestedTraitId)) {
+    return true;
+  }
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t returnAddress =
+      reinterpret_cast<uintptr_t>(_ReturnAddress());
+  // 월별 갱신의 이 호출 위치는 원본의 별도 검사 범위를 유지합니다.
+  if (gameBase &&
+      returnAddress == gameBase + kTraitEffectQuerySkipCallerOffset) {
+    return false;
+  }
+
+  uint16_t matchedId = 0;
+  if (!FindMatchingCustomTrait(officer, requestedTraitId, matchedId))
+    return false;
+
+  g_traitEffectMatchCache.valid = true;
+  g_traitEffectMatchCache.requestedTraitId = requestedTraitId;
+  g_traitEffectMatchCache.matchedCustomTraitId = matchedId;
+  g_traitEffectMatchCache.queryReturnRva =
+      gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
+  return true;
 }
 
 bool EnsureTraitEffectHook() {
@@ -998,6 +1058,406 @@ bool EnsureTraitEffectHook() {
          reinterpret_cast<void *>(
              state.originalTraitEffectQuery));
   return true;
+}
+
+struct TraitBridgeSite {
+  uintptr_t queryReturnRva;
+  uintptr_t consumerReturnRva;
+  uint16_t requestedId;
+};
+
+// These pairs are direct call/return sites in the same SAN8RPK.exe build.
+// The first call checks the base trait; the second consumes that trait ID.
+constexpr TraitBridgeSite kMessageBridgeSites[] = {
+    {0x1854D85, 0x1854E73, 28}, // conversation
+    {0x1859DE5, 0x1859ECF, 1},  // conversation
+    {0x1902E70, 0x1902EF5, 10}, // repeated action
+    {0x1BCEF8C, 0x1BCF20F, 11}, // reinforcement report
+    {0x1BCFF6E, 0x1BD0702, 202}, // strategy phase
+    {0x1BD0954, 0x1BD0A16, 30}, // strategy phase
+    {0x1E4C093, 0x1E4C208, 19}, // battle conclusion
+    {kTransferTraitEventOffset, 0x18A5F81, 26} // transfer event
+};
+constexpr TraitBridgeSite kDataBridgeSites[] = {
+    {0x19253E8, 0x192542F, 55} // conference result
+};
+
+bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
+                         const TraitBridgeSite *sites, std::size_t siteCount,
+                         uint16_t &matchedId) {
+  matchedId = 0;
+  const TraitEffectMatchCache &cache = g_traitEffectMatchCache;
+  RuntimeState &state = State();
+  if (!cache.valid || !state.configLoaded ||
+      requestedId != cache.requestedTraitId ||
+      cache.matchedCustomTraitId < 71 ||
+      cache.matchedCustomTraitId > kTraitCount) {
+    return false;
+  }
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase || consumerReturnAddress < gameBase)
+    return false;
+
+  const uintptr_t consumerRva = consumerReturnAddress - gameBase;
+  bool knownPair = false;
+  for (std::size_t i = 0; i < siteCount; ++i) {
+    if (sites[i].queryReturnRva == cache.queryReturnRva &&
+        sites[i].consumerReturnRva == consumerRva &&
+        sites[i].requestedId == requestedId) {
+      knownPair = true;
+      break;
+    }
+  }
+  if (!knownPair) {
+    thread_local unsigned diagnosticCount = 0;
+    if (diagnosticCount < 12) {
+      AddLog(u8"[기재JSON/호환] 미확인 ID 전달: query=+%llX consumer=+%llX id=%u",
+             static_cast<unsigned long long>(cache.queryReturnRva),
+             static_cast<unsigned long long>(consumerRva), requestedId);
+      ++diagnosticCount;
+    }
+    return false;
+  }
+
+  const uintptr_t customRecord =
+      state.lastTableBase +
+      static_cast<uintptr_t>(cache.matchedCustomTraitId) * kTraitStride;
+  uint16_t recordId = 0;
+  if (!ReadTraitRecordId(customRecord, recordId) ||
+      recordId != cache.matchedCustomTraitId) {
+    return false;
+  }
+
+  matchedId = cache.matchedCustomTraitId;
+  g_traitEffectMatchCache = {};
+  return true;
+}
+
+int __fastcall CustomOfficerTraitQuery(void *officer, uint32_t requestedId) {
+  RuntimeState &state = State();
+  const uintptr_t original = state.originalOfficerTraitQuery;
+  if (!original)
+    return 0;
+
+  const int originalResult =
+      reinterpret_cast<OfficerTraitQuery>(original)(officer, requestedId);
+  if (originalResult)
+    return originalResult;
+
+  // This direct officer query is only extended for the ID 11 path verified
+  // in the original compatibility hook and the game's callers.
+  if (requestedId != 11)
+    return 0;
+
+  g_traitEffectMatchCache = {};
+  uint16_t matchedId = 0;
+  if (!FindMatchingCustomTrait(officer, 11, matchedId))
+    return 0;
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t returnAddress =
+      reinterpret_cast<uintptr_t>(_ReturnAddress());
+  g_traitEffectMatchCache.valid = true;
+  g_traitEffectMatchCache.requestedTraitId = 11;
+  g_traitEffectMatchCache.matchedCustomTraitId = matchedId;
+  g_traitEffectMatchCache.queryReturnRva =
+      gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
+  return 1;
+}
+
+void __fastcall CustomTraitMessageSetter(void *message, uint32_t requestedId) {
+  RuntimeState &state = State();
+  const uintptr_t original = state.originalTraitMessageSetter;
+  if (!original)
+    return;
+
+  uint16_t matchedId = 0;
+  const bool bridge = TakeMatchedBridgeId(
+      requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
+      kMessageBridgeSites, std::size(kMessageBridgeSites), matchedId);
+
+  // The original setter still updates the message object; only its input ID
+  // changes after a confirmed custom-only match at a known call site.
+  reinterpret_cast<TraitMessageSetter>(original)(
+      message, bridge ? matchedId : requestedId);
+  if (bridge) {
+    AddLog(u8"[기재JSON/호환] 대화 효과 ID 연결: %u -> %u",
+           requestedId, matchedId);
+  }
+}
+
+void *__fastcall CustomTraitDataGetter(void *dataCenter, uint32_t requestedId) {
+  RuntimeState &state = State();
+  const uintptr_t original = state.originalTraitDataGetter;
+  if (!original)
+    return nullptr;
+
+  void *result =
+      reinterpret_cast<TraitDataGetter>(original)(dataCenter, requestedId);
+  uint16_t matchedId = 0;
+  if (!TakeMatchedBridgeId(
+          requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
+          kDataBridgeSites, std::size(kDataBridgeSites), matchedId)) {
+    return result;
+  }
+
+  void *custom =
+      reinterpret_cast<TraitDataGetter>(original)(dataCenter, matchedId);
+  uint16_t actualId = 0;
+  if (!ReadTraitRecordId(reinterpret_cast<uintptr_t>(custom), actualId) ||
+      actualId != matchedId) {
+    return result;
+  }
+
+  AddLog(u8"[기재JSON/호환] 효과 데이터 ID 연결: %u -> %u",
+         requestedId, matchedId);
+  return custom;
+}
+
+bool IsValidGameObject(void *object) {
+  if (!object)
+    return false;
+  uintptr_t vtable = 0;
+  uintptr_t validate = 0;
+  if (!ReadMemorySafe(reinterpret_cast<uintptr_t>(object),
+                      &vtable, sizeof(vtable)) ||
+      !ReadMemorySafe(vtable + 0x48, &validate, sizeof(validate)) ||
+      !IsExecutableAddress(validate)) {
+    return false;
+  }
+  __try {
+    return reinterpret_cast<bool(__fastcall *)(void *)>(validate)(object);
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+int __fastcall CustomMonthlyTraitUpdate(void *turn) {
+  RuntimeState &state = State();
+  const uintptr_t original = state.originalMonthlyUpdate;
+  if (!original)
+    return 0;
+
+  const int result = reinterpret_cast<MonthlyTraitUpdate>(original)(turn);
+  if (!state.configLoaded || state.lastTableBase < 0x10000)
+    return result;
+
+  const uintptr_t gameDataRoot = GetGameBaseFast();
+  if (gameDataRoot < 0x10000)
+    return result;
+
+  // The game's monthly update walks these 1801 person pointers. The old
+  // compatibility DLL repeats the loop after the original and adds signed
+  // values for custom effect type 166 to person+0x300, capped at 99999.
+  constexpr uintptr_t kFirstPersonOffset = 0x576C88;
+  constexpr uintptr_t kEndPersonOffset = 0x57A4D0;
+  constexpr uint16_t kMonthlyEffectType = 166;
+  constexpr uint64_t kMaximumAmount = 99999;
+  int updated = 0;
+
+  for (uintptr_t slot = gameDataRoot + kFirstPersonOffset;
+       slot < gameDataRoot + kEndPersonOffset;
+       slot += sizeof(uintptr_t)) {
+    uintptr_t officer = 0;
+    if (!ReadMemorySafe(slot, &officer, sizeof(officer)) ||
+        !IsValidGameObject(reinterpret_cast<void *>(officer))) {
+      continue;
+    }
+
+    int amount = 0;
+    for (int heldSlot = 0; heldSlot < 3; ++heldSlot) {
+      uintptr_t record = 0;
+      if (!ReadMemorySafe(
+              officer + 0x88 +
+                  static_cast<uintptr_t>(heldSlot) * sizeof(uintptr_t),
+              &record, sizeof(record))) {
+        continue;
+      }
+
+      uint16_t id = 0;
+      if (!ReadTraitRecordId(record, id) || id < 71 || id > kTraitCount)
+        continue;
+
+      for (std::size_t effectSlot = 0; effectSlot < kEffectCount; ++effectSlot) {
+        TraitEffect effect{};
+        if (!ReadMemorySafe(record + kEffectOffset + effectSlot * kEffectSize,
+                            &effect, sizeof(effect))) {
+          continue;
+        }
+        if (effect.type != kMonthlyEffectType)
+          continue;
+        int16_t signedValue = 0;
+        std::memcpy(&signedValue, &effect.value, sizeof(signedValue));
+        amount += signedValue;
+      }
+    }
+
+    if (amount <= 0)
+      continue;
+
+    uint32_t current = 0;
+    if (!ReadMemorySafe(officer + 0x300, &current, sizeof(current)))
+      continue;
+    const uint32_t next = static_cast<uint32_t>(std::min<uint64_t>(
+        static_cast<uint64_t>(current) + static_cast<uint32_t>(amount),
+        kMaximumAmount));
+    if (next != current &&
+        WriteMemoryProtected(officer + 0x300, &next, sizeof(next))) {
+      ++updated;
+    }
+  }
+
+  if (updated)
+    AddLog(u8"[기재JSON/호환] 월별 효과 보완: 장수 %d명", updated);
+  return result;
+}
+
+int __fastcall CustomTransferTraitEvent(void *firstPerson, void *secondPerson,
+                                         void *personList, void *firstCity,
+                                         void *secondCity) {
+  RuntimeState &state = State();
+  const uintptr_t original = state.originalTransferEvent;
+  if (!original)
+    return 0;
+
+  // The original DLL checks the second participant for base trait 26 before
+  // this event runs. Its message setter later consumes the matched custom ID.
+  const TraitEffectMatchCache previous = g_traitEffectMatchCache;
+  g_traitEffectMatchCache = {};
+  uint16_t matchedId = 0;
+  if (state.configLoaded &&
+      FindMatchingCustomTrait(secondPerson, 26, matchedId)) {
+    g_traitEffectMatchCache.valid = true;
+    g_traitEffectMatchCache.requestedTraitId = 26;
+    g_traitEffectMatchCache.matchedCustomTraitId = matchedId;
+    g_traitEffectMatchCache.queryReturnRva = kTransferTraitEventOffset;
+  }
+
+  const int result = reinterpret_cast<TransferTraitEvent>(original)(
+      firstPerson, secondPerson, personList, firstCity, secondCity);
+  g_traitEffectMatchCache = previous;
+  return result;
+}
+
+bool InstallCompatibilityHook(uintptr_t offset, const uint8_t *prologue,
+                              std::size_t prologueSize, void *detour,
+                              uintptr_t &originalAddress, bool &installed,
+                              bool &failureLogged, const char *role) {
+  if (installed)
+    return true;
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase)
+    return false;
+  const uintptr_t target = gameBase + offset;
+
+  std::array<uint8_t, 8> bytes{};
+  if (prologueSize > bytes.size() ||
+      !IsExecutableAddress(target) ||
+      !ReadMemorySafe(target, bytes.data(), prologueSize) ||
+      std::memcmp(bytes.data(), prologue, prologueSize) != 0) {
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s +%llX 원본 바이트 불일치. 설치 보류.",
+             role, static_cast<unsigned long long>(offset));
+      failureLogged = true;
+    }
+    return false;
+  }
+
+  const MH_STATUS initStatus = MH_Initialize();
+  if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) {
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s MinHook 초기화 실패: %s",
+             role, MH_StatusToString(initStatus));
+      failureLogged = true;
+    }
+    return false;
+  }
+
+  LPVOID trampoline = nullptr;
+  const MH_STATUS createStatus = MH_CreateHook(
+      reinterpret_cast<LPVOID>(target), detour, &trampoline);
+  if (createStatus != MH_OK) {
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s 훅 생성 실패: %s",
+             role, MH_StatusToString(createStatus));
+      failureLogged = true;
+    }
+    return false;
+  }
+
+  if (!trampoline ||
+      !IsExecutableAddress(reinterpret_cast<uintptr_t>(trampoline))) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s trampoline 검증 실패.", role);
+      failureLogged = true;
+    }
+    return false;
+  }
+
+  originalAddress = reinterpret_cast<uintptr_t>(trampoline);
+  const MH_STATUS enableStatus =
+      MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    originalAddress = 0;
+    if (!failureLogged) {
+      AddLog(u8"[기재JSON/호환] %s 훅 활성화 실패: %s",
+             role, MH_StatusToString(enableStatus));
+      failureLogged = true;
+    }
+    return false;
+  }
+
+  installed = true;
+  failureLogged = false;
+  AddLog(u8"[기재JSON/호환] %s 패치 완료: +%llX",
+         role, static_cast<unsigned long long>(offset));
+  return true;
+}
+
+void EnsureExtendedTraitCompatibility() {
+  RuntimeState &state = State();
+  InstallCompatibilityHook(
+      kOfficerTraitQueryOffset, kOfficerTraitQueryPrologue,
+      sizeof(kOfficerTraitQueryPrologue),
+      reinterpret_cast<void *>(&CustomOfficerTraitQuery),
+      state.originalOfficerTraitQuery, state.officerTraitHookInstalled,
+      state.officerTraitHookFailureLogged, u8"장수 보유 판정");
+
+  InstallCompatibilityHook(
+      kTraitMessageSetterOffset, kTraitMessageSetterPrologue,
+      sizeof(kTraitMessageSetterPrologue),
+      reinterpret_cast<void *>(&CustomTraitMessageSetter),
+      state.originalTraitMessageSetter, state.traitMessageHookInstalled,
+      state.traitMessageHookFailureLogged, u8"대화 효과 연결");
+
+  InstallCompatibilityHook(
+      kTraitDataGetterOffset, kTraitDataGetterPrologue,
+      sizeof(kTraitDataGetterPrologue),
+      reinterpret_cast<void *>(&CustomTraitDataGetter),
+      state.originalTraitDataGetter, state.traitDataHookInstalled,
+      state.traitDataHookFailureLogged, u8"효과 데이터 연결");
+
+  InstallCompatibilityHook(
+      kMonthlyTraitUpdateOffset, kMonthlyTraitUpdatePrologue,
+      sizeof(kMonthlyTraitUpdatePrologue),
+      reinterpret_cast<void *>(&CustomMonthlyTraitUpdate),
+      state.originalMonthlyUpdate, state.monthlyHookInstalled,
+      state.monthlyHookFailureLogged, u8"월별 효과 보완");
+
+  InstallCompatibilityHook(
+      kTransferTraitEventOffset, kTransferTraitEventPrologue,
+      sizeof(kTransferTraitEventPrologue),
+      reinterpret_cast<void *>(&CustomTransferTraitEvent),
+      state.originalTransferEvent, state.transferHookInstalled,
+      state.transferHookFailureLogged, u8"특수 연출 연결");
 }
 
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
@@ -1598,7 +2058,8 @@ void TickTraitConfigRuntime() {
   }
 
   // 설치 실패 시에도 다음 tick에서 다시 시도합니다.
-  EnsureTraitEffectHook();
+  if (EnsureTraitEffectHook())
+    EnsureExtendedTraitCompatibility();
 }
 
 } // namespace DX11Base
