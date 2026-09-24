@@ -1,6 +1,7 @@
 #include "../../pch.h"
 
 #include "../../Cheats.h"
+#include "../../Hooking/MinHook.h"
 #include "../../showlog.h"
 #include "TraitConfigRuntime.h"
 
@@ -31,8 +32,6 @@ constexpr std::size_t kMetadataSize = 0x12;
 constexpr uint32_t kTraitsPointerOffsetFallback = 0x57A4B8;
 constexpr int kDefaultCloneSource = 30; // version.dll Normalize()와 동일한 기본 donor index
 constexpr uintptr_t kNameGetterOffset = 0x170E2D0;
-constexpr uintptr_t kNameGetterPointerOffset = 0x170E2D6;
-constexpr uint8_t kNameGetterStub[] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
 
 #pragma pack(push, 1)
 struct TraitEffect {
@@ -241,61 +240,70 @@ bool EnsureCustomNameHook() {
   if (!HasPublishedCustomNames())
     return true;
 
+  if (state.nameHookInstalled)
+    return true;
+
   const uintptr_t gameBase =
       reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   if (!gameBase)
     return false;
 
-  const uintptr_t stubAddress = gameBase + kNameGetterOffset;
-  uint8_t stub[sizeof(kNameGetterStub)] = {};
-  if (!ReadMemorySafe(stubAddress, stub, sizeof(stub)) ||
-      std::memcmp(stub, kNameGetterStub, sizeof(stub)) != 0) {
+  const uintptr_t target = gameBase + kNameGetterOffset;
+  if (!IsExecutableAddress(target)) {
     if (!state.nameHookFailureLogged) {
-      AddLog(u8"[기재JSON/이름] 이름 getter 스텁 검증 실패 (+170E2D0). 사용자 기재 적용을 보류합니다.");
+      AddLog(u8"[기재JSON/이름] 원본 이름 getter가 실행 가능 메모리가 아닙니다: %p",
+             reinterpret_cast<void *>(target));
       state.nameHookFailureLogged = true;
     }
     return false;
   }
 
-  const uintptr_t pointerAddress = gameBase + kNameGetterPointerOffset;
-  uintptr_t currentTarget = 0;
-  if (!ReadMemorySafe(pointerAddress, &currentTarget, sizeof(currentTarget)))
-    return false;
-
-  const uintptr_t hookTarget =
-      reinterpret_cast<uintptr_t>(&CustomTraitNameGetter);
-
-  if (currentTarget == hookTarget) {
-    state.nameHookInstalled = true;
-    state.nameHookFailureLogged = false;
-    return true;
-  }
-
-  if (state.nameHookInstalled) {
-    // 다른 기능이 이름 getter를 바꿨다면 서로 덮어쓰지 않습니다.
-    if (currentTarget != state.originalNameGetter) {
-      if (!state.nameHookFailureLogged) {
-        AddLog(u8"[기재JSON/이름] 이름 getter가 다른 패치로 변경되어 재설치를 보류합니다: %p",
-               reinterpret_cast<void *>(currentTarget));
-        state.nameHookFailureLogged = true;
-      }
-      return false;
-    }
-  } else {
-    if (!IsExecutableAddress(currentTarget)) {
-      if (!state.nameHookFailureLogged) {
-        AddLog(u8"[기재JSON/이름] 원본 이름 getter 주소가 실행 가능 메모리가 아닙니다: %p",
-               reinterpret_cast<void *>(currentTarget));
-        state.nameHookFailureLogged = true;
-      }
-      return false;
-    }
-    state.originalNameGetter = currentTarget;
-  }
-
-  if (!WritePointerSafe(pointerAddress, hookTarget)) {
+  // kiero가 DX11 초기화 시 MinHook을 이미 초기화하지만,
+  // 호출 순서 차이에 대비해 여기서도 안전하게 초기화를 보장합니다.
+  const MH_STATUS initStatus = MH_Initialize();
+  if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) {
     if (!state.nameHookFailureLogged) {
-      AddLog(u8"[기재JSON/이름] 이름 getter 포인터 교체 실패. 사용자 기재 적용을 보류합니다.");
+      AddLog(u8"[기재JSON/이름] MinHook 초기화 실패: %s",
+             MH_StatusToString(initStatus));
+      state.nameHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  LPVOID original = nullptr;
+  const MH_STATUS createStatus =
+      MH_CreateHook(reinterpret_cast<LPVOID>(target),
+                    reinterpret_cast<LPVOID>(&CustomTraitNameGetter),
+                    &original);
+  if (createStatus != MH_OK) {
+    if (!state.nameHookFailureLogged) {
+      AddLog(u8"[기재JSON/이름] 이름 getter 직접 훅 생성 실패: %s / target=%p",
+             MH_StatusToString(createStatus),
+             reinterpret_cast<void *>(target));
+      state.nameHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  if (!original || !IsExecutableAddress(reinterpret_cast<uintptr_t>(original))) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    if (!state.nameHookFailureLogged) {
+      AddLog(u8"[기재JSON/이름] 이름 getter trampoline 검증 실패.");
+      state.nameHookFailureLogged = true;
+    }
+    return false;
+  }
+
+  state.originalNameGetter = reinterpret_cast<uintptr_t>(original);
+
+  const MH_STATUS enableStatus =
+      MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+    MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+    state.originalNameGetter = 0;
+    if (!state.nameHookFailureLogged) {
+      AddLog(u8"[기재JSON/이름] 이름 getter 직접 훅 활성화 실패: %s",
+             MH_StatusToString(enableStatus));
       state.nameHookFailureLogged = true;
     }
     return false;
@@ -303,9 +311,9 @@ bool EnsureCustomNameHook() {
 
   state.nameHookInstalled = true;
   state.nameHookFailureLogged = false;
-  AddLog(u8"[기재JSON/이름] 원본 UI 이름 훅 설치 완료: original=%p hook=%p",
-         reinterpret_cast<void *>(state.originalNameGetter),
-         reinterpret_cast<void *>(hookTarget));
+  AddLog(u8"[기재JSON/이름] 원본 게임 이름 getter 직접 훅 설치 완료: target=%p trampoline=%p",
+         reinterpret_cast<void *>(target),
+         reinterpret_cast<void *>(state.originalNameGetter));
   return true;
 }
 
