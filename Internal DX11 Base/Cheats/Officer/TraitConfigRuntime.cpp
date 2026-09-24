@@ -42,8 +42,6 @@ constexpr uintptr_t kTraitMessageSetterOffset = 0x13F91E0;
 constexpr uintptr_t kTraitDataGetterOffset = 0x16E63F0;
 constexpr uintptr_t kMonthlyTraitUpdateOffset = 0x1C79C90;
 constexpr uintptr_t kTransferTraitEventOffset = 0x18A5E30;
-constexpr uintptr_t kTraitEligibilityPatchAOffset = 0x17C03E7;
-constexpr uintptr_t kTraitEligibilityPatchBOffset = 0x17C042F;
 
 constexpr uint8_t kTraitEffectQueryPrologue[] = {
     0x48, 0x89, 0x5C, 0x24, 0x08
@@ -62,9 +60,6 @@ constexpr uint8_t kMonthlyTraitUpdatePrologue[] = {
 };
 constexpr uint8_t kTransferTraitEventPrologue[] = {
     0x40, 0x53, 0x55, 0x56, 0x57, 0x41, 0x56
-};
-constexpr uint8_t kTraitEligibilityExpected[] = {
-    0x81, 0xFE, 0x95, 0x00, 0x00, 0x00
 };
 constexpr uintptr_t kDescTextPointerFallbackOffset = 0x2C34EC0;
 constexpr uint32_t kDescNormalIndexBase = 0x2E73;
@@ -161,11 +156,6 @@ struct RuntimeState {
   bool transferHookInstalled = false;
   bool transferHookFailureLogged = false;
   uintptr_t originalTransferEvent = 0;
-
-  bool eligibilityPatchAActive = false;
-  bool eligibilityPatchBActive = false;
-  bool eligibilityPatchAFailureLogged = false;
-  bool eligibilityPatchBFailureLogged = false;
 };
 
 RuntimeState &State() {
@@ -264,31 +254,6 @@ bool WriteMemoryProtected(uintptr_t address, const void *data, std::size_t size)
   VirtualProtect(dst, size, oldProtect, &ignored);
   return ok;
 }
-
-bool WriteExecutableByteProtected(uintptr_t address, uint8_t value) {
-  if (!address)
-    return false;
-
-  DWORD oldProtect = 0;
-  void *dst = reinterpret_cast<void *>(address);
-  if (!VirtualProtect(dst, sizeof(value), PAGE_EXECUTE_READWRITE, &oldProtect))
-    return false;
-
-  bool ok = true;
-  __try {
-    *reinterpret_cast<volatile uint8_t *>(address) = value;
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER) {
-    ok = false;
-  }
-
-  DWORD ignored = 0;
-  VirtualProtect(dst, sizeof(value), oldProtect, &ignored);
-  if (ok)
-    FlushInstructionCache(GetCurrentProcess(), dst, sizeof(value));
-  return ok;
-}
-
 
 
 const wchar_t *__fastcall CustomTraitNameGetter(void *traitObject) {
@@ -1095,17 +1060,64 @@ bool EnsureTraitEffectHook() {
   return true;
 }
 
-bool GetMatchedBridgeId(uint32_t requestedId, uint16_t &matchedId) {
+struct TraitBridgeSite {
+  uintptr_t queryReturnRva;
+  uintptr_t consumerReturnRva;
+  uint16_t requestedId;
+};
+
+// These pairs are direct call/return sites in the same SAN8RPK.exe build.
+// The first call checks the base trait; the second consumes that trait ID.
+constexpr TraitBridgeSite kMessageBridgeSites[] = {
+    {0x1854D85, 0x1854E73, 28}, // conversation
+    {0x1859DE5, 0x1859ECF, 1},  // conversation
+    {0x1902E70, 0x1902EF5, 10}, // repeated action
+    {0x1BCEF8C, 0x1BCF20F, 11}, // reinforcement report
+    {0x1BCFF6E, 0x1BD0702, 202}, // strategy phase
+    {0x1BD0954, 0x1BD0A16, 30}, // strategy phase
+    {0x1E4C093, 0x1E4C208, 19}, // battle conclusion
+    {kTransferTraitEventOffset, 0x18A5F81, 26} // transfer event
+};
+constexpr TraitBridgeSite kDataBridgeSites[] = {
+    {0x19253E8, 0x192542F, 55} // conference result
+};
+
+bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
+                         const TraitBridgeSite *sites, std::size_t siteCount,
+                         uint16_t &matchedId) {
   matchedId = 0;
   const TraitEffectMatchCache &cache = g_traitEffectMatchCache;
   RuntimeState &state = State();
-
-  // 원본 호환 DLL의 전달 브리지는 호출 위치를 제한하지 않습니다.
-  // 직전 확장 효과 판정에서 요청 ID와 커스텀 ID가 정확히 짝지어진 경우에만 치환합니다.
   if (!cache.valid || !state.configLoaded ||
       requestedId != cache.requestedTraitId ||
       cache.matchedCustomTraitId < 71 ||
       cache.matchedCustomTraitId > kTraitCount) {
+    return false;
+  }
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase || consumerReturnAddress < gameBase)
+    return false;
+
+  const uintptr_t consumerRva = consumerReturnAddress - gameBase;
+  bool knownPair = false;
+  for (std::size_t i = 0; i < siteCount; ++i) {
+    if (sites[i].queryReturnRva == cache.queryReturnRva &&
+        sites[i].consumerReturnRva == consumerRva &&
+        sites[i].requestedId == requestedId) {
+      knownPair = true;
+      break;
+    }
+  }
+  if (!knownPair) {
+    thread_local unsigned diagnosticCount = 0;
+    if (diagnosticCount < 12) {
+      AddLog(u8"[기재JSON/호환] 미확인 ID 전달: query=+%llX consumer=+%llX id=%u",
+             static_cast<unsigned long long>(cache.queryReturnRva),
+             static_cast<unsigned long long>(consumerRva), requestedId);
+      ++diagnosticCount;
+    }
     return false;
   }
 
@@ -1119,10 +1131,7 @@ bool GetMatchedBridgeId(uint32_t requestedId, uint16_t &matchedId) {
   }
 
   matchedId = cache.matchedCustomTraitId;
-
-  // 여기서 cache를 지우지 않습니다.
-  // 원본은 다음 TraitEffect 조회가 시작될 때 active 상태를 초기화하며,
-  // 한 이벤트 안에서 여러 문구/데이터 조회가 이어져도 동일 custom ID를 유지합니다.
+  g_traitEffectMatchCache = {};
   return true;
 }
 
@@ -1166,10 +1175,12 @@ void __fastcall CustomTraitMessageSetter(void *message, uint32_t requestedId) {
     return;
 
   uint16_t matchedId = 0;
-  const bool bridge = GetMatchedBridgeId(requestedId, matchedId);
+  const bool bridge = TakeMatchedBridgeId(
+      requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
+      kMessageBridgeSites, std::size(kMessageBridgeSites), matchedId);
 
-  // 확장 효과 판정에서 매칭된 custom ID가 있으면 원본 DLL과 동일하게
-  // 호출 위치와 관계없이 메시지에 custom ID를 전달합니다.
+  // The original setter still updates the message object; only its input ID
+  // changes after a confirmed custom-only match at a known call site.
   reinterpret_cast<TraitMessageSetter>(original)(
       message, bridge ? matchedId : requestedId);
   if (bridge) {
@@ -1187,8 +1198,11 @@ void *__fastcall CustomTraitDataGetter(void *dataCenter, uint32_t requestedId) {
   void *result =
       reinterpret_cast<TraitDataGetter>(original)(dataCenter, requestedId);
   uint16_t matchedId = 0;
-  if (!GetMatchedBridgeId(requestedId, matchedId))
+  if (!TakeMatchedBridgeId(
+          requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
+          kDataBridgeSites, std::size(kDataBridgeSites), matchedId)) {
     return result;
+  }
 
   void *custom =
       reinterpret_cast<TraitDataGetter>(original)(dataCenter, matchedId);
@@ -1408,79 +1422,6 @@ bool InstallCompatibilityHook(uintptr_t offset, const uint8_t *prologue,
   return true;
 }
 
-
-bool MaintainTraitEligibilityPatch(
-    uintptr_t offset, bool &active, bool &failureLogged, const char *role) {
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-  if (!gameBase)
-    return false;
-
-  const uintptr_t address = gameBase + offset;
-  std::array<uint8_t, sizeof(kTraitEligibilityExpected)> bytes{};
-  if (!ReadMemorySafe(address, bytes.data(), bytes.size())) {
-    if (!failureLogged) {
-      AddLog(u8"[기재JSON/호환] %s 메모리 읽기 실패: +%llX",
-             role, static_cast<unsigned long long>(offset));
-      failureLogged = true;
-    }
-    active = false;
-    return false;
-  }
-
-  // 현재 빌드에서 확인된 명령은 "81 FE imm32"입니다.
-  // imm32의 하위 바이트(+2)만 0x95 또는 적용값 0x01로 달라질 수 있습니다.
-  for (std::size_t i = 0; i < bytes.size(); ++i) {
-    if (i == 2)
-      continue;
-    if (bytes[i] != kTraitEligibilityExpected[i]) {
-      if (!failureLogged) {
-        AddLog(u8"[기재JSON/호환] %s 원본 바이트 불일치: +%llX (패치 보류)",
-               role, static_cast<unsigned long long>(offset));
-        failureLogged = true;
-      }
-      active = false;
-      return false;
-    }
-  }
-
-  if (bytes[2] == 0x01) {
-    active = true;
-    failureLogged = false;
-    return true;
-  }
-
-  if (bytes[2] != 0x95) {
-    if (!failureLogged) {
-      AddLog(u8"[기재JSON/호환] %s 임계값 상태 미확인: +%llX value=0x%02X",
-             role, static_cast<unsigned long long>(offset),
-             static_cast<unsigned>(bytes[2]));
-      failureLogged = true;
-    }
-    active = false;
-    return false;
-  }
-
-  const bool wasActive = active;
-  if (!WriteExecutableByteProtected(address + 2, 0x01)) {
-    if (!failureLogged) {
-      AddLog(u8"[기재JSON/호환] %s 적용 실패: +%llX",
-             role, static_cast<unsigned long long>(offset));
-      failureLogged = true;
-    }
-    active = false;
-    return false;
-  }
-
-  active = true;
-  failureLogged = false;
-  AddLog(wasActive
-             ? u8"[기재JSON/호환] %s 복원 감지 -> 재적용: +%llX"
-             : u8"[기재JSON/호환] %s 적용 완료: +%llX",
-         role, static_cast<unsigned long long>(offset));
-  return true;
-}
-
 void EnsureExtendedTraitCompatibility() {
   RuntimeState &state = State();
   InstallCompatibilityHook(
@@ -1517,19 +1458,6 @@ void EnsureExtendedTraitCompatibility() {
       reinterpret_cast<void *>(&CustomTransferTraitEvent),
       state.originalTransferEvent, state.transferHookInstalled,
       state.transferHookFailureLogged, u8"특수 연출 연결");
-
-  // 원본 호환 DLL의 현재 실행 경로에서 실제 활성화되는 두 조건만 유지합니다.
-  // 게임 내부 초기화가 원래 임계값으로 되돌리는 경우 다음 500ms tick에서 재적용합니다.
-  MaintainTraitEligibilityPatch(
-      kTraitEligibilityPatchAOffset,
-      state.eligibilityPatchAActive,
-      state.eligibilityPatchAFailureLogged,
-      u8"기재 사용 조건 A");
-  MaintainTraitEligibilityPatch(
-      kTraitEligibilityPatchBOffset,
-      state.eligibilityPatchBActive,
-      state.eligibilityPatchBFailureLogged,
-      u8"기재 사용 조건 B");
 }
 
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
