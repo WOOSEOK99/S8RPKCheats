@@ -4,6 +4,7 @@
 #include "../../debug.h"
 #include "../../pch.h"
 #include "../../showlog.h"
+#include "../../EmbeddedJsonResources.h"
 #include "../Civilian/CityData.h"
 #include "OfficerData.h"
 #include "OfficerRosterResolve.h"
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <sstream>
 #include <set>
 #include <unordered_map>
 
@@ -169,28 +171,34 @@ namespace DX11Base {
       s_specialityNameById.clear();
       s_specialityDescById.clear();
 
+      std::string jsonText;
+      std::string sourceLabel;
       char path[MAX_PATH] = {};
-      if (!GetModuleFileNameA(g_hModule, path, MAX_PATH))
-        return;
-      std::filesystem::path modDir = std::filesystem::path(path).parent_path();
-      std::vector<std::filesystem::path> candidates = {
-          modDir / "speciality_definitions.json", modDir / "specialty_definitions.json",
-          modDir / "release" / "speciality_definitions.json", modDir / "release" / "specialty_definitions.json"};
+      if (GetModuleFileNameA(g_hModule, path, MAX_PATH)) {
+        std::filesystem::path modDir = std::filesystem::path(path).parent_path();
+        const std::vector<std::filesystem::path> candidates = {
+            modDir / "speciality_definitions.json",
+            modDir / "specialty_definitions.json",
+            modDir / "release" / "speciality_definitions.json",
+            modDir / "release" / "specialty_definitions.json"};
 
-      std::ifstream file;
-      std::filesystem::path loadedPath;
-      for (const auto &p : candidates) {
-        file.open(p.string(), std::ios::in);
-        if (file.is_open()) {
-          loadedPath = p;
-          break;
+        for (const auto &p : candidates) {
+          if (ReadUtf8TextFile(p, jsonText)) {
+            sourceLabel = p.string();
+            break;
+          }
         }
       }
-      if (!file.is_open()) {
-        AddLog(u8"[명품] 정의 파일을 찾지 못했습니다. speciality_definitions.json");
-        return;
+
+      if (jsonText.empty()) {
+        if (!LoadEmbeddedJsonResource(IDR_JSON_SPECIALITY_DEFINITIONS, jsonText)) {
+          AddLog(u8"[명품] 외부/내장 정의를 모두 읽지 못했습니다.");
+          return;
+        }
+        sourceLabel = u8"내장 기본값";
       }
 
+      std::istringstream file(jsonText);
       std::string line;
       int currentId = -1;
       std::string currentName;
@@ -241,9 +249,9 @@ namespace DX11Base {
           s_specialityDescById[currentId] = currentDesc;
         }
       }
-      file.close();
-      s_specialityDefsLoaded = true;
-      AddLog(u8"[명품] 정의 로드 완료: %s (%d개)", loadedPath.string().c_str(), (int)s_specialityNameById.size());
+
+      AddLog(u8"[명품] 정의 로드 완료: %s (%d개)",
+             sourceLabel.c_str(), (int)s_specialityNameById.size());
     }
 
     static bool ResolveSpecialityNameAndNo(uintptr_t objPtr, std::string &outName, uint16_t *outNo) {

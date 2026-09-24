@@ -12,6 +12,7 @@
 #include "Cheats/Officer/RoninMonitor.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
+#include "Cheats/Officer/TraitConfigRuntime.h"
 #include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SpeedHack.h"
@@ -385,6 +386,10 @@ namespace DX11Base {
 
     const bool p1Ready = s_loopP1Ready;
     const bool gameBaseReady = s_loopGameBaseReady;
+
+    // version.dll 없이도 san8r_traits_config.json의 254개 기재 정의를 런타임 테이블에 적용합니다.
+    // 내부에서 500ms 주기로 제한되며 테이블 재생성/효과 초기화 때만 실제 쓰기를 수행합니다.
+    DX11Base::TickTraitConfigRuntime();
 
     // 저장게임/새 게임 로드 시 p1은 새 세대 주소로 교체되거나 잠시 0이 됩니다.
     // 전투/평정 모니터가 이전 전투 UI 포인터를 만지기 전에 5번 책략의
