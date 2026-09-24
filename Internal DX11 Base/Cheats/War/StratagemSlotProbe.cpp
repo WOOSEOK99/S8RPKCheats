@@ -147,6 +147,7 @@ namespace DX11Base {
     static bool g_fifthTextResourceLookupLogged = false;
     static bool g_fifthSetTrickIdPathLogged = false;
     static bool g_fifthFocusDetailPathLogged = false;
+    static bool g_fifthDetailRendererLogged = false;
     static std::atomic<uintptr_t> g_fifthTitleNameGetterOriginal{0};
     static std::atomic<bool> g_fifthTitleNameGetterProbeInstalled{false};
     static std::atomic<uintptr_t> g_fifthTitleSeenCallers[16]{};
@@ -2273,6 +2274,153 @@ namespace DX11Base {
                      (unsigned long long)(ripTarget - exeBase));
             }
           }
+        }
+      }
+    }
+
+
+    static void LogFifthDetailRendererPath() {
+      if (g_fifthDetailRendererLogged)
+        return;
+
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      MODULEINFO mi{};
+      if (!exeBase || !IsSupportedTrickUiBuild(exeBase) ||
+          !GetModuleInformation(GetCurrentProcess(),
+                                reinterpret_cast<HMODULE>(exeBase),
+                                &mi, sizeof(mi)))
+        return;
+
+      const uintptr_t imageEnd =
+          exeBase + static_cast<uintptr_t>(mi.SizeOfImage);
+      constexpr uintptr_t kRendererRva = 0x01D90220;
+      constexpr size_t kMaxScan = 0x500;
+      const uintptr_t fn = exeBase + kRendererRva;
+
+      if (!IsExecutableAddress(fn) || !IsValidPtr(fn, kMaxScan))
+        return;
+
+      uint8_t code[kMaxScan] = {};
+      if (!SafeCopySeh(fn, code, sizeof(code)))
+        return;
+
+      // Bound the dump at the first real RET to avoid repeating the previous
+      // mistake of treating adjacent functions as one routine.
+      size_t size = sizeof(code);
+      for (size_t off = 0; off < sizeof(code); ++off) {
+        if (code[off] == 0xC3) {
+          size = off + 1;
+          break;
+        }
+        if (code[off] == 0xC2 && off + 2 < sizeof(code)) {
+          size = off + 3;
+          break;
+        }
+      }
+
+      g_fifthDetailRendererLogged = true;
+      AddLog(u8"[책략5RENDER] detail renderer RVA=+%llX size=0x%llX",
+             (unsigned long long)kRendererRva,
+             (unsigned long long)size);
+
+      for (size_t off = 0; off < size; off += 0x20) {
+        char line[256] = {};
+        int pos = 0;
+        const size_t chunk =
+            (off + 0x20 <= size) ? 0x20 : (size - off);
+        for (size_t j = 0; j < chunk &&
+                           pos < (int)sizeof(line) - 4; ++j) {
+          pos += sprintf_s(line + pos, sizeof(line) - pos,
+                           "%02X ", (unsigned)code[off + j]);
+        }
+        AddLog(u8"[책략5RENDER] +%03llX : %s",
+               (unsigned long long)off, line);
+      }
+
+      uintptr_t directTargets[48] = {};
+      unsigned directCount = 0;
+
+      for (size_t off = 0; off + 7 <= size; ++off) {
+        if (code[off] == 0xE8 || code[off] == 0xE9) {
+          int32_t rel = 0;
+          std::memcpy(&rel, code + off + 1, sizeof(rel));
+          const uintptr_t target =
+              fn + off + 5 + static_cast<intptr_t>(rel);
+          if (target >= exeBase && target < imageEnd) {
+            AddLog(u8"[책략5RENDER] %s +%03llX -> RVA=+%llX",
+                   code[off] == 0xE8 ? "CALL" : "JMP",
+                   (unsigned long long)off,
+                   (unsigned long long)(target - exeBase));
+
+            bool duplicate = false;
+            for (unsigned i = 0; i < directCount; ++i)
+              if (directTargets[i] == target)
+                duplicate = true;
+            if (!duplicate && directCount < 48)
+              directTargets[directCount++] = target;
+          }
+        }
+
+        // Common virtual calls used by UI text/layout objects.
+        if (off + 3 <= size &&
+            code[off] == 0xFF && code[off + 1] == 0x50) {
+          AddLog(u8"[책략5RENDER] VCALL +%03llX [rax+0x%02X]",
+                 (unsigned long long)off,
+                 (unsigned)code[off + 2]);
+        }
+        if (off + 6 <= size &&
+            code[off] == 0xFF && code[off + 1] == 0x90) {
+          int32_t disp = 0;
+          std::memcpy(&disp, code + off + 2, sizeof(disp));
+          AddLog(u8"[책략5RENDER] VCALL +%03llX [rax+0x%X]",
+                 (unsigned long long)off,
+                 (unsigned)disp);
+        }
+
+        const uint8_t rex = code[off];
+        if ((rex == 0x48 || rex == 0x4C) &&
+            (code[off + 1] == 0x8D || code[off + 1] == 0x8B) &&
+            (code[off + 2] & 0xC7) == 0x05) {
+          int32_t disp = 0;
+          std::memcpy(&disp, code + off + 3, sizeof(disp));
+          const uintptr_t target =
+              fn + off + 7 + static_cast<intptr_t>(disp);
+          if (target >= exeBase && target < imageEnd) {
+            AddLog(u8"[책략5RENDER] RIP-%s +%03llX -> RVA=+%llX",
+                   code[off + 1] == 0x8D ? "LEA" : "MOV",
+                   (unsigned long long)off,
+                   (unsigned long long)(target - exeBase));
+          }
+        }
+      }
+
+      AddLog(u8"[책략5RENDER] unique direct targets=%u", directCount);
+
+      // Only dump the first 0x80 bytes of each direct target so the next
+      // decision can be made without another huge log.
+      for (unsigned i = 0; i < directCount; ++i) {
+        const uintptr_t target = directTargets[i];
+        if (!IsExecutableAddress(target))
+          continue;
+
+        uint8_t head[0x80] = {};
+        if (!SafeCopySeh(target, head, sizeof(head)))
+          continue;
+
+        AddLog(u8"[책략5RENDER] target%u RVA=+%llX",
+               i + 1,
+               (unsigned long long)(target - exeBase));
+        for (size_t off = 0; off < sizeof(head); off += 0x20) {
+          char line[256] = {};
+          int pos = 0;
+          for (size_t j = 0; j < 0x20 &&
+                             pos < (int)sizeof(line) - 4; ++j) {
+            pos += sprintf_s(line + pos, sizeof(line) - pos,
+                             "%02X ", (unsigned)head[off + j]);
+          }
+          AddLog(u8"[책략5RENDER] target%u +%02llX : %s",
+                 i + 1, (unsigned long long)off, line);
         }
       }
     }
@@ -6135,6 +6283,7 @@ namespace DX11Base {
     // its entry hook previously froze the stratagem menu.
     LogFifthSetTrickIdPath();
     LogFifthFocusDetailPath();
+    LogFifthDetailRendererPath();
 
     AddLog(u8"[책략5메타DBG] native TrickData 확인: table=%p row5=%p",
            reinterpret_cast<void *>(table),
