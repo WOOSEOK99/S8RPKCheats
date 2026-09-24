@@ -33,6 +33,11 @@ constexpr uint32_t kTraitsPointerOffsetFallback = 0x57A4B8;
 constexpr int kDefaultCloneSource = 30; // version.dll Normalize()와 동일한 기본 donor index
 constexpr uintptr_t kNameGetterOffset = 0x170E2D0;
 constexpr uintptr_t kDescMapGetterOffset = 0x171E070;
+constexpr uintptr_t kDescTextPointerFallbackOffset = 0x2C34EC0;
+constexpr uint32_t kDescNormalIndexBase = 0x2E73;
+constexpr uint32_t kDescFormatIndexBase = 0x3005;
+constexpr int kDescTableCustomIndexMin = 70;
+constexpr int kDescTableCustomIndexMax = 199;
 
 // version.dll descmap 설치 시 검증하는 +171E070 원본 5바이트와 동일.
 constexpr uint8_t kDescMapGetterPrologue[] = {
@@ -95,6 +100,10 @@ struct RuntimeState {
   bool descHookInstalled = false;
   bool descHookFailureLogged = false;
   uintptr_t originalDescMapGetter = 0;
+
+  bool descTablesSynced = false;
+  bool descTableFailureLogged = false;
+  uintptr_t descTextPointerAddress = 0;
 };
 
 RuntimeState &State() {
@@ -157,6 +166,29 @@ bool WritePointerSafe(uintptr_t address, uintptr_t value) {
   return ok;
 }
 
+bool WriteMemoryProtected(uintptr_t address, const void *data, std::size_t size) {
+  if (!address || !data || size == 0)
+    return false;
+
+  DWORD oldProtect = 0;
+  void *dst = reinterpret_cast<void *>(address);
+  if (!VirtualProtect(dst, size, PAGE_READWRITE, &oldProtect))
+    return false;
+
+  bool ok = true;
+  __try {
+    std::memcpy(dst, data, size);
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    ok = false;
+  }
+
+  DWORD ignored = 0;
+  VirtualProtect(dst, size, oldProtect, &ignored);
+  return ok;
+}
+
+
 const wchar_t *__fastcall CustomTraitNameGetter(void *traitObject) {
   uint16_t id = 0;
   if (traitObject) {
@@ -186,21 +218,49 @@ const wchar_t *__fastcall CustomTraitDescMapGetter(
     void *context, int traitId, uint8_t kind) {
   RuntimeState &state = State();
 
-  if (traitId >= 1 && traitId <= kTraitCount) {
-    const std::size_t index = static_cast<std::size_t>(traitId - 1);
-    const wchar_t *custom =
-        (kind == 2) ? state.nativeDescFormatPtrs[index]
-                    : state.nativeDescPtrs[index];
-    if (custom && custom[0] != L'\0')
-      return custom;
+  // version.dll과 동일하게 반드시 원본을 먼저 호출합니다.
+  // 원본 내부 상태 갱신/참조 처리를 건너뛰면 목록 종료 시 정리 경로가 멎을 수 있습니다.
+  const uintptr_t original = state.originalDescMapGetter;
+  if (original) {
+    const wchar_t *originalResult =
+        reinterpret_cast<TraitDescMapGetter>(original)(
+            context, traitId, kind);
+    if (originalResult)
+      return originalResult;
   }
 
-  const uintptr_t original = state.originalDescMapGetter;
-  if (!original)
-    return nullptr;
+  // version.dll descmap fallback 범위는 ID 201~300.
+  // 우리 JSON은 254까지이므로 201~254만 사용자 설명을 반환합니다.
+  if (traitId < 201 || traitId > kTraitCount)
+    return L"";
 
-  return reinterpret_cast<TraitDescMapGetter>(original)(
-      context, traitId, kind);
+  const std::size_t index = static_cast<std::size_t>(traitId - 1);
+  const wchar_t *custom =
+      (kind == 2) ? state.nativeDescFormatPtrs[index]
+                  : state.nativeDescPtrs[index];
+  if (!custom || custom[0] == L'\0')
+    return L"";
+
+  // version.dll은 고정 포인터를 직접 반환하지 않고 TLS scratch buffer에 복사합니다.
+  // kind==2: 최대 0x7FE wchar, 일반: 최대 0xFE wchar.
+  thread_local std::array<wchar_t, 0x800> formatBuffer{};
+  thread_local std::array<wchar_t, 0x100> normalBuffer{};
+
+  wchar_t *buffer = nullptr;
+  std::size_t maxChars = 0;
+  if (kind == 2) {
+    buffer = formatBuffer.data();
+    maxChars = 0x7FE;
+  } else {
+    buffer = normalBuffer.data();
+    maxChars = 0xFE;
+  }
+
+  const std::size_t length = std::min<std::size_t>(
+      std::wcslen(custom), maxChars);
+  std::memcpy(buffer, custom, length * sizeof(wchar_t));
+  buffer[length] = L'\0';
+  return buffer;
 }
 
 
@@ -398,6 +458,221 @@ bool EnsureCustomNameHook() {
   AddLog(u8"[기재JSON/이름] 원본 게임 이름 getter 직접 훅 설치 완료: target=%p trampoline=%p",
          reinterpret_cast<void *>(target),
          reinterpret_cast<void *>(state.originalNameGetter));
+  return true;
+}
+
+
+uintptr_t ResolveDescTextPointerAddress() {
+  RuntimeState &state = State();
+  if (state.descTextPointerAddress)
+    return state.descTextPointerAddress;
+
+  const uintptr_t gameBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (!gameBase)
+    return 0;
+
+  MODULEINFO mi{};
+  if (GetModuleInformation(GetCurrentProcess(),
+                           reinterpret_cast<HMODULE>(gameBase),
+                           &mi, sizeof(mi))) {
+    const uintptr_t found =
+        FindPattern(gameBase, gameBase + mi.SizeOfImage,
+                    "B8 04 30 00 00");
+    if (found) {
+      bool has5823 = false;
+      for (int off = 5; off < 15; ++off) {
+        uint8_t op = 0;
+        uint32_t imm = 0;
+        if (ReadMemorySafe(found + off, &op, sizeof(op)) &&
+            op == 0xB8 &&
+            ReadMemorySafe(found + off + 1, &imm, sizeof(imm)) &&
+            imm == 0x5823) {
+          has5823 = true;
+          break;
+        }
+      }
+
+      if (has5823) {
+        for (int off = 5; off < 40; ++off) {
+          uint8_t op[3] = {};
+          if (!ReadMemorySafe(found + off, op, sizeof(op)))
+            continue;
+          if (op[0] != 0x4C || op[1] != 0x8B || op[2] != 0x0D)
+            continue;
+
+          int32_t disp = 0;
+          if (!ReadMemorySafe(found + off + 3, &disp, sizeof(disp)))
+            continue;
+
+          state.descTextPointerAddress =
+              found + off + 7 + static_cast<int64_t>(disp);
+          AddLog(u8"[기재JSON/설명TS] textPtrAddr AOB: +0x%llX",
+                 static_cast<unsigned long long>(
+                     state.descTextPointerAddress - gameBase));
+          return state.descTextPointerAddress;
+        }
+      }
+    }
+  }
+
+  state.descTextPointerAddress =
+      gameBase + kDescTextPointerFallbackOffset;
+  AddLog(u8"[기재JSON/설명TS] textPtrAddr fallback: +0x%llX",
+         static_cast<unsigned long long>(
+             kDescTextPointerFallbackOffset));
+  return state.descTextPointerAddress;
+}
+
+bool SyncOneDescTable(uintptr_t tableBase,
+                      uintptr_t bufferBase,
+                      uintptr_t bufferLimit,
+                      uint32_t indexBase,
+                      bool formatted,
+                      int &synced) {
+  RuntimeState &state = State();
+  uintptr_t cursor = 0;
+
+  for (int i = kDescTableCustomIndexMin;
+       i <= kDescTableCustomIndexMax; ++i) {
+    const wchar_t *text =
+        formatted ? state.nativeDescFormatPtrs[i]
+                  : state.nativeDescPtrs[i];
+    if (!text || text[0] == L'\0')
+      continue;
+
+    const std::size_t chars = std::wcslen(text);
+    const std::size_t bytes =
+        (chars + 1) * sizeof(wchar_t);
+
+    const uintptr_t stringAddress = bufferBase + cursor;
+    if (stringAddress < bufferBase ||
+        stringAddress + bytes > bufferLimit)
+      return false;
+
+    if (!WriteMemoryProtected(
+            stringAddress, text, bytes))
+      return false;
+
+    if (stringAddress < tableBase ||
+        stringAddress - tableBase > 0xFFFFFFFFull)
+      return false;
+
+    const uint32_t relative =
+        static_cast<uint32_t>(stringAddress - tableBase);
+    const uintptr_t entryAddress =
+        tableBase +
+        static_cast<uintptr_t>(indexBase + i) *
+            sizeof(uint32_t);
+
+    if (!WriteMemoryProtected(
+            entryAddress, &relative, sizeof(relative)))
+      return false;
+
+    cursor += bytes;
+    cursor = (cursor + 3) & ~static_cast<uintptr_t>(3);
+    ++synced;
+  }
+
+  return true;
+}
+
+bool SyncCustomDescTextTables() {
+  RuntimeState &state = State();
+  if (state.descTablesSynced)
+    return true;
+
+  const uintptr_t pointerAddress =
+      ResolveDescTextPointerAddress();
+  if (!pointerAddress)
+    return false;
+
+  uintptr_t textBase = 0;
+  if (!ReadMemorySafe(
+          pointerAddress, &textBase, sizeof(textBase)) ||
+      textBase < 0x10000) {
+    return false;
+  }
+
+  uint16_t headerType = 0;
+  uint32_t tableOffset = 0;
+  if (!ReadMemorySafe(
+          textBase + 0x0A, &headerType, sizeof(headerType)) ||
+      !ReadMemorySafe(
+          textBase + 0x10, &tableOffset, sizeof(tableOffset)) ||
+      headerType != 4 || tableOffset == 0) {
+    return false;
+  }
+
+  const uintptr_t tableBase = textBase + tableOffset;
+
+  MEMORY_BASIC_INFORMATION mbi{};
+  if (VirtualQuery(reinterpret_cast<const void *>(textBase),
+                   &mbi, sizeof(mbi)) != sizeof(mbi) ||
+      mbi.State != MEM_COMMIT ||
+      mbi.RegionSize < 0x28000) {
+    return false;
+  }
+
+  const uintptr_t regionBegin =
+      reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+  const uintptr_t regionEnd =
+      regionBegin + mbi.RegionSize;
+
+  const uintptr_t formatTableEnd =
+      tableBase +
+      static_cast<uintptr_t>(
+          kDescFormatIndexBase +
+          kDescTableCustomIndexMax + 1) *
+          sizeof(uint32_t);
+  uintptr_t formatBuffer =
+      (regionEnd - 0x24000) &
+      ~static_cast<uintptr_t>(0xF);
+  if (formatBuffer < formatTableEnd)
+    formatBuffer =
+        (formatTableEnd + 0xF) &
+        ~static_cast<uintptr_t>(0xF);
+  if (formatBuffer + 0x1000 > regionEnd)
+    return false;
+
+  const uintptr_t normalTableEnd =
+      tableBase +
+      static_cast<uintptr_t>(
+          kDescNormalIndexBase +
+          kDescTableCustomIndexMax + 1) *
+          sizeof(uint32_t);
+  uintptr_t normalBuffer =
+      (regionEnd - 0x28000) &
+      ~static_cast<uintptr_t>(0xF);
+  if (normalBuffer < normalTableEnd)
+    normalBuffer =
+        (normalTableEnd + 0xF) &
+        ~static_cast<uintptr_t>(0xF);
+
+  // version.dll은 normal buffer를 format 영역보다 앞쪽에 둡니다.
+  if (normalBuffer + 0x400 > formatBuffer)
+    return false;
+
+  int normalSynced = 0;
+  int formatSynced = 0;
+  if (!SyncOneDescTable(
+          tableBase, normalBuffer, formatBuffer,
+          kDescNormalIndexBase, false, normalSynced) ||
+      !SyncOneDescTable(
+          tableBase, formatBuffer, regionEnd,
+          kDescFormatIndexBase, true, formatSynced)) {
+    if (!state.descTableFailureLogged) {
+      AddLog(u8"[기재JSON/설명TS] 설명 텍스트 테이블 기록 실패.");
+      state.descTableFailureLogged = true;
+    }
+    return false;
+  }
+
+  state.descTablesSynced = true;
+  state.descTableFailureLogged = false;
+  AddLog(u8"[기재JSON/설명TS] 동기화 완료: 일반 %d개 / 포맷 %d개 / table=%p",
+         normalSynced, formatSynced,
+         reinterpret_cast<void *>(tableBase));
   return true;
 }
 
@@ -804,6 +1079,8 @@ bool LoadConfig(bool &changed) {
   state.hasWriteTime = haveWriteTime;
   state.sentinelIndex = sentinel;
   state.applyPending = true;
+  state.descTablesSynced = false;
+  state.descTableFailureLogged = false;
   changed = true;
 
   AddLog(u8"[기재JSON] 설정 로드: traits %d개 / customNames %d개 / 감시 index %d",
@@ -1050,11 +1327,13 @@ void TickTraitConfigRuntime() {
   if (!EnsureCustomNameHook())
     return;
 
-  // version.dll의 descmap(+171E070)과 같은 경로를 직접 훅합니다.
-  // JSON 설명이 있는 ID는 원본 조회 전에 즉시 반환하므로 201 이후 빈 설명 조회로
-  // 목록 스크롤이 멎는 경로도 함께 차단합니다.
+  // descmap 훅은 version.dll과 동일하게 "원본 먼저 호출 -> null일 때만 201+ fallback"입니다.
   if (!EnsureCustomDescHook())
     return;
+
+  // ID 71~200은 version.dll DescTS처럼 게임의 일반/포맷 설명 테이블에 직접 동기화합니다.
+  // 리소스가 아직 준비되지 않았으면 다음 tick에서 다시 시도하며 효과 테이블 적용은 막지 않습니다.
+  SyncCustomDescTextTables();
 
   const uintptr_t gameDataRoot = GetGameBaseFast();
   const uintptr_t tableBase = ResolveTraitTable(gameDataRoot);
