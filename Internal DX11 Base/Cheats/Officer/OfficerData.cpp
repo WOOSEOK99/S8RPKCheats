@@ -1848,9 +1848,64 @@ namespace DX11Base {
         std::string jsonPath = std::filesystem::path(path).parent_path().append("S8RPK_cheat_char.json").string();
 
         std::map<int, CharJsonEntry> byId;
-        const bool parsed = ParseCharJsonFileToMap(jsonPath, byId);
+        bool parsed = ParseCharJsonFileToMap(jsonPath, byId);
         if (!parsed && std::filesystem::exists(jsonPath))
             return false;
+
+        // 외부 파일이 아직 없으면 내장 기본 명단을 기준으로 새 override 파일을 만듭니다.
+        // 한 명만 수정했다고 나머지 기본 명단이 사라지는 것을 방지합니다.
+        if (!parsed) {
+            std::string embedded;
+            if (LoadEmbeddedJsonResource(IDR_JSON_CHEAT_CHAR, embedded)) {
+                std::istringstream file(embedded);
+                std::string line;
+                int currentId = -1;
+                std::string currentName;
+                std::string currentJa;
+                while (std::getline(file, line)) {
+                    if (line.find("{") != std::string::npos) {
+                        currentId = -1;
+                        currentName.clear();
+                        currentJa.clear();
+                    }
+                    size_t idPos = line.find("\"id\"");
+                    if (idPos != std::string::npos) {
+                        size_t colon = line.find(":", idPos);
+                        if (colon != std::string::npos) {
+                            try { currentId = std::stoi(line.substr(colon + 1)); }
+                            catch (...) { currentId = -1; }
+                        }
+                    }
+                    size_t namePos = line.find("\"name\"");
+                    if (namePos != std::string::npos) {
+                        size_t colon = line.find(":", namePos);
+                        if (colon != std::string::npos) {
+                            size_t q1 = line.find("\"", colon);
+                            size_t q2 = q1 == std::string::npos ? std::string::npos : line.find("\"", q1 + 1);
+                            if (q1 != std::string::npos && q2 != std::string::npos)
+                                currentName = line.substr(q1 + 1, q2 - q1 - 1);
+                        }
+                    }
+                    size_t jaPos = line.find("\"ja\"");
+                    if (jaPos != std::string::npos) {
+                        size_t colon = line.find(":", jaPos);
+                        if (colon != std::string::npos) {
+                            size_t q1 = line.find("\"", colon);
+                            size_t q2 = q1 == std::string::npos ? std::string::npos : line.find("\"", q1 + 1);
+                            if (q1 != std::string::npos && q2 != std::string::npos)
+                                currentJa = line.substr(q1 + 1, q2 - q1 - 1);
+                        }
+                    }
+                    if (line.find("}") != std::string::npos && currentId != -1) {
+                        CharJsonEntry e;
+                        e.id = currentId;
+                        e.name = NormalizeUtf8(AnsiToUtf8(currentName));
+                        e.ja = NormalizeUtf8(AnsiToUtf8(currentJa));
+                        byId[currentId] = std::move(e);
+                    }
+                }
+            }
+        }
 
         std::string normalized = NormalizeUtf8(nameUtf8);
         auto it = byId.find(id);
