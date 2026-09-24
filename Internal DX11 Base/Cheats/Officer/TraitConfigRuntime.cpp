@@ -1095,64 +1095,17 @@ bool EnsureTraitEffectHook() {
   return true;
 }
 
-struct TraitBridgeSite {
-  uintptr_t queryReturnRva;
-  uintptr_t consumerReturnRva;
-  uint16_t requestedId;
-};
-
-// These pairs are direct call/return sites in the same SAN8RPK.exe build.
-// The first call checks the base trait; the second consumes that trait ID.
-constexpr TraitBridgeSite kMessageBridgeSites[] = {
-    {0x1854D85, 0x1854E73, 28}, // conversation
-    {0x1859DE5, 0x1859ECF, 1},  // conversation
-    {0x1902E70, 0x1902EF5, 10}, // repeated action
-    {0x1BCEF8C, 0x1BCF20F, 11}, // reinforcement report
-    {0x1BCFF6E, 0x1BD0702, 202}, // strategy phase
-    {0x1BD0954, 0x1BD0A16, 30}, // strategy phase
-    {0x1E4C093, 0x1E4C208, 19}, // battle conclusion
-    {kTransferTraitEventOffset, 0x18A5F81, 26} // transfer event
-};
-constexpr TraitBridgeSite kDataBridgeSites[] = {
-    {0x19253E8, 0x192542F, 55} // conference result
-};
-
-bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
-                         const TraitBridgeSite *sites, std::size_t siteCount,
-                         uint16_t &matchedId) {
+bool GetMatchedBridgeId(uint32_t requestedId, uint16_t &matchedId) {
   matchedId = 0;
   const TraitEffectMatchCache &cache = g_traitEffectMatchCache;
   RuntimeState &state = State();
+
+  // 원본 호환 DLL의 전달 브리지는 호출 위치를 제한하지 않습니다.
+  // 직전 확장 효과 판정에서 요청 ID와 커스텀 ID가 정확히 짝지어진 경우에만 치환합니다.
   if (!cache.valid || !state.configLoaded ||
       requestedId != cache.requestedTraitId ||
       cache.matchedCustomTraitId < 71 ||
       cache.matchedCustomTraitId > kTraitCount) {
-    return false;
-  }
-
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-  if (!gameBase || consumerReturnAddress < gameBase)
-    return false;
-
-  const uintptr_t consumerRva = consumerReturnAddress - gameBase;
-  bool knownPair = false;
-  for (std::size_t i = 0; i < siteCount; ++i) {
-    if (sites[i].queryReturnRva == cache.queryReturnRva &&
-        sites[i].consumerReturnRva == consumerRva &&
-        sites[i].requestedId == requestedId) {
-      knownPair = true;
-      break;
-    }
-  }
-  if (!knownPair) {
-    thread_local unsigned diagnosticCount = 0;
-    if (diagnosticCount < 12) {
-      AddLog(u8"[기재JSON/호환] 미확인 ID 전달: query=+%llX consumer=+%llX id=%u",
-             static_cast<unsigned long long>(cache.queryReturnRva),
-             static_cast<unsigned long long>(consumerRva), requestedId);
-      ++diagnosticCount;
-    }
     return false;
   }
 
@@ -1166,7 +1119,10 @@ bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
   }
 
   matchedId = cache.matchedCustomTraitId;
-  g_traitEffectMatchCache = {};
+
+  // 여기서 cache를 지우지 않습니다.
+  // 원본은 다음 TraitEffect 조회가 시작될 때 active 상태를 초기화하며,
+  // 한 이벤트 안에서 여러 문구/데이터 조회가 이어져도 동일 custom ID를 유지합니다.
   return true;
 }
 
@@ -1210,12 +1166,10 @@ void __fastcall CustomTraitMessageSetter(void *message, uint32_t requestedId) {
     return;
 
   uint16_t matchedId = 0;
-  const bool bridge = TakeMatchedBridgeId(
-      requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
-      kMessageBridgeSites, std::size(kMessageBridgeSites), matchedId);
+  const bool bridge = GetMatchedBridgeId(requestedId, matchedId);
 
-  // The original setter still updates the message object; only its input ID
-  // changes after a confirmed custom-only match at a known call site.
+  // 확장 효과 판정에서 매칭된 custom ID가 있으면 원본 DLL과 동일하게
+  // 호출 위치와 관계없이 메시지에 custom ID를 전달합니다.
   reinterpret_cast<TraitMessageSetter>(original)(
       message, bridge ? matchedId : requestedId);
   if (bridge) {
@@ -1233,11 +1187,8 @@ void *__fastcall CustomTraitDataGetter(void *dataCenter, uint32_t requestedId) {
   void *result =
       reinterpret_cast<TraitDataGetter>(original)(dataCenter, requestedId);
   uint16_t matchedId = 0;
-  if (!TakeMatchedBridgeId(
-          requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
-          kDataBridgeSites, std::size(kDataBridgeSites), matchedId)) {
+  if (!GetMatchedBridgeId(requestedId, matchedId))
     return result;
-  }
 
   void *custom =
       reinterpret_cast<TraitDataGetter>(original)(dataCenter, matchedId);
