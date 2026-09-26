@@ -238,21 +238,99 @@ namespace DX11Base {
         return p;
     }
 
+    static bool IsWritableMapPage(DWORD protect) {
+        if (protect & (PAGE_GUARD | PAGE_NOACCESS))
+            return false;
+        const DWORD p = protect & 0xFF;
+        return p == PAGE_READWRITE || p == PAGE_WRITECOPY ||
+               p == PAGE_EXECUTE_READWRITE || p == PAGE_EXECUTE_WRITECOPY;
+    }
+
+    static bool BeginBulkMapWrite(uintptr_t &rangeStart, SIZE_T &rangeSize,
+                                  DWORD &oldProtect, bool &protectionChanged) {
+        rangeStart = 0;
+        uintptr_t rangeEnd = 0;
+        oldProtect = 0;
+        protectionChanged = false;
+
+        for (const auto &rec : g_records) {
+            if (!rec.valid)
+                continue;
+            if (rangeStart == 0 || rec.addr < rangeStart)
+                rangeStart = rec.addr;
+            const uintptr_t end = rec.addr + sizeof(uint64_t);
+            if (end > rangeEnd)
+                rangeEnd = end;
+        }
+
+        if (!rangeStart || rangeEnd <= rangeStart)
+            return false;
+
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery((LPCVOID)rangeStart, &mbi, sizeof(mbi)) != sizeof(mbi))
+            return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+            return false;
+
+        const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+        const uintptr_t regionEnd = regionStart + mbi.RegionSize;
+        if (regionEnd <= regionStart || rangeEnd > regionEnd)
+            return false;
+
+        rangeSize = (SIZE_T)(rangeEnd - rangeStart);
+        if (IsWritableMapPage(mbi.Protect))
+            return true;
+
+        const DWORD p = mbi.Protect & 0xFF;
+        const bool executable = p == PAGE_EXECUTE || p == PAGE_EXECUTE_READ ||
+                                p == PAGE_EXECUTE_WRITECOPY;
+        const DWORD writeProtect = executable ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+        if (!VirtualProtect((LPVOID)rangeStart, rangeSize, writeProtect, &oldProtect))
+            return false;
+
+        protectionChanged = true;
+        return true;
+    }
+
+    static void EndBulkMapWrite(uintptr_t rangeStart, SIZE_T rangeSize,
+                                DWORD oldProtect, bool protectionChanged) {
+        if (!protectionChanged)
+            return;
+        DWORD tmp = 0;
+        VirtualProtect((LPVOID)rangeStart, rangeSize, oldProtect, &tmp);
+    }
+
     // ───────────────────────────────────────────────
     //  원상복구
     // ───────────────────────────────────────────────
     static void RestoreOriginals() {
         if (!g_battleMapShuffleActive) return;
 
-        for (auto& rec : g_records) {
-            if (!rec.valid) continue;
-            if (!IsValidPtr(rec.addr, 8)) continue;
-            
-            DWORD old, tmp;
-            VirtualProtect((LPVOID)rec.addr, 8, PAGE_READWRITE, &old);
-            *(uint64_t*)rec.addr = rec.origValue;
-            VirtualProtect((LPVOID)rec.addr, 8, old, &tmp);
+        uintptr_t rangeStart = 0;
+        SIZE_T rangeSize = 0;
+        DWORD oldProtect = 0;
+        bool protectionChanged = false;
+
+        if (BeginBulkMapWrite(rangeStart, rangeSize, oldProtect, protectionChanged)) {
+            for (const auto &rec : g_records) {
+                if (rec.valid)
+                    *(uint64_t*)rec.addr = rec.origValue;
+            }
+            EndBulkMapWrite(rangeStart, rangeSize, oldProtect, protectionChanged);
+        } else {
+            // 구조가 예상과 달라 한 영역으로 묶을 수 없는 경우에만 기존 방식으로 폴백합니다.
+            for (auto& rec : g_records) {
+                if (!rec.valid) continue;
+                if (!IsValidPtr(rec.addr, 8)) continue;
+
+                DWORD old = 0, tmp = 0;
+                if (!VirtualProtect((LPVOID)rec.addr, 8, PAGE_READWRITE, &old))
+                    continue;
+                *(uint64_t*)rec.addr = rec.origValue;
+                VirtualProtect((LPVOID)rec.addr, 8, old, &tmp);
+            }
         }
+
         g_battleMapShuffleActive = false;
         AddLog(u8"[전투맵셔플] 모든 전투맵 원상복구 완료.");
     }
@@ -263,21 +341,38 @@ namespace DX11Base {
     static void DoRandomShuffle() {
         if (g_uniquePool.empty()) return;
 
+        const ULONGLONG startTick = GetTickCount64();
         srand((unsigned)time(nullptr) ^ GetTickCount());
 
-        for (auto& rec : g_records) {
-            if (!rec.valid) continue;
-            if (!IsValidPtr(rec.addr, 8)) continue;
+        uintptr_t rangeStart = 0;
+        SIZE_T rangeSize = 0;
+        DWORD oldProtect = 0;
+        bool protectionChanged = false;
 
-            uint64_t randVal = g_uniquePool[rand() % g_uniquePool.size()];
-            DWORD old, tmp;
-            VirtualProtect((LPVOID)rec.addr, 8, PAGE_READWRITE, &old);
-            *(uint64_t*)rec.addr = randVal;
-            VirtualProtect((LPVOID)rec.addr, 8, old, &tmp);
+        if (BeginBulkMapWrite(rangeStart, rangeSize, oldProtect, protectionChanged)) {
+            for (const auto &rec : g_records) {
+                if (!rec.valid)
+                    continue;
+                *(uint64_t*)rec.addr = g_uniquePool[rand() % g_uniquePool.size()];
+            }
+            EndBulkMapWrite(rangeStart, rangeSize, oldProtect, protectionChanged);
+        } else {
+            for (auto& rec : g_records) {
+                if (!rec.valid) continue;
+                if (!IsValidPtr(rec.addr, 8)) continue;
+
+                const uint64_t randVal = g_uniquePool[rand() % g_uniquePool.size()];
+                DWORD old = 0, tmp = 0;
+                if (!VirtualProtect((LPVOID)rec.addr, 8, PAGE_READWRITE, &old))
+                    continue;
+                *(uint64_t*)rec.addr = randVal;
+                VirtualProtect((LPVOID)rec.addr, 8, old, &tmp);
+            }
         }
 
         g_battleMapShuffleActive = true;
-        AddLog(u8"[전투맵셔플] 평정 기간 진입: 전투맵 랜덤 셔플 완료!");
+        AddLog(u8"[전투맵셔플] 평정 기간 진입: 전투맵 랜덤 셔플 완료! (%llums)",
+               (unsigned long long)(GetTickCount64() - startTick));
     }
 
     // ───────────────────────────────────────────────

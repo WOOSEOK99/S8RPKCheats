@@ -1,9 +1,18 @@
 #pragma once
+#define DX11BASE_OFFICER_DETAIL_HEADER_INCLUDED 1
+
 #include "../../Framework/imgui.h"
 #include "../../pch.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
+
+// SelectOfficercapture.h가 먼저 포함된 번역 단위에서는 SetTraitID 매크로를
+// 실제 API 선언을 읽는 동안만 해제하고, 헤더 끝에서 동일 고속 경로로 복구합니다.
+#ifdef SetTraitID
+#undef SetTraitID
+#define DX11BASE_RESTORE_FAST_SET_TRAIT_ID 1
+#endif
 
 namespace DX11Base {
   extern bool bShowOfficerDetail;
@@ -47,3 +56,8 @@ namespace DX11Base {
   void DrawBatchOfficerEditWindow(float scale);
   void DrawFactionTechEditor(float scale);
 }
+
+#ifdef DX11BASE_RESTORE_FAST_SET_TRAIT_ID
+#undef DX11BASE_RESTORE_FAST_SET_TRAIT_ID
+#define SetTraitID SetTraitIDForOfficerUiFast
+#endif
