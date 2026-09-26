@@ -38,25 +38,29 @@ namespace DX11Base {
     static uintptr_t s_selfBase = 0;
     static uintptr_t s_selfEnd = 0;
 
-    static std::atomic<DWORD> s_tgtReal{0};
-    static std::atomic<DWORD> s_tgtFake{0};
+    // All four virtual clocks share one generation. Hooks only publish a
+    // snapshot when the generation is even and unchanged, so a multiplier
+    // change can never expose mixed old/new anchors to another thread.
+    static std::atomic<uint32_t> s_clockGeneration{0};
+    static std::atomic_flag s_clockWriter = ATOMIC_FLAG_INIT;
 
-    static std::atomic<DWORD> s_gtcReal{0};
-    static std::atomic<DWORD> s_gtcFake{0};
+    static std::atomic<DWORD> s_tgtRealAnchor{0};
+    static std::atomic<DWORD> s_tgtFakeAnchor{0};
 
-    static std::atomic<ULONGLONG> s_gtc64Real{0};
-    static std::atomic<ULONGLONG> s_gtc64Fake{0};
+    static std::atomic<DWORD> s_gtcRealAnchor{0};
+    static std::atomic<DWORD> s_gtcFakeAnchor{0};
 
-    static std::atomic<LONGLONG> s_qpcReal{0};
-    static std::atomic<LONGLONG> s_qpcFake{0};
+    static std::atomic<ULONGLONG> s_gtc64RealAnchor{0};
+    static std::atomic<ULONGLONG> s_gtc64FakeAnchor{0};
+
+    static std::atomic<LONGLONG> s_qpcRealAnchor{0};
+    static std::atomic<LONGLONG> s_qpcFakeAnchor{0};
 
     static std::atomic<float> s_multiplier{1.0f};
 
     static constexpr float MIN_MULTIPLIER = 1.0f;
     static constexpr float MAX_MULTIPLIER = 5.0f;
     static constexpr float MULTIPLIER_STEP = 0.5f;
-    static LONGLONG s_maxDeltaQpc = 33000;
-    static LONGLONG s_safeDeltaQpc = 50000;
 
     float NormalizeMultiplier(float value) {
       if (value < MIN_MULTIPLIER)
@@ -67,30 +71,6 @@ namespace DX11Base {
       const int stepIndex = static_cast<int>(
           ((value - MIN_MULTIPLIER) / MULTIPLIER_STEP) + 0.5f);
       return MIN_MULTIPLIER + (stepIndex * MULTIPLIER_STEP);
-    }
-
-    void ResetBases(float desiredMul) {
-      s_multiplier.store(NormalizeMultiplier(desiredMul),
-                         std::memory_order_release);
-    }
-
-    void ResetClockState() {
-      s_tgtReal.store(0, std::memory_order_relaxed);
-      s_tgtFake.store(0, std::memory_order_relaxed);
-      s_gtcReal.store(0, std::memory_order_relaxed);
-      s_gtcFake.store(0, std::memory_order_relaxed);
-      s_gtc64Real.store(0, std::memory_order_relaxed);
-      s_gtc64Fake.store(0, std::memory_order_relaxed);
-      s_qpcReal.store(0, std::memory_order_relaxed);
-      s_qpcFake.store(0, std::memory_order_relaxed);
-    }
-
-    void InitializeQpcThresholds() {
-      LARGE_INTEGER freq{};
-      if (QueryPerformanceFrequency(&freq) && freq.QuadPart > 0) {
-        s_maxDeltaQpc = (freq.QuadPart * 33) / 1000;
-        s_safeDeltaQpc = (freq.QuadPart * 50) / 1000;
-      }
     }
 
     void InitializeSelfModuleRange() {
@@ -131,6 +111,139 @@ namespace DX11Base {
       return target && MH_EnableHook(target) == MH_OK;
     }
 
+    void LockClockWriter() {
+      while (s_clockWriter.test_and_set(std::memory_order_acquire))
+        YieldProcessor();
+    }
+
+    void UnlockClockWriter() {
+      s_clockWriter.clear(std::memory_order_release);
+    }
+
+    template <typename T>
+    struct ClockSnapshot {
+      T realAnchor{};
+      T fakeAnchor{};
+      float multiplier{1.0f};
+    };
+
+    template <typename T>
+    ClockSnapshot<T> ReadClockSnapshot(const std::atomic<T> &realAnchor,
+                                       const std::atomic<T> &fakeAnchor) {
+      for (;;) {
+        const uint32_t before = s_clockGeneration.load(std::memory_order_acquire);
+        if (before & 1u) {
+          YieldProcessor();
+          continue;
+        }
+
+        ClockSnapshot<T> snapshot{};
+        snapshot.realAnchor = realAnchor.load(std::memory_order_relaxed);
+        snapshot.fakeAnchor = fakeAnchor.load(std::memory_order_relaxed);
+        snapshot.multiplier = s_multiplier.load(std::memory_order_relaxed);
+
+        const uint32_t after = s_clockGeneration.load(std::memory_order_acquire);
+        if (before == after)
+          return snapshot;
+      }
+    }
+
+    DWORD Scale32(DWORD real, DWORD realAnchor, DWORD fakeAnchor, float multiplier) {
+      // DWORD subtraction intentionally keeps Win32 tick wrap semantics.
+      const DWORD delta = real - realAnchor;
+      const DWORD scaled = static_cast<DWORD>(static_cast<double>(delta) * multiplier);
+      return fakeAnchor + scaled;
+    }
+
+    ULONGLONG Scale64(ULONGLONG real, ULONGLONG realAnchor,
+                      ULONGLONG fakeAnchor, float multiplier) {
+      const ULONGLONG delta = (real >= realAnchor) ? (real - realAnchor) : 0;
+      const ULONGLONG scaled =
+          static_cast<ULONGLONG>(static_cast<long double>(delta) * multiplier);
+      return fakeAnchor + scaled;
+    }
+
+    LONGLONG ScaleQpc(LONGLONG real, LONGLONG realAnchor,
+                      LONGLONG fakeAnchor, float multiplier) {
+      const LONGLONG delta = (real >= realAnchor) ? (real - realAnchor) : 0;
+      const LONGLONG scaled =
+          static_cast<LONGLONG>(static_cast<long double>(delta) * multiplier);
+      return fakeAnchor + scaled;
+    }
+
+    void ResetClockAnchors(bool preserveVirtualTime, float previousMultiplier,
+                           float newMultiplier) {
+      if (!oQueryPerformanceCounter || !oGetTickCount ||
+          !oGetTickCount64 || !otimeGetTime) {
+        return;
+      }
+
+      LARGE_INTEGER qpcNow{};
+      if (!oQueryPerformanceCounter(&qpcNow))
+        return;
+
+      const DWORD gtcNow = oGetTickCount();
+      const ULONGLONG gtc64Now = oGetTickCount64();
+      const DWORD tgtNow = otimeGetTime();
+
+      LockClockWriter();
+      s_clockGeneration.fetch_add(1u, std::memory_order_acq_rel); // odd: writer active
+
+      LONGLONG qpcFakeNow = qpcNow.QuadPart;
+      DWORD gtcFakeNow = gtcNow;
+      ULONGLONG gtc64FakeNow = gtc64Now;
+      DWORD tgtFakeNow = tgtNow;
+
+      if (preserveVirtualTime) {
+        const LONGLONG oldQpcReal = s_qpcRealAnchor.load(std::memory_order_relaxed);
+        const LONGLONG oldQpcFake = s_qpcFakeAnchor.load(std::memory_order_relaxed);
+        const DWORD oldGtcReal = s_gtcRealAnchor.load(std::memory_order_relaxed);
+        const DWORD oldGtcFake = s_gtcFakeAnchor.load(std::memory_order_relaxed);
+        const ULONGLONG oldGtc64Real = s_gtc64RealAnchor.load(std::memory_order_relaxed);
+        const ULONGLONG oldGtc64Fake = s_gtc64FakeAnchor.load(std::memory_order_relaxed);
+        const DWORD oldTgtReal = s_tgtRealAnchor.load(std::memory_order_relaxed);
+        const DWORD oldTgtFake = s_tgtFakeAnchor.load(std::memory_order_relaxed);
+
+        if (oldQpcReal != 0)
+          qpcFakeNow = ScaleQpc(qpcNow.QuadPart, oldQpcReal, oldQpcFake, previousMultiplier);
+        if (oldGtcReal != 0)
+          gtcFakeNow = Scale32(gtcNow, oldGtcReal, oldGtcFake, previousMultiplier);
+        if (oldGtc64Real != 0)
+          gtc64FakeNow = Scale64(gtc64Now, oldGtc64Real, oldGtc64Fake, previousMultiplier);
+        if (oldTgtReal != 0)
+          tgtFakeNow = Scale32(tgtNow, oldTgtReal, oldTgtFake, previousMultiplier);
+      }
+
+      s_qpcRealAnchor.store(qpcNow.QuadPart, std::memory_order_relaxed);
+      s_qpcFakeAnchor.store(qpcFakeNow, std::memory_order_relaxed);
+      s_gtcRealAnchor.store(gtcNow, std::memory_order_relaxed);
+      s_gtcFakeAnchor.store(gtcFakeNow, std::memory_order_relaxed);
+      s_gtc64RealAnchor.store(gtc64Now, std::memory_order_relaxed);
+      s_gtc64FakeAnchor.store(gtc64FakeNow, std::memory_order_relaxed);
+      s_tgtRealAnchor.store(tgtNow, std::memory_order_relaxed);
+      s_tgtFakeAnchor.store(tgtFakeNow, std::memory_order_relaxed);
+      s_multiplier.store(NormalizeMultiplier(newMultiplier), std::memory_order_relaxed);
+
+      s_clockGeneration.fetch_add(1u, std::memory_order_release); // even: publish snapshot
+      UnlockClockWriter();
+    }
+
+    void ClearClockAnchors() {
+      LockClockWriter();
+      s_clockGeneration.fetch_add(1u, std::memory_order_acq_rel);
+      s_qpcRealAnchor.store(0, std::memory_order_relaxed);
+      s_qpcFakeAnchor.store(0, std::memory_order_relaxed);
+      s_gtcRealAnchor.store(0, std::memory_order_relaxed);
+      s_gtcFakeAnchor.store(0, std::memory_order_relaxed);
+      s_gtc64RealAnchor.store(0, std::memory_order_relaxed);
+      s_gtc64FakeAnchor.store(0, std::memory_order_relaxed);
+      s_tgtRealAnchor.store(0, std::memory_order_relaxed);
+      s_tgtFakeAnchor.store(0, std::memory_order_relaxed);
+      s_multiplier.store(1.0f, std::memory_order_relaxed);
+      s_clockGeneration.fetch_add(1u, std::memory_order_release);
+      UnlockClockWriter();
+    }
+
     void RollbackSpeedHooks() {
       s_enabled.store(false, std::memory_order_release);
 
@@ -155,144 +268,74 @@ namespace DX11Base {
       oGetTickCount = nullptr;
       oGetTickCount64 = nullptr;
       otimeGetTime = nullptr;
+      ClearClockAnchors();
       s_installed = false;
     }
   } // namespace
 
   BOOL WINAPI hkQueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
-    BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
-
+    const BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
     if (!ret || IsCheatCaller(_ReturnAddress()) ||
-        !s_enabled.load(std::memory_order_acquire))
-      return ret;
-
-    float mul = s_multiplier.load(std::memory_order_acquire);
-    if (mul > MAX_MULTIPLIER)
-      mul = MAX_MULTIPLIER;
-
-    LONGLONG real = lpPerformanceCount->QuadPart;
-    LONGLONG prevReal = s_qpcReal.load(std::memory_order_relaxed);
-
-    if (prevReal == 0) {
-      s_qpcReal.store(real, std::memory_order_relaxed);
-      s_qpcFake.store(real, std::memory_order_relaxed);
+        !s_enabled.load(std::memory_order_acquire)) {
       return ret;
     }
 
-    LONGLONG delta = real - prevReal;
-    if (delta < 0)
-      delta = 0;
+    const auto snapshot = ReadClockSnapshot(s_qpcRealAnchor, s_qpcFakeAnchor);
+    if (snapshot.realAnchor == 0)
+      return ret;
 
-    if (delta > s_safeDeltaQpc)
-      mul = 1.0f;
-
-    delta = static_cast<LONGLONG>(delta * mul);
-    if (delta > s_maxDeltaQpc)
-      delta = s_maxDeltaQpc;
-
-    LONGLONG fake = s_qpcFake.load(std::memory_order_relaxed) + delta;
-    s_qpcReal.store(real, std::memory_order_relaxed);
-    s_qpcFake.store(fake, std::memory_order_relaxed);
-
-    lpPerformanceCount->QuadPart = fake;
+    lpPerformanceCount->QuadPart =
+        ScaleQpc(lpPerformanceCount->QuadPart, snapshot.realAnchor,
+                 snapshot.fakeAnchor, snapshot.multiplier);
     return ret;
   }
 
   DWORD WINAPI hkGetTickCount() {
-    DWORD real = oGetTickCount();
+    const DWORD real = oGetTickCount();
     if (IsCheatCaller(_ReturnAddress()) ||
-        !s_enabled.load(std::memory_order_acquire))
-      return real;
-
-    float mul = s_multiplier.load(std::memory_order_acquire);
-    if (mul > MAX_MULTIPLIER)
-      mul = MAX_MULTIPLIER;
-
-    DWORD prevReal = s_gtcReal.load(std::memory_order_relaxed);
-    if (prevReal == 0) {
-      s_gtcReal.store(real, std::memory_order_relaxed);
-      s_gtcFake.store(real, std::memory_order_relaxed);
+        !s_enabled.load(std::memory_order_acquire)) {
       return real;
     }
 
-    DWORD delta = real - prevReal;
-    if (static_cast<int32_t>(delta) < 0)
-      delta = 0;
-    if (delta > 50)
-      mul = 1.0f;
-    delta = static_cast<DWORD>(static_cast<float>(delta) * mul);
-
-    DWORD fake = s_gtcFake.load(std::memory_order_relaxed) + delta;
-    s_gtcReal.store(real, std::memory_order_relaxed);
-    s_gtcFake.store(fake, std::memory_order_relaxed);
-    return fake;
+    const auto snapshot = ReadClockSnapshot(s_gtcRealAnchor, s_gtcFakeAnchor);
+    if (snapshot.realAnchor == 0)
+      return real;
+    return Scale32(real, snapshot.realAnchor, snapshot.fakeAnchor,
+                   snapshot.multiplier);
   }
 
   ULONGLONG WINAPI hkGetTickCount64() {
-    ULONGLONG real = oGetTickCount64();
+    const ULONGLONG real = oGetTickCount64();
     if (IsCheatCaller(_ReturnAddress()) ||
-        !s_enabled.load(std::memory_order_acquire))
-      return real;
-
-    float mul = s_multiplier.load(std::memory_order_acquire);
-    if (mul > MAX_MULTIPLIER)
-      mul = MAX_MULTIPLIER;
-
-    ULONGLONG prevReal = s_gtc64Real.load(std::memory_order_relaxed);
-    if (prevReal == 0) {
-      s_gtc64Real.store(real, std::memory_order_relaxed);
-      s_gtc64Fake.store(real, std::memory_order_relaxed);
+        !s_enabled.load(std::memory_order_acquire)) {
       return real;
     }
 
-    ULONGLONG delta = 0;
-    if (real >= prevReal)
-      delta = real - prevReal;
-    if (delta > 50)
-      mul = 1.0f;
-    delta = static_cast<ULONGLONG>(static_cast<double>(delta) * mul);
-
-    ULONGLONG fake = s_gtc64Fake.load(std::memory_order_relaxed) + delta;
-    s_gtc64Real.store(real, std::memory_order_relaxed);
-    s_gtc64Fake.store(fake, std::memory_order_relaxed);
-    return fake;
+    const auto snapshot = ReadClockSnapshot(s_gtc64RealAnchor, s_gtc64FakeAnchor);
+    if (snapshot.realAnchor == 0)
+      return real;
+    return Scale64(real, snapshot.realAnchor, snapshot.fakeAnchor,
+                   snapshot.multiplier);
   }
 
   DWORD WINAPI hktimeGetTime() {
-    DWORD real = otimeGetTime();
+    const DWORD real = otimeGetTime();
     if (IsCheatCaller(_ReturnAddress()) ||
-        !s_enabled.load(std::memory_order_acquire))
-      return real;
-
-    float mul = s_multiplier.load(std::memory_order_acquire);
-    if (mul > MAX_MULTIPLIER)
-      mul = MAX_MULTIPLIER;
-
-    DWORD prevReal = s_tgtReal.load(std::memory_order_relaxed);
-    if (prevReal == 0) {
-      s_tgtReal.store(real, std::memory_order_relaxed);
-      s_tgtFake.store(real, std::memory_order_relaxed);
+        !s_enabled.load(std::memory_order_acquire)) {
       return real;
     }
 
-    DWORD delta = real - prevReal;
-    if (static_cast<int32_t>(delta) < 0)
-      delta = 0;
-    if (delta > 50)
-      mul = 1.0f;
-    delta = static_cast<DWORD>(static_cast<float>(delta) * mul);
-
-    DWORD fake = s_tgtFake.load(std::memory_order_relaxed) + delta;
-    s_tgtReal.store(real, std::memory_order_relaxed);
-    s_tgtFake.store(fake, std::memory_order_relaxed);
-    return fake;
+    const auto snapshot = ReadClockSnapshot(s_tgtRealAnchor, s_tgtFakeAnchor);
+    if (snapshot.realAnchor == 0)
+      return real;
+    return Scale32(real, snapshot.realAnchor, snapshot.fakeAnchor,
+                   snapshot.multiplier);
   }
 
   void SpeedHack_Sleep_Install() {
     if (s_installed || !bSpeedHack)
       return;
 
-    InitializeQpcThresholds();
     InitializeSelfModuleRange();
 
     if (!HookCreated(MH_CreateHookApiEx(L"kernel32.dll", "QueryPerformanceCounter",
@@ -325,8 +368,8 @@ namespace DX11Base {
       return;
     }
 
-    ResetClockState();
-    ResetBases(g_speedMultiplier);
+    const float desired = NormalizeMultiplier(g_speedMultiplier);
+    ResetClockAnchors(false, 1.0f, desired);
     s_enabled.store(bSpeedHack, std::memory_order_release);
     s_installed = true;
   }
@@ -355,25 +398,32 @@ namespace DX11Base {
     }
 
     static bool s_lastEnabled = false;
-    if (s_lastEnabled != bSpeedHack) {
-      s_enabled.store(false, std::memory_order_release);
-      ResetClockState();
-      s_lastEnabled = bSpeedHack;
-    }
-
-    float desired = bSpeedHack ? NormalizeMultiplier(g_speedMultiplier) : 1.0f;
-    if (bSpeedHack && g_speedMultiplier != desired)
+    const bool enabledNow = bSpeedHack;
+    const float desired = enabledNow ? NormalizeMultiplier(g_speedMultiplier) : 1.0f;
+    if (enabledNow && g_speedMultiplier != desired)
       g_speedMultiplier = desired;
 
-    float current = s_multiplier.load(std::memory_order_acquire);
-    if (current != desired) {
+    const float current = s_multiplier.load(std::memory_order_acquire);
+
+    if (s_lastEnabled != enabledNow) {
+      if (!enabledNow) {
+        // OFF means the game immediately returns to the original wall clock.
+        s_enabled.store(false, std::memory_order_release);
+      } else {
+        // After any OFF interval, restart virtual time from the current real
+        // clock so the first ON sample cannot reuse an old accelerated anchor.
+        ResetClockAnchors(false, 1.0f, desired);
+        s_enabled.store(true, std::memory_order_release);
+      }
+      s_lastEnabled = enabledNow;
+    } else if (enabledNow && current != desired) {
       AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx", current, desired);
-      ResetBases(desired);
-      ResetClockState();
+      // Preserve the currently visible virtual time while changing only its
+      // slope. Hooks see the old or new complete snapshot, never a mixture.
+      ResetClockAnchors(true, current, desired);
     }
 
-    s_enabled.store(bSpeedHack, std::memory_order_release);
-    PerfSetSpeedState(bSpeedHack, desired);
+    PerfSetSpeedState(enabledNow, desired);
   }
 
   float SpeedHack_GetRealDeltaTime() {
@@ -401,7 +451,7 @@ namespace DX11Base {
       return 1.0f / 60.0f;
     }
 
-    LONGLONG delta = now.QuadPart - s_prev;
+    const LONGLONG delta = now.QuadPart - s_prev;
     s_prev = now.QuadPart;
     if (delta <= 0)
       return 1.0f / 60.0f;
