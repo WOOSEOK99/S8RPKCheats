@@ -85,7 +85,7 @@ struct ChildEntry {
   uint16_t deathYear = 0;
   uint16_t appliedTargetYear = 0;
 
-  // 체크 해제 시 원래 일정으로 되돌리기 위한 백업
+  // 임관 전에 취소할 경우에만 원래 일정으로 되돌리기 위한 백업
   bool hasOriginalSchedule = false;
   uint16_t originalAppearanceYear = 0;
   uint16_t originalBirthYear = 0;
@@ -159,9 +159,40 @@ static bool ApplyChildSchedule(ChildEntry& e) {
   }
 }
 
+static void FinalizeCompletedChildSchedule(ChildEntry& e, uint16_t currentYear) {
+  if (!e.selected || !e.hasOriginalSchedule || e.appliedTargetYear == 0)
+    return;
+  if (currentYear < e.appliedTargetYear)
+    return;
+
+  const uint16_t completedYear = e.appliedTargetYear;
+
+  // 조기 임관이 완료된 뒤에는 변경된 등장/출생년도가 곧 실제 이력이다.
+  // 원본 일정 백업만 폐기하고 메모리 값은 절대 되돌리지 않는다.
+  e.selected = false;
+  e.appliedTargetYear = 0;
+  e.hasOriginalSchedule = false;
+  e.originalAppearanceYear = 0;
+  e.originalBirthYear = 0;
+
+  AddLog(u8"[ChildManager] ID %u 조기 임관 완료: %u년 / 조정된 출생·등장년도 유지 / 체크 자동 해제",
+         e.id, completedYear);
+}
+
 static bool RestoreChildSchedule(ChildEntry& e) {
   if (!e.hasOriginalSchedule || !e.addr || !IsValidPtr(e.addr, 0x38))
     return false;
+
+  unsigned short currentYear = 0;
+  if (!ReadScenarioYear(&currentYear) || currentYear < 171 || currentYear >= 270)
+    return false;
+
+  // 이미 조기 임관 예정년도에 도달했다면 '예약 취소'가 아니라 '임관 완료'다.
+  // 이 상태에서 생년/등장년을 원복하면 임관된 자녀의 나이만 어려지는 모순이 생긴다.
+  if (e.appliedTargetYear != 0 && currentYear >= e.appliedTargetYear) {
+    FinalizeCompletedChildSchedule(e, currentYear);
+    return true;
+  }
 
   __try {
     if (*(uint16_t*)(e.addr + 0x08) != e.id)
@@ -179,6 +210,8 @@ static bool RestoreChildSchedule(ChildEntry& e) {
     e.birthYear = e.originalBirthYear;
     e.appliedTargetYear = 0;
     e.hasOriginalSchedule = false;
+    e.originalAppearanceYear = 0;
+    e.originalBirthYear = 0;
 
     AddLog(u8"[ChildManager] ID %u 임관 예약 취소: 등장 %u년 / 출생 %u년 복원",
            e.id, e.appearanceYear, e.birthYear);
@@ -186,6 +219,10 @@ static bool RestoreChildSchedule(ChildEntry& e) {
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
   }
+}
+
+static bool IsChildCommissioned(const ChildEntry& e, uint16_t currentYear) {
+  return e.appearanceYear != 0 && currentYear >= e.appearanceYear;
 }
 
 static void ScanCurrentHeroChildren(bool forceLog) {
@@ -289,8 +326,19 @@ void RunChildManagerUpdate() {
   g_lastChildScanMs = now;
   ScanCurrentHeroChildren(false);
 
-  for (auto& kv : g_children)
-    RefreshChild(kv.second);
+  unsigned short currentYear = 0;
+  const bool hasCurrentYear =
+      ReadScenarioYear(&currentYear) && currentYear >= 171 && currentYear < 270;
+
+  for (auto& kv : g_children) {
+    ChildEntry& e = kv.second;
+    RefreshChild(e);
+
+    // 예정년도에 도달하면 조기 임관 작업은 끝난 것이므로 체크를 자동 해제한다.
+    // 이때 조정된 출생/등장년도는 그대로 유지한다.
+    if (hasCurrentYear)
+      FinalizeCompletedChildSchedule(e, currentYear);
+  }
 
   RunPregnancyManagerUpdate();
 }
@@ -329,6 +377,10 @@ void DrawChildManagerWindow(float scale) {
 
   ImGui::Separator();
 
+  unsigned short currentYear = 0;
+  const bool hasCurrentYear =
+      ReadScenarioYear(&currentYear) && currentYear >= 171 && currentYear < 270;
+
   if (g_children.empty()) {
     ImGui::TextUnformatted(u8"현재 주인공의 자녀가 없습니다.");
   } else if (ImGui::BeginTable("ChildManagerTable", 7,
@@ -347,15 +399,35 @@ void DrawChildManagerWindow(float scale) {
     ids.reserve(g_children.size());
     for (const auto& kv : g_children)
       ids.push_back(kv.first);
-    std::sort(ids.begin(), ids.end());
+
+    // 이미 등장(임관)한 자녀를 먼저 보여주고, 같은 그룹 안에서는 ID 순으로 정렬한다.
+    std::sort(ids.begin(), ids.end(),
+              [&](uint16_t lhsId, uint16_t rhsId) {
+                const ChildEntry& lhs = g_children.at(lhsId);
+                const ChildEntry& rhs = g_children.at(rhsId);
+                const bool lhsCommissioned =
+                    hasCurrentYear && IsChildCommissioned(lhs, currentYear);
+                const bool rhsCommissioned =
+                    hasCurrentYear && IsChildCommissioned(rhs, currentYear);
+
+                if (lhsCommissioned != rhsCommissioned)
+                  return lhsCommissioned && !rhsCommissioned;
+                return lhsId < rhsId;
+              });
 
     for (uint16_t id : ids) {
       ChildEntry& e = g_children[id];
+      const bool commissioned =
+          hasCurrentYear && IsChildCommissioned(e, currentYear);
+
       ImGui::PushID((int)id);
       ImGui::TableNextRow();
 
       ImGui::TableNextColumn();
       bool selected = e.selected;
+      if (commissioned)
+        ImGui::BeginDisabled();
+
       if (ImGui::Checkbox("##select", &selected)) {
         if (selected) {
           if (!e.hasOriginalSchedule) {
@@ -369,6 +441,8 @@ void DrawChildManagerWindow(float scale) {
           } else {
             e.selected = false;
             e.hasOriginalSchedule = false;
+            e.originalAppearanceYear = 0;
+            e.originalBirthYear = 0;
             AddLog(u8"[ChildManager] ID %u 임관 예약 적용 실패", e.id);
           }
         } else {
@@ -381,6 +455,9 @@ void DrawChildManagerWindow(float scale) {
           }
         }
       }
+
+      if (commissioned)
+        ImGui::EndDisabled();
 
       ImGui::TableNextColumn();
       auto nameIt = g_officerNames.find(id);
@@ -399,6 +476,9 @@ void DrawChildManagerWindow(float scale) {
       ImGui::Text("%u", e.deathYear);
 
       ImGui::TableNextColumn();
+      if (commissioned)
+        ImGui::BeginDisabled();
+
       ImGui::SetNextItemWidth(55.0f * scale);
       int years = e.yearsLater;
       if (ImGui::InputInt("##years", &years, 0, 0)) {
@@ -407,11 +487,19 @@ void DrawChildManagerWindow(float scale) {
           ApplyChildSchedule(e);
       }
 
+      if (commissioned)
+        ImGui::EndDisabled();
+
       ImGui::TableNextColumn();
-      if (e.appliedTargetYear)
+      if (commissioned) {
+        ImGui::TextColored(
+            ImVec4(0.45f, 1.0f, 0.55f, 1.0f),
+            u8"임관 완료");
+      } else if (e.appliedTargetYear) {
         ImGui::Text(u8"%u년", e.appliedTargetYear);
-      else
+      } else {
         ImGui::TextUnformatted(u8"-");
+      }
 
       ImGui::PopID();
     }
@@ -421,7 +509,11 @@ void DrawChildManagerWindow(float scale) {
 
   ImGui::Spacing();
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
-                     u8"※ 선택된 자녀만 등장년도와 출생년도를 함께 조정하며 사망년도는 변경하지 않습니다.");
+                     u8"※ 이미 등장한 자녀는 임관 완료로 표시되며 조기 임관 설정을 다시 적용할 수 없습니다.");
+  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
+                     u8"※ 임관 전 체크를 해제하면 원래 일정으로 복원되며, 임관 완료 후에는 조정된 나이가 유지됩니다.");
+  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
+                     u8"※ 임관 예정년도에 도달하면 적용 체크는 자동으로 해제됩니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 자녀 출생/임관/주인공 변경은 혈연 데이터를 다시 읽어 목록에 자동 반영합니다.");
 

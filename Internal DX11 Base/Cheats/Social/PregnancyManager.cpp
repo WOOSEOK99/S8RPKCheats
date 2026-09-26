@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -57,6 +58,8 @@ static std::mutex g_pregnancySpouseMutex;
 struct PregnancySpouseOption {
   uint16_t id = 0;
   uintptr_t addr = 0;
+  uint16_t birthYear = 0;
+  std::vector<uint16_t> childIds;
 };
 
 static std::vector<PregnancySpouseOption> g_pregnancyCurrentSpouses;
@@ -127,6 +130,102 @@ static bool ReadPregnancyDebugRecord(
   return true;
 }
 
+static void PopulateSpouseFamilyData(
+    uintptr_t rosterBase,
+    uintptr_t heroMaster,
+    std::vector<PregnancySpouseOption>& options) {
+  if (rosterBase <= 0x10000 || heroMaster <= 0x10000 || options.empty())
+    return;
+
+  const uintptr_t heroNorm = NormalizeOfficerPtr(heroMaster);
+  std::unordered_map<uintptr_t, size_t> spouseByPtr;
+  spouseByPtr.reserve(options.size());
+
+  for (size_t i = 0; i < options.size(); ++i) {
+    PregnancySpouseOption& option = options[i];
+    option.childIds.clear();
+    option.birthYear = 0;
+    SafeRead16(option.addr + 0x34, &option.birthYear);
+    spouseByPtr[NormalizeOfficerPtr(option.addr)] = i;
+  }
+
+  // 자녀 관리와 같은 혈연 포인터(+0x48/+0x50)를 사용합니다.
+  // 주인공과 해당 배우자를 동시에 부모로 가진 실제 자녀만 표시합니다.
+  std::unordered_set<uint16_t> seenChildIds;
+  for (int i = 0; i < 5102; ++i) {
+    const uintptr_t childAddr = rosterBase + (uintptr_t)i * 0x3D0;
+
+    uint16_t childId = 0;
+    if (!SafeRead16(childAddr + 0x08, &childId) ||
+        childId < 1 || childId > 5102) {
+      continue;
+    }
+
+    uint16_t appearance = 0;
+    uint16_t birth = 0;
+    uint16_t death = 0;
+    if (!SafeRead16(childAddr + 0x32, &appearance) ||
+        !SafeRead16(childAddr + 0x34, &birth) ||
+        !SafeRead16(childAddr + 0x36, &death) ||
+        birth == 0 || appearance == 0 || death == 0 ||
+        appearance < birth || death < birth) {
+      continue;
+    }
+
+    uintptr_t dadPtr = 0;
+    uintptr_t momPtr = 0;
+    SafeReadPtr(childAddr + 0x48, &dadPtr);
+    SafeReadPtr(childAddr + 0x50, &momPtr);
+    const uintptr_t dadNorm = NormalizeOfficerPtr(dadPtr);
+    const uintptr_t momNorm = NormalizeOfficerPtr(momPtr);
+
+    uintptr_t otherParent = 0;
+    if (dadNorm == heroNorm)
+      otherParent = momNorm;
+    else if (momNorm == heroNorm)
+      otherParent = dadNorm;
+    else
+      continue;
+
+    const auto spouseIt = spouseByPtr.find(otherParent);
+    if (spouseIt == spouseByPtr.end())
+      continue;
+
+    if (!seenChildIds.insert(childId).second)
+      continue;
+
+    options[spouseIt->second].childIds.push_back(childId);
+  }
+
+  for (PregnancySpouseOption& option : options)
+    std::sort(option.childIds.begin(), option.childIds.end());
+}
+
+static std::string BuildSpouseChildrenText(
+    const PregnancySpouseOption& option) {
+  if (option.childIds.empty())
+    return u8"-";
+
+  std::string text;
+  for (size_t i = 0; i < option.childIds.size(); ++i) {
+    const uint16_t childId = option.childIds[i];
+    if (i != 0)
+      text += u8", ";
+
+    const auto nameIt = g_officerNames.find(childId);
+    if (nameIt != g_officerNames.end() && !nameIt->second.empty()) {
+      text += nameIt->second;
+      text += " (";
+      text += std::to_string(childId);
+      text += ")";
+    } else {
+      text += u8"ID ";
+      text += std::to_string(childId);
+    }
+  }
+  return text;
+}
+
 static bool RefreshCurrentPregnancySpousesFast() {
   uintptr_t rosterBase = 0;
   uintptr_t heroMaster = 0;
@@ -180,6 +279,8 @@ static bool RefreshCurrentPregnancySpousesFast() {
     option.addr = NormalizeOfficerPtr(officerAddr);
     options.push_back(option);
   }
+
+  PopulateSpouseFamilyData(rosterBase, heroMaster, options);
 
   {
     std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
@@ -713,6 +814,9 @@ static bool ApplyPregnancySpouseSlotSwap(
 
   g_pregnancySwapSpouseId = 0;
 
+  // 슬롯 교체 직후 배우자 나이/자녀 캐시도 다시 읽어 다음 프레임에 함께 반영합니다.
+  RefreshCurrentPregnancySpousesFast();
+
   AddLog(
       u8"[임신슬롯교체] slot%d 배우자 교체 성공: ID %u -> ID %u / cooldown=100(가능성 0%%)",
       slotIndex + 1, oldSpouseId, newSpouseId);
@@ -808,13 +912,16 @@ void DrawPregnancyManagerSection(float scale) {
       GetCanonicalPregnancySnapshot();
 
   // 현재 배우자 전체 목록은 임신 3슬롯과 별도로 항상 표시합니다.
-  // 기존 슬롯/교체 드롭다운 로직은 그대로 두고, 어떤 배우자가
-  // 슬롯 안/밖에 있는지만 한눈에 확인할 수 있게 합니다.
+  // 배우자별 나이와 주인공 사이의 자녀도 함께 표시합니다.
   std::vector<PregnancySpouseOption> currentSpouses;
   {
     std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
     currentSpouses = g_pregnancyCurrentSpouses;
   }
+
+  unsigned short currentYear = 0;
+  const bool hasCurrentYear =
+      ReadScenarioYear(&currentYear) && currentYear >= 171 && currentYear < 270;
 
   ImGui::Text(
       u8"현재 배우자 목록 (%zu명)",
@@ -826,12 +933,12 @@ void DrawPregnancyManagerSection(float scale) {
     const float rowHeight =
         ImGui::GetTextLineHeightWithSpacing();
     const float tableHeight =
-        (std::min)(180.0f * scale,
+        (std::min)(200.0f * scale,
                    (rowHeight * (float)(currentSpouses.size() + 1)) +
                        8.0f * scale);
 
     if (ImGui::BeginTable(
-            "CurrentPregnancySpouseList", 4,
+            "CurrentPregnancySpouseList", 6,
             ImGuiTableFlags_Borders |
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_ScrollY |
@@ -841,15 +948,21 @@ void DrawPregnancyManagerSection(float scale) {
       ImGui::TableSetupScrollFreeze(0, 1);
       ImGui::TableSetupColumn(
           u8"번호", ImGuiTableColumnFlags_WidthFixed,
-          45.0f * scale);
+          42.0f * scale);
       ImGui::TableSetupColumn(
-          u8"배우자", ImGuiTableColumnFlags_WidthStretch);
+          u8"배우자", ImGuiTableColumnFlags_WidthFixed,
+          120.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"나이", ImGuiTableColumnFlags_WidthFixed,
+          50.0f * scale);
       ImGui::TableSetupColumn(
           u8"ID", ImGuiTableColumnFlags_WidthFixed,
-          55.0f * scale);
+          50.0f * scale);
+      ImGui::TableSetupColumn(
+          u8"자녀", ImGuiTableColumnFlags_WidthStretch);
       ImGui::TableSetupColumn(
           u8"임신 슬롯", ImGuiTableColumnFlags_WidthFixed,
-          80.0f * scale);
+          75.0f * scale);
       ImGui::TableHeadersRow();
 
       for (size_t i = 0; i < currentSpouses.size(); ++i) {
@@ -871,7 +984,21 @@ void DrawPregnancyManagerSection(float scale) {
         }
 
         ImGui::TableNextColumn();
+        if (hasCurrentYear && option.birthYear != 0 &&
+            currentYear >= option.birthYear) {
+          ImGui::Text(u8"%u세",
+                      (unsigned)(currentYear - option.birthYear));
+        } else {
+          ImGui::TextUnformatted(u8"-");
+        }
+
+        ImGui::TableNextColumn();
         ImGui::Text("%u", option.id);
+
+        ImGui::TableNextColumn();
+        const std::string childrenText =
+            BuildSpouseChildrenText(option);
+        ImGui::TextWrapped("%s", childrenText.c_str());
 
         ImGui::TableNextColumn();
         if (pregnancy.valid) {
