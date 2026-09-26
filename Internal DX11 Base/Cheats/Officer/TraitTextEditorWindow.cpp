@@ -185,6 +185,9 @@ bool IsTraitTextEditorWindowOpen() {
 }
 
 void TickTraitTextEditorAutoApply() {
+  // 진단 창을 열지 않아도 메인 효과 판정 추적 훅을 자동 유지합니다.
+  MaintainTraitCompatibilityDiagnostics();
+
   if (g_autoFinished)
     return;
 
