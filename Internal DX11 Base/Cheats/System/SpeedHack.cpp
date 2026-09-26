@@ -17,6 +17,7 @@ namespace DX11Base {
   namespace {
     static bool s_installed = false;
     static std::atomic<bool> s_enabled{false};
+    static std::atomic<DWORD> s_managerThreadId{0};
 
     typedef DWORD(WINAPI *PtimeGetTime)();
     static PtimeGetTime otimeGetTime = nullptr;
@@ -123,6 +124,11 @@ namespace DX11Base {
       return caller >= s_selfBase && caller < s_selfEnd;
     }
 
+    bool IsManagerThread() {
+      const DWORD managerThreadId = s_managerThreadId.load(std::memory_order_relaxed);
+      return managerThreadId != 0 && managerThreadId == GetCurrentThreadId();
+    }
+
     bool HookCreated(MH_STATUS status) {
       return status == MH_OK;
     }
@@ -162,7 +168,7 @@ namespace DX11Base {
   BOOL WINAPI hkQueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount) {
     BOOL ret = oQueryPerformanceCounter(lpPerformanceCount);
 
-    if (!ret || IsCheatCaller(_ReturnAddress()) ||
+    if (!ret || IsCheatCaller(_ReturnAddress()) || IsManagerThread() ||
         !s_enabled.load(std::memory_order_acquire))
       return ret;
 
@@ -200,7 +206,7 @@ namespace DX11Base {
 
   DWORD WINAPI hkGetTickCount() {
     DWORD real = oGetTickCount();
-    if (IsCheatCaller(_ReturnAddress()) ||
+    if (IsCheatCaller(_ReturnAddress()) || IsManagerThread() ||
         !s_enabled.load(std::memory_order_acquire))
       return real;
 
@@ -230,7 +236,7 @@ namespace DX11Base {
 
   ULONGLONG WINAPI hkGetTickCount64() {
     ULONGLONG real = oGetTickCount64();
-    if (IsCheatCaller(_ReturnAddress()) ||
+    if (IsCheatCaller(_ReturnAddress()) || IsManagerThread() ||
         !s_enabled.load(std::memory_order_acquire))
       return real;
 
@@ -260,7 +266,7 @@ namespace DX11Base {
 
   DWORD WINAPI hktimeGetTime() {
     DWORD real = otimeGetTime();
-    if (IsCheatCaller(_ReturnAddress()) ||
+    if (IsCheatCaller(_ReturnAddress()) || IsManagerThread() ||
         !s_enabled.load(std::memory_order_acquire))
       return real;
 
@@ -339,6 +345,15 @@ namespace DX11Base {
 
   void SpeedHack_Update(uintptr_t p1) {
     PerfScope perfScope(PerfMetric::SpeedHackUpdate);
+
+    DWORD expectedThreadId = 0;
+    const DWORD currentThreadId = GetCurrentThreadId();
+    if (s_managerThreadId.compare_exchange_strong(
+            expectedThreadId, currentThreadId,
+            std::memory_order_relaxed, std::memory_order_relaxed)) {
+      AddLog(u8"[SpeedHack] 치트 관리 스레드 실제시간 고정: thread=%lu",
+             static_cast<unsigned long>(currentThreadId));
+    }
 
     if (!s_installed) {
       if (!bSpeedHack) {
