@@ -3,110 +3,157 @@
 #include "../../pch.h"
 #include "../../MenuState.h"
 #include "../../showlog.h"
+#include "../Officer/OfficerRosterResolve.h"
 
 #include <Windows.h>
-#include <Psapi.h>
-#include <array>
 #include <cstdint>
-#include <cstring>
 
 namespace DX11Base {
 namespace ChildNameDiagnostics {
 
-// 실측된 이름 입력 UI 버퍼의 GameBase 기준 오프셋.
-// 영구 이름 저장소로 사용하지 않고, SAN8RPK.exe 네이티브 코드가 이 버퍼를
-// 어떻게 참조하는지 찾기 위한 정적 코드 스캔 키로만 사용한다.
-static constexpr uint32_t kSurnameOffsetFromGameBase = 0x1DC7F6;
-static constexpr uint32_t kGivenOffsetFromGameBase   = 0x1DC80C;
-static constexpr uint32_t kStyleOffsetFromGameBase   = 0x1DC822;
+// SAN8RPK.pdb 실측 심볼:
+//   san8r::PersonData::GetName() const
+// PDB section 1(.text) offset 0x1712DB0 + section RVA 0x1000.
+static constexpr uintptr_t kPersonDataGetNameRva = 0x1713DB0;
+static constexpr uintptr_t kOfficerStride = 0x3D0;
 
-static void DumpCodeAround(uintptr_t exeBase, uintptr_t hit, const char* label) {
-  const uintptr_t start = hit >= exeBase + 0x20 ? hit - 0x20 : exeBase;
-  std::array<uint8_t, 0x60> bytes{};
-  SIZE_T read = 0;
-  if (!ReadProcessMemory(GetCurrentProcess(), (LPCVOID)start,
-                         bytes.data(), bytes.size(), &read) || read == 0) {
+using NativePersonGetName = const wchar_t* (__fastcall*)(const void* self);
+
+static bool SafeRead16Local(uintptr_t addr, uint16_t* out) {
+  if (!out)
+    return false;
+  __try {
+    *out = *(const uint16_t*)addr;
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    *out = 0;
+    return false;
+  }
+}
+
+static uintptr_t ResolveOfficerById(uintptr_t rosterBase, uint16_t id) {
+  if (rosterBase <= 0x10000 || id < 1 || id > 5102)
+    return 0;
+
+  const uintptr_t direct = rosterBase + (uintptr_t)(id - 1) * kOfficerStride;
+  uint16_t verify = 0;
+  if (SafeRead16Local(direct + 0x08, &verify) && verify == id)
+    return direct;
+
+  for (int i = 0; i < 5102; ++i) {
+    const uintptr_t p = rosterBase + (uintptr_t)i * kOfficerStride;
+    if (SafeRead16Local(p + 0x08, &verify) && verify == id)
+      return p;
+  }
+  return 0;
+}
+
+static bool CopyWideSafe(const wchar_t* src, wchar_t* out, size_t capacity) {
+  if (!src || !out || capacity < 2)
+    return false;
+
+  __try {
+    for (size_t i = 0; i + 1 < capacity; ++i) {
+      const wchar_t ch = src[i];
+      out[i] = ch;
+      if (ch == L'\0')
+        return true;
+    }
+    out[capacity - 1] = L'\0';
+    return true;
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    out[0] = L'\0';
+    return false;
+  }
+}
+
+static bool WideToUtf8(const wchar_t* wide, char* out, int outSize) {
+  if (!wide || !out || outSize <= 1)
+    return false;
+  out[0] = '\0';
+  const int n = WideCharToMultiByte(CP_UTF8, 0, wide, -1,
+                                    out, outSize, nullptr, nullptr);
+  return n > 0;
+}
+
+static const wchar_t* CallNativeGetName(uintptr_t fnAddr, uintptr_t officer) {
+  if (fnAddr <= 0x10000 || officer <= 0x10000)
+    return nullptr;
+
+  const auto fn = reinterpret_cast<NativePersonGetName>(fnAddr);
+  const wchar_t* result = nullptr;
+  __try {
+    result = fn(reinterpret_cast<const void*>(officer));
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    result = nullptr;
+  }
+  return result;
+}
+
+static void LogOneName(uintptr_t fnAddr, uintptr_t rosterBase, uint16_t id) {
+  const uintptr_t officer = ResolveOfficerById(rosterBase, id);
+  if (!officer) {
+    AddLog(u8"[자녀이름DBG] id=%u 레코드 찾기 실패", (unsigned)id);
     return;
   }
 
-  AddLog(u8"[자녀이름DBG] %s 후보: RVA=+0x%llX hit=%p",
-         label,
-         (unsigned long long)(hit - exeBase),
-         (void*)hit);
-
-  for (size_t off = 0; off < read; off += 0x10) {
-    char line[3 * 16 + 1]{};
-    char* p = line;
-    const size_t n = (read - off) < 0x10 ? (read - off) : 0x10;
-    for (size_t i = 0; i < n; ++i) {
-      sprintf_s(p, (size_t)(line + sizeof(line) - p), "%02X ", bytes[off + i]);
-      p += 3;
-    }
-    AddLog(u8"[자녀이름DBG]   %+03llX : %s",
-           (long long)((start + off) - hit), line);
+  const wchar_t* namePtr = CallNativeGetName(fnAddr, officer);
+  if (!namePtr) {
+    AddLog(u8"[자녀이름DBG] id=%u GetName 호출 실패/NULL officer=%p",
+           (unsigned)id, (void*)officer);
+    return;
   }
+
+  wchar_t wide[64]{};
+  if (!CopyWideSafe(namePtr, wide, _countof(wide))) {
+    AddLog(u8"[자녀이름DBG] id=%u 이름 포인터 읽기 실패 namePtr=%p",
+           (unsigned)id, (const void*)namePtr);
+    return;
+  }
+
+  char utf8[256]{};
+  if (!WideToUtf8(wide, utf8, (int)sizeof(utf8))) {
+    AddLog(u8"[자녀이름DBG] id=%u UTF-8 변환 실패 namePtr=%p",
+           (unsigned)id, (const void*)namePtr);
+    return;
+  }
+
+  AddLog(u8"[자녀이름DBG] id=%u officer=%p namePtr=%p name=%s",
+         (unsigned)id, (void*)officer, (const void*)namePtr, utf8);
 }
 
-static int ScanImmediate32(uintptr_t exeBase,
-                           size_t exeSize,
-                           uint32_t value,
-                           const char* label) {
-  if (!exeBase || exeSize < 4)
-    return 0;
-
-  const uint8_t* begin = reinterpret_cast<const uint8_t*>(exeBase);
-  int count = 0;
-
-  __try {
-    for (size_t i = 0; i + sizeof(uint32_t) <= exeSize; ++i) {
-      uint32_t v = 0;
-      memcpy(&v, begin + i, sizeof(v));
-      if (v != value)
-        continue;
-
-      ++count;
-      if (count <= 16)
-        DumpCodeAround(exeBase, exeBase + i, label);
-    }
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER) {
-    AddLog(u8"[자녀이름DBG] %s 스캔 중 예외 발생", label);
-  }
-
-  AddLog(u8"[자녀이름DBG] %s 32bit 상수 후보 수=%d", label, count);
-  return count;
-}
-
-static void ScanNativeExeReferences() {
+static void ProbeNativePersonGetName() {
   const uintptr_t exeBase = (uintptr_t)GetModuleHandleW(nullptr);
   if (!exeBase) {
     AddLog(u8"[자녀이름DBG] SAN8RPK.exe 베이스 확보 실패");
     return;
   }
 
-  MODULEINFO mi{};
-  if (!GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase,
-                            &mi, sizeof(mi))) {
-    AddLog(u8"[자녀이름DBG] SAN8RPK.exe 이미지 크기 확보 실패");
+  uintptr_t rosterBase = 0;
+  if (!TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) ||
+      rosterBase <= 0x10000) {
+    AddLog(u8"[자녀이름DBG] 무장 배열 베이스 확보 실패");
     return;
   }
 
-  AddLog(u8"[자녀이름DBG] ===== SAN8RPK.exe 이름 입력버퍼 참조 상수 스캔 시작 =====");
-  AddLog(u8"[자녀이름DBG] exe=%p size=0x%X / offsets=%08X,%08X,%08X",
+  const uintptr_t fnAddr = exeBase + kPersonDataGetNameRva;
+  AddLog(u8"[자녀이름DBG] ===== PDB PersonData::GetName 직접 진단 시작 =====");
+  AddLog(u8"[자녀이름DBG] exe=%p roster=%p GetName=+0x%llX (%p)",
          (void*)exeBase,
-         (unsigned)mi.SizeOfImage,
-         kSurnameOffsetFromGameBase,
-         kGivenOffsetFromGameBase,
-         kStyleOffsetFromGameBase);
+         (void*)rosterBase,
+         (unsigned long long)kPersonDataGetNameRva,
+         (void*)fnAddr);
 
-  ScanImmediate32(exeBase, mi.SizeOfImage,
-                  kSurnameOffsetFromGameBase, "SURNAME");
-  ScanImmediate32(exeBase, mi.SizeOfImage,
-                  kGivenOffsetFromGameBase, "GIVEN");
-  ScanImmediate32(exeBase, mi.SizeOfImage,
-                  kStyleOffsetFromGameBase, "STYLE");
+  // 일반 무장 952를 대조군으로 먼저 확인하고, 기존 생성 자녀만 읽는다.
+  LogOneName(fnAddr, rosterBase, 952);
+  LogOneName(fnAddr, rosterBase, 4001);
+  LogOneName(fnAddr, rosterBase, 4002);
+  LogOneName(fnAddr, rosterBase, 4003);
 
-  AddLog(u8"[자녀이름DBG] ===== SAN8RPK.exe 이름 입력버퍼 참조 상수 스캔 종료 =====");
+  AddLog(u8"[자녀이름DBG] ===== PDB PersonData::GetName 직접 진단 종료 =====");
 }
 
 struct State {
@@ -134,7 +181,7 @@ static void Tick() {
   if (now - g_state.openedAt < 300)
     return;
 
-  ScanNativeExeReferences();
+  ProbeNativePersonGetName();
   g_state.done = true;
 }
 
