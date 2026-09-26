@@ -3,6 +3,7 @@
 // =============================================================================
 #include "pch.h"
 #include "helper.h"
+#include "showlog.h"
 #include <windows.h>
 
 // [중요] 링크 에러 방지
@@ -53,6 +54,43 @@
 extern DWORD WINAPI MainThread_Initialize(LPVOID dwModule);
 namespace DX11Base { void Shutdown(bool isTerminating); }
 
+static DWORD WINAPI TraitCompatibilityDiagnosticThread(LPVOID) {
+    Sleep(3000);
+
+    bool versionFileExists = false;
+    wchar_t exePath[MAX_PATH] = {};
+    const DWORD exeLen = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (exeLen > 0 && exeLen < MAX_PATH) {
+        std::error_code ec;
+        const std::filesystem::path versionPath =
+            std::filesystem::path(exePath).parent_path() / L"version.dll";
+        versionFileExists = std::filesystem::is_regular_file(versionPath, ec) && !ec;
+    }
+
+    const bool versionLoaded = GetModuleHandleW(L"version.dll") != nullptr;
+
+    uint8_t eligibilityA = 0xFF;
+    uint8_t eligibilityB = 0xFF;
+    const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    if (gameBase) {
+        __try {
+            eligibilityA = *reinterpret_cast<const uint8_t *>(gameBase + 0x17C03E9);
+            eligibilityB = *reinterpret_cast<const uint8_t *>(gameBase + 0x17C0431);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            eligibilityA = 0xFE;
+            eligibilityB = 0xFE;
+        }
+    }
+
+    AddLog(u8"[기재호환DBG] build=20260926-01 version.dll file=%d loaded=%d eligibilityA=0x%02X eligibilityB=0x%02X",
+           versionFileExists ? 1 : 0,
+           versionLoaded ? 1 : 0,
+           static_cast<unsigned>(eligibilityA),
+           static_cast<unsigned>(eligibilityB));
+    return 0;
+}
+
 static void InitializeOnce() {
     static bool initialized = false;
     if (initialized) return;
@@ -61,6 +99,9 @@ static void InitializeOnce() {
     // 치트 로딩 스레드 실행
     HANDLE hThread = CreateThread(nullptr, 0, MainThread_Initialize, DX11Base::g_hModule, 0, nullptr);
     if (hThread) CloseHandle(hThread);
+
+    HANDLE hDiagnosticThread = CreateThread(nullptr, 0, TraitCompatibilityDiagnosticThread, nullptr, 0, nullptr);
+    if (hDiagnosticThread) CloseHandle(hDiagnosticThread);
 }
 
 // -----------------------------------------------------------------------------
