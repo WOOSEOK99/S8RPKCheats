@@ -6,6 +6,7 @@
 #include "../Officer/OfficerRosterResolve.h"
 
 #include <Windows.h>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -13,12 +14,13 @@
 namespace DX11Base {
 namespace ChildNameDiagnostics {
 
-// SAN8RPK.pdb에서 확인된 PersonData 원본 getter.
-// GetSei/GetMei를 조합해야 일부 무장에서 성만 표시되는 문제를 피할 수 있다.
-// GetName은 특수/예외 레코드의 fallback으로만 사용한다.
-static constexpr uintptr_t kPersonDataGetSeiRva = 0x170BAD0;
-static constexpr uintptr_t kPersonDataGetMeiRva = 0x16F6790;
+// SAN8RPK.pdb에서 확인된 PersonData 원본 이름 함수.
+// 1) const wchar_t* GetName() const               -> +0x1713DB0
+// 2) void GetName(wchar_t* out) const             -> +0x16F6850
+// 두 번째 오버로드가 게임 측에서 완성 이름을 출력 버퍼에 조합하는 함수이므로
+// 기본 이름 표시는 이 함수를 우선 사용한다.
 static constexpr uintptr_t kPersonDataGetNameRva = 0x1713DB0;
+static constexpr uintptr_t kPersonDataGetNameToBufferRva = 0x16F6850;
 static constexpr uintptr_t kPersonDataGetAzanaRva = 0x1712A80;
 static constexpr uintptr_t kOfficerStride = 0x3D0;
 static constexpr int kOfficerCount = 5102;
@@ -26,6 +28,7 @@ static constexpr uint16_t kGeneratedFirstId = 4001;
 static constexpr uint16_t kGeneratedLastId = 4020;
 
 using NativePersonTextGetter = const wchar_t* (__fastcall*)(const void* self);
+using NativePersonNameWriter = void (__fastcall*)(const void* self, wchar_t* out);
 
 static bool SafeRead16Local(uintptr_t addr, uint16_t* out) {
   if (!out)
@@ -77,17 +80,29 @@ static const wchar_t* CallNativeTextGetterSafe(uintptr_t fnAddr,
   return result;
 }
 
-static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
-                                  uintptr_t officer,
-                                  std::string& outText) {
-  outText.clear();
-
-  const wchar_t* result = CallNativeTextGetterSafe(fnAddr, officer);
-  if (!result)
+static bool CallNativeNameWriterSafe(uintptr_t fnAddr,
+                                     uintptr_t officer,
+                                     wchar_t* out) {
+  if (!out)
+    return false;
+  out[0] = L'\0';
+  if (fnAddr <= 0x10000 || officer <= 0x10000)
     return false;
 
-  wchar_t wide[64]{};
-  if (!CopyWideSafe(result, wide, _countof(wide)) || wide[0] == L'\0')
+  const auto fn = reinterpret_cast<NativePersonNameWriter>(fnAddr);
+  __try {
+    fn(reinterpret_cast<const void*>(officer), out);
+    return out[0] != L'\0';
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    out[0] = L'\0';
+    return false;
+  }
+}
+
+static bool WideBufferToUtf8(const wchar_t* wide, std::string& outText) {
+  outText.clear();
+  if (!wide || wide[0] == L'\0')
     return false;
 
   const int needed = WideCharToMultiByte(CP_UTF8, 0, wide, -1,
@@ -108,11 +123,45 @@ static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
   return !outText.empty();
 }
 
+static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
+                                  uintptr_t officer,
+                                  std::string& outText) {
+  outText.clear();
+
+  const wchar_t* result = CallNativeTextGetterSafe(fnAddr, officer);
+  if (!result)
+    return false;
+
+  wchar_t wide[64]{};
+  if (!CopyWideSafe(result, wide, _countof(wide)) || wide[0] == L'\0')
+    return false;
+
+  return WideBufferToUtf8(wide, outText);
+}
+
+static bool ResolveNativeFullNameUtf8(uintptr_t writerAddr,
+                                      uintptr_t fallbackGetterAddr,
+                                      uintptr_t officer,
+                                      std::string& outName) {
+  outName.clear();
+
+  // 게임의 완성 이름 조합용 출력 버퍼 오버로드를 최우선으로 사용한다.
+  wchar_t wide[128]{};
+  if (CallNativeNameWriterSafe(writerAddr, officer, wide) &&
+      WideBufferToUtf8(wide, outName)) {
+    return true;
+  }
+
+  // 특수 상황에서 writer 호출이 실패할 경우에만 기존 const wchar_t* getter 사용.
+  return ResolveNativeTextUtf8(fallbackGetterAddr, officer, outName);
+}
+
 struct State {
   ULONGLONG lastFullSyncAt = 0;
   ULONGLONG lastChildSyncAt = 0;
   uintptr_t lastRosterBase = 0;
   std::unordered_map<int, std::string> lastNativeNames;
+  std::array<uintptr_t, 20> generatedOfficers{};
 };
 
 static State g_state{};
@@ -139,38 +188,13 @@ static void DropPreviousNativeCache() {
       g_officerNames.erase(current);
   }
   g_state.lastNativeNames.clear();
-}
-
-static bool ResolveNativeOfficerName(uintptr_t officer,
-                                     uintptr_t getSeiAddr,
-                                     uintptr_t getMeiAddr,
-                                     uintptr_t getNameAddr,
-                                     std::string& outName) {
-  outName.clear();
-
-  std::string sei;
-  std::string mei;
-  ResolveNativeTextUtf8(getSeiAddr, officer, sei);
-  ResolveNativeTextUtf8(getMeiAddr, officer, mei);
-
-  if (!sei.empty() || !mei.empty()) {
-    if (!sei.empty())
-      outName += sei;
-    if (!mei.empty() && mei != sei)
-      outName += mei;
-    if (!outName.empty())
-      return true;
-  }
-
-  // 드문 특수 레코드에서 성/명이 비어 있을 경우 기존 GetName을 fallback으로 사용한다.
-  return ResolveNativeTextUtf8(getNameAddr, officer, outName);
+  g_state.generatedOfficers.fill(0);
 }
 
 static bool SyncOneOfficer(uintptr_t officer,
                            uint16_t expectedId,
-                           uintptr_t getSeiAddr,
-                           uintptr_t getMeiAddr,
-                           uintptr_t getNameAddr,
+                           uintptr_t getNameWriterAddr,
+                           uintptr_t getNameFallbackAddr,
                            uintptr_t getAzanaAddr,
                            int* nativeCount,
                            int* overrideCount,
@@ -188,8 +212,8 @@ static bool SyncOneOfficer(uintptr_t officer,
   }
 
   std::string name;
-  if (!ResolveNativeOfficerName(officer, getSeiAddr, getMeiAddr,
-                                getNameAddr, name)) {
+  if (!ResolveNativeFullNameUtf8(getNameWriterAddr, getNameFallbackAddr,
+                                 officer, name)) {
     return false;
   }
 
@@ -245,48 +269,56 @@ static void SyncAllOfficerNames(uintptr_t exeBase, uintptr_t rosterBase) {
   if (g_state.lastRosterBase != 0 && g_state.lastRosterBase != rosterBase)
     DropPreviousNativeCache();
 
-  const uintptr_t getSeiAddr = exeBase + kPersonDataGetSeiRva;
-  const uintptr_t getMeiAddr = exeBase + kPersonDataGetMeiRva;
-  const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
+  const uintptr_t getNameWriterAddr = exeBase + kPersonDataGetNameToBufferRva;
+  const uintptr_t getNameFallbackAddr = exeBase + kPersonDataGetNameRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
   int nativeCount = 0;
   int overrideCount = 0;
 
+  g_state.generatedOfficers.fill(0);
+
   for (int i = 0; i < kOfficerCount; ++i) {
     const uintptr_t officer = rosterBase + (uintptr_t)i * kOfficerStride;
+
+    uint16_t id = 0;
+    if (SafeRead16Local(officer + 0x08, &id) &&
+        id >= kGeneratedFirstId && id <= kGeneratedLastId) {
+      g_state.generatedOfficers[(size_t)(id - kGeneratedFirstId)] = officer;
+    }
+
     SyncOneOfficer(officer, 0,
-                   getSeiAddr, getMeiAddr, getNameAddr, getAzanaAddr,
+                   getNameWriterAddr, getNameFallbackAddr, getAzanaAddr,
                    &nativeCount, &overrideCount, false);
   }
 
   if (g_state.lastRosterBase != rosterBase || g_state.lastFullSyncAt == 0) {
-    AddLog(u8"[무장이름] 원본 성/명/자 동기화 완료: native=%d override=%d / GetSei +0x%llX / GetMei +0x%llX / GetAzana +0x%llX",
+    AddLog(u8"[무장이름] 원본 완성이름/자 동기화 완료: native=%d override=%d / GetName(out) +0x%llX / GetAzana +0x%llX",
            nativeCount, overrideCount,
-           (unsigned long long)kPersonDataGetSeiRva,
-           (unsigned long long)kPersonDataGetMeiRva,
+           (unsigned long long)kPersonDataGetNameToBufferRva,
            (unsigned long long)kPersonDataGetAzanaRva);
   }
   g_state.lastRosterBase = rosterBase;
 }
 
 static void SyncGeneratedChildren(uintptr_t exeBase, uintptr_t rosterBase) {
-  const uintptr_t getSeiAddr = exeBase + kPersonDataGetSeiRva;
-  const uintptr_t getMeiAddr = exeBase + kPersonDataGetMeiRva;
-  const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
+  (void)rosterBase;
+  const uintptr_t getNameWriterAddr = exeBase + kPersonDataGetNameToBufferRva;
+  const uintptr_t getNameFallbackAddr = exeBase + kPersonDataGetNameRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
 
-  // 생성 자녀는 출산 직후 이름이 생길 수 있으므로 전체 5102명 재조회 대신
-  // 4001~4020의 20개 슬롯만 짧은 주기로 갱신한다.
+  // 전체 동기화 때 실제 ID를 기준으로 찾아 둔 생성 자녀 20개 예약 슬롯만 갱신한다.
   for (uint16_t id = kGeneratedFirstId; id <= kGeneratedLastId; ++id) {
-    const uintptr_t officer =
-        rosterBase + (uintptr_t)(id - 1) * kOfficerStride;
+    const size_t index = (size_t)(id - kGeneratedFirstId);
+    const uintptr_t officer = g_state.generatedOfficers[index];
+    if (!officer)
+      continue;
 
     uint16_t birth = 0;
     if (!SafeRead16Local(officer + 0x34, &birth) || birth == 0)
       continue;
 
     SyncOneOfficer(officer, id,
-                   getSeiAddr, getMeiAddr, getNameAddr, getAzanaAddr,
+                   getNameWriterAddr, getNameFallbackAddr, getAzanaAddr,
                    nullptr, nullptr, true);
   }
 }
@@ -308,7 +340,7 @@ static void Tick() {
     g_state.lastFullSyncAt = now;
   }
 
-  // 출산 직후 이름 반영만 2초 간격으로 20개 슬롯에 한정한다.
+  // 출산 직후 이름 반영은 이미 찾아 둔 20개 예약 슬롯만 2초 간격으로 갱신한다.
   if (g_state.lastChildSyncAt == 0 ||
       now - g_state.lastChildSyncAt >= 2000) {
     SyncGeneratedChildren(exeBase, rosterBase);
