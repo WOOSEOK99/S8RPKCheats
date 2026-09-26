@@ -179,7 +179,7 @@ RuntimeState &State() {
 
 using TraitNameGetter = const wchar_t *(__fastcall *)(void *);
 using TraitDescMapGetter = const wchar_t *(__fastcall *)(void *, int, uint8_t);
-using TraitEffectQuery = bool(__fastcall *)(void *, uint16_t);
+using TraitEffectQuery = int(__fastcall *)(void *, uint16_t);
 using OfficerTraitQuery = int(__fastcall *)(void *, uint32_t);
 using TraitMessageSetter = void(__fastcall *)(void *, uint32_t);
 using TraitDataGetter = void *(__fastcall *)(void *, uint32_t);
@@ -931,14 +931,25 @@ bool FindMatchingCustomTrait(
   if (!officer ||
       !state.configLoaded ||
       requestedTraitId < 1 ||
-      requestedTraitId > kTraitCount ||
-      state.lastTableBase < 0x10000) {
+      requestedTraitId > kTraitCount) {
     return false;
   }
 
-  const uintptr_t requestedRecord =
-      state.lastTableBase +
-      static_cast<uintptr_t>(requestedTraitId) * kTraitStride;
+  const uintptr_t gameDataRoot = GetGameBaseFast();
+  if (gameDataRoot < 0x10000)
+    return false;
+
+  const uint32_t traitsPointerOffset =
+      state.offsetResolved ? state.traitsPointerOffset
+                           : kTraitsPointerOffsetFallback;
+  uintptr_t requestedRecord = 0;
+  if (!ReadMemorySafe(
+          gameDataRoot + traitsPointerOffset +
+              static_cast<uintptr_t>(requestedTraitId) * sizeof(uintptr_t),
+          &requestedRecord, sizeof(requestedRecord)) ||
+      requestedRecord < 0x10000) {
+    return false;
+  }
 
   uint16_t requestedRecordId = 0;
   if (!ReadTraitRecordId(requestedRecord, requestedRecordId) ||
@@ -967,6 +978,16 @@ bool FindMatchingCustomTrait(
     if (heldId < 71 || heldId > kTraitCount)
       continue;
 
+    const TraitMetaEntry &heldMeta =
+        state.meta[static_cast<std::size_t>(heldId - 1)];
+    const int requestedIndex = static_cast<int>(requestedTraitId) - 1;
+    const bool explicitLineage =
+        heldMeta.present &&
+        (heldMeta.cloneSrc == requestedIndex ||
+         heldMeta.bgTrait == requestedIndex);
+    if (!explicitLineage)
+      continue;
+
     if (!HasMatchingEffectType(heldRecord, requestedRecord))
       continue;
 
@@ -977,7 +998,7 @@ bool FindMatchingCustomTrait(
   return false;
 }
 
-bool __fastcall CustomTraitEffectQuery(
+int __fastcall CustomTraitEffectQuery(
     void *officer, uint16_t requestedTraitId) {
   RuntimeState &state = State();
   g_traitEffectMatchCache = {};
