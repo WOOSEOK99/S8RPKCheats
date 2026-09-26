@@ -355,6 +355,14 @@ namespace DX11Base {
              static_cast<unsigned long>(currentThreadId));
     }
 
+    if (IsManagerThread() && PerfDiagnosticsEnabled()) {
+      static thread_local uint64_t s_lastManagerLoop100ns = 0;
+      const uint64_t now100ns = PerfRealNow100ns();
+      if (s_lastManagerLoop100ns != 0 && now100ns >= s_lastManagerLoop100ns)
+        PerfRecord(PerfMetric::MenuLoopHeartbeat, now100ns - s_lastManagerLoop100ns);
+      s_lastManagerLoop100ns = now100ns;
+    }
+
     if (!s_installed) {
       if (!bSpeedHack) {
         s_enabled.store(false, std::memory_order_release);
