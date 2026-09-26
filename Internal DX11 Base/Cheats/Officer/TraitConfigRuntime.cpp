@@ -978,6 +978,16 @@ bool FindMatchingCustomTrait(
     if (heldId < 71 || heldId > kTraitCount)
       continue;
 
+    const TraitMetaEntry &heldMeta =
+        state.meta[static_cast<std::size_t>(heldId - 1)];
+    const int requestedIndex = static_cast<int>(requestedTraitId) - 1;
+    const bool explicitLineage =
+        heldMeta.present &&
+        (heldMeta.cloneSrc == requestedIndex ||
+         heldMeta.bgTrait == requestedIndex);
+    if (!explicitLineage)
+      continue;
+
     if (!HasMatchingEffectType(heldRecord, requestedRecord))
       continue;
 
