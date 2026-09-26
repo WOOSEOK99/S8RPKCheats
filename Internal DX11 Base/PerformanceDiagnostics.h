@@ -141,9 +141,9 @@ namespace DX11Base {
 
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
     if (snapshot != INVALID_HANDLE_VALUE) {
-      MODULEENTRY32 me{};
+      MODULEENTRY32A me{};
       me.dwSize = sizeof(me);
-      if (Module32First(snapshot, &me)) {
+      if (Module32FirstA(snapshot, &me)) {
         do {
           if (_stricmp(me.szModule, "dinput8.dll") == 0)
             ++dinput8Count;
@@ -153,7 +153,7 @@ namespace DX11Base {
             ++hidCount;
           else if (_stricmp(me.szModule, "version.dll") == 0)
             ++versionCount;
-        } while (Module32Next(snapshot, &me));
+        } while (Module32NextA(snapshot, &me));
       }
       CloseHandle(snapshot);
     }
