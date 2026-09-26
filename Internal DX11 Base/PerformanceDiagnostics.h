@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Windows.h>
-#include <TlHelp32.h>
+#include <Psapi.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -55,10 +55,6 @@ namespace DX11Base {
     if (QueryUnbiasedInterruptTime(&now))
       return static_cast<uint64_t>(now);
 
-    // QueryUnbiasedInterruptTime is not one of the APIs hooked by SpeedHack.
-    // This fallback is also outside the current SpeedHack hook set. It is not
-    // monotonic if the system clock is changed, so the unbiased clock remains
-    // the preferred source.
     FILETIME ft{};
     GetSystemTimeAsFileTime(&ft);
     ULARGE_INTEGER value{};
@@ -139,23 +135,27 @@ namespace DX11Base {
     unsigned hidCount = 0;
     unsigned versionCount = 0;
 
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
-    if (snapshot != INVALID_HANDLE_VALUE) {
-      MODULEENTRY32A me{};
-      me.dwSize = sizeof(me);
-      if (Module32FirstA(snapshot, &me)) {
-        do {
-          if (_stricmp(me.szModule, "dinput8.dll") == 0)
-            ++dinput8Count;
-          else if (_stricmp(me.szModule, "dxgi.dll") == 0)
-            ++dxgiCount;
-          else if (_stricmp(me.szModule, "hid.dll") == 0)
-            ++hidCount;
-          else if (_stricmp(me.szModule, "version.dll") == 0)
-            ++versionCount;
-        } while (Module32NextA(snapshot, &me));
+    HMODULE modules[1024] = {};
+    DWORD bytesNeeded = 0;
+    if (EnumProcessModules(GetCurrentProcess(), modules, sizeof(modules), &bytesNeeded)) {
+      const size_t moduleCount = (std::min)(
+          static_cast<size_t>(bytesNeeded / sizeof(HMODULE)),
+          sizeof(modules) / sizeof(modules[0]));
+      for (size_t i = 0; i < moduleCount; ++i) {
+        char moduleName[MAX_PATH] = {};
+        if (GetModuleBaseNameA(GetCurrentProcess(), modules[i], moduleName,
+                               static_cast<DWORD>(sizeof(moduleName))) == 0)
+          continue;
+
+        if (_stricmp(moduleName, "dinput8.dll") == 0)
+          ++dinput8Count;
+        else if (_stricmp(moduleName, "dxgi.dll") == 0)
+          ++dxgiCount;
+        else if (_stricmp(moduleName, "hid.dll") == 0)
+          ++hidCount;
+        else if (_stricmp(moduleName, "version.dll") == 0)
+          ++versionCount;
       }
-      CloseHandle(snapshot);
     }
 
 #ifdef _DEBUG
