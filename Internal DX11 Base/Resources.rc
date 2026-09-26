@@ -14,5 +14,4 @@ IDR_PNG_RANGE11 RCDATA "images/ranges/11.png"
 
 IDR_JSON_TRAITS_DEFAULT         RCDATA "Resources\\Defaults\\S8RPK_traits_default.json"
 IDR_JSON_EFFECT_DEFINITIONS     RCDATA "Resources\\Defaults\\effect_definitions.json"
-IDR_JSON_CHEAT_CHAR             RCDATA "Resources\\Defaults\\S8RPK_cheat_char.json"
 IDR_JSON_SPECIALITY_DEFINITIONS RCDATA "Resources\\Defaults\\speciality_definitions.json"
