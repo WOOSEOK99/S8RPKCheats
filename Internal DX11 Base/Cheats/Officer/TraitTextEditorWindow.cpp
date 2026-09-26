@@ -5,6 +5,8 @@
 #include "TraitTextNameHook.h"
 #include "TraitTextDescHook.h"
 #include "TraitTextSpecialDescHook.h"
+#include "../../Cheats.h"
+#include "../../Hooking/MinHook.h"
 #include "../../Framework/imgui.h"
 #include "../../showlog.h"
 
@@ -29,6 +31,48 @@ static bool g_autoFinished = false;
 static ULONGLONG g_autoFirstTick = 0;
 static ULONGLONG g_autoLastAttempt = 0;
 static int g_autoAttempts = 0;
+
+constexpr uintptr_t kTraitEffectQueryOffset = 0x17AAD60;
+constexpr uintptr_t kGameStateOffset = 0xD0;
+constexpr uint8_t kCouncilState = 0x05;
+
+void MaintainTraitEffectCouncilGate() {
+  const uintptr_t gameData = GetGameBaseFast();
+  const uintptr_t exeBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  if (gameData < 0x10000 || !exeBase)
+    return;
+
+  uint8_t gameState = 0;
+  __try {
+    gameState = *reinterpret_cast<const uint8_t *>(gameData + kGameStateOffset);
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    return;
+  }
+
+  const bool shouldEnable = gameState != kCouncilState;
+  void *target = reinterpret_cast<void *>(exeBase + kTraitEffectQueryOffset);
+  const MH_STATUS status = shouldEnable
+      ? MH_EnableHook(target)
+      : MH_DisableHook(target);
+
+  const bool ok = status == MH_OK ||
+      (shouldEnable && status == MH_ERROR_ENABLED) ||
+      (!shouldEnable && status == MH_ERROR_DISABLED);
+  if (!ok)
+    return;
+
+  static int lastEnabled = -1;
+  const int enabled = shouldEnable ? 1 : 0;
+  if (lastEnabled == enabled)
+    return;
+
+  lastEnabled = enabled;
+  AddLog(shouldEnable
+             ? u8"[기재JSON/효과] 평정 종료 감지: +17AAD60 메인 효과 판정 ON"
+             : u8"[기재JSON/효과] 평정 진입 감지: +17AAD60 메인 효과 판정 OFF");
+}
 
 void CopyToBuffer(const std::string& text, char* dst, size_t size) {
   if (!dst || size == 0)
@@ -128,6 +172,10 @@ bool IsTraitTextEditorWindowOpen() {
 }
 
 void TickTraitTextEditorAutoApply() {
+  // +17AAD60은 전투/내정 효과 호환에는 유지하되,
+  // 평정(0x05)에서만 비활성화하여 임면의 기재 보유 오인을 막습니다.
+  MaintainTraitEffectCouncilGate();
+
   if (g_autoFinished)
     return;
 
