@@ -178,7 +178,7 @@ inline bool __fastcall TraceEffectDetour(
     return false;
 
   const bool result = original(officer, requestedTraitId);
-  if (!result || (requestedTraitId != 11 && requestedTraitId != 26))
+  if (!result)
     return result;
 
   std::array<uint16_t, 3> held{};
@@ -190,8 +190,22 @@ inline bool __fastcall TraceEffectDetour(
   const uintptr_t callerRva =
       gameBase && returnAddress >= gameBase ? returnAddress - gameBase : 0;
 
-  thread_local unsigned logCount = 0;
-  if (logCount < 80) {
+  const uint64_t key =
+      (static_cast<uint64_t>(requestedTraitId) << 48) ^
+      ((static_cast<uint64_t>(held[0]) & 0xFFFFull) << 32) ^
+      ((static_cast<uint64_t>(held[1]) & 0xFFFFull) << 16) ^
+      (static_cast<uint64_t>(held[2]) & 0xFFFFull) ^
+      (static_cast<uint64_t>(callerRva) * 0x9E3779B185EBCA87ull);
+
+  thread_local std::array<uint64_t, 160> seen{};
+  thread_local std::size_t seenCount = 0;
+  for (std::size_t i = 0; i < seenCount; ++i) {
+    if (seen[i] == key)
+      return result;
+  }
+
+  if (seenCount < seen.size()) {
+    seen[seenCount++] = key;
     AddLog(u8"[기재호환추적] req=%u result=1 held=%u,%u,%u officer=%p caller=+%llX",
            static_cast<unsigned>(requestedTraitId),
            static_cast<unsigned>(held[0]),
@@ -199,7 +213,6 @@ inline bool __fastcall TraceEffectDetour(
            static_cast<unsigned>(held[2]),
            officer,
            static_cast<unsigned long long>(callerRva));
-    ++logCount;
   }
 
   return result;
