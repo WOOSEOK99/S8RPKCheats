@@ -6,6 +6,7 @@
 #include "../Officer/OfficerRosterResolve.h"
 
 #include <Windows.h>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -13,12 +14,13 @@
 namespace DX11Base {
 namespace ChildNameDiagnostics {
 
-// SAN8RPK.pdb에서 확인된 PersonData 원본 getter.
-// GetSei/GetMei를 조합해야 일부 무장에서 성만 표시되는 문제를 피할 수 있다.
-// GetName은 특수/예외 레코드의 fallback으로만 사용한다.
-static constexpr uintptr_t kPersonDataGetSeiRva = 0x170BAD0;
-static constexpr uintptr_t kPersonDataGetMeiRva = 0x16F6790;
+// SAN8RPK.pdb에서 확인된 PersonData 원본 이름 함수.
+// const wchar_t* GetName() const 는 대부분의 무장에서 안전하게 완성 이름을 반환하지만
+// 일부 무장은 성 1글자만 반환한다.
+// void GetName(wchar_t* out) const (+0x16F6850)는 완성 이름 출력용 오버로드지만
+// 전체 5102명에 호출하면 프리징이 발생했으므로, '사용 중인 레코드 + 1글자 결과'에만 제한한다.
 static constexpr uintptr_t kPersonDataGetNameRva = 0x1713DB0;
+static constexpr uintptr_t kPersonDataGetNameToBufferRva = 0x16F6850;
 static constexpr uintptr_t kPersonDataGetAzanaRva = 0x1712A80;
 static constexpr uintptr_t kOfficerStride = 0x3D0;
 static constexpr int kOfficerCount = 5102;
@@ -26,6 +28,7 @@ static constexpr uint16_t kGeneratedFirstId = 4001;
 static constexpr uint16_t kGeneratedLastId = 4020;
 
 using NativePersonTextGetter = const wchar_t* (__fastcall*)(const void* self);
+using NativePersonNameWriter = void (__fastcall*)(const void* self, wchar_t* out);
 
 static bool SafeRead16Local(uintptr_t addr, uint16_t* out) {
   if (!out)
@@ -77,17 +80,29 @@ static const wchar_t* CallNativeTextGetterSafe(uintptr_t fnAddr,
   return result;
 }
 
-static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
-                                  uintptr_t officer,
-                                  std::string& outText) {
-  outText.clear();
-
-  const wchar_t* result = CallNativeTextGetterSafe(fnAddr, officer);
-  if (!result)
+static bool CallNativeNameWriterSafe(uintptr_t fnAddr,
+                                     uintptr_t officer,
+                                     wchar_t* out) {
+  if (!out)
+    return false;
+  out[0] = L'\0';
+  if (fnAddr <= 0x10000 || officer <= 0x10000)
     return false;
 
-  wchar_t wide[64]{};
-  if (!CopyWideSafe(result, wide, _countof(wide)) || wide[0] == L'\0')
+  const auto fn = reinterpret_cast<NativePersonNameWriter>(fnAddr);
+  __try {
+    fn(reinterpret_cast<const void*>(officer), out);
+    return out[0] != L'\0';
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER) {
+    out[0] = L'\0';
+    return false;
+  }
+}
+
+static bool WideToUtf8(const wchar_t* wide, std::string& outText) {
+  outText.clear();
+  if (!wide || wide[0] == L'\0')
     return false;
 
   const int needed = WideCharToMultiByte(CP_UTF8, 0, wide, -1,
@@ -108,11 +123,76 @@ static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
   return !outText.empty();
 }
 
+static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
+                                  uintptr_t officer,
+                                  std::string& outText) {
+  outText.clear();
+
+  const wchar_t* result = CallNativeTextGetterSafe(fnAddr, officer);
+  if (!result)
+    return false;
+
+  wchar_t wide[64]{};
+  if (!CopyWideSafe(result, wide, _countof(wide)) || wide[0] == L'\0')
+    return false;
+
+  return WideToUtf8(wide, outText);
+}
+
+static size_t Utf8CodePointCount(const std::string& text) {
+  size_t count = 0;
+  for (unsigned char ch : text) {
+    if ((ch & 0xC0) != 0x80)
+      ++count;
+  }
+  return count;
+}
+
+static bool ResolveNativeOfficerName(uintptr_t officer,
+                                     uintptr_t getNameAddr,
+                                     uintptr_t getNameWriterAddr,
+                                     std::string& outName,
+                                     bool* usedWriter) {
+  if (usedWriter)
+    *usedWriter = false;
+  outName.clear();
+
+  // 검증된 const wchar_t* GetName()을 기본 경로로 사용한다.
+  if (!ResolveNativeTextUtf8(getNameAddr, officer, outName))
+    return false;
+
+  // 대부분의 장수는 여기서 이미 완성 이름이다.
+  // 한 글자만 나온 경우에만 레코드가 실제 사용 중인지 확인 후 writer를 보조적으로 호출한다.
+  if (Utf8CodePointCount(outName) != 1)
+    return true;
+
+  uint16_t birth = 0;
+  if (!SafeRead16Local(officer + 0x34, &birth) || birth == 0)
+    return true;
+
+  wchar_t wide[128]{};
+  if (!CallNativeNameWriterSafe(getNameWriterAddr, officer, wide))
+    return true;
+
+  std::string fullName;
+  if (!WideToUtf8(wide, fullName) || fullName.empty())
+    return true;
+
+  // writer 결과가 더 길 때만 교체한다. 이상한 반환값이면 안전한 기본값을 유지한다.
+  if (Utf8CodePointCount(fullName) > Utf8CodePointCount(outName)) {
+    outName = fullName;
+    if (usedWriter)
+      *usedWriter = true;
+  }
+  return true;
+}
+
 struct State {
   ULONGLONG lastFullSyncAt = 0;
   ULONGLONG lastChildSyncAt = 0;
   uintptr_t lastRosterBase = 0;
   std::unordered_map<int, std::string> lastNativeNames;
+  std::array<uintptr_t, 20> generatedOfficers{};
 };
 
 static State g_state{};
@@ -139,41 +219,17 @@ static void DropPreviousNativeCache() {
       g_officerNames.erase(current);
   }
   g_state.lastNativeNames.clear();
-}
-
-static bool ResolveNativeOfficerName(uintptr_t officer,
-                                     uintptr_t getSeiAddr,
-                                     uintptr_t getMeiAddr,
-                                     uintptr_t getNameAddr,
-                                     std::string& outName) {
-  outName.clear();
-
-  std::string sei;
-  std::string mei;
-  ResolveNativeTextUtf8(getSeiAddr, officer, sei);
-  ResolveNativeTextUtf8(getMeiAddr, officer, mei);
-
-  if (!sei.empty() || !mei.empty()) {
-    if (!sei.empty())
-      outName += sei;
-    if (!mei.empty() && mei != sei)
-      outName += mei;
-    if (!outName.empty())
-      return true;
-  }
-
-  // 드문 특수 레코드에서 성/명이 비어 있을 경우 기존 GetName을 fallback으로 사용한다.
-  return ResolveNativeTextUtf8(getNameAddr, officer, outName);
+  g_state.generatedOfficers.fill(0);
 }
 
 static bool SyncOneOfficer(uintptr_t officer,
                            uint16_t expectedId,
-                           uintptr_t getSeiAddr,
-                           uintptr_t getMeiAddr,
                            uintptr_t getNameAddr,
+                           uintptr_t getNameWriterAddr,
                            uintptr_t getAzanaAddr,
                            int* nativeCount,
                            int* overrideCount,
+                           int* writerCount,
                            bool logGeneratedChange) {
   uint16_t id = 0;
   if (!SafeRead16Local(officer + 0x08, &id) || id < 1 || id > kOfficerCount)
@@ -188,10 +244,13 @@ static bool SyncOneOfficer(uintptr_t officer,
   }
 
   std::string name;
-  if (!ResolveNativeOfficerName(officer, getSeiAddr, getMeiAddr,
-                                getNameAddr, name)) {
+  bool usedWriter = false;
+  if (!ResolveNativeOfficerName(officer, getNameAddr, getNameWriterAddr,
+                                name, &usedWriter)) {
     return false;
   }
+  if (usedWriter && writerCount)
+    ++(*writerCount);
 
   std::string azana;
   ResolveNativeTextUtf8(getAzanaAddr, officer, azana);
@@ -245,49 +304,58 @@ static void SyncAllOfficerNames(uintptr_t exeBase, uintptr_t rosterBase) {
   if (g_state.lastRosterBase != 0 && g_state.lastRosterBase != rosterBase)
     DropPreviousNativeCache();
 
-  const uintptr_t getSeiAddr = exeBase + kPersonDataGetSeiRva;
-  const uintptr_t getMeiAddr = exeBase + kPersonDataGetMeiRva;
   const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
+  const uintptr_t getNameWriterAddr = exeBase + kPersonDataGetNameToBufferRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
   int nativeCount = 0;
   int overrideCount = 0;
+  int writerCount = 0;
+
+  g_state.generatedOfficers.fill(0);
 
   for (int i = 0; i < kOfficerCount; ++i) {
     const uintptr_t officer = rosterBase + (uintptr_t)i * kOfficerStride;
+
+    uint16_t id = 0;
+    if (SafeRead16Local(officer + 0x08, &id) &&
+        id >= kGeneratedFirstId && id <= kGeneratedLastId) {
+      g_state.generatedOfficers[(size_t)(id - kGeneratedFirstId)] = officer;
+    }
+
     SyncOneOfficer(officer, 0,
-                   getSeiAddr, getMeiAddr, getNameAddr, getAzanaAddr,
-                   &nativeCount, &overrideCount, false);
+                   getNameAddr, getNameWriterAddr, getAzanaAddr,
+                   &nativeCount, &overrideCount, &writerCount, false);
   }
 
   if (g_state.lastRosterBase != rosterBase || g_state.lastFullSyncAt == 0) {
-    AddLog(u8"[무장이름] 원본 성/명/자 동기화 완료: native=%d override=%d / GetSei +0x%llX / GetMei +0x%llX / GetAzana +0x%llX",
-           nativeCount, overrideCount,
-           (unsigned long long)kPersonDataGetSeiRva,
-           (unsigned long long)kPersonDataGetMeiRva,
+    AddLog(u8"[무장이름] 원본 이름/자 동기화 완료: native=%d override=%d writer보정=%d / GetName +0x%llX / GetAzana +0x%llX",
+           nativeCount, overrideCount, writerCount,
+           (unsigned long long)kPersonDataGetNameRva,
            (unsigned long long)kPersonDataGetAzanaRva);
   }
   g_state.lastRosterBase = rosterBase;
 }
 
 static void SyncGeneratedChildren(uintptr_t exeBase, uintptr_t rosterBase) {
-  const uintptr_t getSeiAddr = exeBase + kPersonDataGetSeiRva;
-  const uintptr_t getMeiAddr = exeBase + kPersonDataGetMeiRva;
+  (void)rosterBase;
   const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
+  const uintptr_t getNameWriterAddr = exeBase + kPersonDataGetNameToBufferRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
 
-  // 생성 자녀는 출산 직후 이름이 생길 수 있으므로 전체 5102명 재조회 대신
-  // 4001~4020의 20개 슬롯만 짧은 주기로 갱신한다.
+  // 전체 스캔에서 실제 ID로 찾아 둔 생성 자녀 예약 슬롯만 짧은 주기로 갱신한다.
   for (uint16_t id = kGeneratedFirstId; id <= kGeneratedLastId; ++id) {
     const uintptr_t officer =
-        rosterBase + (uintptr_t)(id - 1) * kOfficerStride;
+        g_state.generatedOfficers[(size_t)(id - kGeneratedFirstId)];
+    if (!officer)
+      continue;
 
     uint16_t birth = 0;
     if (!SafeRead16Local(officer + 0x34, &birth) || birth == 0)
       continue;
 
     SyncOneOfficer(officer, id,
-                   getSeiAddr, getMeiAddr, getNameAddr, getAzanaAddr,
-                   nullptr, nullptr, true);
+                   getNameAddr, getNameWriterAddr, getAzanaAddr,
+                   nullptr, nullptr, nullptr, true);
   }
 }
 
@@ -308,7 +376,7 @@ static void Tick() {
     g_state.lastFullSyncAt = now;
   }
 
-  // 출산 직후 이름 반영만 2초 간격으로 20개 슬롯에 한정한다.
+  // 출산 직후 이름 반영은 실제로 찾은 20개 예약 슬롯만 2초 간격으로 갱신한다.
   if (g_state.lastChildSyncAt == 0 ||
       now - g_state.lastChildSyncAt >= 2000) {
     SyncGeneratedChildren(exeBase, rosterBase);
