@@ -2,6 +2,7 @@
 #include "../../Hooking/MinHook.h"
 #include "../../MenuState.h"
 #include "../../showlog.h"
+#include "../../PerformanceDiagnostics.h"
 #include <atomic>
 #include <windows.h>
 
@@ -235,10 +236,14 @@ namespace DX11Base {
   }
 
   void SpeedHack_Update(uintptr_t p1) {
+    PerfScope perfScope(PerfMetric::SpeedHackUpdate);
+
     // 배속을 한 번도 켜지 않았다면 시간 API 훅 자체를 설치하지 않습니다.
     if (!s_installed) {
-      if (!bSpeedHack)
+      if (!bSpeedHack) {
+        PerfSetSpeedState(false, 1.0f);
         return;
+      }
       SpeedHack_Init();
     }
 
@@ -259,6 +264,8 @@ namespace DX11Base {
       AddLog(u8"[SpeedHack] 배율 변경: %.1fx -> %.1fx", current, desired);
       ResetBases(desired);
     }
+
+    PerfSetSpeedState(bSpeedHack, desired);
   }
 
   float SpeedHack_GetRealDeltaTime() {
