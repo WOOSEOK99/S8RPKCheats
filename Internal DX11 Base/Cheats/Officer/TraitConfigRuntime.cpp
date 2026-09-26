@@ -931,14 +931,25 @@ bool FindMatchingCustomTrait(
   if (!officer ||
       !state.configLoaded ||
       requestedTraitId < 1 ||
-      requestedTraitId > kTraitCount ||
-      state.lastTableBase < 0x10000) {
+      requestedTraitId > kTraitCount) {
     return false;
   }
 
-  const uintptr_t requestedRecord =
-      state.lastTableBase +
-      static_cast<uintptr_t>(requestedTraitId) * kTraitStride;
+  const uintptr_t gameDataRoot = GetGameBaseFast();
+  if (gameDataRoot < 0x10000)
+    return false;
+
+  const uint32_t traitsPointerOffset =
+      state.offsetResolved ? state.traitsPointerOffset
+                           : kTraitsPointerOffsetFallback;
+  uintptr_t requestedRecord = 0;
+  if (!ReadMemorySafe(
+          gameDataRoot + traitsPointerOffset +
+              static_cast<uintptr_t>(requestedTraitId) * sizeof(uintptr_t),
+          &requestedRecord, sizeof(requestedRecord)) ||
+      requestedRecord < 0x10000) {
+    return false;
+  }
 
   uint16_t requestedRecordId = 0;
   if (!ReadTraitRecordId(requestedRecord, requestedRecordId) ||
