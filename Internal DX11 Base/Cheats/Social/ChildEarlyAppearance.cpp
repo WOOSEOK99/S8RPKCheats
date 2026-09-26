@@ -221,6 +221,10 @@ static bool RestoreChildSchedule(ChildEntry& e) {
   }
 }
 
+static bool IsChildCommissioned(const ChildEntry& e, uint16_t currentYear) {
+  return e.appearanceYear != 0 && currentYear >= e.appearanceYear;
+}
+
 static void ScanCurrentHeroChildren(bool forceLog) {
   uintptr_t rosterBase = 0;
   uintptr_t heroMaster = 0;
@@ -373,6 +377,10 @@ void DrawChildManagerWindow(float scale) {
 
   ImGui::Separator();
 
+  unsigned short currentYear = 0;
+  const bool hasCurrentYear =
+      ReadScenarioYear(&currentYear) && currentYear >= 171 && currentYear < 270;
+
   if (g_children.empty()) {
     ImGui::TextUnformatted(u8"현재 주인공의 자녀가 없습니다.");
   } else if (ImGui::BeginTable("ChildManagerTable", 7,
@@ -391,15 +399,35 @@ void DrawChildManagerWindow(float scale) {
     ids.reserve(g_children.size());
     for (const auto& kv : g_children)
       ids.push_back(kv.first);
-    std::sort(ids.begin(), ids.end());
+
+    // 이미 등장(임관)한 자녀를 먼저 보여주고, 같은 그룹 안에서는 ID 순으로 정렬한다.
+    std::sort(ids.begin(), ids.end(),
+              [&](uint16_t lhsId, uint16_t rhsId) {
+                const ChildEntry& lhs = g_children.at(lhsId);
+                const ChildEntry& rhs = g_children.at(rhsId);
+                const bool lhsCommissioned =
+                    hasCurrentYear && IsChildCommissioned(lhs, currentYear);
+                const bool rhsCommissioned =
+                    hasCurrentYear && IsChildCommissioned(rhs, currentYear);
+
+                if (lhsCommissioned != rhsCommissioned)
+                  return lhsCommissioned && !rhsCommissioned;
+                return lhsId < rhsId;
+              });
 
     for (uint16_t id : ids) {
       ChildEntry& e = g_children[id];
+      const bool commissioned =
+          hasCurrentYear && IsChildCommissioned(e, currentYear);
+
       ImGui::PushID((int)id);
       ImGui::TableNextRow();
 
       ImGui::TableNextColumn();
       bool selected = e.selected;
+      if (commissioned)
+        ImGui::BeginDisabled();
+
       if (ImGui::Checkbox("##select", &selected)) {
         if (selected) {
           if (!e.hasOriginalSchedule) {
@@ -428,6 +456,9 @@ void DrawChildManagerWindow(float scale) {
         }
       }
 
+      if (commissioned)
+        ImGui::EndDisabled();
+
       ImGui::TableNextColumn();
       auto nameIt = g_officerNames.find(id);
       if (nameIt != g_officerNames.end() && !nameIt->second.empty())
@@ -445,6 +476,9 @@ void DrawChildManagerWindow(float scale) {
       ImGui::Text("%u", e.deathYear);
 
       ImGui::TableNextColumn();
+      if (commissioned)
+        ImGui::BeginDisabled();
+
       ImGui::SetNextItemWidth(55.0f * scale);
       int years = e.yearsLater;
       if (ImGui::InputInt("##years", &years, 0, 0)) {
@@ -453,11 +487,19 @@ void DrawChildManagerWindow(float scale) {
           ApplyChildSchedule(e);
       }
 
+      if (commissioned)
+        ImGui::EndDisabled();
+
       ImGui::TableNextColumn();
-      if (e.appliedTargetYear)
+      if (commissioned) {
+        ImGui::TextColored(
+            ImVec4(0.45f, 1.0f, 0.55f, 1.0f),
+            u8"임관 완료");
+      } else if (e.appliedTargetYear) {
         ImGui::Text(u8"%u년", e.appliedTargetYear);
-      else
+      } else {
         ImGui::TextUnformatted(u8"-");
+      }
 
       ImGui::PopID();
     }
@@ -466,6 +508,8 @@ void DrawChildManagerWindow(float scale) {
   }
 
   ImGui::Spacing();
+  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
+                     u8"※ 이미 등장한 자녀는 임관 완료로 표시되며 조기 임관 설정을 다시 적용할 수 없습니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 임관 전 체크를 해제하면 원래 일정으로 복원되며, 임관 완료 후에는 조정된 나이가 유지됩니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
