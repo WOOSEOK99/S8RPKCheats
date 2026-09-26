@@ -1,6 +1,7 @@
 #pragma once
 #define DX11BASE_SELECT_OFFICER_CAPTURE_HEADER_INCLUDED 1
 
+#include "../../pch.h"
 #include "Framework/imgui.h"
 #include "OfficerData.h"
 #include "CustomTraitDisplay.h"
@@ -50,6 +51,55 @@ namespace DX11Base {
    */
 
   extern uintptr_t g_capturedOfficerBase;
+  uintptr_t GetGameBaseFast();
+  bool SetTraitID(uintptr_t base, int slot, uint16_t traitID);
+
+#ifndef DX11BASE_OFFICER_DETAIL_HEADER_INCLUDED
+  // [모든 무장 UI 고속 경로]
+  // 기존 SetTraitID는 캐시 미스 시 5102명 x 3슬롯 전체 검색과 프로세스 메모리
+  // 스캔까지 수행할 수 있습니다. 런타임 기재 포인터 배열에서 ID로 바로 찾아
+  // 슬롯에 기록하고, 구조가 예상과 다를 때만 기존 경로로 폴백합니다.
+  inline bool SetTraitIDForOfficerUiFast(uintptr_t officerBase, int slotIndex, uint16_t traitID) {
+    if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 || traitID == 0)
+      return false;
+
+    constexpr uintptr_t kTraitPointerArrayOffset = 0x57A4D0;
+    const uintptr_t gameDataRoot = GetGameBaseFast();
+    if (gameDataRoot > 0x10000) {
+      __try {
+        const uintptr_t targetTrait =
+            *reinterpret_cast<const uintptr_t *>(
+                gameDataRoot + kTraitPointerArrayOffset +
+                static_cast<uintptr_t>(traitID) * sizeof(uintptr_t));
+
+        if (targetTrait > 0x10000) {
+          const uintptr_t vtable =
+              *reinterpret_cast<const uintptr_t *>(targetTrait);
+          const uint16_t actualId =
+              *reinterpret_cast<const uint16_t *>(targetTrait + 0x08);
+
+          if (vtable > 0x10000 && actualId == traitID) {
+            uintptr_t *slotPtr = reinterpret_cast<uintptr_t *>(
+                officerBase + 0x88 +
+                static_cast<uintptr_t>(slotIndex) * sizeof(uintptr_t));
+            *slotPtr = targetTrait;
+
+            const uintptr_t verifyTrait = *slotPtr;
+            if (verifyTrait == targetTrait &&
+                *reinterpret_cast<const uint16_t *>(verifyTrait + 0x08) == traitID) {
+              return true;
+            }
+          }
+        }
+      }
+      __except (EXCEPTION_EXECUTE_HANDLER) {
+      }
+    }
+
+    return SetTraitID(officerBase, slotIndex, traitID);
+  }
+#endif
+
   void DrawSelectedOfficerWindow(ImVec2 mPos, ImVec2 mSize, float scale, bool asChild = false);
 
   void DrawOfficerListWindow(uintptr_t p1, float scale);
@@ -69,6 +119,11 @@ namespace DX11Base {
   size_t GetSelectedOfficerIDCount();
   void   ApplyPatchToSelectedOfficers(std::function<void(uintptr_t)> patchFn);
 } // namespace DX11Base
+
+#ifndef DX11BASE_OFFICER_DETAIL_HEADER_INCLUDED
+// SelectOfficercapture.cpp의 개별/랜덤 기재 변경 호출만 고속 경로로 보냅니다.
+#define SetTraitID SetTraitIDForOfficerUiFast
+#endif
 
 // DrawOfficerTalents()의 기존 Unknown 분기는
 //   "[*] 기재 N : #ID (ID ID)"
