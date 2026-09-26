@@ -1,4 +1,6 @@
 #pragma once
+#define DX11BASE_SELECT_OFFICER_CAPTURE_HEADER_INCLUDED 1
+
 #include "Framework/imgui.h"
 #include "OfficerData.h"
 #include "CustomTraitDisplay.h"
