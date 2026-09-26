@@ -179,7 +179,7 @@ RuntimeState &State() {
 
 using TraitNameGetter = const wchar_t *(__fastcall *)(void *);
 using TraitDescMapGetter = const wchar_t *(__fastcall *)(void *, int, uint8_t);
-using TraitEffectQuery = bool(__fastcall *)(void *, uint16_t);
+using TraitEffectQuery = int(__fastcall *)(void *, uint16_t);
 using OfficerTraitQuery = int(__fastcall *)(void *, uint32_t);
 using TraitMessageSetter = void(__fastcall *)(void *, uint32_t);
 using TraitDataGetter = void *(__fastcall *)(void *, uint32_t);
@@ -977,7 +977,7 @@ bool FindMatchingCustomTrait(
   return false;
 }
 
-bool __fastcall CustomTraitEffectQuery(
+int __fastcall CustomTraitEffectQuery(
     void *officer, uint16_t requestedTraitId) {
   RuntimeState &state = State();
   g_traitEffectMatchCache = {};
