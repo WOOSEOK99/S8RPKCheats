@@ -13,9 +13,11 @@
 namespace DX11Base {
 namespace ChildNameDiagnostics {
 
-// SAN8RPK.pdb에서 주소까지 확인된 PersonData 원본 getter.
-// GetName은 2026-09-26 실게임에서 일반 무장/생성 자녀 모두 검증 완료.
-// GetAzana는 같은 PDB 공개 심볼이며 동일한 const wchar_t* 반환형이다.
+// SAN8RPK.pdb에서 확인된 PersonData 원본 getter.
+// GetSei/GetMei를 조합해야 일부 무장에서 성만 표시되는 문제를 피할 수 있다.
+// GetName은 특수/예외 레코드의 fallback으로만 사용한다.
+static constexpr uintptr_t kPersonDataGetSeiRva = 0x170BAD0;
+static constexpr uintptr_t kPersonDataGetMeiRva = 0x16F6790;
 static constexpr uintptr_t kPersonDataGetNameRva = 0x1713DB0;
 static constexpr uintptr_t kPersonDataGetAzanaRva = 0x1712A80;
 static constexpr uintptr_t kOfficerStride = 0x3D0;
@@ -139,8 +141,35 @@ static void DropPreviousNativeCache() {
   g_state.lastNativeNames.clear();
 }
 
+static bool ResolveNativeOfficerName(uintptr_t officer,
+                                     uintptr_t getSeiAddr,
+                                     uintptr_t getMeiAddr,
+                                     uintptr_t getNameAddr,
+                                     std::string& outName) {
+  outName.clear();
+
+  std::string sei;
+  std::string mei;
+  ResolveNativeTextUtf8(getSeiAddr, officer, sei);
+  ResolveNativeTextUtf8(getMeiAddr, officer, mei);
+
+  if (!sei.empty() || !mei.empty()) {
+    if (!sei.empty())
+      outName += sei;
+    if (!mei.empty() && mei != sei)
+      outName += mei;
+    if (!outName.empty())
+      return true;
+  }
+
+  // 드문 특수 레코드에서 성/명이 비어 있을 경우 기존 GetName을 fallback으로 사용한다.
+  return ResolveNativeTextUtf8(getNameAddr, officer, outName);
+}
+
 static bool SyncOneOfficer(uintptr_t officer,
                            uint16_t expectedId,
+                           uintptr_t getSeiAddr,
+                           uintptr_t getMeiAddr,
                            uintptr_t getNameAddr,
                            uintptr_t getAzanaAddr,
                            int* nativeCount,
@@ -159,8 +188,10 @@ static bool SyncOneOfficer(uintptr_t officer,
   }
 
   std::string name;
-  if (!ResolveNativeTextUtf8(getNameAddr, officer, name))
+  if (!ResolveNativeOfficerName(officer, getSeiAddr, getMeiAddr,
+                                getNameAddr, name)) {
     return false;
+  }
 
   std::string azana;
   ResolveNativeTextUtf8(getAzanaAddr, officer, azana);
@@ -214,6 +245,8 @@ static void SyncAllOfficerNames(uintptr_t exeBase, uintptr_t rosterBase) {
   if (g_state.lastRosterBase != 0 && g_state.lastRosterBase != rosterBase)
     DropPreviousNativeCache();
 
+  const uintptr_t getSeiAddr = exeBase + kPersonDataGetSeiRva;
+  const uintptr_t getMeiAddr = exeBase + kPersonDataGetMeiRva;
   const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
   int nativeCount = 0;
@@ -221,20 +254,24 @@ static void SyncAllOfficerNames(uintptr_t exeBase, uintptr_t rosterBase) {
 
   for (int i = 0; i < kOfficerCount; ++i) {
     const uintptr_t officer = rosterBase + (uintptr_t)i * kOfficerStride;
-    SyncOneOfficer(officer, 0, getNameAddr, getAzanaAddr,
+    SyncOneOfficer(officer, 0,
+                   getSeiAddr, getMeiAddr, getNameAddr, getAzanaAddr,
                    &nativeCount, &overrideCount, false);
   }
 
   if (g_state.lastRosterBase != rosterBase || g_state.lastFullSyncAt == 0) {
-    AddLog(u8"[무장이름] 원본 이름/자 동기화 완료: native=%d override=%d / GetName +0x%llX / GetAzana +0x%llX",
+    AddLog(u8"[무장이름] 원본 성/명/자 동기화 완료: native=%d override=%d / GetSei +0x%llX / GetMei +0x%llX / GetAzana +0x%llX",
            nativeCount, overrideCount,
-           (unsigned long long)kPersonDataGetNameRva,
+           (unsigned long long)kPersonDataGetSeiRva,
+           (unsigned long long)kPersonDataGetMeiRva,
            (unsigned long long)kPersonDataGetAzanaRva);
   }
   g_state.lastRosterBase = rosterBase;
 }
 
 static void SyncGeneratedChildren(uintptr_t exeBase, uintptr_t rosterBase) {
+  const uintptr_t getSeiAddr = exeBase + kPersonDataGetSeiRva;
+  const uintptr_t getMeiAddr = exeBase + kPersonDataGetMeiRva;
   const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
 
@@ -248,7 +285,8 @@ static void SyncGeneratedChildren(uintptr_t exeBase, uintptr_t rosterBase) {
     if (!SafeRead16Local(officer + 0x34, &birth) || birth == 0)
       continue;
 
-    SyncOneOfficer(officer, id, getNameAddr, getAzanaAddr,
+    SyncOneOfficer(officer, id,
+                   getSeiAddr, getMeiAddr, getNameAddr, getAzanaAddr,
                    nullptr, nullptr, true);
   }
 }
