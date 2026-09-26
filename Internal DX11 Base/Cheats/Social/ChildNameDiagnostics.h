@@ -57,12 +57,10 @@ static bool CopyWideSafe(const wchar_t* src, wchar_t* out, size_t capacity) {
   }
 }
 
-static bool ResolveNativeNameUtf8(uintptr_t fnAddr,
-                                  uintptr_t officer,
-                                  std::string& outName) {
-  outName.clear();
+// C2712 방지: __try는 C++ 소멸자가 필요한 std::string 함수와 분리한다.
+static const wchar_t* CallNativeGetNameSafe(uintptr_t fnAddr, uintptr_t officer) {
   if (fnAddr <= 0x10000 || officer <= 0x10000)
-    return false;
+    return nullptr;
 
   const auto fn = reinterpret_cast<NativePersonGetName>(fnAddr);
   const wchar_t* result = nullptr;
@@ -72,6 +70,15 @@ static bool ResolveNativeNameUtf8(uintptr_t fnAddr,
   __except (EXCEPTION_EXECUTE_HANDLER) {
     result = nullptr;
   }
+  return result;
+}
+
+static bool ResolveNativeNameUtf8(uintptr_t fnAddr,
+                                  uintptr_t officer,
+                                  std::string& outName) {
+  outName.clear();
+
+  const wchar_t* result = CallNativeGetNameSafe(fnAddr, officer);
   if (!result)
     return false;
 
