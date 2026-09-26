@@ -44,8 +44,6 @@ constexpr uintptr_t kTraitMessageSetterOffset = 0x13F91E0;
 constexpr uintptr_t kTraitDataGetterOffset = 0x16E63F0;
 constexpr uintptr_t kMonthlyTraitUpdateOffset = 0x1C79C90;
 constexpr uintptr_t kTransferTraitEventOffset = 0x18A5E30;
-constexpr uintptr_t kTraitEligibilityPatchAOffset = 0x17C03E7;
-constexpr uintptr_t kTraitEligibilityPatchBOffset = 0x17C042F;
 
 constexpr uint8_t kTraitEffectQueryPrologue[] = {
     0x48, 0x89, 0x5C, 0x24, 0x08
@@ -64,9 +62,6 @@ constexpr uint8_t kMonthlyTraitUpdatePrologue[] = {
 };
 constexpr uint8_t kTransferTraitEventPrologue[] = {
     0x40, 0x53, 0x55, 0x56, 0x57, 0x41, 0x56
-};
-constexpr uint8_t kTraitEligibilityExpected[] = {
-    0x81, 0xFE, 0x95, 0x00, 0x00, 0x00
 };
 constexpr uintptr_t kDescTextPointerFallbackOffset = 0x2C34EC0;
 constexpr uint32_t kDescNormalIndexBase = 0x2E73;
@@ -164,18 +159,12 @@ struct RuntimeState {
   bool transferHookInstalled = false;
   bool transferHookFailureLogged = false;
   uintptr_t originalTransferEvent = 0;
-
-  bool eligibilityPatchAActive = false;
-  bool eligibilityPatchBActive = false;
-  bool eligibilityPatchAFailureLogged = false;
-  bool eligibilityPatchBFailureLogged = false;
 };
 
 RuntimeState &State() {
   static RuntimeState state;
   return state;
 }
-
 
 using TraitNameGetter = const wchar_t *(__fastcall *)(void *);
 using TraitDescMapGetter = const wchar_t *(__fastcall *)(void *, int, uint8_t);
@@ -268,32 +257,6 @@ bool WriteMemoryProtected(uintptr_t address, const void *data, std::size_t size)
   return ok;
 }
 
-bool WriteExecutableByteProtected(uintptr_t address, uint8_t value) {
-  if (!address)
-    return false;
-
-  DWORD oldProtect = 0;
-  void *dst = reinterpret_cast<void *>(address);
-  if (!VirtualProtect(dst, sizeof(value), PAGE_EXECUTE_READWRITE, &oldProtect))
-    return false;
-
-  bool ok = true;
-  __try {
-    *reinterpret_cast<volatile uint8_t *>(address) = value;
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER) {
-    ok = false;
-  }
-
-  DWORD ignored = 0;
-  VirtualProtect(dst, sizeof(value), oldProtect, &ignored);
-  if (ok)
-    FlushInstructionCache(GetCurrentProcess(), dst, sizeof(value));
-  return ok;
-}
-
-
-
 const wchar_t *__fastcall CustomTraitNameGetter(void *traitObject) {
   uint16_t id = 0;
   if (traitObject) {
@@ -326,8 +289,7 @@ const wchar_t *__fastcall CustomTraitDescMapGetter(
   const uintptr_t original = state.originalDescMapGetter;
   if (original) {
     const wchar_t *originalResult =
-        reinterpret_cast<TraitDescMapGetter>(original)(
-            context, traitId, kind);
+        reinterpret_cast<TraitDescMapGetter>(original)(context, traitId, kind);
     if (originalResult)
       return originalResult;
   }
@@ -355,13 +317,11 @@ const wchar_t *__fastcall CustomTraitDescMapGetter(
     maxChars = 0xFE;
   }
 
-  const std::size_t length = std::min<std::size_t>(
-      std::wcslen(custom), maxChars);
+  const std::size_t length = std::min<std::size_t>(std::wcslen(custom), maxChars);
   std::memcpy(buffer, custom, length * sizeof(wchar_t));
   buffer[length] = L'\0';
   return buffer;
 }
-
 
 bool Utf8ToWide(const std::string &text, std::wstring &out) {
   out.clear();
@@ -369,17 +329,15 @@ bool Utf8ToWide(const std::string &text, std::wstring &out) {
     return true;
 
   const int count = MultiByteToWideChar(
-      CP_UTF8, MB_ERR_INVALID_CHARS,
-      text.data(), static_cast<int>(text.size()),
-      nullptr, 0);
+      CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+      static_cast<int>(text.size()), nullptr, 0);
   if (count <= 0)
     return false;
 
   out.resize(static_cast<std::size_t>(count));
   return MultiByteToWideChar(
-             CP_UTF8, MB_ERR_INVALID_CHARS,
-             text.data(), static_cast<int>(text.size()),
-             out.data(), count) == count;
+             CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+             static_cast<int>(text.size()), out.data(), count) == count;
 }
 
 const wchar_t *AllocateStableWideText(const std::wstring &wide) {
@@ -387,8 +345,7 @@ const wchar_t *AllocateStableWideText(const std::wstring &wide) {
     return nullptr;
 
   const std::size_t bytes = (wide.size() + 1) * sizeof(wchar_t);
-  void *memory =
-      VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  void *memory = VirtualAlloc(nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
   if (!memory)
     return nullptr;
 
@@ -418,8 +375,7 @@ const wchar_t *AllocateStableFormatWideString(const std::string &utf8) {
   return AllocateStableWideText(escaped);
 }
 
-bool PublishNativeTexts(
-    const std::array<TraitMetaEntry, kTraitCount> &meta) {
+bool PublishNativeTexts(const std::array<TraitMetaEntry, kTraitCount> &meta) {
   RuntimeState &state = State();
 
   std::array<const wchar_t *, kTraitCount> nextNames{};
@@ -445,8 +401,7 @@ bool PublishNativeTexts(
 
     if (!meta[i].desc.empty()) {
       const wchar_t *wide = AllocateStableWideString(meta[i].desc);
-      const wchar_t *formatWide =
-          AllocateStableFormatWideString(meta[i].desc);
+      const wchar_t *formatWide = AllocateStableFormatWideString(meta[i].desc);
       if (!wide || !formatWide) {
         AddLog(u8"[기재JSON/문구] 설명 UTF-8 변환/할당 실패: index=%d", i);
         return false;
@@ -479,12 +434,10 @@ bool EnsureCustomNameHook() {
   RuntimeState &state = State();
   if (!HasPublishedCustomNames())
     return true;
-
   if (state.nameHookInstalled)
     return true;
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   if (!gameBase)
     return false;
 
@@ -501,23 +454,20 @@ bool EnsureCustomNameHook() {
   const MH_STATUS initStatus = MH_Initialize();
   if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) {
     if (!state.nameHookFailureLogged) {
-      AddLog(u8"[기재JSON/이름] MinHook 초기화 실패: %s",
-             MH_StatusToString(initStatus));
+      AddLog(u8"[기재JSON/이름] MinHook 초기화 실패: %s", MH_StatusToString(initStatus));
       state.nameHookFailureLogged = true;
     }
     return false;
   }
 
   LPVOID original = nullptr;
-  const MH_STATUS createStatus =
-      MH_CreateHook(reinterpret_cast<LPVOID>(target),
-                    reinterpret_cast<LPVOID>(&CustomTraitNameGetter),
-                    &original);
+  const MH_STATUS createStatus = MH_CreateHook(
+      reinterpret_cast<LPVOID>(target),
+      reinterpret_cast<LPVOID>(&CustomTraitNameGetter), &original);
   if (createStatus != MH_OK) {
     if (!state.nameHookFailureLogged) {
       AddLog(u8"[기재JSON/이름] 이름 getter 직접 훅 생성 실패: %s / target=%p",
-             MH_StatusToString(createStatus),
-             reinterpret_cast<void *>(target));
+             MH_StatusToString(createStatus), reinterpret_cast<void *>(target));
       state.nameHookFailureLogged = true;
     }
     return false;
@@ -533,9 +483,7 @@ bool EnsureCustomNameHook() {
   }
 
   state.originalNameGetter = reinterpret_cast<uintptr_t>(original);
-
-  const MH_STATUS enableStatus =
-      MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(target));
   if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
     MH_RemoveHook(reinterpret_cast<LPVOID>(target));
     state.originalNameGetter = 0;
@@ -555,33 +503,27 @@ bool EnsureCustomNameHook() {
   return true;
 }
 
-
 uintptr_t ResolveDescTextPointerAddress() {
   RuntimeState &state = State();
   if (state.descTextPointerAddress)
     return state.descTextPointerAddress;
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   if (!gameBase)
     return 0;
 
   MODULEINFO mi{};
-  if (GetModuleInformation(GetCurrentProcess(),
-                           reinterpret_cast<HMODULE>(gameBase),
+  if (GetModuleInformation(GetCurrentProcess(), reinterpret_cast<HMODULE>(gameBase),
                            &mi, sizeof(mi))) {
-    const uintptr_t found =
-        FindPattern(gameBase, gameBase + mi.SizeOfImage,
-                    "B8 04 30 00 00");
+    const uintptr_t found = FindPattern(gameBase, gameBase + mi.SizeOfImage,
+                                        "B8 04 30 00 00");
     if (found) {
       bool has5823 = false;
       for (int off = 5; off < 15; ++off) {
         uint8_t op = 0;
         uint32_t imm = 0;
-        if (ReadMemorySafe(found + off, &op, sizeof(op)) &&
-            op == 0xB8 &&
-            ReadMemorySafe(found + off + 1, &imm, sizeof(imm)) &&
-            imm == 0x5823) {
+        if (ReadMemorySafe(found + off, &op, sizeof(op)) && op == 0xB8 &&
+            ReadMemorySafe(found + off + 1, &imm, sizeof(imm)) && imm == 0x5823) {
           has5823 = true;
           break;
         }
@@ -599,68 +541,49 @@ uintptr_t ResolveDescTextPointerAddress() {
           if (!ReadMemorySafe(found + off + 3, &disp, sizeof(disp)))
             continue;
 
-          state.descTextPointerAddress =
-              found + off + 7 + static_cast<int64_t>(disp);
+          state.descTextPointerAddress = found + off + 7 + static_cast<int64_t>(disp);
           AddLog(u8"[기재JSON/설명TS] textPtrAddr AOB: +0x%llX",
-                 static_cast<unsigned long long>(
-                     state.descTextPointerAddress - gameBase));
+                 static_cast<unsigned long long>(state.descTextPointerAddress - gameBase));
           return state.descTextPointerAddress;
         }
       }
     }
   }
 
-  state.descTextPointerAddress =
-      gameBase + kDescTextPointerFallbackOffset;
+  state.descTextPointerAddress = gameBase + kDescTextPointerFallbackOffset;
   AddLog(u8"[기재JSON/설명TS] textPtrAddr fallback: +0x%llX",
-         static_cast<unsigned long long>(
-             kDescTextPointerFallbackOffset));
+         static_cast<unsigned long long>(kDescTextPointerFallbackOffset));
   return state.descTextPointerAddress;
 }
 
-bool SyncOneDescTable(uintptr_t tableBase,
-                      uintptr_t bufferBase,
-                      uintptr_t bufferLimit,
-                      uint32_t indexBase,
-                      bool formatted,
-                      int &synced) {
+bool SyncOneDescTable(uintptr_t tableBase, uintptr_t bufferBase,
+                      uintptr_t bufferLimit, uint32_t indexBase,
+                      bool formatted, int &synced) {
   RuntimeState &state = State();
   uintptr_t cursor = 0;
 
-  for (int i = kDescTableCustomIndexMin;
-       i <= kDescTableCustomIndexMax; ++i) {
-    const wchar_t *text =
-        formatted ? state.nativeDescFormatPtrs[i]
-                  : state.nativeDescPtrs[i];
+  for (int i = kDescTableCustomIndexMin; i <= kDescTableCustomIndexMax; ++i) {
+    const wchar_t *text = formatted ? state.nativeDescFormatPtrs[i]
+                                    : state.nativeDescPtrs[i];
     if (!text || text[0] == L'\0')
       continue;
 
     const std::size_t chars = std::wcslen(text);
-    const std::size_t bytes =
-        (chars + 1) * sizeof(wchar_t);
-
+    const std::size_t bytes = (chars + 1) * sizeof(wchar_t);
     const uintptr_t stringAddress = bufferBase + cursor;
-    if (stringAddress < bufferBase ||
-        stringAddress + bytes > bufferLimit)
+    if (stringAddress < bufferBase || stringAddress + bytes > bufferLimit)
       return false;
 
-    if (!WriteMemoryProtected(
-            stringAddress, text, bytes))
+    if (!WriteMemoryProtected(stringAddress, text, bytes))
       return false;
 
-    if (stringAddress < tableBase ||
-        stringAddress - tableBase > 0xFFFFFFFFull)
+    if (stringAddress < tableBase || stringAddress - tableBase > 0xFFFFFFFFull)
       return false;
 
-    const uint32_t relative =
-        static_cast<uint32_t>(stringAddress - tableBase);
+    const uint32_t relative = static_cast<uint32_t>(stringAddress - tableBase);
     const uintptr_t entryAddress =
-        tableBase +
-        static_cast<uintptr_t>(indexBase + i) *
-            sizeof(uint32_t);
-
-    if (!WriteMemoryProtected(
-            entryAddress, &relative, sizeof(relative)))
+        tableBase + static_cast<uintptr_t>(indexBase + i) * sizeof(uint32_t);
+    if (!WriteMemoryProtected(entryAddress, &relative, sizeof(relative)))
       return false;
 
     cursor += bytes;
@@ -676,84 +599,52 @@ bool SyncCustomDescTextTables() {
   if (state.descTablesSynced)
     return true;
 
-  const uintptr_t pointerAddress =
-      ResolveDescTextPointerAddress();
+  const uintptr_t pointerAddress = ResolveDescTextPointerAddress();
   if (!pointerAddress)
     return false;
 
   uintptr_t textBase = 0;
-  if (!ReadMemorySafe(
-          pointerAddress, &textBase, sizeof(textBase)) ||
-      textBase < 0x10000) {
+  if (!ReadMemorySafe(pointerAddress, &textBase, sizeof(textBase)) || textBase < 0x10000)
     return false;
-  }
 
   uint16_t headerType = 0;
   uint32_t tableOffset = 0;
-  if (!ReadMemorySafe(
-          textBase + 0x0A, &headerType, sizeof(headerType)) ||
-      !ReadMemorySafe(
-          textBase + 0x10, &tableOffset, sizeof(tableOffset)) ||
-      headerType != 4 || tableOffset == 0) {
+  if (!ReadMemorySafe(textBase + 0x0A, &headerType, sizeof(headerType)) ||
+      !ReadMemorySafe(textBase + 0x10, &tableOffset, sizeof(tableOffset)) ||
+      headerType != 4 || tableOffset == 0)
     return false;
-  }
 
   const uintptr_t tableBase = textBase + tableOffset;
-
   MEMORY_BASIC_INFORMATION mbi{};
-  if (VirtualQuery(reinterpret_cast<const void *>(textBase),
-                   &mbi, sizeof(mbi)) != sizeof(mbi) ||
-      mbi.State != MEM_COMMIT ||
-      mbi.RegionSize < 0x28000) {
+  if (VirtualQuery(reinterpret_cast<const void *>(textBase), &mbi, sizeof(mbi)) != sizeof(mbi) ||
+      mbi.State != MEM_COMMIT || mbi.RegionSize < 0x28000)
     return false;
-  }
 
-  const uintptr_t regionBegin =
-      reinterpret_cast<uintptr_t>(mbi.BaseAddress);
-  const uintptr_t regionEnd =
-      regionBegin + mbi.RegionSize;
+  const uintptr_t regionBegin = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+  const uintptr_t regionEnd = regionBegin + mbi.RegionSize;
 
   const uintptr_t formatTableEnd =
-      tableBase +
-      static_cast<uintptr_t>(
-          kDescFormatIndexBase +
-          kDescTableCustomIndexMax + 1) *
-          sizeof(uint32_t);
-  uintptr_t formatBuffer =
-      (regionEnd - 0x24000) &
-      ~static_cast<uintptr_t>(0xF);
+      tableBase + static_cast<uintptr_t>(kDescFormatIndexBase + kDescTableCustomIndexMax + 1) * sizeof(uint32_t);
+  uintptr_t formatBuffer = (regionEnd - 0x24000) & ~static_cast<uintptr_t>(0xF);
   if (formatBuffer < formatTableEnd)
-    formatBuffer =
-        (formatTableEnd + 0xF) &
-        ~static_cast<uintptr_t>(0xF);
+    formatBuffer = (formatTableEnd + 0xF) & ~static_cast<uintptr_t>(0xF);
   if (formatBuffer + 0x1000 > regionEnd)
     return false;
 
   const uintptr_t normalTableEnd =
-      tableBase +
-      static_cast<uintptr_t>(
-          kDescNormalIndexBase +
-          kDescTableCustomIndexMax + 1) *
-          sizeof(uint32_t);
-  uintptr_t normalBuffer =
-      (regionEnd - 0x28000) &
-      ~static_cast<uintptr_t>(0xF);
+      tableBase + static_cast<uintptr_t>(kDescNormalIndexBase + kDescTableCustomIndexMax + 1) * sizeof(uint32_t);
+  uintptr_t normalBuffer = (regionEnd - 0x28000) & ~static_cast<uintptr_t>(0xF);
   if (normalBuffer < normalTableEnd)
-    normalBuffer =
-        (normalTableEnd + 0xF) &
-        ~static_cast<uintptr_t>(0xF);
-
+    normalBuffer = (normalTableEnd + 0xF) & ~static_cast<uintptr_t>(0xF);
   if (normalBuffer + 0x400 > formatBuffer)
     return false;
 
   int normalSynced = 0;
   int formatSynced = 0;
-  if (!SyncOneDescTable(
-          tableBase, normalBuffer, formatBuffer,
-          kDescNormalIndexBase, false, normalSynced) ||
-      !SyncOneDescTable(
-          tableBase, formatBuffer, regionEnd,
-          kDescFormatIndexBase, true, formatSynced)) {
+  if (!SyncOneDescTable(tableBase, normalBuffer, formatBuffer,
+                        kDescNormalIndexBase, false, normalSynced) ||
+      !SyncOneDescTable(tableBase, formatBuffer, regionEnd,
+                        kDescFormatIndexBase, true, formatSynced)) {
     if (!state.descTableFailureLogged) {
       AddLog(u8"[기재JSON/설명TS] 설명 텍스트 테이블 기록 실패.");
       state.descTableFailureLogged = true;
@@ -764,8 +655,7 @@ bool SyncCustomDescTextTables() {
   state.descTablesSynced = true;
   state.descTableFailureLogged = false;
   AddLog(u8"[기재JSON/설명TS] 동기화 완료: 일반 %d개 / 포맷 %d개 / table=%p",
-         normalSynced, formatSynced,
-         reinterpret_cast<void *>(tableBase));
+         normalSynced, formatSynced, reinterpret_cast<void *>(tableBase));
   return true;
 }
 
@@ -784,17 +674,14 @@ bool EnsureCustomDescHook() {
   if (!hasDescriptions)
     return true;
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   if (!gameBase)
     return false;
-
   const uintptr_t target = gameBase + kDescMapGetterOffset;
 
   uint8_t prologue[sizeof(kDescMapGetterPrologue)] = {};
   if (!ReadMemorySafe(target, prologue, sizeof(prologue)) ||
-      std::memcmp(prologue, kDescMapGetterPrologue,
-                  sizeof(kDescMapGetterPrologue)) != 0) {
+      std::memcmp(prologue, kDescMapGetterPrologue, sizeof(kDescMapGetterPrologue)) != 0) {
     if (!state.descHookFailureLogged) {
       AddLog(u8"[기재JSON/설명] descmap 원본 바이트 불일치: +171E070");
       state.descHookFailureLogged = true;
@@ -803,33 +690,28 @@ bool EnsureCustomDescHook() {
   }
 
   const MH_STATUS initStatus = MH_Initialize();
-  if (initStatus != MH_OK &&
-      initStatus != MH_ERROR_ALREADY_INITIALIZED) {
+  if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) {
     if (!state.descHookFailureLogged) {
-      AddLog(u8"[기재JSON/설명] MinHook 초기화 실패: %s",
-             MH_StatusToString(initStatus));
+      AddLog(u8"[기재JSON/설명] MinHook 초기화 실패: %s", MH_StatusToString(initStatus));
       state.descHookFailureLogged = true;
     }
     return false;
   }
 
   LPVOID original = nullptr;
-  const MH_STATUS createStatus =
-      MH_CreateHook(reinterpret_cast<LPVOID>(target),
-                    reinterpret_cast<LPVOID>(&CustomTraitDescMapGetter),
-                    &original);
+  const MH_STATUS createStatus = MH_CreateHook(
+      reinterpret_cast<LPVOID>(target),
+      reinterpret_cast<LPVOID>(&CustomTraitDescMapGetter), &original);
   if (createStatus != MH_OK) {
     if (!state.descHookFailureLogged) {
       AddLog(u8"[기재JSON/설명] descmap 훅 생성 실패: %s / target=%p",
-             MH_StatusToString(createStatus),
-             reinterpret_cast<void *>(target));
+             MH_StatusToString(createStatus), reinterpret_cast<void *>(target));
       state.descHookFailureLogged = true;
     }
     return false;
   }
 
-  if (!original ||
-      !IsExecutableAddress(reinterpret_cast<uintptr_t>(original))) {
+  if (!original || !IsExecutableAddress(reinterpret_cast<uintptr_t>(original))) {
     MH_RemoveHook(reinterpret_cast<LPVOID>(target));
     if (!state.descHookFailureLogged) {
       AddLog(u8"[기재JSON/설명] descmap trampoline 검증 실패.");
@@ -838,18 +720,13 @@ bool EnsureCustomDescHook() {
     return false;
   }
 
-  state.originalDescMapGetter =
-      reinterpret_cast<uintptr_t>(original);
-
-  const MH_STATUS enableStatus =
-      MH_EnableHook(reinterpret_cast<LPVOID>(target));
-  if (enableStatus != MH_OK &&
-      enableStatus != MH_ERROR_ENABLED) {
+  state.originalDescMapGetter = reinterpret_cast<uintptr_t>(original);
+  const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
     MH_RemoveHook(reinterpret_cast<LPVOID>(target));
     state.originalDescMapGetter = 0;
     if (!state.descHookFailureLogged) {
-      AddLog(u8"[기재JSON/설명] descmap 훅 활성화 실패: %s",
-             MH_StatusToString(enableStatus));
+      AddLog(u8"[기재JSON/설명] descmap 훅 활성화 실패: %s", MH_StatusToString(enableStatus));
       state.descHookFailureLogged = true;
     }
     return false;
@@ -863,8 +740,6 @@ bool EnsureCustomDescHook() {
   return true;
 }
 
-
-
 bool ReadTraitRecordId(uintptr_t record, uint16_t &id) {
   id = 0;
   if (record < 0x10000)
@@ -876,9 +751,8 @@ bool ReadTraitEffectType(uintptr_t record, std::size_t slot, uint16_t &type) {
   type = 0;
   if (record < 0x10000 || slot >= kEffectCount)
     return false;
-  return ReadMemorySafe(
-      record + kEffectOffset + slot * kEffectSize,
-      &type, sizeof(type));
+  return ReadMemorySafe(record + kEffectOffset + slot * kEffectSize,
+                        &type, sizeof(type));
 }
 
 bool HasMatchingEffectType(uintptr_t customRecord, uintptr_t requestedRecord) {
@@ -890,58 +764,43 @@ bool HasMatchingEffectType(uintptr_t customRecord, uintptr_t requestedRecord) {
   if (!ReadMemorySafe(customRecord + kEffectOffset,
                       customEffects.data(), sizeof(customEffects)) ||
       !ReadMemorySafe(requestedRecord + kEffectOffset,
-                      requestedEffects.data(), sizeof(requestedEffects))) {
+                      requestedEffects.data(), sizeof(requestedEffects)))
     return false;
-  }
 
-  // ID 기반 특수 이벤트 호환은 원본 기재의 6개 효과 슬롯이 완전히 같을 때만 인정합니다.
-  // 일부 type만 겹치는 경우, 또는 value/param이 하나라도 다르면 같은 기재가 아닙니다.
   return std::memcmp(customEffects.data(), requestedEffects.data(),
                      sizeof(customEffects)) == 0;
 }
 
-bool FindMatchingCustomTrait(
-    void *officer, uint16_t requestedTraitId, uint16_t &matchedId) {
+bool FindMatchingCustomTrait(void *officer, uint16_t requestedTraitId,
+                             uint16_t &matchedId) {
   matchedId = 0;
   RuntimeState &state = State();
-  if (!officer ||
-      !state.configLoaded ||
-      requestedTraitId < 1 ||
-      requestedTraitId > kTraitCount ||
-      state.lastTableBase < 0x10000) {
+  if (!officer || !state.configLoaded || requestedTraitId < 1 ||
+      requestedTraitId > kTraitCount || state.lastTableBase < 0x10000)
     return false;
-  }
 
   const uintptr_t requestedRecord =
-      state.lastTableBase +
-      static_cast<uintptr_t>(requestedTraitId) * kTraitStride;
+      state.lastTableBase + static_cast<uintptr_t>(requestedTraitId) * kTraitStride;
 
   uint16_t requestedRecordId = 0;
   if (!ReadTraitRecordId(requestedRecord, requestedRecordId) ||
-      requestedRecordId != requestedTraitId) {
+      requestedRecordId != requestedTraitId)
     return false;
-  }
 
-  const uintptr_t officerBase =
-      reinterpret_cast<uintptr_t>(officer);
-
+  const uintptr_t officerBase = reinterpret_cast<uintptr_t>(officer);
   for (int slot = 0; slot < 3; ++slot) {
     uintptr_t heldRecord = 0;
-    if (!ReadMemorySafe(
-            officerBase + 0x88 +
-                static_cast<uintptr_t>(slot) * sizeof(uintptr_t),
-            &heldRecord, sizeof(heldRecord)) ||
-        heldRecord < 0x10000) {
+    if (!ReadMemorySafe(officerBase + 0x88 +
+                            static_cast<uintptr_t>(slot) * sizeof(uintptr_t),
+                        &heldRecord, sizeof(heldRecord)) ||
+        heldRecord < 0x10000)
       continue;
-    }
 
     uint16_t heldId = 0;
     if (!ReadTraitRecordId(heldRecord, heldId))
       continue;
-
     if (heldId < 71 || heldId > kTraitCount)
       continue;
-
     if (!HasMatchingEffectType(heldRecord, requestedRecord))
       continue;
 
@@ -952,25 +811,18 @@ bool FindMatchingCustomTrait(
   return false;
 }
 
-bool __fastcall CustomTraitEffectQuery(
-    void *officer, uint16_t requestedTraitId) {
+bool __fastcall CustomTraitEffectQuery(void *officer, uint16_t requestedTraitId) {
   RuntimeState &state = State();
   g_traitEffectMatchCache = {};
 
   const uintptr_t original = state.originalTraitEffectQuery;
-  if (original &&
-      reinterpret_cast<TraitEffectQuery>(original)(officer, requestedTraitId)) {
+  if (original && reinterpret_cast<TraitEffectQuery>(original)(officer, requestedTraitId))
     return true;
-  }
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-  const uintptr_t returnAddress =
-      reinterpret_cast<uintptr_t>(_ReturnAddress());
-  if (gameBase &&
-      returnAddress == gameBase + kTraitEffectQuerySkipCallerOffset) {
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t returnAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
+  if (gameBase && returnAddress == gameBase + kTraitEffectQuerySkipCallerOffset)
     return false;
-  }
 
   uint16_t matchedId = 0;
   if (!FindMatchingCustomTrait(officer, requestedTraitId, matchedId))
@@ -989,13 +841,10 @@ bool EnsureTraitEffectHook() {
   if (state.traitEffectHookInstalled)
     return true;
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   if (!gameBase)
     return false;
-
-  const uintptr_t target =
-      gameBase + kTraitEffectQueryOffset;
+  const uintptr_t target = gameBase + kTraitEffectQueryOffset;
 
   uint8_t prologue[sizeof(kTraitEffectQueryPrologue)] = {};
   if (!ReadMemorySafe(target, prologue, sizeof(prologue)) ||
@@ -1009,34 +858,27 @@ bool EnsureTraitEffectHook() {
   }
 
   const MH_STATUS initStatus = MH_Initialize();
-  if (initStatus != MH_OK &&
-      initStatus != MH_ERROR_ALREADY_INITIALIZED) {
+  if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) {
     if (!state.traitEffectHookFailureLogged) {
-      AddLog(u8"[기재JSON/효과] MinHook 초기화 실패: %s",
-             MH_StatusToString(initStatus));
+      AddLog(u8"[기재JSON/효과] MinHook 초기화 실패: %s", MH_StatusToString(initStatus));
       state.traitEffectHookFailureLogged = true;
     }
     return false;
   }
 
   LPVOID original = nullptr;
-  const MH_STATUS createStatus =
-      MH_CreateHook(
-          reinterpret_cast<LPVOID>(target),
-          reinterpret_cast<LPVOID>(&CustomTraitEffectQuery),
-          &original);
+  const MH_STATUS createStatus = MH_CreateHook(
+      reinterpret_cast<LPVOID>(target),
+      reinterpret_cast<LPVOID>(&CustomTraitEffectQuery), &original);
   if (createStatus != MH_OK) {
     if (!state.traitEffectHookFailureLogged) {
-      AddLog(u8"[기재JSON/효과] +17AAD60 훅 생성 실패: %s",
-             MH_StatusToString(createStatus));
+      AddLog(u8"[기재JSON/효과] +17AAD60 훅 생성 실패: %s", MH_StatusToString(createStatus));
       state.traitEffectHookFailureLogged = true;
     }
     return false;
   }
 
-  if (!original ||
-      !IsExecutableAddress(
-          reinterpret_cast<uintptr_t>(original))) {
+  if (!original || !IsExecutableAddress(reinterpret_cast<uintptr_t>(original))) {
     MH_RemoveHook(reinterpret_cast<LPVOID>(target));
     if (!state.traitEffectHookFailureLogged) {
       AddLog(u8"[기재JSON/효과] +17AAD60 trampoline 검증 실패.");
@@ -1045,18 +887,13 @@ bool EnsureTraitEffectHook() {
     return false;
   }
 
-  state.originalTraitEffectQuery =
-      reinterpret_cast<uintptr_t>(original);
-
-  const MH_STATUS enableStatus =
-      MH_EnableHook(reinterpret_cast<LPVOID>(target));
-  if (enableStatus != MH_OK &&
-      enableStatus != MH_ERROR_ENABLED) {
+  state.originalTraitEffectQuery = reinterpret_cast<uintptr_t>(original);
+  const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
     MH_RemoveHook(reinterpret_cast<LPVOID>(target));
     state.originalTraitEffectQuery = 0;
     if (!state.traitEffectHookFailureLogged) {
-      AddLog(u8"[기재JSON/효과] +17AAD60 훅 활성화 실패: %s",
-             MH_StatusToString(enableStatus));
+      AddLog(u8"[기재JSON/효과] +17AAD60 훅 활성화 실패: %s", MH_StatusToString(enableStatus));
       state.traitEffectHookFailureLogged = true;
     }
     return false;
@@ -1064,11 +901,9 @@ bool EnsureTraitEffectHook() {
 
   state.traitEffectHookInstalled = true;
   state.traitEffectHookFailureLogged = false;
-
   AddLog(u8"[기재JSON/효과] TraitEffect 메인 훅 설치 완료: +17AAD60 target=%p trampoline=%p",
          reinterpret_cast<void *>(target),
-         reinterpret_cast<void *>(
-             state.originalTraitEffectQuery));
+         reinterpret_cast<void *>(state.originalTraitEffectQuery));
   return true;
 }
 
@@ -1101,12 +936,10 @@ bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
   if (!cache.valid || !state.configLoaded ||
       requestedId != cache.requestedTraitId ||
       cache.matchedCustomTraitId < 71 ||
-      cache.matchedCustomTraitId > kTraitCount) {
+      cache.matchedCustomTraitId > kTraitCount)
     return false;
-  }
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   if (!gameBase || consumerReturnAddress < gameBase)
     return false;
 
@@ -1124,13 +957,11 @@ bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
     return false;
 
   const uintptr_t customRecord =
-      state.lastTableBase +
-      static_cast<uintptr_t>(cache.matchedCustomTraitId) * kTraitStride;
+      state.lastTableBase + static_cast<uintptr_t>(cache.matchedCustomTraitId) * kTraitStride;
   uint16_t recordId = 0;
   if (!ReadTraitRecordId(customRecord, recordId) ||
-      recordId != cache.matchedCustomTraitId) {
+      recordId != cache.matchedCustomTraitId)
     return false;
-  }
 
   matchedId = cache.matchedCustomTraitId;
   g_traitEffectMatchCache = {};
@@ -1147,7 +978,6 @@ int __fastcall CustomOfficerTraitQuery(void *officer, uint32_t requestedId) {
       reinterpret_cast<OfficerTraitQuery>(original)(officer, requestedId);
   if (originalResult)
     return originalResult;
-
   if (requestedId != 11)
     return 0;
 
@@ -1156,10 +986,8 @@ int __fastcall CustomOfficerTraitQuery(void *officer, uint32_t requestedId) {
   if (!FindMatchingCustomTrait(officer, 11, matchedId))
     return 0;
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-  const uintptr_t returnAddress =
-      reinterpret_cast<uintptr_t>(_ReturnAddress());
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t returnAddress = reinterpret_cast<uintptr_t>(_ReturnAddress());
   g_traitEffectMatchCache.valid = true;
   g_traitEffectMatchCache.requestedTraitId = 11;
   g_traitEffectMatchCache.matchedCustomTraitId = matchedId;
@@ -1193,22 +1021,18 @@ void *__fastcall CustomTraitDataGetter(void *dataCenter, uint32_t requestedId) {
   if (!original)
     return nullptr;
 
-  void *result =
-      reinterpret_cast<TraitDataGetter>(original)(dataCenter, requestedId);
+  void *result = reinterpret_cast<TraitDataGetter>(original)(dataCenter, requestedId);
   uint16_t matchedId = 0;
   if (!TakeMatchedBridgeId(
           requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
-          kDataBridgeSites, std::size(kDataBridgeSites), matchedId)) {
+          kDataBridgeSites, std::size(kDataBridgeSites), matchedId))
     return result;
-  }
 
-  void *custom =
-      reinterpret_cast<TraitDataGetter>(original)(dataCenter, matchedId);
+  void *custom = reinterpret_cast<TraitDataGetter>(original)(dataCenter, matchedId);
   uint16_t actualId = 0;
   if (!ReadTraitRecordId(reinterpret_cast<uintptr_t>(custom), actualId) ||
-      actualId != matchedId) {
+      actualId != matchedId)
     return result;
-  }
 
   AddLog(u8"[기재JSON/호환] 효과 데이터 ID 연결: %u -> %u",
          requestedId, matchedId);
@@ -1220,12 +1044,10 @@ bool IsValidGameObject(void *object) {
     return false;
   uintptr_t vtable = 0;
   uintptr_t validate = 0;
-  if (!ReadMemorySafe(reinterpret_cast<uintptr_t>(object),
-                      &vtable, sizeof(vtable)) ||
+  if (!ReadMemorySafe(reinterpret_cast<uintptr_t>(object), &vtable, sizeof(vtable)) ||
       !ReadMemorySafe(vtable + 0x48, &validate, sizeof(validate)) ||
-      !IsExecutableAddress(validate)) {
+      !IsExecutableAddress(validate))
     return false;
-  }
   __try {
     return reinterpret_cast<bool(__fastcall *)(void *)>(validate)(object);
   }
@@ -1255,23 +1077,19 @@ int __fastcall CustomMonthlyTraitUpdate(void *turn) {
   int updated = 0;
 
   for (uintptr_t slot = gameDataRoot + kFirstPersonOffset;
-       slot < gameDataRoot + kEndPersonOffset;
-       slot += sizeof(uintptr_t)) {
+       slot < gameDataRoot + kEndPersonOffset; slot += sizeof(uintptr_t)) {
     uintptr_t officer = 0;
     if (!ReadMemorySafe(slot, &officer, sizeof(officer)) ||
-        !IsValidGameObject(reinterpret_cast<void *>(officer))) {
+        !IsValidGameObject(reinterpret_cast<void *>(officer)))
       continue;
-    }
 
     int amount = 0;
     for (int heldSlot = 0; heldSlot < 3; ++heldSlot) {
       uintptr_t record = 0;
-      if (!ReadMemorySafe(
-              officer + 0x88 +
-                  static_cast<uintptr_t>(heldSlot) * sizeof(uintptr_t),
-              &record, sizeof(record))) {
+      if (!ReadMemorySafe(officer + 0x88 +
+                              static_cast<uintptr_t>(heldSlot) * sizeof(uintptr_t),
+                          &record, sizeof(record)))
         continue;
-      }
 
       uint16_t id = 0;
       if (!ReadTraitRecordId(record, id) || id < 71 || id > kTraitCount)
@@ -1280,9 +1098,8 @@ int __fastcall CustomMonthlyTraitUpdate(void *turn) {
       for (std::size_t effectSlot = 0; effectSlot < kEffectCount; ++effectSlot) {
         TraitEffect effect{};
         if (!ReadMemorySafe(record + kEffectOffset + effectSlot * kEffectSize,
-                            &effect, sizeof(effect))) {
+                            &effect, sizeof(effect)))
           continue;
-        }
         if (effect.type != kMonthlyEffectType)
           continue;
         int16_t signedValue = 0;
@@ -1301,9 +1118,8 @@ int __fastcall CustomMonthlyTraitUpdate(void *turn) {
         static_cast<uint64_t>(current) + static_cast<uint32_t>(amount),
         kMaximumAmount));
     if (next != current &&
-        WriteMemoryProtected(officer + 0x300, &next, sizeof(next))) {
+        WriteMemoryProtected(officer + 0x300, &next, sizeof(next)))
       ++updated;
-    }
   }
 
   if (updated)
@@ -1322,8 +1138,7 @@ int __fastcall CustomTransferTraitEvent(void *firstPerson, void *secondPerson,
   const TraitEffectMatchCache previous = g_traitEffectMatchCache;
   g_traitEffectMatchCache = {};
   uint16_t matchedId = 0;
-  if (state.configLoaded &&
-      FindMatchingCustomTrait(secondPerson, 26, matchedId)) {
+  if (state.configLoaded && FindMatchingCustomTrait(secondPerson, 26, matchedId)) {
     g_traitEffectMatchCache.valid = true;
     g_traitEffectMatchCache.requestedTraitId = 26;
     g_traitEffectMatchCache.matchedCustomTraitId = matchedId;
@@ -1343,15 +1158,13 @@ bool InstallCompatibilityHook(uintptr_t offset, const uint8_t *prologue,
   if (installed)
     return true;
 
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
   if (!gameBase)
     return false;
   const uintptr_t target = gameBase + offset;
 
   std::array<uint8_t, 8> bytes{};
-  if (prologueSize > bytes.size() ||
-      !IsExecutableAddress(target) ||
+  if (prologueSize > bytes.size() || !IsExecutableAddress(target) ||
       !ReadMemorySafe(target, bytes.data(), prologueSize) ||
       std::memcmp(bytes.data(), prologue, prologueSize) != 0) {
     if (!failureLogged) {
@@ -1384,8 +1197,7 @@ bool InstallCompatibilityHook(uintptr_t offset, const uint8_t *prologue,
     return false;
   }
 
-  if (!trampoline ||
-      !IsExecutableAddress(reinterpret_cast<uintptr_t>(trampoline))) {
+  if (!trampoline || !IsExecutableAddress(reinterpret_cast<uintptr_t>(trampoline))) {
     MH_RemoveHook(reinterpret_cast<LPVOID>(target));
     if (!failureLogged) {
       AddLog(u8"[기재JSON/호환] %s trampoline 검증 실패.", role);
@@ -1395,8 +1207,7 @@ bool InstallCompatibilityHook(uintptr_t offset, const uint8_t *prologue,
   }
 
   originalAddress = reinterpret_cast<uintptr_t>(trampoline);
-  const MH_STATUS enableStatus =
-      MH_EnableHook(reinterpret_cast<LPVOID>(target));
+  const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(target));
   if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
     MH_RemoveHook(reinterpret_cast<LPVOID>(target));
     originalAddress = 0;
@@ -1411,77 +1222,6 @@ bool InstallCompatibilityHook(uintptr_t offset, const uint8_t *prologue,
   installed = true;
   failureLogged = false;
   AddLog(u8"[기재JSON/호환] %s 패치 완료: +%llX",
-         role, static_cast<unsigned long long>(offset));
-  return true;
-}
-
-
-bool MaintainTraitEligibilityPatch(
-    uintptr_t offset, bool &active, bool &failureLogged, const char *role) {
-  const uintptr_t gameBase =
-      reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-  if (!gameBase)
-    return false;
-
-  const uintptr_t address = gameBase + offset;
-  std::array<uint8_t, sizeof(kTraitEligibilityExpected)> bytes{};
-  if (!ReadMemorySafe(address, bytes.data(), bytes.size())) {
-    if (!failureLogged) {
-      AddLog(u8"[기재JSON/호환] %s 메모리 읽기 실패: +%llX",
-             role, static_cast<unsigned long long>(offset));
-      failureLogged = true;
-    }
-    active = false;
-    return false;
-  }
-
-  for (std::size_t i = 0; i < bytes.size(); ++i) {
-    if (i == 2)
-      continue;
-    if (bytes[i] != kTraitEligibilityExpected[i]) {
-      if (!failureLogged) {
-        AddLog(u8"[기재JSON/호환] %s 원본 바이트 불일치: +%llX (패치 보류)",
-               role, static_cast<unsigned long long>(offset));
-        failureLogged = true;
-      }
-      active = false;
-      return false;
-    }
-  }
-
-  if (bytes[2] == 0x01) {
-    active = true;
-    failureLogged = false;
-    return true;
-  }
-
-  if (bytes[2] != 0x95) {
-    if (!failureLogged) {
-      AddLog(u8"[기재JSON/호환] %s 임계값 상태 미확인: +%llX value=0x%02X",
-             role, static_cast<unsigned long long>(offset),
-             static_cast<unsigned>(bytes[2]));
-      failureLogged = true;
-    }
-    active = false;
-    return false;
-  }
-
-  const bool wasActive = active;
-  if (!WriteExecutableByteProtected(address + 2, 0x01)) {
-    if (!failureLogged) {
-      AddLog(u8"[기재JSON/호환] %s 적용 실패: +%llX",
-             role, static_cast<unsigned long long>(offset));
-      failureLogged = true;
-    }
-    active = false;
-    return false;
-  }
-
-  active = true;
-  failureLogged = false;
-  AddLog(wasActive
-             ? u8"[기재JSON/호환] %s 복원 감지 -> 재적용: +%llX"
-             : u8"[기재JSON/호환] %s 적용 완료: +%llX",
          role, static_cast<unsigned long long>(offset));
   return true;
 }
@@ -1522,17 +1262,6 @@ void EnsureExtendedTraitCompatibility() {
       reinterpret_cast<void *>(&CustomTransferTraitEvent),
       state.originalTransferEvent, state.transferHookInstalled,
       state.transferHookFailureLogged, u8"특수 연출 연결");
-
-  MaintainTraitEligibilityPatch(
-      kTraitEligibilityPatchAOffset,
-      state.eligibilityPatchAActive,
-      state.eligibilityPatchAFailureLogged,
-      u8"기재 사용 조건 A");
-  MaintainTraitEligibilityPatch(
-      kTraitEligibilityPatchBOffset,
-      state.eligibilityPatchBActive,
-      state.eligibilityPatchBFailureLogged,
-      u8"기재 사용 조건 B");
 }
 
 bool ReadJsonIntValue(const std::string &text, const char *field, int &out) {
@@ -1623,10 +1352,8 @@ bool ParseTraitLine(const std::string &line, int &index, TraitConfigEntry &entry
   int id = 0;
   if (!ReadJsonIntValue(line, "index", index) ||
       !ReadJsonIntValue(line, "id", id) ||
-      index < 0 || index >= kTraitCount ||
-      id < 1 || id > kTraitCount) {
+      index < 0 || index >= kTraitCount || id < 1 || id > kTraitCount)
     return false;
-  }
 
   const std::size_t effectsKey = line.find("\"effects\"");
   const std::size_t arrayStart = line.find('[', effectsKey);
@@ -1652,11 +1379,9 @@ bool ParseTraitLine(const std::string &line, int &index, TraitConfigEntry &entry
     if (!ReadJsonIntValue(obj, "type", type) ||
         !ReadJsonIntValue(obj, "value", value) ||
         !ReadJsonIntValue(obj, "param", param) ||
-        type < 0 || type > 0xFFFF ||
-        value < 0 || value > 0xFFFF ||
-        param < 0 || param > 0xFFFF) {
+        type < 0 || type > 0xFFFF || value < 0 || value > 0xFFFF ||
+        param < 0 || param > 0xFFFF)
       return false;
-    }
 
     parsed.effects[slot].type = static_cast<uint16_t>(type);
     parsed.effects[slot].value = static_cast<uint16_t>(value);
@@ -1728,8 +1453,7 @@ std::filesystem::path ResolveConfigPath() {
   const DWORD len = GetModuleFileNameW(g_hModule, modulePath, MAX_PATH);
   if (len > 0 && len < MAX_PATH) {
     std::filesystem::path p =
-        std::filesystem::path(modulePath).parent_path() /
-        L"san8r_traits_config.json";
+        std::filesystem::path(modulePath).parent_path() / L"san8r_traits_config.json";
     std::error_code ec;
     if (std::filesystem::exists(p, ec) && !ec)
       return p;
@@ -1758,12 +1482,9 @@ bool LoadConfig(bool &changed) {
   if (!path.empty()) {
     writeTime = std::filesystem::last_write_time(path, ec);
     haveWriteTime = !ec;
-    if (state.configLoaded &&
-        path == state.configPath &&
-        haveWriteTime && state.hasWriteTime &&
-        writeTime == state.configWriteTime) {
+    if (state.configLoaded && path == state.configPath &&
+        haveWriteTime && state.hasWriteTime && writeTime == state.configWriteTime)
       return true;
-    }
   } else if (state.configLoaded && state.configFromEmbedded) {
     return true;
   }
@@ -1771,9 +1492,7 @@ bool LoadConfig(bool &changed) {
   auto parseText = [&](const std::string &jsonText,
                        std::array<TraitConfigEntry, kTraitCount> &traits,
                        std::array<TraitMetaEntry, kTraitCount> &meta,
-                       int &traitCount,
-                       int &customCount,
-                       int &sentinel) -> bool {
+                       int &traitCount, int &customCount, int &sentinel) -> bool {
     traits = {};
     meta = {};
     traitCount = 0;
@@ -1841,9 +1560,8 @@ bool LoadConfig(bool &changed) {
 
   if (!path.empty()) {
     loaded = ReadUtf8TextFile(path, jsonText);
-    if (!loaded) {
+    if (!loaded)
       AddLog(u8"[기재JSON] 외부 설정 읽기 실패. 내장 기본값으로 전환합니다.");
-    }
   }
 
   if (!loaded) {
@@ -1913,21 +1631,17 @@ uint32_t ResolveTraitsPointerOffset() {
     return state.traitsPointerOffset;
 
   MODULEINFO mi{};
-  if (!GetModuleInformation(GetCurrentProcess(),
-                            reinterpret_cast<HMODULE>(exeBase),
-                            &mi, sizeof(mi))) {
+  if (!GetModuleInformation(GetCurrentProcess(), reinterpret_cast<HMODULE>(exeBase),
+                            &mi, sizeof(mi)))
     return state.traitsPointerOffset;
-  }
 
   const std::string pattern =
       "48 8B ?? ?? ?? ?? ?? ?? 48 85 ?? 74 ?? 48 8B ?? 48 8B ?? "
       "FF ?? ?? 84 ?? 74 ?? 0F B7 ?? ?? 66 ?? ?? ?? ?? ?? ?? 48 8B";
 
-  const uintptr_t found =
-      FindPattern(exeBase, exeBase + mi.SizeOfImage, pattern);
+  const uintptr_t found = FindPattern(exeBase, exeBase + mi.SizeOfImage, pattern);
   if (found && IsValidPtr(found + 4, sizeof(uint32_t))) {
-    const uint32_t candidate =
-        *reinterpret_cast<const uint32_t *>(found + 4);
+    const uint32_t candidate = *reinterpret_cast<const uint32_t *>(found + 4);
     if (candidate > 0x1000 && candidate < 0x10000000)
       state.traitsPointerOffset = candidate;
   }
@@ -1935,34 +1649,28 @@ uint32_t ResolveTraitsPointerOffset() {
   AddLog(u8"[기재JSON] 기재 테이블 포인터 오프셋: 0x%X%s",
          state.traitsPointerOffset,
          state.traitsPointerOffset == kTraitsPointerOffsetFallback
-             ? u8" (fallback)"
-             : u8" (AOB)");
+             ? u8" (fallback)" : u8" (AOB)");
   return state.traitsPointerOffset;
 }
 
 bool IsEffectTableReady(uintptr_t tableBase) {
-  if (!tableBase ||
-      !IsValidPtr(tableBase + kTraitStride,
-                  kTraitCount * kTraitStride)) {
+  if (!tableBase || !IsValidPtr(tableBase + kTraitStride,
+                                kTraitCount * kTraitStride))
     return false;
-  }
 
   __try {
-    const uint16_t firstId =
-        *reinterpret_cast<const uint16_t *>(
-            tableBase + kTraitStride + kTraitIdOffset);
+    const uint16_t firstId = *reinterpret_cast<const uint16_t *>(
+        tableBase + kTraitStride + kTraitIdOffset);
     if (firstId != 1)
       return false;
 
     int nonZeroTypes = 0;
     const int sampleCount = 30;
     for (int i = 0; i < sampleCount; ++i) {
-      const uintptr_t record =
-          tableBase + static_cast<uintptr_t>(i + 1) * kTraitStride;
+      const uintptr_t record = tableBase + static_cast<uintptr_t>(i + 1) * kTraitStride;
       for (std::size_t e = 0; e < kEffectCount; ++e) {
-        const uint16_t type =
-            *reinterpret_cast<const uint16_t *>(
-                record + kEffectOffset + e * kEffectSize);
+        const uint16_t type = *reinterpret_cast<const uint16_t *>(
+            record + kEffectOffset + e * kEffectSize);
         if (type == 0)
           continue;
         if (type < 102 || type > 194)
@@ -2005,19 +1713,15 @@ bool ConfigEntryMatches(uintptr_t tableBase, int index) {
   if (index < 0 || index >= kTraitCount || !state.traits[index].present)
     return true;
 
-  const uintptr_t record =
-      tableBase + static_cast<uintptr_t>(index + 1) * kTraitStride;
-
+  const uintptr_t record = tableBase + static_cast<uintptr_t>(index + 1) * kTraitStride;
   __try {
-    const uint16_t id =
-        *reinterpret_cast<const uint16_t *>(record + kTraitIdOffset);
+    const uint16_t id = *reinterpret_cast<const uint16_t *>(record + kTraitIdOffset);
     if (id != static_cast<uint16_t>(state.traits[index].id))
       return false;
 
-    return std::memcmp(
-               reinterpret_cast<const void *>(record + kEffectOffset),
-               state.traits[index].effects.data(),
-               kEffectCount * sizeof(TraitEffect)) == 0;
+    return std::memcmp(reinterpret_cast<const void *>(record + kEffectOffset),
+                       state.traits[index].effects.data(),
+                       kEffectCount * sizeof(TraitEffect)) == 0;
   }
   __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
@@ -2031,15 +1735,12 @@ bool ApplyConfig(uintptr_t tableBase) {
 
   constexpr std::size_t kRegionSize = kTraitCount * kTraitStride;
   const uintptr_t firstRecord = tableBase + kTraitStride;
-
   if (!IsValidPtr(firstRecord, kRegionSize))
     return false;
 
   std::array<std::array<uint8_t, kTraitStride>, kTraitCount> records{};
-
   __try {
-    std::memcpy(records.data(),
-                reinterpret_cast<const void *>(firstRecord),
+    std::memcpy(records.data(), reinterpret_cast<const void *>(firstRecord),
                 kRegionSize);
   }
   __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -2053,13 +1754,11 @@ bool ApplyConfig(uintptr_t tableBase) {
       int source = meta.cloneSrc;
       if (source < 0 || source >= kTraitCount || source == i)
         source = kDefaultCloneSource;
-
       if (source >= 0 && source < kTraitCount && source != i)
         records[i] = records[source];
     }
 
-    if (meta.present &&
-        meta.bgTrait >= 0 && meta.bgTrait < kTraitCount &&
+    if (meta.present && meta.bgTrait >= 0 && meta.bgTrait < kTraitCount &&
         meta.bgTrait != i) {
       std::memcpy(records[i].data() + kMetadataOffset,
                   records[meta.bgTrait].data() + kMetadataOffset,
@@ -2079,32 +1778,28 @@ bool ApplyConfig(uintptr_t tableBase) {
   }
 
   DWORD oldProtect = 0;
-  if (!VirtualProtect(reinterpret_cast<void *>(firstRecord),
-                      kRegionSize, PAGE_READWRITE, &oldProtect)) {
+  if (!VirtualProtect(reinterpret_cast<void *>(firstRecord), kRegionSize,
+                      PAGE_READWRITE, &oldProtect))
     return false;
-  }
 
   bool ok = true;
   __try {
-    std::memcpy(reinterpret_cast<void *>(firstRecord),
-                records.data(),
-                kRegionSize);
+    std::memcpy(reinterpret_cast<void *>(firstRecord), records.data(), kRegionSize);
   }
   __except (EXCEPTION_EXECUTE_HANDLER) {
     ok = false;
   }
 
   DWORD unused = 0;
-  VirtualProtect(reinterpret_cast<void *>(firstRecord),
-                 kRegionSize, oldProtect, &unused);
+  VirtualProtect(reinterpret_cast<void *>(firstRecord), kRegionSize,
+                 oldProtect, &unused);
 
   if (!ok)
     return false;
 
   if (state.sentinelIndex >= 0 &&
-      !ConfigEntryMatches(tableBase, state.sentinelIndex)) {
+      !ConfigEntryMatches(tableBase, state.sentinelIndex))
     return false;
-  }
 
   return true;
 }
@@ -2124,9 +1819,8 @@ void TickTraitConfigRuntime() {
   if (!externalVersionDllChecked) {
     externalVersionDllChecked = true;
     externalVersionDllDetected = HasExternalGameVersionDll();
-    if (externalVersionDllDetected) {
+    if (externalVersionDllDetected)
       AddLog(u8"[기재JSON] 게임 폴더의 외부 version.dll 감지. S8RCheats 내장 기재 런타임을 사용하지 않습니다.");
-    }
   }
   if (externalVersionDllDetected)
     return;
@@ -2142,7 +1836,6 @@ void TickTraitConfigRuntime() {
 
   if (!EnsureCustomNameHook())
     return;
-
   if (!EnsureCustomDescHook())
     return;
 
@@ -2163,8 +1856,7 @@ void TickTraitConfigRuntime() {
     state.applyPending = true;
   }
 
-  if (!state.applyPending &&
-      state.sentinelIndex >= 0 &&
+  if (!state.applyPending && state.sentinelIndex >= 0 &&
       !ConfigEntryMatches(tableBase, state.sentinelIndex)) {
     AddLog(u8"[기재JSON] 기재 효과 초기화 감지(index %d). 재적용합니다.",
            state.sentinelIndex);
