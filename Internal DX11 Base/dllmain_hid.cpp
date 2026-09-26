@@ -54,6 +54,15 @@
 extern DWORD WINAPI MainThread_Initialize(LPVOID dwModule);
 namespace DX11Base { void Shutdown(bool isTerminating); }
 
+static uint8_t ReadTraitDiagnosticByte(uintptr_t address) {
+    __try {
+        return *reinterpret_cast<const uint8_t *>(address);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0xFE;
+    }
+}
+
 static DWORD WINAPI TraitCompatibilityDiagnosticThread(LPVOID) {
     Sleep(3000);
 
@@ -73,21 +82,15 @@ static DWORD WINAPI TraitCompatibilityDiagnosticThread(LPVOID) {
     uint8_t eligibilityB = 0xFF;
     const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
     if (gameBase) {
-        __try {
-            eligibilityA = *reinterpret_cast<const uint8_t *>(gameBase + 0x17C03E9);
-            eligibilityB = *reinterpret_cast<const uint8_t *>(gameBase + 0x17C0431);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            eligibilityA = 0xFE;
-            eligibilityB = 0xFE;
-        }
+        eligibilityA = ReadTraitDiagnosticByte(gameBase + 0x17C03E9);
+        eligibilityB = ReadTraitDiagnosticByte(gameBase + 0x17C0431);
     }
 
-    AddLog(u8"[기재호환DBG] build=20260926-01 version.dll file=%d loaded=%d eligibilityA=0x%02X eligibilityB=0x%02X",
-           versionFileExists ? 1 : 0,
-           versionLoaded ? 1 : 0,
-           static_cast<unsigned>(eligibilityA),
-           static_cast<unsigned>(eligibilityB));
+    DX11Base::AddLog(u8"[기재호환DBG] build=20260926-02 version.dll file=%d loaded=%d eligibilityA=0x%02X eligibilityB=0x%02X",
+                     versionFileExists ? 1 : 0,
+                     versionLoaded ? 1 : 0,
+                     static_cast<unsigned>(eligibilityA),
+                     static_cast<unsigned>(eligibilityB));
     return 0;
 }
 
