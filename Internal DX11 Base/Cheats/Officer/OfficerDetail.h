@@ -1,4 +1,6 @@
 #pragma once
+#define DX11BASE_OFFICER_DETAIL_HEADER_INCLUDED 1
+
 #include "../../Framework/imgui.h"
 #include "../../pch.h"
 #include <string>
