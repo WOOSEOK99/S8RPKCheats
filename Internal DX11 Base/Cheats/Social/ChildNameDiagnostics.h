@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 namespace DX11Base {
 namespace ChildNameDiagnostics {
@@ -20,16 +21,19 @@ static constexpr uintptr_t kPregnancySlotStride = 0x28;
 static constexpr uintptr_t kPregnancyChildPtrOffset = 0x10;
 static constexpr size_t kOfficerRecordSize = 0x3D0;
 
+// 이름 레코드 실측 구조
+// 성 0x16 bytes + 명 0x16 bytes + 자 0x16 bytes = 0x42 bytes / officer
+static constexpr size_t kNamePartSize = 0x16;
+static constexpr size_t kNameRecordSize = 0x42;
+
+// 두 번의 독립 실행에서 ID4004 성 슬롯이 임신 테이블 기준 정확히 +0x1D6CB6로 동일했다.
+// 4004 = base + (4004 - 1) * 0x42 이므로 전체 이름 테이블 시작 후보는 +0x1964B0.
+static constexpr uintptr_t kNameTableFromPregnancyTable = 0x1964B0;
+
 // 테스트 입력: 성=가나 / 명=다라 / 자=마바
 static const wchar_t kSurnameMarker[] = L"가나";
 static const wchar_t kGivenMarker[] = L"다라";
 static const wchar_t kStyleMarker[] = L"마바";
-
-// 이번 실측에서 성/명/자가 각각 0x16 간격으로 한 블록에 저장됐다.
-static constexpr size_t kNamePartStride = 0x16;
-static constexpr uintptr_t kSearchRadius = 0x400000; // 임신 테이블 기준 ±4MB만 탐색
-static constexpr size_t kChunkSize = 0x10000;
-static constexpr size_t kChunkOverlap = 0x40;
 
 static bool SafeReadMem(uintptr_t addr, void* out, size_t size) {
   if (!out || size == 0 || addr <= 0x10000)
@@ -75,87 +79,131 @@ static bool IsChildLinkedInPregnancySlot(uint16_t childId) {
   return false;
 }
 
-static void DumpNameBlock(uintptr_t surnameAddr) {
-  const uintptr_t start = surnameAddr >= 0x20 ? surnameAddr - 0x20 : surnameAddr;
-  std::array<uint8_t, 0x80> raw{};
-  if (!SafeReadMem(start, raw.data(), raw.size()))
-    return;
+static std::string WideFixedToUtf8(const wchar_t* src, size_t wcharCount) {
+  if (!src || wcharCount == 0)
+    return std::string();
 
-  AddLog(u8"[자녀이름DBG] -- 이름 블록 주변 덤프 start=%p surname=%p --",
-         (void*)start, (void*)surnameAddr);
-  for (size_t off = 0; off < raw.size(); off += 0x10) {
-    uint16_t w[8]{};
-    memcpy(w, raw.data() + off, sizeof(w));
-    AddLog(u8"[자녀이름DBG] NAMEBLK +0x%02zX: %04X %04X %04X %04X %04X %04X %04X %04X",
-           off,
-           (unsigned)w[0], (unsigned)w[1], (unsigned)w[2], (unsigned)w[3],
-           (unsigned)w[4], (unsigned)w[5], (unsigned)w[6], (unsigned)w[7]);
-  }
+  size_t len = 0;
+  while (len < wcharCount && src[len] != L'\0')
+    ++len;
+  if (len == 0)
+    return std::string();
+
+  const int needed = WideCharToMultiByte(CP_UTF8, 0, src, (int)len,
+                                          nullptr, 0, nullptr, nullptr);
+  if (needed <= 0)
+    return std::string();
+
+  std::string out((size_t)needed, '\0');
+  WideCharToMultiByte(CP_UTF8, 0, src, (int)len,
+                      &out[0], needed, nullptr, nullptr);
+  return out;
 }
 
-static bool MatchesNameBlock(const uint8_t* p, size_t available) {
-  const size_t markerBytes = 2 * sizeof(wchar_t);
-  const size_t needed = kNamePartStride * 2 + markerBytes;
-  if (!p || available < needed)
-    return false;
+struct NameRecordText {
+  bool readable = false;
+  std::string surname;
+  std::string given;
+  std::string style;
+};
 
-  return memcmp(p, kSurnameMarker, markerBytes) == 0 &&
-         memcmp(p + kNamePartStride, kGivenMarker, markerBytes) == 0 &&
-         memcmp(p + kNamePartStride * 2, kStyleMarker, markerBytes) == 0;
+static NameRecordText ReadNameRecord(uintptr_t recordAddr) {
+  NameRecordText result{};
+  std::array<uint8_t, kNameRecordSize> raw{};
+  if (!SafeReadMem(recordAddr, raw.data(), raw.size()))
+    return result;
+
+  wchar_t surname[12]{};
+  wchar_t given[12]{};
+  wchar_t style[12]{};
+  memcpy(surname, raw.data(), kNamePartSize);
+  memcpy(given, raw.data() + kNamePartSize, kNamePartSize);
+  memcpy(style, raw.data() + kNamePartSize * 2, kNamePartSize);
+
+  result.readable = true;
+  result.surname = WideFixedToUtf8(surname, 11);
+  result.given = WideFixedToUtf8(given, 11);
+  result.style = WideFixedToUtf8(style, 11);
+  return result;
 }
 
-static uintptr_t FindNameBlockNearPregnancyTable() {
+static uintptr_t GetNameTableBase() {
   const uintptr_t gameBase = GetGameBase();
   if (gameBase <= 0x10000)
     return 0;
+  const uintptr_t pregnancyTable = gameBase + kPregnancyTableOffset;
+  return pregnancyTable + kNameTableFromPregnancyTable;
+}
 
-  const uintptr_t tableBase = gameBase + kPregnancyTableOffset;
-  const uintptr_t start = tableBase > kSearchRadius ? tableBase - kSearchRadius : 0x10000;
-  const uintptr_t end = tableBase + kSearchRadius;
+static uintptr_t GetNameRecordAddress(uint16_t officerId) {
+  const uintptr_t base = GetNameTableBase();
+  if (base <= 0x10000 || officerId == 0)
+    return 0;
+  return base + (uintptr_t)(officerId - 1) * kNameRecordSize;
+}
 
-  AddLog(u8"[자녀이름DBG] 제한 검색 시작: table=%p range=%p~%p (8MB)",
-         (void*)tableBase, (void*)start, (void*)end);
-
-  std::array<uint8_t, kChunkSize> buffer{};
-  uintptr_t cur = start;
-  while (cur < end) {
-    const size_t remain = (size_t)(end - cur);
-    const size_t want = remain < kChunkSize ? remain : kChunkSize;
-    SIZE_T got = 0;
-
-    if (ReadProcessMemory(GetCurrentProcess(), (LPCVOID)cur,
-                          buffer.data(), want, &got) != FALSE && got >= 0x30) {
-      // 정상 UTF-16 정렬만 검사. 같은 블록의 성/명/자 3개가 모두 맞아야 히트로 인정.
-      for (size_t i = 0; i + 0x30 <= got; i += 2) {
-        if (!MatchesNameBlock(buffer.data() + i, got - i))
-          continue;
-
-        const uintptr_t hit = cur + i;
-        AddLog(u8"[자녀이름DBG] >>> 이름 블록 발견: surname=%p given=%p style=%p tableDelta=%lld",
-               (void*)hit,
-               (void*)(hit + kNamePartStride),
-               (void*)(hit + kNamePartStride * 2),
-               (long long)(hit - tableBase));
-        DumpNameBlock(hit);
-        return hit;
-      }
-    }
-
-    if (want <= kChunkOverlap)
-      break;
-    cur += want - kChunkOverlap;
+static bool MarkerMatches4004(uintptr_t recordAddr) {
+  wchar_t surname[3]{};
+  wchar_t given[3]{};
+  wchar_t style[3]{};
+  if (!SafeReadMem(recordAddr, surname, 2 * sizeof(wchar_t)) ||
+      !SafeReadMem(recordAddr + kNamePartSize, given, 2 * sizeof(wchar_t)) ||
+      !SafeReadMem(recordAddr + kNamePartSize * 2, style, 2 * sizeof(wchar_t))) {
+    return false;
   }
 
-  AddLog(u8"[자녀이름DBG] 제한 검색 범위에서 이름 블록을 찾지 못함");
-  return 0;
+  return wmemcmp(surname, kSurnameMarker, 2) == 0 &&
+         wmemcmp(given, kGivenMarker, 2) == 0 &&
+         wmemcmp(style, kStyleMarker, 2) == 0;
+}
+
+static void LogNameRecord(uint16_t officerId) {
+  const uintptr_t addr = GetNameRecordAddress(officerId);
+  const NameRecordText rec = ReadNameRecord(addr);
+  if (!rec.readable) {
+    AddLog(u8"[자녀이름DBG] NAMETABLE ID=%u addr=%p READ_FAIL",
+           (unsigned)officerId, (void*)addr);
+    return;
+  }
+
+  AddLog(u8"[자녀이름DBG] NAMETABLE ID=%u addr=%p 성='%s' 명='%s' 자='%s' 합='%s%s'",
+         (unsigned)officerId, (void*)addr,
+         rec.surname.c_str(), rec.given.c_str(), rec.style.c_str(),
+         rec.surname.c_str(), rec.given.c_str());
+}
+
+static void ValidateNameTable() {
+  const uintptr_t pregnancyTable = GetGameBase() + kPregnancyTableOffset;
+  const uintptr_t nameBase = GetNameTableBase();
+  const uintptr_t id4004Addr = GetNameRecordAddress(kTargetChildId);
+
+  AddLog(u8"[자녀이름DBG] ===== 이름 테이블 공식 검증 =====");
+  AddLog(u8"[자녀이름DBG] pregnancyTable=%p / nameBase=%p / baseDelta=0x%llX",
+         (void*)pregnancyTable, (void*)nameBase,
+         (unsigned long long)(nameBase - pregnancyTable));
+  AddLog(u8"[자녀이름DBG] ID4004 계산주소=%p / deltaFromTable=0x%llX / marker=%s",
+         (void*)id4004Addr,
+         (unsigned long long)(id4004Addr - pregnancyTable),
+         MarkerMatches4004(id4004Addr) ? "MATCH" : "MISMATCH");
+
+  // 현재 세이브에서 4001~4004는 생성 완료, 4005는 아직 비어 있으므로
+  // 연속 0x42 레코드 가설을 검증하기 좋은 구간이다.
+  for (uint16_t id = 4001; id <= 4005; ++id)
+    LogNameRecord(id);
+
+  // 역사/현재 등장 장수 쪽에도 같은 테이블이 적용되는지 샘플 확인.
+  const uint16_t samples[] = {1, 163, 565, 792, 952};
+  for (uint16_t id : samples)
+    LogNameRecord(id);
+
+  AddLog(u8"[자녀이름DBG] ===== 이름 테이블 공식 검증 종료 =====");
 }
 
 struct MonitorState {
   bool armed = false;
   bool completed = false;
-  bool searched = false;
+  bool validated = false;
   uintptr_t record = 0;
-  uintptr_t nameBlock = 0;
   ULONGLONG lastPollMs = 0;
   ULONGLONG linkedMs = 0;
 };
@@ -178,13 +226,12 @@ static bool ArmBeforeBirth() {
 
   g_state.armed = true;
   g_state.completed = false;
-  g_state.searched = false;
+  g_state.validated = false;
   g_state.record = record;
-  g_state.nameBlock = 0;
   g_state.lastPollMs = 0;
   g_state.linkedMs = 0;
 
-  AddLog(u8"[자녀이름DBG] ===== ID4004 이름 블록 진단 대기: record=%p birth=%u =====",
+  AddLog(u8"[자녀이름DBG] ===== ID4004 이름 테이블 검증 대기: record=%p birth=%u =====",
          (void*)record, (unsigned)birth);
   AddLog(u8"[자녀이름DBG] 테스트 입력값: 성=가나 / 명=다라 / 자=마바");
   return true;
@@ -199,37 +246,19 @@ static void Poll() {
   const bool linked = IsChildLinkedInPregnancySlot(kTargetChildId);
   if (linked && g_state.linkedMs == 0) {
     g_state.linkedMs = now;
-    AddLog(u8"[자녀이름DBG] childPtr=4004 연결 감지. 제한된 이름 블록 검색을 예약합니다.");
+    AddLog(u8"[자녀이름DBG] childPtr=4004 연결 감지. 스캔 없이 이름 테이블 공식을 검증합니다.");
   }
 
   if (g_state.linkedMs == 0)
     return;
 
-  if (!g_state.searched && now - g_state.linkedMs >= 250) {
-    g_state.nameBlock = FindNameBlockNearPregnancyTable();
-    g_state.searched = true;
+  if (!g_state.validated && now - g_state.linkedMs >= 250) {
+    ValidateNameTable();
+    g_state.validated = true;
   }
 
-  // 블록을 찾았다면 1.5초 뒤 같은 주소에 이름이 그대로 남는지도 확인한다.
-  if (g_state.searched && now - g_state.linkedMs >= 1750) {
-    if (g_state.nameBlock != 0) {
-      wchar_t surname[3]{};
-      wchar_t given[3]{};
-      wchar_t style[3]{};
-      const bool ok =
-          SafeReadMem(g_state.nameBlock, surname, 2 * sizeof(wchar_t)) &&
-          SafeReadMem(g_state.nameBlock + kNamePartStride, given, 2 * sizeof(wchar_t)) &&
-          SafeReadMem(g_state.nameBlock + kNamePartStride * 2, style, 2 * sizeof(wchar_t));
-      AddLog(u8"[자녀이름DBG] 이름 블록 지속성 확인: addr=%p result=%s",
-             (void*)g_state.nameBlock,
-             (ok && wmemcmp(surname, kSurnameMarker, 2) == 0 &&
-                    wmemcmp(given, kGivenMarker, 2) == 0 &&
-                    wmemcmp(style, kStyleMarker, 2) == 0)
-                 ? "STILL_VALID"
-                 : "CHANGED_OR_GONE");
-    }
-
-    AddLog(u8"[자녀이름DBG] ===== ID4004 이름 블록 진단 종료 =====");
+  if (g_state.validated && now - g_state.linkedMs >= 700) {
+    AddLog(u8"[자녀이름DBG] ===== ID4004 이름 테이블 진단 종료 =====");
     g_state.armed = false;
     g_state.completed = true;
   }
