@@ -1,6 +1,7 @@
 #include "SkillCountManager.h"
 #include "../../pch.h"
 #include "../../showlog.h"
+#include "../../PerformanceDiagnostics.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -12,6 +13,7 @@ namespace DX11Base {
     extern HMODULE g_hModule;
 
     void SaveSkillCounts() {
+        PerfScope perfScope(PerfMetric::SkillCountSave);
         std::lock_guard<std::mutex> lock(g_skillCountMutex);
         char path[MAX_PATH];
         if (!GetModuleFileNameA(g_hModule, path, MAX_PATH)) return;
