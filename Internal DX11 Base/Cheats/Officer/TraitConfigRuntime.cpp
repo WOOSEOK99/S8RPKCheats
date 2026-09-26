@@ -2236,9 +2236,10 @@ void TickTraitConfigRuntime() {
     }
   }
 
-  // 설치 실패 시에도 다음 tick에서 다시 시도합니다.
-  if (EnsureTraitEffectHook())
-    EnsureExtendedTraitCompatibility();
+  // +17AAD60 메인 효과 커스텀 fallback은 사용하지 않습니다.
+  // 진단에서 이 훅을 OFF 했을 때와 동일하게 원본 게임 판정만 유지하고,
+  // 나머지 검증된 호환 경로는 계속 설치합니다.
+  EnsureExtendedTraitCompatibility();
 }
 
 } // namespace DX11Base
