@@ -323,8 +323,6 @@ const wchar_t *__fastcall CustomTraitDescMapGetter(
     void *context, int traitId, uint8_t kind) {
   RuntimeState &state = State();
 
-  // version.dll과 동일하게 반드시 원본을 먼저 호출합니다.
-  // 원본 내부 상태 갱신/참조 처리를 건너뛰면 목록 종료 시 정리 경로가 멎을 수 있습니다.
   const uintptr_t original = state.originalDescMapGetter;
   if (original) {
     const wchar_t *originalResult =
@@ -334,8 +332,6 @@ const wchar_t *__fastcall CustomTraitDescMapGetter(
       return originalResult;
   }
 
-  // version.dll descmap fallback 범위는 ID 201~300.
-  // 우리 JSON은 254까지이므로 201~254만 사용자 설명을 반환합니다.
   if (traitId < 201 || traitId > kTraitCount)
     return L"";
 
@@ -346,8 +342,6 @@ const wchar_t *__fastcall CustomTraitDescMapGetter(
   if (!custom || custom[0] == L'\0')
     return L"";
 
-  // version.dll은 고정 포인터를 직접 반환하지 않고 TLS scratch buffer에 복사합니다.
-  // kind==2: 최대 0x7FE wchar, 일반: 최대 0xFE wchar.
   thread_local std::array<wchar_t, 0x800> formatBuffer{};
   thread_local std::array<wchar_t, 0x100> normalBuffer{};
 
@@ -414,7 +408,6 @@ const wchar_t *AllocateStableFormatWideString(const std::string &utf8) {
   if (!Utf8ToWide(utf8, wide) || wide.empty())
     return nullptr;
 
-  // version.dll descmap은 kind==2 경로에서 '%'를 '%%'로 복제한 문자열을 사용합니다.
   std::wstring escaped;
   escaped.reserve(wide.size() + 8);
   for (wchar_t ch : wide) {
@@ -464,8 +457,6 @@ bool PublishNativeTexts(
     }
   }
 
-  // 게임 UI가 이전 반환 문자열 포인터를 보유할 수 있으므로 이전 VirtualAlloc 문자열은
-  // 즉시 해제하지 않고 새 포인터 배열만 교체합니다.
   state.nativeNamePtrs = nextNames;
   state.nativeDescPtrs = nextDescs;
   state.nativeDescFormatPtrs = nextFormatDescs;
@@ -507,8 +498,6 @@ bool EnsureCustomNameHook() {
     return false;
   }
 
-  // kiero가 DX11 초기화 시 MinHook을 이미 초기화하지만,
-  // 호출 순서 차이에 대비해 여기서도 안전하게 초기화를 보장합니다.
   const MH_STATUS initStatus = MH_Initialize();
   if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED) {
     if (!state.nameHookFailureLogged) {
@@ -754,7 +743,6 @@ bool SyncCustomDescTextTables() {
         (normalTableEnd + 0xF) &
         ~static_cast<uintptr_t>(0xF);
 
-  // version.dll은 normal buffer를 format 영역보다 앞쪽에 둡니다.
   if (normalBuffer + 0x400 > formatBuffer)
     return false;
 
@@ -894,34 +882,22 @@ bool ReadTraitEffectType(uintptr_t record, std::size_t slot, uint16_t &type) {
 }
 
 bool HasMatchingEffectType(uintptr_t customRecord, uintptr_t requestedRecord) {
-  std::array<uint16_t, kEffectCount> requestedTypes{};
-  std::size_t requestedCount = 0;
-
-  for (std::size_t i = 0; i < kEffectCount; ++i) {
-    uint16_t type = 0;
-    if (!ReadTraitEffectType(requestedRecord, i, type))
-      return false;
-    if (type != 0)
-      requestedTypes[requestedCount++] = type;
-  }
-
-  if (requestedCount == 0)
+  if (customRecord < 0x10000 || requestedRecord < 0x10000)
     return false;
 
-  for (std::size_t i = 0; i < kEffectCount; ++i) {
-    uint16_t customType = 0;
-    if (!ReadTraitEffectType(customRecord, i, customType))
-      return false;
-    if (customType == 0)
-      continue;
-
-    for (std::size_t j = 0; j < requestedCount; ++j) {
-      if (customType == requestedTypes[j])
-        return true;
-    }
+  std::array<TraitEffect, kEffectCount> customEffects{};
+  std::array<TraitEffect, kEffectCount> requestedEffects{};
+  if (!ReadMemorySafe(customRecord + kEffectOffset,
+                      customEffects.data(), sizeof(customEffects)) ||
+      !ReadMemorySafe(requestedRecord + kEffectOffset,
+                      requestedEffects.data(), sizeof(requestedEffects))) {
+    return false;
   }
 
-  return false;
+  // ID 기반 특수 이벤트 호환은 원본 기재의 6개 효과 슬롯이 완전히 같을 때만 인정합니다.
+  // 일부 type만 겹치는 경우, 또는 value/param이 하나라도 다르면 같은 기재가 아닙니다.
+  return std::memcmp(customEffects.data(), requestedEffects.data(),
+                     sizeof(customEffects)) == 0;
 }
 
 bool FindMatchingCustomTrait(
@@ -963,7 +939,6 @@ bool FindMatchingCustomTrait(
     if (!ReadTraitRecordId(heldRecord, heldId))
       continue;
 
-    // version.dll은 71~300을 대상으로 하지만 현재 JSON/런타임 테이블은 254까지 사용합니다.
     if (heldId < 71 || heldId > kTraitCount)
       continue;
 
@@ -1103,20 +1078,18 @@ struct TraitBridgeSite {
   uint16_t requestedId;
 };
 
-// These pairs are direct call/return sites in the same SAN8RPK.exe build.
-// The first call checks the base trait; the second consumes that trait ID.
 constexpr TraitBridgeSite kMessageBridgeSites[] = {
-    {0x1854D85, 0x1854E73, 28}, // conversation
-    {0x1859DE5, 0x1859ECF, 1},  // conversation
-    {0x1902E70, 0x1902EF5, 10}, // repeated action
-    {0x1BCEF8C, 0x1BCF20F, 11}, // reinforcement report
-    {0x1BCFF6E, 0x1BD0702, 202}, // strategy phase
-    {0x1BD0954, 0x1BD0A16, 30}, // strategy phase
-    {0x1E4C093, 0x1E4C208, 19}, // battle conclusion
-    {kTransferTraitEventOffset, 0x18A5F81, 26} // transfer event
+    {0x1854D85, 0x1854E73, 28},
+    {0x1859DE5, 0x1859ECF, 1},
+    {0x1902E70, 0x1902EF5, 10},
+    {0x1BCEF8C, 0x1BCF20F, 11},
+    {0x1BCFF6E, 0x1BD0702, 202},
+    {0x1BD0954, 0x1BD0A16, 30},
+    {0x1E4C093, 0x1E4C208, 19},
+    {kTransferTraitEventOffset, 0x18A5F81, 26}
 };
 constexpr TraitBridgeSite kDataBridgeSites[] = {
-    {0x19253E8, 0x192542F, 55} // conference result
+    {0x19253E8, 0x192542F, 55}
 };
 
 bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
@@ -1147,16 +1120,8 @@ bool TakeMatchedBridgeId(uint32_t requestedId, uintptr_t consumerReturnAddress,
       break;
     }
   }
-  if (!knownPair) {
-    thread_local unsigned diagnosticCount = 0;
-    if (diagnosticCount < 12) {
-      AddLog(u8"[기재JSON/호환] 미확인 ID 전달: query=+%llX consumer=+%llX id=%u",
-             static_cast<unsigned long long>(cache.queryReturnRva),
-             static_cast<unsigned long long>(consumerRva), requestedId);
-      ++diagnosticCount;
-    }
+  if (!knownPair)
     return false;
-  }
 
   const uintptr_t customRecord =
       state.lastTableBase +
@@ -1183,8 +1148,6 @@ int __fastcall CustomOfficerTraitQuery(void *officer, uint32_t requestedId) {
   if (originalResult)
     return originalResult;
 
-  // This direct officer query is only extended for the ID 11 path verified
-  // in the original compatibility hook and the game's callers.
   if (requestedId != 11)
     return 0;
 
@@ -1216,8 +1179,6 @@ void __fastcall CustomTraitMessageSetter(void *message, uint32_t requestedId) {
       requestedId, reinterpret_cast<uintptr_t>(_ReturnAddress()),
       kMessageBridgeSites, std::size(kMessageBridgeSites), matchedId);
 
-  // The original setter still updates the message object; only its input ID
-  // changes after a confirmed custom-only match at a known call site.
   reinterpret_cast<TraitMessageSetter>(original)(
       message, bridge ? matchedId : requestedId);
   if (bridge) {
@@ -1287,9 +1248,6 @@ int __fastcall CustomMonthlyTraitUpdate(void *turn) {
   if (gameDataRoot < 0x10000)
     return result;
 
-  // The game's monthly update walks these 1801 person pointers. The old
-  // compatibility DLL repeats the loop after the original and adds signed
-  // values for custom effect type 166 to person+0x300, capped at 99999.
   constexpr uintptr_t kFirstPersonOffset = 0x576C88;
   constexpr uintptr_t kEndPersonOffset = 0x57A4D0;
   constexpr uint16_t kMonthlyEffectType = 166;
@@ -1361,8 +1319,6 @@ int __fastcall CustomTransferTraitEvent(void *firstPerson, void *secondPerson,
   if (!original)
     return 0;
 
-  // The original DLL checks the second participant for base trait 26 before
-  // this event runs. Its message setter later consumes the matched custom ID.
   const TraitEffectMatchCache previous = g_traitEffectMatchCache;
   g_traitEffectMatchCache = {};
   uint16_t matchedId = 0;
@@ -1963,7 +1919,6 @@ uint32_t ResolveTraitsPointerOffset() {
     return state.traitsPointerOffset;
   }
 
-  // version.dll이 사용하는 FindOffset AOB와 동일합니다.
   const std::string pattern =
       "48 8B ?? ?? ?? ?? ?? ?? 48 85 ?? 74 ?? 48 8B ?? 48 8B ?? "
       "FF ?? ?? 84 ?? 74 ?? 0F B7 ?? ?? 66 ?? ?? ?? ?? ?? ?? 48 8B";
@@ -2091,9 +2046,6 @@ bool ApplyConfig(uintptr_t tableBase) {
     return false;
   }
 
-  // version.dll Normalize()의 핵심 동작:
-  // custom text가 있는 슬롯은 cloneSrc의 0x40 레코드를 복제한 뒤 ID와 효과를 복구합니다.
-  // cloneSrc가 자기 자신/범위 밖이면 donor index 30을 사용합니다.
   for (int i = 0; i < kTraitCount; ++i) {
     TraitMetaEntry &meta = state.meta[i];
 
@@ -2121,7 +2073,6 @@ bool ApplyConfig(uintptr_t tableBase) {
                   state.traits[i].effects.data(),
                   kEffectCount * sizeof(TraitEffect));
     } else {
-      // JSON에 효과가 없더라도 테이블 슬롯의 ID만 정상화합니다.
       const uint16_t id = static_cast<uint16_t>(i + 1);
       std::memcpy(records[i].data() + kTraitIdOffset, &id, sizeof(id));
     }
@@ -2164,7 +2115,6 @@ void TickTraitConfigRuntime() {
   RuntimeState &state = State();
   const ULONGLONG now = GetTickCount64();
 
-  // Menu::Loops()는 약 30ms 주기이므로 이 기능은 500ms마다만 확인합니다.
   if (now - state.lastTickMs < 500ull)
     return;
   state.lastTickMs = now;
@@ -2190,17 +2140,12 @@ void TickTraitConfigRuntime() {
       state.applyPending = true;
   }
 
-  // 커스텀 ID가 원본 UI에서 조회되기 전에 이름 getter를 먼저 가로챕니다.
-  // 이 훅이 실패하면 71~254 슬롯을 활성화하지 않아 원본 사실무장 편집 UI 프리징을 방지합니다.
   if (!EnsureCustomNameHook())
     return;
 
-  // descmap 훅은 version.dll과 동일하게 "원본 먼저 호출 -> null일 때만 201+ fallback"입니다.
   if (!EnsureCustomDescHook())
     return;
 
-  // ID 71~200은 version.dll DescTS처럼 게임의 일반/포맷 설명 테이블에 직접 동기화합니다.
-  // 리소스가 아직 준비되지 않았으면 다음 tick에서 다시 시도하며 효과 테이블 적용은 막지 않습니다.
   SyncCustomDescTextTables();
 
   const uintptr_t gameDataRoot = GetGameBaseFast();
@@ -2236,7 +2181,6 @@ void TickTraitConfigRuntime() {
     }
   }
 
-  // 설치 실패 시에도 다음 tick에서 다시 시도합니다.
   if (EnsureTraitEffectHook())
     EnsureExtendedTraitCompatibility();
 }
