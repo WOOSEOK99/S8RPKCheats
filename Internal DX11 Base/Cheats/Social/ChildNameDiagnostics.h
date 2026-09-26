@@ -14,13 +14,12 @@
 namespace DX11Base {
 namespace ChildNameDiagnostics {
 
-// SAN8RPK.pdb에서 확인된 PersonData 원본 이름 함수.
-// const wchar_t* GetName() const 는 대부분의 무장에서 안전하게 완성 이름을 반환하지만
-// 일부 무장은 성 1글자만 반환한다.
-// void GetName(wchar_t* out) const (+0x16F6850)는 완성 이름 출력용 오버로드지만
-// 전체 5102명에 호출하면 프리징이 발생했으므로, '사용 중인 레코드 + 1글자 결과'에만 제한한다.
+// SAN8RPK.pdb + 실게임 검증 완료:
+//   san8r::PersonData::GetName() const
+//   san8r::PersonData::GetAzana() const
+// 이름 동기화는 '모든 무장' 목록과 동일하게 같은 ID의 첫 번째 유효 레코드만 채택한다.
+// 뒤쪽 중복/예약 레코드가 정상 이름을 덮어쓰지 않도록 한다.
 static constexpr uintptr_t kPersonDataGetNameRva = 0x1713DB0;
-static constexpr uintptr_t kPersonDataGetNameToBufferRva = 0x16F6850;
 static constexpr uintptr_t kPersonDataGetAzanaRva = 0x1712A80;
 static constexpr uintptr_t kOfficerStride = 0x3D0;
 static constexpr int kOfficerCount = 5102;
@@ -28,7 +27,6 @@ static constexpr uint16_t kGeneratedFirstId = 4001;
 static constexpr uint16_t kGeneratedLastId = 4020;
 
 using NativePersonTextGetter = const wchar_t* (__fastcall*)(const void* self);
-using NativePersonNameWriter = void (__fastcall*)(const void* self, wchar_t* out);
 
 static bool SafeRead16Local(uintptr_t addr, uint16_t* out) {
   if (!out)
@@ -80,29 +78,17 @@ static const wchar_t* CallNativeTextGetterSafe(uintptr_t fnAddr,
   return result;
 }
 
-static bool CallNativeNameWriterSafe(uintptr_t fnAddr,
-                                     uintptr_t officer,
-                                     wchar_t* out) {
-  if (!out)
-    return false;
-  out[0] = L'\0';
-  if (fnAddr <= 0x10000 || officer <= 0x10000)
-    return false;
-
-  const auto fn = reinterpret_cast<NativePersonNameWriter>(fnAddr);
-  __try {
-    fn(reinterpret_cast<const void*>(officer), out);
-    return out[0] != L'\0';
-  }
-  __except (EXCEPTION_EXECUTE_HANDLER) {
-    out[0] = L'\0';
-    return false;
-  }
-}
-
-static bool WideToUtf8(const wchar_t* wide, std::string& outText) {
+static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
+                                  uintptr_t officer,
+                                  std::string& outText) {
   outText.clear();
-  if (!wide || wide[0] == L'\0')
+
+  const wchar_t* result = CallNativeTextGetterSafe(fnAddr, officer);
+  if (!result)
+    return false;
+
+  wchar_t wide[64]{};
+  if (!CopyWideSafe(result, wide, _countof(wide)) || wide[0] == L'\0')
     return false;
 
   const int needed = WideCharToMultiByte(CP_UTF8, 0, wide, -1,
@@ -121,70 +107,6 @@ static bool WideToUtf8(const wchar_t* wide, std::string& outText) {
 
   outText = NormalizeUtf8(utf8);
   return !outText.empty();
-}
-
-static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
-                                  uintptr_t officer,
-                                  std::string& outText) {
-  outText.clear();
-
-  const wchar_t* result = CallNativeTextGetterSafe(fnAddr, officer);
-  if (!result)
-    return false;
-
-  wchar_t wide[64]{};
-  if (!CopyWideSafe(result, wide, _countof(wide)) || wide[0] == L'\0')
-    return false;
-
-  return WideToUtf8(wide, outText);
-}
-
-static size_t Utf8CodePointCount(const std::string& text) {
-  size_t count = 0;
-  for (unsigned char ch : text) {
-    if ((ch & 0xC0) != 0x80)
-      ++count;
-  }
-  return count;
-}
-
-static bool ResolveNativeOfficerName(uintptr_t officer,
-                                     uintptr_t getNameAddr,
-                                     uintptr_t getNameWriterAddr,
-                                     std::string& outName,
-                                     bool* usedWriter) {
-  if (usedWriter)
-    *usedWriter = false;
-  outName.clear();
-
-  // 검증된 const wchar_t* GetName()을 기본 경로로 사용한다.
-  if (!ResolveNativeTextUtf8(getNameAddr, officer, outName))
-    return false;
-
-  // 대부분의 장수는 여기서 이미 완성 이름이다.
-  // 한 글자만 나온 경우에만 레코드가 실제 사용 중인지 확인 후 writer를 보조적으로 호출한다.
-  if (Utf8CodePointCount(outName) != 1)
-    return true;
-
-  uint16_t birth = 0;
-  if (!SafeRead16Local(officer + 0x34, &birth) || birth == 0)
-    return true;
-
-  wchar_t wide[128]{};
-  if (!CallNativeNameWriterSafe(getNameWriterAddr, officer, wide))
-    return true;
-
-  std::string fullName;
-  if (!WideToUtf8(wide, fullName) || fullName.empty())
-    return true;
-
-  // writer 결과가 더 길 때만 교체한다. 이상한 반환값이면 안전한 기본값을 유지한다.
-  if (Utf8CodePointCount(fullName) > Utf8CodePointCount(outName)) {
-    outName = fullName;
-    if (usedWriter)
-      *usedWriter = true;
-  }
-  return true;
 }
 
 struct State {
@@ -225,11 +147,9 @@ static void DropPreviousNativeCache() {
 static bool SyncOneOfficer(uintptr_t officer,
                            uint16_t expectedId,
                            uintptr_t getNameAddr,
-                           uintptr_t getNameWriterAddr,
                            uintptr_t getAzanaAddr,
                            int* nativeCount,
                            int* overrideCount,
-                           int* writerCount,
                            bool logGeneratedChange) {
   uint16_t id = 0;
   if (!SafeRead16Local(officer + 0x08, &id) || id < 1 || id > kOfficerCount)
@@ -244,13 +164,8 @@ static bool SyncOneOfficer(uintptr_t officer,
   }
 
   std::string name;
-  bool usedWriter = false;
-  if (!ResolveNativeOfficerName(officer, getNameAddr, getNameWriterAddr,
-                                name, &usedWriter)) {
+  if (!ResolveNativeTextUtf8(getNameAddr, officer, name))
     return false;
-  }
-  if (usedWriter && writerCount)
-    ++(*writerCount);
 
   std::string azana;
   ResolveNativeTextUtf8(getAzanaAddr, officer, azana);
@@ -305,31 +220,40 @@ static void SyncAllOfficerNames(uintptr_t exeBase, uintptr_t rosterBase) {
     DropPreviousNativeCache();
 
   const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
-  const uintptr_t getNameWriterAddr = exeBase + kPersonDataGetNameToBufferRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
   int nativeCount = 0;
   int overrideCount = 0;
-  int writerCount = 0;
+  int duplicateCount = 0;
 
+  // 모든 무장 목록과 동일하게 ID별 첫 번째 레코드만 사용한다.
+  std::array<uint8_t, kOfficerCount + 1> seen{};
   g_state.generatedOfficers.fill(0);
 
   for (int i = 0; i < kOfficerCount; ++i) {
     const uintptr_t officer = rosterBase + (uintptr_t)i * kOfficerStride;
 
     uint16_t id = 0;
-    if (SafeRead16Local(officer + 0x08, &id) &&
-        id >= kGeneratedFirstId && id <= kGeneratedLastId) {
+    if (!SafeRead16Local(officer + 0x08, &id) || id < 1 || id > kOfficerCount)
+      continue;
+
+    if (seen[(size_t)id]) {
+      ++duplicateCount;
+      continue;
+    }
+    seen[(size_t)id] = 1;
+
+    if (id >= kGeneratedFirstId && id <= kGeneratedLastId) {
       g_state.generatedOfficers[(size_t)(id - kGeneratedFirstId)] = officer;
     }
 
-    SyncOneOfficer(officer, 0,
-                   getNameAddr, getNameWriterAddr, getAzanaAddr,
-                   &nativeCount, &overrideCount, &writerCount, false);
+    SyncOneOfficer(officer, id,
+                   getNameAddr, getAzanaAddr,
+                   &nativeCount, &overrideCount, false);
   }
 
   if (g_state.lastRosterBase != rosterBase || g_state.lastFullSyncAt == 0) {
-    AddLog(u8"[무장이름] 원본 이름/자 동기화 완료: native=%d override=%d writer보정=%d / GetName +0x%llX / GetAzana +0x%llX",
-           nativeCount, overrideCount, writerCount,
+    AddLog(u8"[무장이름] 첫 유효 ID 기준 이름/자 동기화 완료: native=%d override=%d duplicateSkip=%d / GetName +0x%llX / GetAzana +0x%llX",
+           nativeCount, overrideCount, duplicateCount,
            (unsigned long long)kPersonDataGetNameRva,
            (unsigned long long)kPersonDataGetAzanaRva);
   }
@@ -339,10 +263,9 @@ static void SyncAllOfficerNames(uintptr_t exeBase, uintptr_t rosterBase) {
 static void SyncGeneratedChildren(uintptr_t exeBase, uintptr_t rosterBase) {
   (void)rosterBase;
   const uintptr_t getNameAddr = exeBase + kPersonDataGetNameRva;
-  const uintptr_t getNameWriterAddr = exeBase + kPersonDataGetNameToBufferRva;
   const uintptr_t getAzanaAddr = exeBase + kPersonDataGetAzanaRva;
 
-  // 전체 스캔에서 실제 ID로 찾아 둔 생성 자녀 예약 슬롯만 짧은 주기로 갱신한다.
+  // 전체 스캔에서 첫 유효 ID로 찾아 둔 생성 자녀 예약 슬롯만 짧은 주기로 갱신한다.
   for (uint16_t id = kGeneratedFirstId; id <= kGeneratedLastId; ++id) {
     const uintptr_t officer =
         g_state.generatedOfficers[(size_t)(id - kGeneratedFirstId)];
@@ -354,8 +277,8 @@ static void SyncGeneratedChildren(uintptr_t exeBase, uintptr_t rosterBase) {
       continue;
 
     SyncOneOfficer(officer, id,
-                   getNameAddr, getNameWriterAddr, getAzanaAddr,
-                   nullptr, nullptr, nullptr, true);
+                   getNameAddr, getAzanaAddr,
+                   nullptr, nullptr, true);
   }
 }
 
