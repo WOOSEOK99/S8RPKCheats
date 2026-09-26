@@ -14,8 +14,7 @@
 namespace DX11Base {
 namespace ChildNameDiagnostics {
 
-static constexpr uint16_t kNamedChildId = 4004;
-static constexpr uint16_t kBlankChildId = 4005;
+static constexpr uint16_t kTargetChildId = 4004;
 static constexpr uintptr_t kPregnancyTableOffset = 0x5B40;
 static constexpr uintptr_t kPregnancySlotStride = 0x28;
 static constexpr uintptr_t kPregnancyChildPtrOffset = 0x10;
@@ -61,8 +60,7 @@ static uintptr_t FindOfficerRecord(uintptr_t rosterBase, uint16_t targetId) {
   }
 
   for (int i = 0; i < 5102; ++i) {
-    const uintptr_t p =
-        rosterBase + (uintptr_t)i * kOfficerRecordSize;
+    const uintptr_t p = rosterBase + (uintptr_t)i * kOfficerRecordSize;
     if (ChildManagerDetail::SafeRead16(p + 0x08, &verify) &&
         verify == targetId) {
       return p;
@@ -100,69 +98,124 @@ static bool IsChildLinkedInPregnancySlot(uint16_t childId) {
   return false;
 }
 
-static void LogRecord16Snapshot(uintptr_t record) {
-  std::array<uint8_t, kOfficerRecordSize> raw{};
-  if (!SafeReadMem(record, raw.data(), raw.size())) {
-    AddLog(u8"[자녀이름DBG] 4004 0x3D0 레코드 스냅샷 읽기 실패");
+struct PointerWatch {
+  uintptr_t recordOffset = 0;
+  const char* label = nullptr;
+  uintptr_t ptr = 0;
+  bool valid = false;
+  std::array<uint8_t, 0x80> bytes{};
+};
+
+struct MonitorState {
+  bool armed = false;
+  bool completed = false;
+  uintptr_t record = 0;
+  uint16_t initialBirth = 0;
+  ULONGLONG lastPollMs = 0;
+  ULONGLONG linkedMs = 0;
+  int changeCount = 0;
+  std::array<uint8_t, kOfficerRecordSize> recordBytes{};
+  PointerWatch p10{0x10, "P10"};
+  PointerWatch p360{0x360, "P360"};
+};
+
+static MonitorState g_state{};
+
+static void LogWordDiffs(const char* label,
+                         const uint8_t* before,
+                         const uint8_t* after,
+                         size_t size) {
+  if (!label || !before || !after)
+    return;
+
+  for (size_t off = 0; off + 2 <= size; off += 2) {
+    uint16_t a = 0;
+    uint16_t b = 0;
+    memcpy(&a, before + off, sizeof(a));
+    memcpy(&b, after + off, sizeof(b));
+    if (a == b)
+      continue;
+
+    AddLog(
+        u8"[자녀이름DBG] CHANGE %s +0x%03zX : 0x%04X(%u) -> 0x%04X(%u)",
+        label, off,
+        (unsigned)a, (unsigned)a,
+        (unsigned)b, (unsigned)b);
+    ++g_state.changeCount;
+  }
+}
+
+static bool ReadRecordPointer(uintptr_t record,
+                              uintptr_t offset,
+                              uintptr_t* outPtr) {
+  if (!outPtr)
+    return false;
+
+  uintptr_t value = 0;
+  if (!SafeReadMem(record + offset, &value, sizeof(value)))
+    return false;
+
+  value &= 0x0000FFFFFFFFFFFFULL;
+  *outPtr = value;
+  return IsReadablePointer(value);
+}
+
+static void InitPointerWatch(PointerWatch& watch) {
+  uintptr_t ptr = 0;
+  if (!ReadRecordPointer(g_state.record, watch.recordOffset, &ptr)) {
+    watch.ptr = 0;
+    watch.valid = false;
+    watch.bytes.fill(0);
+    AddLog(u8"[자녀이름DBG] BASE %s : 아직 유효 포인터 없음",
+           watch.label);
     return;
   }
 
-  AddLog(u8"[자녀이름DBG] -- ID4004 16-bit 전체 스냅샷 시작 --");
-  for (size_t off = 0; off < raw.size(); off += 0x10) {
-    uint16_t words[8]{};
-    const size_t remaining = raw.size() - off;
-    const size_t bytesThisLine = (remaining < 0x10) ? remaining : 0x10;
-    memcpy(words, raw.data() + off, bytesThisLine);
-
-    AddLog(
-        u8"[자녀이름DBG] D16 +0x%03zX: %04X %04X %04X %04X %04X %04X %04X %04X",
-        off,
-        (unsigned)words[0], (unsigned)words[1],
-        (unsigned)words[2], (unsigned)words[3],
-        (unsigned)words[4], (unsigned)words[5],
-        (unsigned)words[6], (unsigned)words[7]);
-  }
-  AddLog(u8"[자녀이름DBG] -- ID4004 16-bit 전체 스냅샷 종료 --");
-}
-
-static void LogPointerCandidates(uintptr_t namedRecord,
-                                 uintptr_t blankRecord) {
-  int logged = 0;
-  for (size_t off = 0;
-       off + sizeof(uintptr_t) <= kOfficerRecordSize;
-       off += sizeof(uintptr_t)) {
-    uintptr_t namedValue = 0;
-    uintptr_t blankValue = 0;
-    if (!SafeReadMem(namedRecord + off, &namedValue, sizeof(namedValue)) ||
-        !SafeReadMem(blankRecord + off, &blankValue, sizeof(blankValue))) {
-      continue;
-    }
-
-    const uintptr_t namedPtr =
-        namedValue & 0x0000FFFFFFFFFFFFULL;
-    const uintptr_t blankPtr =
-        blankValue & 0x0000FFFFFFFFFFFFULL;
-
-    if (namedPtr == blankPtr || !IsReadablePointer(namedPtr))
-      continue;
-
-    AddLog(
-        u8"[자녀이름DBG] PTR +0x%03zX: 4004=%p / 4005=%p",
-        off, (void*)namedPtr, (void*)blankPtr);
-
-    if (++logged >= 64) {
-      AddLog(u8"[자녀이름DBG] 포인터 후보가 많아 64개까지만 표시");
-      break;
-    }
-  }
-
-  if (logged == 0) {
-    AddLog(
-        u8"[자녀이름DBG] 4004/4005 차이 중 읽을 수 있는 포인터 후보 없음");
+  watch.ptr = ptr;
+  watch.valid = SafeReadMem(ptr, watch.bytes.data(), watch.bytes.size());
+  if (watch.valid) {
+    AddLog(u8"[자녀이름DBG] BASE %s : 4004+0x%zX -> %p",
+           watch.label, watch.recordOffset, (void*)watch.ptr);
   }
 }
 
-static bool RunOnce() {
+static void PollPointerWatch(PointerWatch& watch) {
+  uintptr_t currentPtr = 0;
+  const bool currentValid =
+      ReadRecordPointer(g_state.record, watch.recordOffset, &currentPtr);
+
+  if (!currentValid) {
+    if (watch.valid) {
+      AddLog(u8"[자녀이름DBG] CHANGE %s pointer %p -> invalid",
+             watch.label, (void*)watch.ptr);
+      ++g_state.changeCount;
+      watch.valid = false;
+      watch.ptr = 0;
+      watch.bytes.fill(0);
+    }
+    return;
+  }
+
+  std::array<uint8_t, 0x80> current{};
+  if (!SafeReadMem(currentPtr, current.data(), current.size()))
+    return;
+
+  if (!watch.valid || watch.ptr != currentPtr) {
+    AddLog(u8"[자녀이름DBG] CHANGE %s pointer %p -> %p",
+           watch.label, (void*)watch.ptr, (void*)currentPtr);
+    ++g_state.changeCount;
+    watch.ptr = currentPtr;
+    watch.valid = true;
+    watch.bytes = current;
+    return;
+  }
+
+  LogWordDiffs(watch.label,
+               watch.bytes.data(), current.data(), current.size());
+  watch.bytes = current;
+}
+
+static bool ArmBeforeBirth() {
   uintptr_t rosterBase = 0;
   uintptr_t heroMaster = 0;
   uint16_t heroId = 0;
@@ -171,58 +224,91 @@ static bool RunOnce() {
     return false;
   }
 
-  const uintptr_t namedRecord =
-      FindOfficerRecord(rosterBase, kNamedChildId);
-  const uintptr_t blankRecord =
-      FindOfficerRecord(rosterBase, kBlankChildId);
-  if (!namedRecord || !blankRecord)
+  const uintptr_t record = FindOfficerRecord(rosterBase, kTargetChildId);
+  if (!record)
     return false;
 
-  uint16_t namedBirth = 0;
-  uint16_t blankBirth = 0;
-  if (!ChildManagerDetail::SafeRead16(namedRecord + 0x34, &namedBirth) ||
-      namedBirth == 0) {
+  uint16_t birth = 0;
+  if (!ChildManagerDetail::SafeRead16(record + 0x34, &birth))
+    return false;
+
+  if (!SafeReadMem(record,
+                   g_state.recordBytes.data(),
+                   g_state.recordBytes.size())) {
     return false;
   }
-  ChildManagerDetail::SafeRead16(blankRecord + 0x34, &blankBirth);
 
-  if (!IsChildLinkedInPregnancySlot(kNamedChildId))
-    return false;
+  g_state.armed = true;
+  g_state.record = record;
+  g_state.initialBirth = birth;
+  g_state.lastPollMs = 0;
+  g_state.linkedMs = 0;
+  g_state.changeCount = 0;
 
   AddLog(
-      u8"[자녀이름DBG] ===== ID4004 이름결정 완료 스냅샷: record=%p birth=%u / ID4005 birth=%u =====",
-      (void*)namedRecord,
-      (unsigned)namedBirth,
-      (unsigned)blankBirth);
+      u8"[자녀이름DBG] ===== ID4004 출산 전 기준선 감시 시작: record=%p birth=%u =====",
+      (void*)record, (unsigned)birth);
+  if (birth == 0) {
+    AddLog(
+        u8"[자녀이름DBG] 현재 4004는 미생성 상태. 이 빈 레코드부터 출산/수동 이름 확정까지 같은 ID4004만 추적합니다.");
+  } else {
+    AddLog(
+        u8"[자녀이름DBG] 주의: 감시 시작 시점에 이미 4004 birth=%u",
+        (unsigned)birth);
+  }
 
-  LogRecord16Snapshot(namedRecord);
-  LogPointerCandidates(namedRecord, blankRecord);
-
-  AddLog(u8"[자녀이름DBG] ===== ID4004 이름 진단 종료 =====");
+  InitPointerWatch(g_state.p10);
+  InitPointerWatch(g_state.p360);
   return true;
 }
 
-static void Tick() {
-  static bool completed = false;
-  static ULONGLONG lastCheckMs = 0;
+static void Poll() {
+  const ULONGLONG now = GetTickCount64();
+  if (g_state.lastPollMs != 0 && now - g_state.lastPollMs < 100)
+    return;
+  g_state.lastPollMs = now;
 
-  if (!bShowChildManagerWin) {
-    completed = false;
-    lastCheckMs = 0;
+  std::array<uint8_t, kOfficerRecordSize> current{};
+  if (SafeReadMem(g_state.record, current.data(), current.size())) {
+    LogWordDiffs("REC4004",
+                 g_state.recordBytes.data(), current.data(), current.size());
+    g_state.recordBytes = current;
+  }
+
+  PollPointerWatch(g_state.p10);
+  PollPointerWatch(g_state.p360);
+
+  const bool linked = IsChildLinkedInPregnancySlot(kTargetChildId);
+  if (linked && g_state.linkedMs == 0) {
+    g_state.linkedMs = now;
+    AddLog(
+        u8"[자녀이름DBG] childPtr=4004 연결 감지. 이름 확정 이후 변화까지 2초 더 기록합니다.");
+  }
+
+  if (g_state.linkedMs != 0 && now - g_state.linkedMs >= 2000) {
+    AddLog(
+        u8"[자녀이름DBG] ===== ID4004 출산 전→이름확정 감시 종료 / 변화=%d =====",
+        g_state.changeCount);
+    g_state.armed = false;
+    g_state.completed = true;
+  }
+}
+
+static void Tick() {
+  if (g_state.completed)
+    return;
+
+  if (!g_state.armed) {
+    // 지금 세이브는 4004 임신 중이므로 자녀 관리 창을 한 번 열면
+    // birth=0인 4004 빈 레코드를 즉시 기준선으로 저장한다.
+    if (!bShowChildManagerWin)
+      return;
+    ArmBeforeBirth();
     return;
   }
-  if (completed)
-    return;
 
-  const ULONGLONG now = GetTickCount64();
-  if (lastCheckMs != 0 && now - lastCheckMs < 250)
-    return;
-  lastCheckMs = now;
-
-  // 출산 직후 레코드가 만들어지는 시점에는 아직 이름 입력 화면이 진행 중일 수 있습니다.
-  // 임신 슬롯 childPtr가 4004에 연결된 뒤에만 스냅샷을 남겨 최종 이름 상태를 잡습니다.
-  if (RunOnce())
-    completed = true;
+  // 감시 시작 후에는 이름 입력 모달 등으로 창 상태가 달라져도 계속 읽기 전용 추적.
+  Poll();
 }
 
 } // namespace ChildNameDiagnostics
