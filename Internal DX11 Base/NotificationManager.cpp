@@ -3,6 +3,7 @@
 #include "MenuState.h"
 #include "showlog.h"
 #include "Cheats/System/SpeedHack.h"
+#include "PerformanceDiagnostics.h"
 #include <algorithm>
 
 namespace DX11Base {
@@ -17,6 +18,8 @@ namespace DX11Base {
 
     // --- 일반 알림 추가 ---
     void AddNotification(const std::string& msg) {
+        PerfScope perfScope(PerfMetric::NotificationProduce, static_cast<uint64_t>(msg.size()));
+
         Notification n;
         n.message = msg;
         n.xPos = 0.0f;  // 나중에 Draw 루프에서 초기화됨 (화면 너비 알 수 있는 시점)
@@ -29,6 +32,8 @@ namespace DX11Base {
         if (g_notificationHistory.size() > 50) {
             g_notificationHistory.erase(g_notificationHistory.begin());
         }
+
+        PerfRecordNotificationSizes(g_notifications.size(), g_notificationHistory.size());
     }
 
     void RequestConfigSaveErrorPopup() {
@@ -78,6 +83,9 @@ namespace DX11Base {
 
     // --- 상단 흐르는 알림(Marquee) 렌더링 ---
     void DrawMarqueeNotifications(float scale) {
+        PerfScope perfScope(PerfMetric::NotificationRender);
+        PerfRecordNotificationSizes(g_notifications.size(), g_notificationHistory.size());
+
         if (g_notifications.empty())
             return;
 
@@ -135,6 +143,7 @@ namespace DX11Base {
             }
         }
         ImGui::End();
+        PerfRecordNotificationSizes(g_notifications.size(), g_notificationHistory.size());
     }
 
     // --- 알림 기록(History) 창 렌더링 ---
@@ -164,6 +173,7 @@ namespace DX11Base {
             ImGui::SameLine(ImGui::GetWindowWidth() - 80.0f * scale);
             if (ImGui::Button(u8"기록 삭제", ImVec2(70.0f * scale, 0))) {
                 g_notificationHistory.clear();
+                PerfRecordNotificationSizes(g_notifications.size(), g_notificationHistory.size());
             }
             
             ImGui::Separator();
