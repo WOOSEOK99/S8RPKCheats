@@ -20,6 +20,13 @@ static constexpr uintptr_t kPregnancySlotStride = 0x28;
 static constexpr uintptr_t kPregnancyChildPtrOffset = 0x10;
 static constexpr size_t kOfficerRecordSize = 0x3D0;
 
+// 다음 테스트에서 사용자가 직접 입력할 고유 표식.
+// 성=가나 / 명=다라 / 자=마바
+static const wchar_t kSurnameMarker[] = L"가나";
+static const wchar_t kGivenMarker[] = L"다라";
+static const wchar_t kStyleMarker[] = L"마바";
+static const wchar_t kCombinedMarker[] = L"가나다라마바";
+
 static bool SafeReadMem(uintptr_t addr, void* out, size_t size) {
   if (!out || size == 0 || addr <= 0x10000)
     return false;
@@ -28,16 +35,13 @@ static bool SafeReadMem(uintptr_t addr, void* out, size_t size) {
          read == size;
 }
 
-static bool IsReadablePointer(uintptr_t addr) {
-  if (addr <= 0x10000)
+static bool IsReadableProtect(DWORD protect) {
+  if ((protect & PAGE_GUARD) || (protect & PAGE_NOACCESS))
     return false;
-  MEMORY_BASIC_INFORMATION mbi{};
-  if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi))
-    return false;
-  if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) ||
-      (mbi.Protect & PAGE_NOACCESS))
-    return false;
-  return true;
+  const DWORD base = protect & 0xFF;
+  return base == PAGE_READONLY || base == PAGE_READWRITE ||
+         base == PAGE_WRITECOPY || base == PAGE_EXECUTE_READ ||
+         base == PAGE_EXECUTE_READWRITE || base == PAGE_EXECUTE_WRITECOPY;
 }
 
 static uintptr_t FindOfficerRecord(uintptr_t rosterBase, uint16_t targetId) {
@@ -76,142 +80,150 @@ static bool IsChildLinkedInPregnancySlot(uint16_t childId) {
   return false;
 }
 
-struct PointerWatch {
-  uintptr_t recordOffset = 0;
-  const char* label = nullptr;
-  uintptr_t ptr = 0;
-  bool valid = false;
-  std::array<uint8_t, 0x80> bytes{};
-};
-
-struct MonitorState {
-  bool armed = false;
-  bool completed = false;
-  uintptr_t record = 0;
-  uint16_t initialBirth = 0;
-  ULONGLONG lastPollMs = 0;
-  ULONGLONG linkedMs = 0;
-  int changeCount = 0;
-  std::array<uint8_t, kOfficerRecordSize> recordBytes{};
-  PointerWatch p10{0x10, "P10"};
-  PointerWatch p360{0x360, "P360"};
-};
-
-static MonitorState g_state{};
-
-static void LogWordDiffs(const char* label, const uint8_t* before,
-                         const uint8_t* after, size_t size) {
-  if (!label || !before || !after)
+static void LogAroundHit(const char* label, uintptr_t hit) {
+  if (!label || hit <= 0x10000)
     return;
-  for (size_t off = 0; off + 2 <= size; off += 2) {
-    uint16_t a = 0, b = 0;
-    memcpy(&a, before + off, sizeof(a));
-    memcpy(&b, after + off, sizeof(b));
-    if (a == b)
-      continue;
-    AddLog(u8"[자녀이름DBG] CHANGE %s +0x%03zX : 0x%04X(%u) -> 0x%04X(%u)",
-           label, off, (unsigned)a, (unsigned)a, (unsigned)b, (unsigned)b);
-    ++g_state.changeCount;
-  }
-}
 
-static void LogSnapshot(const char* label, uintptr_t ptr,
-                        const std::array<uint8_t, 0x80>& data) {
-  AddLog(u8"[자녀이름DBG] SNAP %s ptr=%p", label, (void*)ptr);
-  for (size_t off = 0; off < data.size(); off += 0x10) {
+  uintptr_t start = hit >= 0x30 ? hit - 0x30 : hit;
+  std::array<uint8_t, 0x80> raw{};
+  if (!SafeReadMem(start, raw.data(), raw.size()))
+    return;
+
+  AddLog(u8"[자녀이름DBG] HIT %s addr=%p 주변 0x80", label, (void*)hit);
+  for (size_t off = 0; off < raw.size(); off += 0x10) {
     uint16_t w[8]{};
-    memcpy(w, data.data() + off, sizeof(w));
-    AddLog(u8"[자녀이름DBG] SNAP %s +0x%02zX: %04X %04X %04X %04X %04X %04X %04X %04X",
-           label, off, (unsigned)w[0], (unsigned)w[1], (unsigned)w[2], (unsigned)w[3],
+    memcpy(w, raw.data() + off, sizeof(w));
+    AddLog(u8"[자녀이름DBG] HITDUMP %s %p +0x%02zX: %04X %04X %04X %04X %04X %04X %04X %04X",
+           label, (void*)start, off,
+           (unsigned)w[0], (unsigned)w[1], (unsigned)w[2], (unsigned)w[3],
            (unsigned)w[4], (unsigned)w[5], (unsigned)w[6], (unsigned)w[7]);
   }
 }
 
-static bool ReadRecordPointer(uintptr_t record, uintptr_t offset, uintptr_t* outPtr) {
-  if (!outPtr)
-    return false;
-  uintptr_t value = 0;
-  if (!SafeReadMem(record + offset, &value, sizeof(value)))
-    return false;
-  value &= 0x0000FFFFFFFFFFFFULL;
-  *outPtr = value;
-  return IsReadablePointer(value);
-}
+struct MarkerSpec {
+  const char* label;
+  const wchar_t* text;
+  size_t wcharCount;
+  int hits;
+};
 
-static void InitPointerWatch(PointerWatch& watch) {
-  uintptr_t ptr = 0;
-  if (!ReadRecordPointer(g_state.record, watch.recordOffset, &ptr)) {
-    watch.ptr = 0;
-    watch.valid = false;
-    watch.bytes.fill(0);
-    AddLog(u8"[자녀이름DBG] BASE %s : 아직 유효 포인터 없음", watch.label);
-    return;
-  }
-  watch.ptr = ptr;
-  watch.valid = SafeReadMem(ptr, watch.bytes.data(), watch.bytes.size());
-  if (watch.valid)
-    AddLog(u8"[자녀이름DBG] BASE %s : 4004+0x%zX -> %p",
-           watch.label, watch.recordOffset, (void*)watch.ptr);
-}
+static void ScanNameMarkers(const char* stage) {
+  MarkerSpec markers[] = {
+      {"SURNAME_가나", kSurnameMarker, 2, 0},
+      {"GIVEN_다라", kGivenMarker, 2, 0},
+      {"STYLE_마바", kStyleMarker, 2, 0},
+      {"FULL_가나다라마바", kCombinedMarker, 6, 0},
+  };
 
-static void PollPointerWatch(PointerWatch& watch) {
-  uintptr_t currentPtr = 0;
-  const bool currentValid = ReadRecordPointer(g_state.record, watch.recordOffset, &currentPtr);
-  if (!currentValid) {
-    if (watch.valid) {
-      AddLog(u8"[자녀이름DBG] CHANGE %s pointer %p -> invalid", watch.label, (void*)watch.ptr);
-      ++g_state.changeCount;
-      watch.valid = false;
-      watch.ptr = 0;
-      watch.bytes.fill(0);
+  AddLog(u8"[자녀이름DBG] ===== 이름 문자열 메모리 스캔 %s 시작 =====",
+         stage ? stage : "");
+
+  SYSTEM_INFO si{};
+  GetSystemInfo(&si);
+  uintptr_t addr = (uintptr_t)si.lpMinimumApplicationAddress;
+  const uintptr_t maxAddr = (uintptr_t)si.lpMaximumApplicationAddress;
+  constexpr size_t kChunk = 0x10000;
+  constexpr size_t kOverlap = 0x20;
+  std::array<uint8_t, kChunk> buffer{};
+
+  while (addr < maxAddr) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi))
+      break;
+
+    const uintptr_t regionBase = (uintptr_t)mbi.BaseAddress;
+    const uintptr_t regionEnd = regionBase + mbi.RegionSize;
+
+    // 사용자 입력 문자열은 런타임 힙에 있을 가능성이 가장 높으므로
+    // 우선 MEM_PRIVATE + 읽기 가능한 영역만 검색한다.
+    if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE &&
+        IsReadableProtect(mbi.Protect)) {
+      uintptr_t cur = regionBase;
+      while (cur < regionEnd) {
+        const size_t remain = (size_t)(regionEnd - cur);
+        const size_t want = remain < kChunk ? remain : kChunk;
+        SIZE_T got = 0;
+        if (ReadProcessMemory(GetCurrentProcess(), (LPCVOID)cur,
+                              buffer.data(), want, &got) != FALSE && got > 0) {
+          for (auto& marker : markers) {
+            if (marker.hits >= 12)
+              continue;
+            const size_t patternBytes = marker.wcharCount * sizeof(wchar_t);
+            if (got < patternBytes)
+              continue;
+            for (size_t i = 0; i + patternBytes <= got; ++i) {
+              if (memcmp(buffer.data() + i, marker.text, patternBytes) != 0)
+                continue;
+              const uintptr_t hit = cur + i;
+              AddLog(u8"[자녀이름DBG] %s %s UTF16 hit=%p region=%p size=0x%zX protect=0x%X",
+                     stage ? stage : "SCAN", marker.label,
+                     (void*)hit, mbi.BaseAddress, (size_t)mbi.RegionSize,
+                     (unsigned)mbi.Protect);
+              LogAroundHit(marker.label, hit);
+              ++marker.hits;
+              if (marker.hits >= 12)
+                break;
+            }
+          }
+        }
+
+        if (want <= kOverlap)
+          break;
+        const size_t step = want - kOverlap;
+        cur += step;
+      }
     }
-    return;
+
+    if (regionEnd <= addr)
+      break;
+    addr = regionEnd;
   }
 
-  std::array<uint8_t, 0x80> current{};
-  if (!SafeReadMem(currentPtr, current.data(), current.size()))
-    return;
-
-  if (!watch.valid || watch.ptr != currentPtr) {
-    AddLog(u8"[자녀이름DBG] CHANGE %s pointer %p -> %p",
-           watch.label, (void*)watch.ptr, (void*)currentPtr);
-    ++g_state.changeCount;
-    LogSnapshot(watch.label, currentPtr, current);
-    watch.ptr = currentPtr;
-    watch.valid = true;
-    watch.bytes = current;
-    return;
+  for (const auto& marker : markers) {
+    AddLog(u8"[자녀이름DBG] %s %s hitCount=%d",
+           stage ? stage : "SCAN", marker.label, marker.hits);
   }
-
-  LogWordDiffs(watch.label, watch.bytes.data(), current.data(), current.size());
-  watch.bytes = current;
+  AddLog(u8"[자녀이름DBG] ===== 이름 문자열 메모리 스캔 %s 종료 =====",
+         stage ? stage : "");
 }
+
+struct MonitorState {
+  bool armed = false;
+  bool completed = false;
+  bool firstScanDone = false;
+  bool secondScanDone = false;
+  uintptr_t record = 0;
+  ULONGLONG lastPollMs = 0;
+  ULONGLONG linkedMs = 0;
+};
+
+static MonitorState g_state{};
 
 static bool ArmBeforeBirth() {
   uintptr_t rosterBase = 0, heroMaster = 0;
   uint16_t heroId = 0;
   if (!ChildManagerDetail::ResolveHeroAndRoster(rosterBase, heroMaster, heroId))
     return false;
+
   const uintptr_t record = FindOfficerRecord(rosterBase, kTargetChildId);
   if (!record)
     return false;
+
   uint16_t birth = 0;
   if (!ChildManagerDetail::SafeRead16(record + 0x34, &birth))
     return false;
-  if (!SafeReadMem(record, g_state.recordBytes.data(), g_state.recordBytes.size()))
-    return false;
 
   g_state.armed = true;
+  g_state.completed = false;
+  g_state.firstScanDone = false;
+  g_state.secondScanDone = false;
   g_state.record = record;
-  g_state.initialBirth = birth;
   g_state.lastPollMs = 0;
   g_state.linkedMs = 0;
-  g_state.changeCount = 0;
 
-  AddLog(u8"[자녀이름DBG] ===== ID4004 출산 전 기준선 감시 시작: record=%p birth=%u =====",
+  AddLog(u8"[자녀이름DBG] ===== ID4004 이름 문자열 진단 대기: record=%p birth=%u =====",
          (void*)record, (unsigned)birth);
-  InitPointerWatch(g_state.p10);
-  InitPointerWatch(g_state.p360);
+  AddLog(u8"[자녀이름DBG] 테스트 입력값: 성=가나 / 명=다라 / 자=마바");
   return true;
 }
 
@@ -221,24 +233,27 @@ static void Poll() {
     return;
   g_state.lastPollMs = now;
 
-  std::array<uint8_t, kOfficerRecordSize> current{};
-  if (SafeReadMem(g_state.record, current.data(), current.size())) {
-    LogWordDiffs("REC4004", g_state.recordBytes.data(), current.data(), current.size());
-    g_state.recordBytes = current;
-  }
-
-  PollPointerWatch(g_state.p10);
-  PollPointerWatch(g_state.p360);
-
   const bool linked = IsChildLinkedInPregnancySlot(kTargetChildId);
   if (linked && g_state.linkedMs == 0) {
     g_state.linkedMs = now;
-    AddLog(u8"[자녀이름DBG] childPtr=4004 연결 감지. 최종 상태도 2초 더 기록합니다.");
+    AddLog(u8"[자녀이름DBG] childPtr=4004 연결 감지. 이름 확정 후 문자열 스캔을 시작합니다.");
   }
 
-  if (g_state.linkedMs != 0 && now - g_state.linkedMs >= 2000) {
-    AddLog(u8"[자녀이름DBG] ===== ID4004 출산 전→이름확정 감시 종료 / 변화=%d =====",
-           g_state.changeCount);
+  if (g_state.linkedMs == 0)
+    return;
+
+  if (!g_state.firstScanDone && now - g_state.linkedMs >= 300) {
+    ScanNameMarkers("T+0.3s");
+    g_state.firstScanDone = true;
+  }
+
+  if (!g_state.secondScanDone && now - g_state.linkedMs >= 1800) {
+    ScanNameMarkers("T+1.8s");
+    g_state.secondScanDone = true;
+  }
+
+  if (g_state.secondScanDone && now - g_state.linkedMs >= 2200) {
+    AddLog(u8"[자녀이름DBG] ===== ID4004 이름 문자열 진단 종료 =====");
     g_state.armed = false;
     g_state.completed = true;
   }
