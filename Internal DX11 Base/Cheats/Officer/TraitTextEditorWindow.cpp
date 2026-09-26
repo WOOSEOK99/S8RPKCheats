@@ -5,6 +5,7 @@
 #include "TraitTextNameHook.h"
 #include "TraitTextDescHook.h"
 #include "TraitTextSpecialDescHook.h"
+#include "TraitCompatibilityDiagnostics.h"
 #include "../../Framework/imgui.h"
 #include "../../showlog.h"
 
@@ -110,6 +111,62 @@ void SetStatus(const std::string& text) {
     AddLog(u8"[기재 문구] %s", text.c_str());
 }
 
+void DrawCompatibilityDiagnostics(float scale) {
+  TraitCompatibilityDiagnosticState &diag =
+      GetTraitCompatibilityDiagnosticState();
+
+  ImGui::Spacing();
+  ImGui::Separator();
+  ImGui::Spacing();
+  ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.2f, 1.0f),
+                     u8"[ 기재 호환 기능 진단 ]");
+  ImGui::TextDisabled(u8"테스트용: 체크를 하나씩 해제하고 평정 → 임면에서 확인하세요. 저장되지 않습니다.");
+
+  auto drawToggle = [&](const char *label, bool &value, const char *logName) {
+    if (ImGui::Checkbox(label, &value))
+      LogTraitCompatibilityDiagnosticChange(logName, value);
+  };
+
+  if (ImGui::BeginTable("TraitCompatibilityDiagnostics", 2,
+                        ImGuiTableFlags_SizingStretchSame |
+                            ImGuiTableFlags_NoSavedSettings)) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    drawToggle(u8"메인 효과 판정 (+17AAD60)", diag.effectQuery, "effect-query");
+    ImGui::TableSetColumnIndex(1);
+    drawToggle(u8"왕좌 보유 판정 ID11 (+170C080)", diag.officerTraitQuery, "officer-id11");
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    drawToggle(u8"대화/메시지 ID 연결 (+13F91E0)", diag.messageBridge, "message-bridge");
+    ImGui::TableSetColumnIndex(1);
+    drawToggle(u8"효과 데이터 ID 연결 (+16E63F0)", diag.dataBridge, "data-bridge");
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    drawToggle(u8"월별 효과 보완 (+1C79C90)", diag.monthlyUpdate, "monthly-update");
+    ImGui::TableSetColumnIndex(1);
+    drawToggle(u8"원모심려 특수 경로 ID26 (+18A5E30)", diag.transferEvent, "transfer-id26");
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    drawToggle(u8"기재 사용 조건 A (+17C03E7)", diag.eligibilityA, "eligibility-A");
+    ImGui::TableSetColumnIndex(1);
+    drawToggle(u8"기재 사용 조건 B (+17C042F)", diag.eligibilityB, "eligibility-B");
+
+    ImGui::EndTable();
+  }
+
+  if (ImGui::Button(u8"진단 기능 전체 ON 복원",
+                    ImVec2(180.0f * scale, 28.0f * scale))) {
+    ResetTraitCompatibilityDiagnostics();
+  }
+
+  // A/B 임계값 패치는 기존 런타임이 500ms마다 재적용하므로
+  // 진단 창이 열린 동안 사용자가 선택한 상태를 매 프레임 다시 유지합니다.
+  MaintainTraitCompatibilityDiagnostics();
+}
+
 } // namespace
 
 void OpenTraitTextEditorWindow() {
@@ -176,7 +233,7 @@ void DrawTraitTextEditorWindow(float scale) {
   if (!g_open)
     return;
 
-  ImGui::SetNextWindowSize(ImVec2(820.0f * scale, 620.0f * scale), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(900.0f * scale, 760.0f * scale), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin(u8"기재 이름/설명 편집기", &g_open)) {
     ImGui::End();
     return;
@@ -189,7 +246,7 @@ void DrawTraitTextEditorWindow(float scale) {
     return;
   }
 
-  ImGui::BeginChild("##trait_list", ImVec2(220.0f * scale, -42.0f * scale), true);
+  ImGui::BeginChild("##trait_list", ImVec2(220.0f * scale, 430.0f * scale), true);
   for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
     const bool modified = !rows[i].newName.empty() || !rows[i].newDesc.empty();
     char label[256] = {};
@@ -211,7 +268,7 @@ void DrawTraitTextEditorWindow(float scale) {
   ImGui::Separator();
 
   ImGui::TextUnformatted(u8"기존 설명");
-  ImGui::BeginChild("##old_desc", ImVec2(0, 120.0f * scale), true);
+  ImGui::BeginChild("##old_desc", ImVec2(0, 100.0f * scale), true);
   ImGui::TextWrapped("%s", row.oldDesc.c_str());
   ImGui::EndChild();
 
@@ -224,7 +281,7 @@ void DrawTraitTextEditorWindow(float scale) {
   ImGui::Spacing();
   ImGui::TextUnformatted(u8"새 설명");
   if (ImGui::InputTextMultiline("##new_desc", g_descBuf.data(), g_descBuf.size(),
-                                ImVec2(-1, 200.0f * scale)))
+                                ImVec2(-1, 150.0f * scale)))
     StoreSelectionBuffers();
 
   ImGui::TextDisabled(u8"%%d 등의 형식 토큰을 유지할 경우 원문과 종류/순서가 같아야 합니다. %% 표시는 %%%% 사용.");
@@ -281,6 +338,8 @@ void DrawTraitTextEditorWindow(float scale) {
   }
 
   ImGui::EndGroup();
+
+  DrawCompatibilityDiagnostics(scale);
   ImGui::End();
 }
 
