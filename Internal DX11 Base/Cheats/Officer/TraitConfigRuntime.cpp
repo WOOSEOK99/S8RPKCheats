@@ -894,34 +894,20 @@ bool ReadTraitEffectType(uintptr_t record, std::size_t slot, uint16_t &type) {
 }
 
 bool HasMatchingEffectType(uintptr_t customRecord, uintptr_t requestedRecord) {
-  std::array<uint16_t, kEffectCount> requestedTypes{};
-  std::size_t requestedCount = 0;
-
-  for (std::size_t i = 0; i < kEffectCount; ++i) {
-    uint16_t type = 0;
-    if (!ReadTraitEffectType(requestedRecord, i, type))
-      return false;
-    if (type != 0)
-      requestedTypes[requestedCount++] = type;
-  }
-
-  if (requestedCount == 0)
+  if (customRecord < 0x10000 || requestedRecord < 0x10000)
     return false;
 
-  for (std::size_t i = 0; i < kEffectCount; ++i) {
-    uint16_t customType = 0;
-    if (!ReadTraitEffectType(customRecord, i, customType))
-      return false;
-    if (customType == 0)
-      continue;
-
-    for (std::size_t j = 0; j < requestedCount; ++j) {
-      if (customType == requestedTypes[j])
-        return true;
-    }
+  std::array<TraitEffect, kEffectCount> customEffects{};
+  std::array<TraitEffect, kEffectCount> requestedEffects{};
+  if (!ReadMemorySafe(customRecord + kEffectOffset,
+                      customEffects.data(), sizeof(customEffects)) ||
+      !ReadMemorySafe(requestedRecord + kEffectOffset,
+                      requestedEffects.data(), sizeof(requestedEffects))) {
+    return false;
   }
 
-  return false;
+  return std::memcmp(customEffects.data(), requestedEffects.data(),
+                     sizeof(customEffects)) == 0;
 }
 
 bool FindMatchingCustomTrait(
