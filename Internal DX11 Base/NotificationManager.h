@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 #include "Framework/imgui.h"
@@ -10,6 +11,7 @@ namespace DX11Base {
         float xPos;      // 상단 마퀴용 현재 X 위치
         float width;     // 텍스트 측정 너비
         bool active;
+        uint64_t createdAt100ns = 0; // SpeedHack과 분리된 실제 시간 기준 TTL
     };
 
     // --- 알림 상태 전역 변수 (extern) ---
