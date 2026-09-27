@@ -1,6 +1,10 @@
 #pragma once
 #include "Cheats.h"
+#include "Cheats/Civilian/Techzero.h"
 #include "Cheats/System/SpeedHack.h"
+#include "Cheats/System/StartSetting.h"
+#include "Cheats/War/FactionLordBonus.h"
+#include "Cheats/War/Roadblock.h"
 #include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/Spell5HealProbe.h"
 #include "Config.h"
@@ -387,6 +391,15 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
     WCMUpdate.join();
   if (initRetryThread.joinable())
     initRetryThread.join();
+
+  // Stop T07-managed feature workers while game memory and our code are still valid.
+  // Do not move these waits into DllMain/Shutdown(true): joining under loader lock can deadlock.
+  DX11Base::SetUndiscoveredToRonin(false);
+  DX11Base::SetStartSetting(false);
+  DX11Base::SetTechZero(false);
+  DX11Base::SetRoadBlock(false);
+  DX11Base::SetRoadBlock2(false);
+  DX11Base::SetFactionLordBonus(false);
 
   // Only the owning MainThread tears down hooks/render resources during normal unload.
   DX11Base::Shutdown(false);
