@@ -1,3 +1,5 @@
+#include "TraitConfigRuntime.h"
+
 #define DrawBatchRandomTraitAssignmentWindow DrawBatchRandomTraitAssignmentWindowLegacyT05
 #include "SelectOfficercapture_t05_base.inc"
 #undef DrawBatchRandomTraitAssignmentWindow
@@ -10,7 +12,6 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
   if (!s_showBatchRandomTraitWindow && !s_batchRandomJob.running)
     return;
 
-  // 기존 처리 속도/검색/적용 로직은 그대로 사용합니다.
   TickBatchRandomTraitJob();
 
   if (!s_showBatchRandomTraitWindow)
@@ -58,6 +59,14 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
     ImGui::SetTooltip(u8"OFF: 기본 게임 기재 ID 1~70, 201, 202만 사용\nON: JSON에 정의된 커스텀 기재도 후보에 포함");
   }
 
+  bool bypassCompatibility = IsTraitCompatibilityBypass();
+  if (ImGui::Checkbox(u8"커스텀 기재 호환 처리 우회 (진단)##TraitCompatBypass", &bypassCompatibility)) {
+    SetTraitCompatibilityBypass(bypassCompatibility);
+  }
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+    ImGui::SetTooltip(u8"ON: 이미 설치된 호환 훅은 유지하지만 커스텀 확장 처리는 건너뛰고 게임 원본 판정만 사용합니다.\n기재 데이터 자체는 변경하지 않습니다.");
+  }
+
   ImGui::Text(u8"황금 후보: %d개", goldCount);
   ImGui::SameLine();
   ImGui::Text(u8"녹색: %d개", greenCount);
@@ -93,6 +102,11 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
                        u8"진단 모드: 기본 게임 기재 72개만 랜덤 부여합니다.");
   } else if (!HasCustomTraitConfigFile()) {
     ImGui::TextDisabled(u8"※ san8r_traits_config.json 없음: 기본 황금 기재 72개만 사용");
+  }
+
+  if (IsTraitCompatibilityBypass()) {
+    ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f),
+                       u8"진단 모드: 커스텀 기재 호환 확장 우회 중 (게임 원본 판정만 사용)");
   }
 
   ImGui::Spacing();
