@@ -30,6 +30,106 @@ static ULONGLONG g_autoFirstTick = 0;
 static ULONGLONG g_autoLastAttempt = 0;
 static int g_autoAttempts = 0;
 
+// 기재 이름 편집은 원본 CT에서 version.dll+5CB0을 전제로 했습니다.
+// 현재 우리 환경의 실제 연결 상태를 확인하기 위한 1회성 읽기 전용 진단입니다.
+static bool g_nameHookDiagnosticLogged = false;
+constexpr uintptr_t kDiagNameGetterOffset = 0x170E2D0;
+constexpr uintptr_t kDiagNameGetterPointerOffset = 0x170E2D6;
+constexpr uintptr_t kDiagVersionGetterOffset = 0x5CB0;
+
+std::string ReadHexBytes(uintptr_t address, size_t count) {
+  std::array<unsigned char, 16> bytes{};
+  if (!address || count == 0 || count > bytes.size())
+    return "<invalid>";
+
+  SIZE_T bytesRead = 0;
+  if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
+                         bytes.data(), count, &bytesRead) || bytesRead != count) {
+    return "<read failed>";
+  }
+
+  char text[16 * 3 + 1] = {};
+  size_t pos = 0;
+  for (size_t i = 0; i < count && pos < sizeof(text); ++i) {
+    const int written = std::snprintf(text + pos, sizeof(text) - pos,
+                                      i == 0 ? "%02X" : " %02X", bytes[i]);
+    if (written <= 0)
+      break;
+    pos += static_cast<size_t>(written);
+  }
+  return text;
+}
+
+bool ReadPointerDiagnostic(uintptr_t address, uintptr_t& value) {
+  value = 0;
+  SIZE_T bytesRead = 0;
+  return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
+                           &value, sizeof(value), &bytesRead) &&
+         bytesRead == sizeof(value);
+}
+
+std::string ModulePathUtf8(HMODULE module) {
+  if (!module)
+    return "<none>";
+
+  wchar_t path[MAX_PATH] = {};
+  const DWORD length = GetModuleFileNameW(module, path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH)
+    return "<path unavailable>";
+
+  const int needed = WideCharToMultiByte(CP_UTF8, 0, path, static_cast<int>(length),
+                                          nullptr, 0, nullptr, nullptr);
+  if (needed <= 0)
+    return "<path convert failed>";
+
+  std::string result(static_cast<size_t>(needed), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, path, static_cast<int>(length),
+                      result.data(), needed, nullptr, nullptr);
+  return result;
+}
+
+void LogNameHookReadOnlyDiagnostic() {
+  if (g_nameHookDiagnosticLogged)
+    return;
+  g_nameHookDiagnosticLogged = true;
+
+  const uintptr_t gameBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+  const HMODULE versionModule = GetModuleHandleW(L"version.dll");
+  const uintptr_t versionBase = reinterpret_cast<uintptr_t>(versionModule);
+
+  AddLog(u8"[기재 이름 진단] 읽기 전용 진단 시작");
+  AddLog(u8"[기재 이름 진단] gameBase=%p / +170E2D0=%s",
+         reinterpret_cast<void*>(gameBase),
+         ReadHexBytes(gameBase ? gameBase + kDiagNameGetterOffset : 0, 16).c_str());
+
+  uintptr_t target = 0;
+  if (gameBase && ReadPointerDiagnostic(gameBase + kDiagNameGetterPointerOffset, target)) {
+    AddLog(u8"[기재 이름 진단] [+170E2D6]=%p / target bytes=%s",
+           reinterpret_cast<void*>(target), ReadHexBytes(target, 16).c_str());
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (target && VirtualQuery(reinterpret_cast<const void*>(target), &mbi, sizeof(mbi)) == sizeof(mbi)) {
+      const HMODULE ownerModule = reinterpret_cast<HMODULE>(mbi.AllocationBase);
+      AddLog(u8"[기재 이름 진단] target AllocationBase=%p / module=%s",
+             mbi.AllocationBase, ModulePathUtf8(ownerModule).c_str());
+    } else {
+      AddLog(u8"[기재 이름 진단] target VirtualQuery 실패");
+    }
+  } else {
+    AddLog(u8"[기재 이름 진단] +170E2D6 포인터 읽기 실패");
+  }
+
+  if (versionBase) {
+    AddLog(u8"[기재 이름 진단] version.dll base=%p / path=%s",
+           reinterpret_cast<void*>(versionBase), ModulePathUtf8(versionModule).c_str());
+    AddLog(u8"[기재 이름 진단] version.dll+5CB0=%p / bytes=%s",
+           reinterpret_cast<void*>(versionBase + kDiagVersionGetterOffset),
+           ReadHexBytes(versionBase + kDiagVersionGetterOffset, 16).c_str());
+  } else {
+    AddLog(u8"[기재 이름 진단] version.dll 미로드");
+  }
+}
+
 void CopyToBuffer(const std::string& text, char* dst, size_t size) {
   if (!dst || size == 0)
     return;
@@ -63,8 +163,10 @@ bool ApplyAll(std::string& error) {
       return false;
   }
 
-  if (!ApplyTraitTextNameHook(&error))
+  if (!ApplyTraitTextNameHook(&error)) {
+    LogNameHookReadOnlyDiagnostic();
     return false;
+  }
   if (!ApplyTraitTextDescHook(&error)) {
     std::string ignored;
     RemoveTraitTextNameHook(&ignored);
