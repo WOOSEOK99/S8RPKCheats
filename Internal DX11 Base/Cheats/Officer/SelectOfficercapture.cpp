@@ -260,12 +260,11 @@ namespace {
     return true;
   }
 
-  // --- T05 일괄 랜덤 기재 관리 상태 ---
   uintptr_t g_t05BatchGameBase = 0;
   uintptr_t g_t05BatchP1 = 0;
   uintptr_t g_t05BatchRosterBase = 0;
   size_t g_t05BatchCollectCursor = 0;
-  bool g_t05BatchSeenIds[kBatchRandomOfficerCount + 1] = {};
+  bool g_t05BatchSeenIds[DX11Base::kBatchRandomOfficerCount + 1] = {};
   ULONGLONG g_t05BatchLastTickMs = 0;
   ULONGLONG g_t05BatchLastScanMs = 0;
 
@@ -495,7 +494,6 @@ namespace DX11Base {
     }
 
     if (s_batchRandomJob.scanningTraits) {
-      // 단건 기재 cache miss가 있으면 그 요청을 우선 처리해 대규모 scanner 동시 실행을 막습니다.
       if (g_pendingTraitChange.active)
         return;
       if (g_t05BatchLastScanMs != 0 && nowMs - g_t05BatchLastScanMs < 200)
@@ -525,8 +523,7 @@ namespace DX11Base {
       if (s_batchRandomJob.pool.empty()) {
         s_batchRandomJob.running = false;
         s_batchRandomJob.scanningTraits = false;
-        s_batchRandomStatus =
-            u8"기재 객체 검색은 완료했지만 사용할 수 있는 기재 객체를 찾지 못했습니다.";
+        s_batchRandomStatus = u8"기재 객체 검색은 완료했지만 사용할 수 있는 기재 객체를 찾지 못했습니다.";
         ResetT05BatchRuntime();
         return;
       }
@@ -543,7 +540,6 @@ namespace DX11Base {
         static_cast<unsigned int>(
             std::chrono::high_resolution_clock::now().time_since_epoch().count()));
 
-    // FPS와 무관하게 50ms cadence에서 호출되며, 한 호출의 실제 작업시간도 2ms로 제한합니다.
     const auto deadline = Clock::now() + std::chrono::milliseconds(2);
     size_t processedThisTick = 0;
     constexpr size_t kHardOfficerCapPerTick = 64;
