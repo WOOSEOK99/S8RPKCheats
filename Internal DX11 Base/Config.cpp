@@ -6,6 +6,7 @@
 
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Civilian/JewelSettings.h"
+#include "Cheats/System/StartSetting.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
@@ -205,6 +206,14 @@ namespace DX11Base {
 
   void LoadConfig() {
     LoadConfigBase();
+
+    // 이 기능은 gameBase 안정화 3초를 기다리면 첫 세이브 로드를 놓칠 수 있습니다.
+    // 설정 파일에서 이미 ON인 경우 메모리를 쓰지 않고 watcher만 즉시 시작합니다.
+    // watcher가 gameBase/P1이 실제로 유효해지는 순간에 1회 검사를 수행합니다.
+    if (bUndiscoveredToRonin) {
+      SetUndiscoveredToRonin(true);
+      AddLog(u8"[Config] 미발견 무장 재야 변경 watcher 조기 시작");
+    }
 
     bool savedAIWarImprove = false;
     if (LoadBoolConfigValue("bAIWarImprove", savedAIWarImprove)) {
