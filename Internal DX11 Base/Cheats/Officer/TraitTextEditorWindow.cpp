@@ -12,8 +12,6 @@
 #include <array>
 #include <cstdio>
 #include <string>
-#include <utility>
-#include <vector>
 
 namespace DX11Base {
 namespace {
@@ -31,15 +29,6 @@ static bool g_autoFinished = false;
 static ULONGLONG g_autoFirstTick = 0;
 static ULONGLONG g_autoLastAttempt = 0;
 static int g_autoAttempts = 0;
-
-// T06: 동일한 편집 내용을 다시 적용할 때 세 후크를 해제/재생성하지 않습니다.
-// code cave는 게임 UI가 이전 문자열 주소를 보유할 가능성 때문에 즉시 해제할 수 없으므로,
-// 동일 설정 재적용을 건너뛰는 것이 가장 안전한 첫 번째 누적 메모리 방어입니다.
-static bool g_lastApplySnapshotValid = false;
-static std::vector<std::pair<std::string, std::string>> g_lastAppliedTexts;
-static bool g_lastNameHookApplied = false;
-static bool g_lastDescHookApplied = false;
-static bool g_lastSpecialDescHookApplied = false;
 
 void CopyToBuffer(const std::string& text, char* dst, size_t size) {
   if (!dst || size == 0)
@@ -68,43 +57,11 @@ void StoreSelectionBuffers() {
   rows[g_selected].newDesc = g_descBuf.data();
 }
 
-std::vector<std::pair<std::string, std::string>> CaptureAppliedTextSnapshot() {
-  const auto& rows = GetTraitTextEditRows();
-  std::vector<std::pair<std::string, std::string>> snapshot;
-  snapshot.reserve(rows.size());
-  for (const auto& row : rows)
-    snapshot.emplace_back(row.newName, row.newDesc);
-  return snapshot;
-}
-
-bool HookStateMatchesLastApply() {
-  return IsTraitTextNameHookApplied() == g_lastNameHookApplied &&
-         IsTraitTextDescHookApplied() == g_lastDescHookApplied &&
-         IsTraitTextSpecialDescHookApplied() == g_lastSpecialDescHookApplied;
-}
-
-void InvalidateLastApplySnapshot() {
-  g_lastApplySnapshotValid = false;
-}
-
 bool ApplyAll(std::string& error) {
   for (size_t i = 0; i < GetTraitTextEditRows().size(); ++i) {
     if (!ValidateTraitTextRow(i, &error))
       return false;
   }
-
-  auto currentSnapshot = CaptureAppliedTextSnapshot();
-  if (g_lastApplySnapshotValid &&
-      currentSnapshot == g_lastAppliedTexts &&
-      HookStateMatchesLastApply()) {
-    error.clear();
-    AddLog(u8"[기재 문구/T06] 동일 설정 재적용 생략");
-    return true;
-  }
-
-  // 여기부터는 실제 후크 상태가 바뀔 수 있으므로, 중간 실패 시 이전 snapshot으로
-  // 잘못 생략하지 않도록 먼저 무효화합니다.
-  InvalidateLastApplySnapshot();
 
   if (!ApplyTraitTextNameHook(&error))
     return false;
@@ -119,19 +76,10 @@ bool ApplyAll(std::string& error) {
     RemoveTraitTextNameHook(&ignored);
     return false;
   }
-
-  g_lastAppliedTexts = std::move(currentSnapshot);
-  g_lastNameHookApplied = IsTraitTextNameHookApplied();
-  g_lastDescHookApplied = IsTraitTextDescHookApplied();
-  g_lastSpecialDescHookApplied = IsTraitTextSpecialDescHookApplied();
-  g_lastApplySnapshotValid = true;
   return true;
 }
 
 bool RemoveAll(std::string& error) {
-  // 해제 성공/실패와 무관하게 이후 ApplyAll은 실제 상태를 다시 확인하고 적용해야 합니다.
-  InvalidateLastApplySnapshot();
-
   std::string firstError;
   bool ok = true;
   std::string e;
