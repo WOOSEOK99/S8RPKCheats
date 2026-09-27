@@ -1,12 +1,89 @@
 #include "TraitConfigRuntime.h"
 
+#define TickBatchRandomTraitJob TickBatchRandomTraitJobLegacyT05
 #define DrawBatchRandomTraitAssignmentWindow DrawBatchRandomTraitAssignmentWindowLegacyT05
 #include "SelectOfficercapture_t05_base.inc"
 #undef DrawBatchRandomTraitAssignmentWindow
+#undef TickBatchRandomTraitJob
 
 namespace DX11Base {
 
 static bool s_batchRandomIncludeCustomTraits = true;
+
+static bool s_batchRandomDiagActive = false;
+static bool s_batchRandomDiagApplyStarted = false;
+static int s_batchRandomDiagNextChangedMark = 250;
+static ULONGLONG s_batchRandomDiagStartMs = 0;
+static ULONGLONG s_batchRandomDiagApplyStartMs = 0;
+
+static unsigned long long BatchDiagElapsedMs(ULONGLONG since) {
+  const ULONGLONG now = GetTickCount64();
+  return static_cast<unsigned long long>(now >= since ? now - since : 0);
+}
+
+static void ResetBatchRandomDiag() {
+  s_batchRandomDiagActive = true;
+  s_batchRandomDiagApplyStarted = false;
+  s_batchRandomDiagNextChangedMark = 250;
+  s_batchRandomDiagStartMs = GetTickCount64();
+  s_batchRandomDiagApplyStartMs = 0;
+}
+
+static void TickBatchRandomTraitJob() {
+  if (!s_batchRandomJob.running)
+    return;
+
+  const bool wasCollecting = s_batchRandomJob.collectingOfficers;
+  const bool wasScanning = s_batchRandomJob.scanningTraits;
+  const bool wasRunning = s_batchRandomJob.running;
+
+  TickBatchRandomTraitJobLegacyT05();
+
+  if (!s_batchRandomDiagActive)
+    return;
+
+  if (wasCollecting && !s_batchRandomJob.collectingOfficers) {
+    AddLog(u8"[랜덤기재/일괄/T05DIAG] 단계1 목록 수집 완료: %zu명 / 시작후 %llums",
+           s_batchRandomJob.officers.size(),
+           BatchDiagElapsedMs(s_batchRandomDiagStartMs));
+  }
+
+  if (wasScanning && !s_batchRandomJob.scanningTraits) {
+    AddLog(u8"[랜덤기재/일괄/T05DIAG] 단계2 기재 객체 검색 완료: 사용가능 %zu개 / 요청 %zu개 / 시작후 %llums",
+           s_batchRandomJob.pool.size(),
+           s_batchRandomJob.requestedPool.size(),
+           BatchDiagElapsedMs(s_batchRandomDiagStartMs));
+  }
+
+  if (!s_batchRandomJob.collectingOfficers && !s_batchRandomJob.scanningTraits &&
+      s_batchRandomJob.running && !s_batchRandomDiagApplyStarted) {
+    s_batchRandomDiagApplyStarted = true;
+    s_batchRandomDiagApplyStartMs = GetTickCount64();
+    AddLog(u8"[랜덤기재/일괄/T05DIAG] 단계3 실제 슬롯 적용 시작: 대상 %zu명 / pool %zu개",
+           s_batchRandomJob.officers.size(),
+           s_batchRandomJob.pool.size());
+  }
+
+  while (s_batchRandomDiagApplyStarted &&
+         s_batchRandomJob.changedOfficers >= s_batchRandomDiagNextChangedMark) {
+    AddLog(u8"[랜덤기재/일괄/T05DIAG] 적용 진행: 변경 %d명 / cursor %zu/%zu / 부여 슬롯 %d개 / 적용시작후 %llums / 전체 %llums",
+           s_batchRandomJob.changedOfficers,
+           s_batchRandomJob.cursor,
+           s_batchRandomJob.officers.size(),
+           s_batchRandomJob.filledSlots,
+           BatchDiagElapsedMs(s_batchRandomDiagApplyStartMs),
+           BatchDiagElapsedMs(s_batchRandomDiagStartMs));
+    s_batchRandomDiagNextChangedMark += 250;
+  }
+
+  if (wasRunning && !s_batchRandomJob.running) {
+    AddLog(u8"[랜덤기재/일괄/T05DIAG] 단계4 작업 종료: 변경 %d명 / 부여 슬롯 %d개 / 전체 %llums",
+           s_batchRandomJob.changedOfficers,
+           s_batchRandomJob.filledSlots,
+           BatchDiagElapsedMs(s_batchRandomDiagStartMs));
+    s_batchRandomDiagActive = false;
+  }
+}
 
 void DrawBatchRandomTraitAssignmentWindow(float scale) {
   if (!s_showBatchRandomTraitWindow && !s_batchRandomJob.running)
@@ -162,6 +239,10 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
         s_batchRandomJob.running = true;
         s_batchRandomJob.collectingOfficers = true;
         s_batchRandomJob.requestedPool = std::move(enabledPool);
+        ResetBatchRandomDiag();
+        AddLog(u8"[랜덤기재/일괄/T05DIAG] 단계0 작업 시작: 요청 기재 %zu개 / 커스텀 포함=%s",
+               s_batchRandomJob.requestedPool.size(),
+               s_batchRandomIncludeCustomTraits ? "ON" : "OFF");
 
         if (!SeedTraitObjectsForBatch(
                 s_batchRandomJob.requestedPool,
@@ -169,6 +250,7 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
                 s_batchRandomJob.traitVtable)) {
           s_batchRandomJob.running = false;
           s_batchRandomJob.collectingOfficers = false;
+          s_batchRandomDiagActive = false;
           s_batchRandomStatus =
               u8"기재 객체 형식(vtable)을 확인할 기준 기재를 찾지 못했습니다.";
         } else {
