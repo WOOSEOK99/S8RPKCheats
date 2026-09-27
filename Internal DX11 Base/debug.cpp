@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -19,7 +20,9 @@ struct T05DebugWorker {
 };
 
 std::mutex g_t05DebugWorkersMutex;
-std::vector<T05DebugWorker> g_t05DebugWorkers;
+// Raw pointer 보관은 의도적입니다. 정상 FreeLibrary 경로에서는 join+delete하고,
+// 프로세스 종료(DllMain terminating)에서는 loader lock 아래 join/destructor를 피합니다.
+std::vector<T05DebugWorker*> g_t05DebugWorkers;
 
 } // namespace
 
@@ -73,7 +76,6 @@ private:
 namespace DX11Base {
 
 bool T05PrepareDebugWorkerStart() {
-  // 버튼 클릭 시점에 먼저 running을 확보하여 다음 프레임 전 중복 시작 창을 닫습니다.
   bool expected = false;
   if (!s_isScanning.compare_exchange_strong(
           expected, true, std::memory_order_acq_rel)) {
@@ -87,20 +89,24 @@ bool T05PrepareDebugWorkerStart() {
 void T05RegisterDebugWorker(
     std::thread&& worker,
     std::shared_ptr<std::atomic<bool>> done) {
+  auto* state = new T05DebugWorker{std::move(worker), std::move(done)};
   std::lock_guard<std::mutex> lock(g_t05DebugWorkersMutex);
-  g_t05DebugWorkers.push_back({std::move(worker), std::move(done)});
+  g_t05DebugWorkers.push_back(state);
 }
 
 static void ReapFinishedDebugWorkersT05() {
   std::lock_guard<std::mutex> lock(g_t05DebugWorkersMutex);
   for (auto it = g_t05DebugWorkers.begin(); it != g_t05DebugWorkers.end();) {
-    if (!it->done || !it->done->load(std::memory_order_acquire)) {
+    T05DebugWorker* worker = *it;
+    if (!worker || !worker->done ||
+        !worker->done->load(std::memory_order_acquire)) {
       ++it;
       continue;
     }
 
-    if (it->thread.joinable())
-      it->thread.join();
+    if (worker->thread.joinable())
+      worker->thread.join();
+    delete worker;
     it = g_t05DebugWorkers.erase(it);
   }
 }
@@ -108,15 +114,18 @@ static void ReapFinishedDebugWorkersT05() {
 void ShutdownDebugScannerT05() {
   s_stopScan.store(true, std::memory_order_release);
 
-  std::vector<T05DebugWorker> workers;
+  std::vector<T05DebugWorker*> workers;
   {
     std::lock_guard<std::mutex> lock(g_t05DebugWorkersMutex);
     workers.swap(g_t05DebugWorkers);
   }
 
-  for (auto& worker : workers) {
-    if (worker.thread.joinable())
-      worker.thread.join();
+  for (T05DebugWorker* worker : workers) {
+    if (!worker)
+      continue;
+    if (worker->thread.joinable())
+      worker->thread.join();
+    delete worker;
   }
 
   s_isScanning.store(false, std::memory_order_release);
