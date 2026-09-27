@@ -116,7 +116,7 @@ static constexpr int kChildRosterSlots = 5102;
 static constexpr ULONGLONG kChildScanStepIntervalMs = 25;
 static constexpr ULONGLONG kChildMaintenanceIntervalMs = 1000;
 static constexpr ULONGLONG kChildSessionProbeIntervalMs = 1000;
-static constexpr ULONGLONG kChildFullScanFallbackIntervalMs = 5000;
+static constexpr ULONGLONG kChildFullScanFallbackIntervalMs = 30000;
 
 using ChildManagerDetail::NormalizeOfficerPtr;
 using ChildManagerDetail::ResolveHeroAndRoster;
@@ -402,7 +402,7 @@ void RunChildManagerUpdate() {
   const ULONGLONG now = GetTickCount64();
 
   // 주인공/roster 세대는 1초마다 가볍게 확인합니다.
-  // 세대가 바뀌면 5초 fallback을 기다리지 않고 즉시 새 분할 스캔을 시작합니다.
+  // 세대가 바뀌면 30초 fallback을 기다리지 않고 즉시 새 분할 스캔을 시작합니다.
   if (!g_childScanInProgress &&
       (g_lastChildSessionProbeMs == 0 ||
        (now - g_lastChildSessionProbeMs) >= kChildSessionProbeIntervalMs)) {
@@ -430,7 +430,7 @@ void RunChildManagerUpdate() {
     }
   }
 
-  // 평상시에는 5초마다 한 번만 전체 검색을 재확인합니다.
+  // 평상시에는 30초마다 한 번만 전체 검색을 재확인합니다.
   // 실제 검색은 한 step에 256슬롯, 최소 25ms 간격으로 분할 처리합니다.
   if (!g_childScanInProgress &&
       (g_lastChildScanMs == 0 ||
@@ -637,7 +637,7 @@ void DrawChildManagerWindow(float scale) {
                      u8"※ 이미 등장한 자녀는 임관 완료로 표시되며 조기 임관 설정을 다시 적용할 수 없습니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 임관 전 체크를 해제하면 원래 일정으로 복원되며, 임관 완료 후에는 조정된 나이가 유지됩니다.");
-  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
+  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 0.4f),
                      u8"※ 임관 예정년도에 도달하면 적용 체크는 자동으로 해제됩니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 자녀 출생/임관/주인공 변경은 혈연 데이터를 다시 읽어 목록에 자동 반영합니다.");
