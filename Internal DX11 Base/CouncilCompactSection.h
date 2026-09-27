@@ -3,6 +3,7 @@
 #include "Cheats.h"
 #include "Cheats/System/SkillCondition.h"
 #include "Cheats/System/TengiCave.h"
+#include "Cheats/War/CouncilContinueAfterMove.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Config.h"
 #include "Framework/imgui.h"
@@ -42,9 +43,9 @@ namespace DX11Base {
     ImGui::PushID(label);
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
-    ImGui::SameLine(0.0f, 5.0f * scale);
+    ImGui::SameLine(0.0f, 4.0f * scale);
 
-    if (ImGui::Button("-", ImVec2(22.0f * scale, 25.0f * scale))) {
+    if (ImGui::Button("-", ImVec2(20.0f * scale, 25.0f * scale))) {
       --(*inputVal);
       if (useP1 && p1)
         DX11Base::ModifyStat(p1, offset, *inputVal, size);
@@ -52,8 +53,8 @@ namespace DX11Base {
         *(unsigned int *)(gameBase + offset) = (unsigned int)*inputVal;
     }
 
-    ImGui::SameLine(0.0f, 4.0f * scale);
-    ImGui::SetNextItemWidth(48.0f * scale);
+    ImGui::SameLine(0.0f, 3.0f * scale);
+    ImGui::SetNextItemWidth(40.0f * scale);
     ImGui::InputInt("##val", inputVal, 0, 0,
                     ImGuiInputTextFlags_CharsDecimal);
 
@@ -74,8 +75,8 @@ namespace DX11Base {
         *inputVal = (int)(*(unsigned int *)(targetAddr + offset));
     }
 
-    ImGui::SameLine(0.0f, 4.0f * scale);
-    if (ImGui::Button("+", ImVec2(22.0f * scale, 25.0f * scale))) {
+    ImGui::SameLine(0.0f, 3.0f * scale);
+    if (ImGui::Button("+", ImVec2(20.0f * scale, 25.0f * scale))) {
       ++(*inputVal);
       if (useP1 && p1)
         DX11Base::ModifyStat(p1, offset, *inputVal, size);
@@ -94,18 +95,22 @@ namespace DX11Base {
     BeginCompactCouncilSection();
     ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 ]");
 
-    MenuSections::DrawStatRow(u8"전략 포인트", 0xED, 1, &v_SP,
-                              p1, gameBase, scale);
-
     if (ImGui::BeginTable(
-            "CouncilMeritPrivilegeRow",
+            "CouncilStatLayout",
             2,
             ImGuiTableFlags_SizingStretchSame |
                 ImGuiTableFlags_NoSavedSettings)) {
       ImGui::TableSetupColumn("Merit", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-      ImGui::TableSetupColumn("Privilege", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-      ImGui::TableNextRow();
+      ImGui::TableSetupColumn("CouncilRight", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 
+      // 전략 포인트는 특권과 같은 오른쪽 열에 두어 시작 위치를 맞춥니다.
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(1);
+      DrawCompactCouncilStat(u8"전략 포인트", 0xED, 1, &v_SP,
+                             p1, gameBase, scale);
+
+      // 공적 / 특권은 같은 줄 유지.
+      ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
       DrawCompactCouncilStat(u8"공적", 0x100, 2, &v_Merit,
                              p1, gameBase, scale);
@@ -238,6 +243,28 @@ namespace DX11Base {
       ImGui::TextColored(
           ImVec4(1, 1, 0, 1),
           u8"평정 기간 진입 시, 모든 장수의 능력치 중 99인 항목을 100으로 올립니다.");
+      ImGui::EndTooltip();
+    }
+
+    ImGui::SameLine(160.0f * scale);
+    if (ImGui::Checkbox(u8"도시 이동 후 평정 지속", &bCouncilContinueAfterMove)) {
+      const bool requested = bCouncilContinueAfterMove;
+      if (!SetCouncilContinueAfterMove(requested))
+        bCouncilContinueAfterMove = IsCouncilContinueAfterMoveApplied();
+      NotifyFeatureToggle(u8"도시 이동 후 평정 지속", bCouncilContinueAfterMove);
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                         u8"평정 중 주인공의 도시가 바뀌어도 평정을 계속 진행합니다.");
+      ImGui::TextUnformatted(u8"- 일반 이동 / 배정 이동");
+      ImGui::TextUnformatted(u8"- 자동전투 승리 후 점령지 이동");
+      ImGui::TextUnformatted(u8"- 수동전투 승리 후 점령지 이동");
+      ImGui::TextUnformatted(u8"- 같은 이동 명령의 다른 장수에게 종료 플래그가 번지는 동작 보정");
+      ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
+                         u8"주인공의 행동 완료 bit0은 유지하고 평정 종료에 관여하는 bit1만 해제합니다.");
+      ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                         u8"※ 6개 hook 지점의 원본 바이트가 모두 일치할 때만 적용됩니다.");
       ImGui::EndTooltip();
     }
 
