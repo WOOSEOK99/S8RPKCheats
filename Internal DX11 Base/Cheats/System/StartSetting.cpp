@@ -6,15 +6,20 @@
 #include "../../pch.h"
 #include "../../showlog.h"
 
-
+#include <atomic>
+#include <mutex>
 #include <psapi.h>
 
 namespace DX11Base {
 
   // 시나리오 시작 설정 자동 적용
   bool g_startSettingEnabled = false;
-  static bool g_startSettingRunning = false;
+  static std::atomic<bool> g_startSettingRunning{false};
+  static std::atomic<bool> g_startSettingRequested{false};
+  static std::atomic<uint64_t> g_startSettingGeneration{0};
   static HANDLE g_startSettingThread = nullptr;
+  static HANDLE g_startSettingStopEvent = nullptr;
+  static std::mutex g_startSettingLifecycleMutex;
 
   static bool g_flag1 = false;
   static bool g_flag2 = false;
@@ -26,6 +31,29 @@ namespace DX11Base {
   static bool g_loggedRelationWaiting = false;
   static bool g_loggedRelationAlreadyApplied = false;
   static bool g_loggedYearNotZero = false;
+
+  // 미발견→재야 보정의 세션 상태. 기존 함수 static 상태를 파일 상태로 올려
+  // OFF/재활성화 시 이전 세션의 대기 상태가 새 세션으로 넘어가지 않게 합니다.
+  static bool g_undiscoveredWaitForStart = false;
+  static bool g_undiscoveredSeenMenu = false;
+  static bool g_undiscoveredLogged = false;
+
+  static bool IsStartSettingSessionActive(uint64_t generation) {
+    return g_startSettingRequested.load(std::memory_order_acquire) &&
+           g_startSettingGeneration.load(std::memory_order_acquire) == generation;
+  }
+
+  static void ResetStartSettingSessionState() {
+    g_flag1 = g_flag2 = g_flag3 = g_flag4 = g_flag5 = false;
+    g_loggedRelationSwap = false;
+    g_loggedRelationNoMatch = false;
+    g_loggedRelationWaiting = false;
+    g_loggedRelationAlreadyApplied = false;
+    g_loggedYearNotZero = false;
+    g_undiscoveredWaitForStart = false;
+    g_undiscoveredSeenMenu = false;
+    g_undiscoveredLogged = false;
+  }
 
   static void LogOfficerPtrBrief(const char *tag, uintptr_t ptr) {
     if (!ptr || !IsValidPtr(ptr, 0x20)) {
@@ -63,8 +91,12 @@ namespace DX11Base {
   static void WriteQword(uintptr_t addr, uint64_t val) {
     if (!IsValidPtr(addr, 8))
       return;
-    DWORD old, tmp;
-    VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old);
+    if (*(uint64_t *)addr == val)
+      return;
+
+    DWORD old = 0, tmp = 0;
+    if (!VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old))
+      return;
     *(uint64_t *)addr = val;
     VirtualProtect((LPVOID)addr, 8, old, &tmp);
   }
@@ -72,15 +104,22 @@ namespace DX11Base {
   static void WriteByte(uintptr_t addr, uint8_t val) {
     if (!IsValidPtr(addr, 1))
       return;
-    DWORD old, tmp;
-    VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &old);
+    if (*(uint8_t *)addr == val)
+      return;
+
+    DWORD old = 0, tmp = 0;
+    if (!VirtualProtect((LPVOID)addr, 1, PAGE_READWRITE, &old))
+      return;
     *(uint8_t *)addr = val;
     VirtualProtect((LPVOID)addr, 1, old, &tmp);
   }
 
-  static void RunOnce() {
+  static void RunOnce(uint64_t generation) {
+    if (!IsStartSettingSessionActive(generation))
+      return;
+
     uintptr_t root = ResolveRoot();
-    if (!root) {
+    if (!root || !IsStartSettingSessionActive(generation)) {
       return;
     }
 
@@ -96,6 +135,9 @@ namespace DX11Base {
       return;
     }
     g_loggedYearNotZero = false;
+
+    if (!IsStartSettingSessionActive(generation))
+      return;
 
     {
       uintptr_t revengeAddr = root + 0x4172D0;
@@ -128,6 +170,8 @@ namespace DX11Base {
             LogOfficerPtrBrief("target(guanyuPos)", caohongPosAddr);
           }
 
+          if (!IsStartSettingSessionActive(generation))
+            return;
           WriteQword(revengeAddr, caohongPosAddr);
           WriteQword(enemyAddr, guanyuPosAddr);
           g_flag1 = true;
@@ -164,6 +208,9 @@ namespace DX11Base {
       }
     }
 
+    if (!IsStartSettingSessionActive(generation))
+      return;
+
     {
       uintptr_t lordAddr = root + 0xC72A0;
       uintptr_t zhugeAddr = root + 0x23CF10;
@@ -175,6 +222,8 @@ namespace DX11Base {
         uint64_t lordVal = *(uint64_t *)lordAddr;
         bool cond = (lordVal == zhugeAddr);
         if (cond && !g_flag2) {
+          if (!IsStartSettingSessionActive(generation))
+            return;
           WriteByte(bowTechAddr, 0x03);
           WriteByte(siegeTechAddr, 0x04);
           g_flag2 = true;
@@ -186,6 +235,9 @@ namespace DX11Base {
       }
     }
 
+    if (!IsStartSettingSessionActive(generation))
+      return;
+
     {
       uintptr_t zStatusAddr = root + 0x1F2200;
       uintptr_t bStatusAddr = root + 0x24DA00;
@@ -196,8 +248,9 @@ namespace DX11Base {
         uint8_t bStatus = *(uint8_t *)bStatusAddr;
         bool cond = (zStatus == 200 && bStatus == 200);
 
-
         if (cond && !g_flag3) {
+          if (!IsStartSettingSessionActive(generation))
+            return;
           WriteByte(cStatusAddr, 88);
           g_flag3 = true;
         } else if (!cond) {
@@ -207,6 +260,9 @@ namespace DX11Base {
         g_flag3 = false;
       }
     }
+
+    if (!IsStartSettingSessionActive(generation))
+      return;
 
     {
       uintptr_t baseAddr1 = root + 0xC6A0A;
@@ -227,11 +283,15 @@ namespace DX11Base {
 
         if (cond && !g_flag4) {
           for (int i = 0; i < 4; i++) {
+            if (!IsStartSettingSessionActive(generation))
+              return;
             WriteByte(slots1[i], 0x00);
             WriteQword(slots1[i] + 6, 0);
             WriteQword(slots1[i] + 14, 0);
           }
           for (int i = 0; i < 4; i++) {
+            if (!IsStartSettingSessionActive(generation))
+              return;
             WriteByte(slots2[i] + 0, 0x00);
             WriteByte(slots2[i] + 1, 0x00);
             WriteByte(slots2[i] + 2, 0x00);
@@ -245,6 +305,9 @@ namespace DX11Base {
         g_flag4 = false;
       }
     }
+
+    if (!IsStartSettingSessionActive(generation))
+      return;
 
     {
       uintptr_t statusAddr1 = root + 0x24DA00;
@@ -263,6 +326,8 @@ namespace DX11Base {
         if (cond && !g_flag5) {
           uint64_t bForce = *(uint64_t *)bForceAddr;
           uint64_t bCity = *(uint64_t *)bCityAddr;
+          if (!IsStartSettingSessionActive(generation))
+            return;
           WriteQword(aForceAddr, bForce);
           WriteQword(aCityAddr, bCity);
           g_flag5 = true;
@@ -275,73 +340,11 @@ namespace DX11Base {
     }
   }
 
-  static DWORD WINAPI StartSettingThread(LPVOID) {
-    while (g_startSettingEnabled) {
-      Sleep(200);
-      if (!g_startSettingEnabled)
-        break;
-      RunOnce();
-      extern void UpdateUndiscoveredToRonin();
-      UpdateUndiscoveredToRonin();
-    }
-    g_startSettingRunning = false;
-    return 0;
-  }
-
-  void SetStartSetting(bool enable) {
-    if (enable) {
-      if (g_startSettingEnabled)
-        return;
-
-      g_flag1 = g_flag2 = g_flag3 = g_flag4 = g_flag5 = false;
-      g_loggedRelationSwap = false;
-      g_loggedRelationNoMatch = false;
-      g_loggedRelationWaiting = false;
-      g_loggedRelationAlreadyApplied = false;
-      g_loggedYearNotZero = false;
-      g_startSettingEnabled = true;
-      g_startSettingRunning = true;
-
-      RunOnce();
-
-      g_startSettingThread = CreateThread(nullptr, 0, StartSettingThread, nullptr, 0, nullptr);
-      if (!g_startSettingThread) {
-        g_startSettingEnabled = false;
-        g_startSettingRunning = false;
-        AddLog(u8"[시작설정] 스레드 생성 실패");
-      } else {
-        AddLog(u8"[시작설정] 활성화");
-      }
-    } else {
-      g_startSettingEnabled = false;
-
-      if (g_startSettingThread) {
-        WaitForSingleObject(g_startSettingThread, 1000);
-        CloseHandle(g_startSettingThread);
-        g_startSettingThread = nullptr;
-      }
-
-      g_flag1 = g_flag2 = g_flag3 = g_flag4 = g_flag5 = false;
-      g_loggedRelationSwap = false;
-      g_loggedRelationNoMatch = false;
-      g_loggedRelationWaiting = false;
-      g_loggedRelationAlreadyApplied = false;
-      g_loggedYearNotZero = false;
-      AddLog(u8"[시작설정] 비활성화");
-    }
-  }
-
   // 모든 미발견 무장 재야로 변경 및 나이 보정
   extern bool bUndiscoveredToRonin;
-  void SetUndiscoveredToRonin(bool enable) {
-    if (enable) {
-      AddLog(u8"[시작설정] 미발견 무장 보정 기능 활성화 시도");
-      SetStartSetting(true);
-    }
-  }
 
-  void UpdateUndiscoveredToRonin() {
-    if (!bUndiscoveredToRonin)
+  static void UpdateUndiscoveredToRoninForSession(uint64_t generation) {
+    if (!IsStartSettingSessionActive(generation) || !bUndiscoveredToRonin)
       return;
 
     // ReadScenarioDate는 메뉴에서도 동작함 (MonthCapture 경로 사용)
@@ -356,42 +359,42 @@ namespace DX11Base {
       return;
     }
 
-    static bool s_waitForStart = false;
-    static bool s_seenMenu = false;
-    static bool s_logged = false;
+    if (!IsStartSettingSessionActive(generation))
+      return;
 
-    // 메뉴 화면 (year >= 100) 감지: s_seenMenu 기록만
-    // 단, 이미 대기 중이면 리셋하면 안 됨 (시나리오 연도도 >= 100일 수 있음)
+    // 메뉴 화면 (year >= 100) 감지: 메뉴를 확인한 상태만 기록합니다.
+    // 단, 이미 대기 중이면 시나리오 연도도 >= 100일 수 있으므로 대기 상태를 유지합니다.
     if (currentYear >= 100) {
-      if (!s_seenMenu) {
+      if (!g_undiscoveredSeenMenu) {
         AddLog(u8"[미발견보정] 메뉴 확인 (year=%d)", (int)currentYear);
-        s_seenMenu = true;
+        g_undiscoveredSeenMenu = true;
       }
-      if (!s_waitForStart) {
-        // 아직 대기 전 → 메뉴 상태이므로 그냥 리턴
+      if (!g_undiscoveredWaitForStart) {
         return;
       }
-      // s_waitForStart == true → 시나리오 연도가 확인된 것이므로 아래 트리거 로직으로 fall-through
     }
 
     // 1. 시나리오 선택 전 초기화 상태 (0년 0월) 감지 - 반드시 메뉴를 거친 뒤에만
     if (currentYear == 0 && currentMonth == 0) {
-      if (s_seenMenu && !s_waitForStart) {
+      if (g_undiscoveredSeenMenu && !g_undiscoveredWaitForStart) {
         AddLog(u8"[미발견보정] 대기 상태 진입 (year=0, month=0, 메뉴 확인됨)");
-        s_logged = false;
-        s_waitForStart = true;
+        g_undiscoveredLogged = false;
+        g_undiscoveredWaitForStart = true;
       }
       return;
     }
 
     // 2. 대기 없이 연도가 바뀐 경우 스킵 (게임 첫 로딩 184년 등)
-    if (!s_waitForStart) {
-      if (!s_logged) {
+    if (!g_undiscoveredWaitForStart) {
+      if (!g_undiscoveredLogged) {
         AddLog(u8"[미발견보정] 스킵 (year=%d month=%d, 0->0 단계 미통과)", (int)currentYear, (int)currentMonth);
-        s_logged = true;
+        g_undiscoveredLogged = true;
       }
       return;
     }
+
+    if (!IsStartSettingSessionActive(generation))
+      return;
 
     // 3. 트리거 발동: 0년에서 실제 시나리오 연도로 바뀐 순간
     AddLog(u8"[미발견보정] 트리거! year=%d month=%d", (int)currentYear, (int)currentMonth);
@@ -400,13 +403,16 @@ namespace DX11Base {
     uintptr_t root = ResolveRoot();
     if (!root) {
       AddLog(u8"[미발견보정] root 없음 - 다음 루프 재시도");
-      // s_waitForStart는 true로 유지하여 다음 루프에서 재시도
+      // waitForStart는 true로 유지하여 다음 루프에서 재시도
       return;
     }
 
+    if (!IsStartSettingSessionActive(generation))
+      return;
+
     int targetYear = (int)currentYear;
-    s_waitForStart = false;
-    s_logged = false;
+    g_undiscoveredWaitForStart = false;
+    g_undiscoveredLogged = false;
 
     AddNotification(u8"미발견 무장이 발견되었습니다. 재야로 변경중입니다. 잠시 기다려주세요");
 
@@ -423,6 +429,12 @@ namespace DX11Base {
     int countModified = 0;
 
     for (int i = 0; i < maxOfficers; i++) {
+      // OFF 또는 새 세대가 요청되면 오래된 worker가 남은 무장을 더 이상 쓰지 않습니다.
+      if (!IsStartSettingSessionActive(generation)) {
+        AddLog(u8"[미발견보정] 중단: 시작설정 OFF 또는 세션 변경 (%d명 수정 후)", countModified);
+        return;
+      }
+
       uintptr_t offPtr = baseAddr + (i * stride);
       if (!IsValidPtr(offPtr, 0x40))
         break;
@@ -463,8 +475,129 @@ namespace DX11Base {
         countModified++;
     }
 
+    if (!IsStartSettingSessionActive(generation))
+      return;
+
     AddLog(u8"[미발견보정] 완료: %d명 수정", countModified);
     AddNotification(std::to_string(countModified) + u8"명의 미발견 무장이 재야로 변경되었습니다.");
   }
 
-  } // namespace DX11Base
+  void UpdateUndiscoveredToRonin() {
+    const uint64_t generation = g_startSettingGeneration.load(std::memory_order_acquire);
+    UpdateUndiscoveredToRoninForSession(generation);
+  }
+
+  static DWORD WINAPI StartSettingThread(LPVOID param) {
+    const uint64_t generation = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(param));
+
+    // 기존 SetStartSetting(true)의 즉시 RunOnce 동작을 worker 시작 직후 그대로 수행합니다.
+    RunOnce(generation);
+
+    while (IsStartSettingSessionActive(generation)) {
+      const DWORD waitResult = WaitForSingleObject(g_startSettingStopEvent, 200);
+      if (waitResult == WAIT_OBJECT_0)
+        break;
+      if (waitResult == WAIT_FAILED) {
+        AddLog(u8"[시작설정] stop event 대기 실패. worker를 종료합니다.");
+        break;
+      }
+
+      if (!IsStartSettingSessionActive(generation))
+        break;
+
+      RunOnce(generation);
+      if (!IsStartSettingSessionActive(generation))
+        break;
+
+      UpdateUndiscoveredToRoninForSession(generation);
+    }
+
+    g_startSettingRunning.store(false, std::memory_order_release);
+    return 0;
+  }
+
+  void SetStartSetting(bool enable) {
+    std::lock_guard<std::mutex> lifecycleLock(g_startSettingLifecycleMutex);
+
+    if (enable) {
+      if (g_startSettingEnabled && g_startSettingRequested.load(std::memory_order_acquire))
+        return;
+
+      // 이전 worker handle이 남아 있으면 종료를 확인한 뒤 새 세션을 시작합니다.
+      if (g_startSettingThread) {
+        WaitForSingleObject(g_startSettingThread, INFINITE);
+        CloseHandle(g_startSettingThread);
+        g_startSettingThread = nullptr;
+      }
+      if (g_startSettingStopEvent) {
+        CloseHandle(g_startSettingStopEvent);
+        g_startSettingStopEvent = nullptr;
+      }
+
+      g_startSettingStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+      if (!g_startSettingStopEvent) {
+        g_startSettingEnabled = false;
+        g_startSettingRequested.store(false, std::memory_order_release);
+        g_startSettingRunning.store(false, std::memory_order_release);
+        AddLog(u8"[시작설정] stop event 생성 실패");
+        return;
+      }
+
+      ResetStartSettingSessionState();
+      const uint64_t generation = g_startSettingGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+      g_startSettingEnabled = true;
+      g_startSettingRequested.store(true, std::memory_order_release);
+      g_startSettingRunning.store(true, std::memory_order_release);
+
+      g_startSettingThread = CreateThread(nullptr, 0, StartSettingThread,
+                                          reinterpret_cast<LPVOID>(static_cast<uintptr_t>(generation)), 0, nullptr);
+      if (!g_startSettingThread) {
+        g_startSettingEnabled = false;
+        g_startSettingRequested.store(false, std::memory_order_release);
+        g_startSettingGeneration.fetch_add(1, std::memory_order_acq_rel);
+        g_startSettingRunning.store(false, std::memory_order_release);
+        CloseHandle(g_startSettingStopEvent);
+        g_startSettingStopEvent = nullptr;
+        AddLog(u8"[시작설정] 스레드 생성 실패");
+      } else {
+        AddLog(u8"[시작설정] 활성화");
+      }
+    } else {
+      if (!g_startSettingEnabled && !g_startSettingThread)
+        return;
+
+      g_startSettingEnabled = false;
+      g_startSettingRequested.store(false, std::memory_order_release);
+      // 현재 worker가 가진 세대를 즉시 무효화합니다.
+      g_startSettingGeneration.fetch_add(1, std::memory_order_acq_rel);
+
+      if (g_startSettingStopEvent)
+        SetEvent(g_startSettingStopEvent);
+
+      if (g_startSettingThread) {
+        // 200ms Sleep을 기다리지 않고 event가 즉시 깨웁니다.
+        // 미발견 1000명 순회 중이어도 각 iteration에서 취소를 확인합니다.
+        WaitForSingleObject(g_startSettingThread, INFINITE);
+        CloseHandle(g_startSettingThread);
+        g_startSettingThread = nullptr;
+      }
+
+      if (g_startSettingStopEvent) {
+        CloseHandle(g_startSettingStopEvent);
+        g_startSettingStopEvent = nullptr;
+      }
+
+      g_startSettingRunning.store(false, std::memory_order_release);
+      ResetStartSettingSessionState();
+      AddLog(u8"[시작설정] 비활성화");
+    }
+  }
+
+  void SetUndiscoveredToRonin(bool enable) {
+    if (enable) {
+      AddLog(u8"[시작설정] 미발견 무장 보정 기능 활성화 시도");
+      SetStartSetting(true);
+    }
+  }
+
+} // namespace DX11Base
