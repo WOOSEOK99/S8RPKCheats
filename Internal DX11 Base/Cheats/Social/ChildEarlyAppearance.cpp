@@ -43,7 +43,12 @@ bool SafeReadPtr(uintptr_t addr, uintptr_t* out) {
     return false;
   }
 }
+
 bool ResolveHeroAndRoster(uintptr_t& rosterBase, uintptr_t& heroMaster, uint16_t& heroId) {
+  static uintptr_t s_cachedRosterBase = 0;
+  static uintptr_t s_cachedHeroMaster = 0;
+  static uint16_t s_cachedHeroId = 0;
+
   rosterBase = 0;
   heroMaster = 0;
   heroId = 0;
@@ -63,12 +68,50 @@ bool ResolveHeroAndRoster(uintptr_t& rosterBase, uintptr_t& heroMaster, uint16_t
   if (!exeBase || !TryResolveOfficerRosterArrayBase(exeBase, &rosterBase) || rosterBase <= 0x10000)
     return false;
 
-  heroMaster = rosterBase + (uintptr_t)(heroId - 1) * 0x3D0;
+  // 일반 무장은 대부분 ID == roster index + 1이므로 기존 O(1) 경로를 유지합니다.
+  uintptr_t candidate = rosterBase + (uintptr_t)(heroId - 1) * 0x3D0;
   uint16_t verify = 0;
-  if (!SafeRead16(heroMaster + 0x08, &verify) || verify != heroId)
-    return false;
+  if (SafeRead16(candidate + 0x08, &verify) && verify == heroId) {
+    heroMaster = candidate;
+    s_cachedRosterBase = rosterBase;
+    s_cachedHeroMaster = heroMaster;
+    s_cachedHeroId = heroId;
+    return true;
+  }
 
-  return true;
+  // 커스텀 무장은 ID와 실제 roster 슬롯 인덱스가 일치하지 않을 수 있습니다.
+  // 같은 세션에서 이미 실제 위치를 찾았다면 검증 후 즉시 재사용합니다.
+  if (s_cachedRosterBase == rosterBase &&
+      s_cachedHeroId == heroId &&
+      s_cachedHeroMaster > 0x10000 &&
+      SafeRead16(s_cachedHeroMaster + 0x08, &verify) &&
+      verify == heroId) {
+    heroMaster = s_cachedHeroMaster;
+    return true;
+  }
+
+  // 모든 무장 목록과 동일하게 5102개 실제 슬롯에서 ID를 찾아
+  // 커스텀/비정렬 주인공의 정확한 master 주소를 확보합니다.
+  for (int i = 0; i < 5102; ++i) {
+    candidate = rosterBase + (uintptr_t)i * 0x3D0;
+    if (!SafeRead16(candidate + 0x08, &verify) || verify != heroId)
+      continue;
+
+    heroMaster = candidate;
+    s_cachedRosterBase = rosterBase;
+    s_cachedHeroMaster = heroMaster;
+    s_cachedHeroId = heroId;
+
+    AddLog(
+        u8"[ChildManager] 비정렬 주인공 roster 위치 보정: ID %u / index %d / addr=%p",
+        heroId, i, (void*)heroMaster);
+    return true;
+  }
+
+  s_cachedRosterBase = 0;
+  s_cachedHeroMaster = 0;
+  s_cachedHeroId = 0;
+  return false;
 }
 
 } // namespace ChildManagerDetail
