@@ -95,6 +95,19 @@ static std::unordered_map<uint16_t, ChildEntry> g_children;
 static ULONGLONG g_lastChildScanMs = 0;
 static uint16_t g_lastHeroId = 0;
 
+// T04: 5,102슬롯 전체 검색을 한 렌더 호출에 몰지 않고 분할합니다.
+// 검색 중 결과는 이 임시 상태에만 보관하고 완료 시점에 g_children으로 한 번만 게시합니다.
+static bool g_childScanInProgress = false;
+static bool g_childScanForceLog = false;
+static uintptr_t g_childScanRosterBase = 0;
+static uintptr_t g_childScanHeroMaster = 0;
+static uintptr_t g_childScanHeroNorm = 0;
+static uint16_t g_childScanHeroId = 0;
+static int g_childScanNextIndex = 0;
+static std::unordered_map<uint16_t, ChildEntry> g_childScanFound;
+static constexpr int kChildScanSlotsPerStep = 256;
+static constexpr int kChildRosterSlots = 5102;
+
 using ChildManagerDetail::NormalizeOfficerPtr;
 using ChildManagerDetail::ResolveHeroAndRoster;
 using ChildManagerDetail::SafeRead16;
@@ -225,12 +238,12 @@ static bool IsChildCommissioned(const ChildEntry& e, uint16_t currentYear) {
   return e.appearanceYear != 0 && currentYear >= e.appearanceYear;
 }
 
-static void ScanCurrentHeroChildren(bool forceLog) {
+static bool BeginChildScan(bool forceLog) {
   uintptr_t rosterBase = 0;
   uintptr_t heroMaster = 0;
   uint16_t heroId = 0;
   if (!ResolveHeroAndRoster(rosterBase, heroMaster, heroId))
-    return;
+    return false;
 
   // 주인공이 교체되면 이전 주인공 기준 목록은 즉시 폐기.
   if (g_lastHeroId != 0 && g_lastHeroId != heroId) {
@@ -238,15 +251,28 @@ static void ScanCurrentHeroChildren(bool forceLog) {
     AddLog(u8"[ChildManager] 주인공 변경 감지: %u -> %u, 자녀 목록 초기화",
            g_lastHeroId, heroId);
   }
-  g_lastHeroId = heroId;
 
-  std::unordered_map<uint16_t, ChildEntry> found;
-  found.reserve(8);
+  g_childScanInProgress = true;
+  g_childScanForceLog = forceLog;
+  g_childScanRosterBase = rosterBase;
+  g_childScanHeroMaster = heroMaster;
+  g_childScanHeroNorm = NormalizeOfficerPtr(heroMaster);
+  g_childScanHeroId = heroId;
+  g_childScanNextIndex = 0;
+  g_childScanFound.clear();
+  g_childScanFound.reserve(8);
+  return true;
+}
 
-  const uintptr_t heroNorm = NormalizeOfficerPtr(heroMaster);
+static bool ProcessChildScanStep() {
+  if (!g_childScanInProgress)
+    return false;
 
-  for (int i = 0; i < 5102; ++i) {
-    const uintptr_t officerBase = rosterBase + (uintptr_t)i * 0x3D0;
+  const int endIndex = (std::min)(g_childScanNextIndex + kChildScanSlotsPerStep,
+                                  kChildRosterSlots);
+
+  for (int i = g_childScanNextIndex; i < endIndex; ++i) {
+    const uintptr_t officerBase = g_childScanRosterBase + (uintptr_t)i * 0x3D0;
 
     uint16_t id = 0;
     if (!SafeRead16(officerBase + 0x08, &id) || id < 1 || id > 5102)
@@ -258,14 +284,12 @@ static void ScanCurrentHeroChildren(bool forceLog) {
     SafeReadPtr(officerBase + 0x50, &momPtr);
 
     const bool hasParentLink =
-        (NormalizeOfficerPtr(dadPtr) == heroNorm) ||
-        (NormalizeOfficerPtr(momPtr) == heroNorm);
+        (NormalizeOfficerPtr(dadPtr) == g_childScanHeroNorm) ||
+        (NormalizeOfficerPtr(momPtr) == g_childScanHeroNorm);
 
     if (!hasParentLink)
       continue;
 
-    // 일부 미사용/더미 무장 슬롯에도 혈연 포인터 값이 남아 있을 수 있습니다.
-    // 실제 자녀 후보는 정상적인 생년/등장년/몰년 데이터를 가진 레코드만 허용합니다.
     uint16_t appearance = 0;
     uint16_t birth = 0;
     uint16_t death = 0;
@@ -275,38 +299,57 @@ static void ScanCurrentHeroChildren(bool forceLog) {
       continue;
 
     const bool hasValidLifeYears =
-        birth != 0 &&
-        appearance != 0 &&
-        death != 0 &&
-        appearance >= birth &&
-        death >= birth;
-
+        birth != 0 && appearance != 0 && death != 0 &&
+        appearance >= birth && death >= birth;
     if (!hasValidLifeYears)
       continue;
 
     ChildEntry e;
     auto oldIt = g_children.find(id);
-    if (oldIt != g_children.end()) {
+    if (oldIt != g_children.end())
       e = oldIt->second; // 체크/연수/예약 상태 유지
-    }
 
     e.id = id;
     e.addr = officerBase;
     RefreshChild(e);
-    found[id] = e;
+    g_childScanFound[id] = e;
   }
 
-  if (forceLog || found.size() != g_children.size()) {
+  g_childScanNextIndex = endIndex;
+  if (g_childScanNextIndex < kChildRosterSlots)
+    return false;
+
+  if (g_childScanForceLog || g_childScanFound.size() != g_children.size()) {
     AddLog(u8"[ChildManager] 혈연 데이터 기준 자녀 검색 완료: 주인공 ID %u / %zu명",
-           heroId, found.size());
-    for (const auto& kv : found) {
+           g_childScanHeroId, g_childScanFound.size());
+    for (const auto& kv : g_childScanFound) {
       const ChildEntry& e = kv.second;
       AddLog(u8"[ChildManager] 자녀 ID %u | 출생 %u 등장 %u 사망 %u",
              e.id, e.birthYear, e.appearanceYear, e.deathYear);
     }
   }
 
-  g_children.swap(found);
+  g_children.swap(g_childScanFound);
+  g_childScanFound.clear();
+  g_lastHeroId = g_childScanHeroId;
+  g_lastChildScanMs = GetTickCount64();
+
+  g_childScanInProgress = false;
+  g_childScanForceLog = false;
+  g_childScanRosterBase = 0;
+  g_childScanHeroMaster = 0;
+  g_childScanHeroNorm = 0;
+  g_childScanHeroId = 0;
+  g_childScanNextIndex = 0;
+  return true;
+}
+
+static void RequestChildScan(bool forceLog) {
+  if (!g_childScanInProgress) {
+    BeginChildScan(forceLog);
+  } else if (forceLog) {
+    g_childScanForceLog = true;
+  }
 }
 
 } // namespace
@@ -319,12 +362,13 @@ void EnsureChildManagerCapture() {
 void RunChildManagerUpdate() {
   const ULONGLONG now = GetTickCount64();
 
-  // 주인공이 바뀌었는지 빠르게 확인하기 위해 1초 간격으로 재검색.
-  if (g_lastChildScanMs != 0 && (now - g_lastChildScanMs) < 1000)
-    return;
-
-  g_lastChildScanMs = now;
-  ScanCurrentHeroChildren(false);
+  // 전체 5,102슬롯 스캔은 1초 cadence로 시작하되 한 호출에 256슬롯만 처리합니다.
+  // 진행 중인 스캔은 호출마다 다음 chunk만 처리하고 완료 시 snapshot을 한 번 게시합니다.
+  if (!g_childScanInProgress) {
+    if (g_lastChildScanMs == 0 || (now - g_lastChildScanMs) >= 1000)
+      RequestChildScan(false);
+  }
+  ProcessChildScanStep();
 
   unsigned short currentYear = 0;
   const bool hasCurrentYear =
@@ -372,7 +416,7 @@ void DrawChildManagerWindow(float scale) {
                      u8"자녀를 체크한 뒤 '몇 년 후'를 변경하면 해당 시점으로 임관 연도가 적용됩니다.");
 
   if (ImGui::Button(u8"목록 새로고침", ImVec2(110.0f * scale, 0))) {
-    ScanCurrentHeroChildren(true);
+    RequestChildScan(true);
   }
 
   ImGui::Separator();
