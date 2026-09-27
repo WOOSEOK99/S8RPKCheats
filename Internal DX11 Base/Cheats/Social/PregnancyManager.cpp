@@ -313,7 +313,6 @@ static bool TryReadDirectPregnancyTableAt(
 
   PregnancyCanonicalTable table;
   table.base = base;
-  std::unordered_set<uint16_t> uniqueSlotSpouses;
   int matchedCurrentSpouses = 0;
 
   for (int slot = 0; slot < 3; ++slot) {
@@ -332,15 +331,14 @@ static bool TryReadDirectPregnancyTableAt(
     const uintptr_t spousePtr = NormalizeOfficerPtr(d.q00);
     const uint16_t spouseId = d.q00OfficerId;
 
-    // 빈 슬롯은 +00이 NULL이어야 하고, 사용 슬롯은 정상 무장 포인터여야 합니다.
+    // 슬롯이 적은 배우자 수를 반복 포인터로 채울 수 있으므로
+    // 서로 다른 spouse ID라는 조건은 요구하지 않습니다.
     if (spousePtr == 0) {
       if (spouseId != 0)
         return false;
     } else {
-      if (spouseId == 0 ||
-          !uniqueSlotSpouses.insert(spouseId).second) {
+      if (spouseId == 0)
         return false;
-      }
 
       if (currentSpouseIds.count(spouseId) != 0)
         matchedCurrentSpouses++;
@@ -354,8 +352,8 @@ static bool TryReadDirectPregnancyTableAt(
   }
 
   // 현재 배우자와 슬롯의 일치 여부는 테이블 자체의 유효성 조건이 아닙니다.
-  // 새 게임/커스텀 배우자는 관계가 성립해도 임신 슬롯이 아직 비어 있을 수 있으므로,
-  // 슬롯 포인터/flag/month/child 구조가 정상이라면 canonical table로 인정합니다.
+  // 새 게임/커스텀 배우자는 관계가 성립해도 임신 슬롯이 아직 비어 있을 수 있고,
+  // 배우자가 3명 미만이면 같은 배우자 포인터가 여러 슬롯에 반복될 수 있습니다.
   (void)matchedCurrentSpouses;
 
   table.valid = true;
