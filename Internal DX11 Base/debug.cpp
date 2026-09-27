@@ -1,11 +1,23 @@
 #define NOMINMAX
 #include "pch.h"
 #include "debug.h"
+#include "Cheats.h"
+#include "Cheats\Social\InstantLoveCave.h"
+#include "Cheats\System\MonthCapture.h"
+#include "Cheats\Officer\OfficerDetail.h"
+#include "Cheats\Officer\SelectOfficercapture.h"
+#include "Engine.h"
+#include "Menu.h"
+#include "MenuState.h"
+#include "showcal.h"
 #include "showlog.h"
+#include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <tuple>
 #include <type_traits>
@@ -20,9 +32,71 @@ struct T05DebugWorker {
 };
 
 std::mutex g_t05DebugWorkersMutex;
-// Raw pointer 보관은 의도적입니다. 정상 FreeLibrary 경로에서는 join+delete하고,
-// 프로세스 종료(DllMain terminating)에서는 loader lock 아래 join/destructor를 피합니다.
+// 정상 FreeLibrary 경로에서는 join+delete하고, 프로세스 종료에서는 loader lock
+// 아래 joinable thread destructor를 피하기 위해 raw pointer만 정적 보관합니다.
 std::vector<T05DebugWorker*> g_t05DebugWorkers;
+
+struct T05DebugBytePool {
+  unsigned char* data = nullptr;
+  size_t capacity = 0;
+
+  ~T05DebugBytePool() {
+    ::operator delete(data);
+  }
+};
+
+thread_local T05DebugBytePool g_t05DebugBytePool;
+
+unsigned char* AcquireT05DebugBytes(size_t count) {
+  if (g_t05DebugBytePool.data && g_t05DebugBytePool.capacity >= count) {
+    unsigned char* p = g_t05DebugBytePool.data;
+    g_t05DebugBytePool.data = nullptr;
+    g_t05DebugBytePool.capacity = 0;
+    return p;
+  }
+  return static_cast<unsigned char*>(::operator new(count));
+}
+
+void ReleaseT05DebugBytes(unsigned char* data, size_t count) noexcept {
+  if (!data)
+    return;
+
+  if (!g_t05DebugBytePool.data || count > g_t05DebugBytePool.capacity) {
+    ::operator delete(g_t05DebugBytePool.data);
+    g_t05DebugBytePool.data = data;
+    g_t05DebugBytePool.capacity = count;
+    return;
+  }
+
+  ::operator delete(data);
+}
+
+template <class T>
+struct T05DebugAllocator {
+  using value_type = T;
+
+  T05DebugAllocator() noexcept = default;
+  template <class U>
+  T05DebugAllocator(const T05DebugAllocator<U>&) noexcept {}
+
+  T* allocate(size_t count) {
+    if constexpr (std::is_same_v<T, unsigned char>)
+      return reinterpret_cast<T*>(AcquireT05DebugBytes(count));
+    return std::allocator<T>{}.allocate(count);
+  }
+
+  void deallocate(T* p, size_t count) noexcept {
+    if constexpr (std::is_same_v<T, unsigned char>)
+      ReleaseT05DebugBytes(reinterpret_cast<unsigned char*>(p), count);
+    else
+      std::allocator<T>{}.deallocate(p, count);
+  }
+
+  template <class U>
+  bool operator==(const T05DebugAllocator<U>&) const noexcept { return true; }
+  template <class U>
+  bool operator!=(const T05DebugAllocator<U>&) const noexcept { return false; }
+};
 
 } // namespace
 
@@ -33,9 +107,12 @@ namespace DX11Base {
       std::shared_ptr<std::atomic<bool>> done);
 }
 
-// debug_impl.inc의 std::thread(...).detach() 두 경로만 관리형 worker로 치환합니다.
-// 실제 검색 구현/UI는 보존합니다.
+// 기존 구현의 std::thread(...).detach()를 관리형 worker로 바꾸고,
+// 내부 vector<unsigned char> 버퍼는 thread-local allocator로 재사용합니다.
 namespace std {
+template <class T>
+using T05DebugVector = vector<T, ::T05DebugAllocator<T>>;
+
 class T05ManagedThread {
 public:
   template <class F, class... Args>
@@ -67,11 +144,13 @@ private:
 };
 } // namespace std
 
+#define vector T05DebugVector
 #define thread T05ManagedThread
 #define debuging debugingLegacy
 #include "debug_impl.inc"
 #undef debuging
 #undef thread
+#undef vector
 
 namespace DX11Base {
 
