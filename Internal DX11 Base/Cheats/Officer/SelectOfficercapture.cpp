@@ -7,12 +7,14 @@ namespace {
   std::atomic<bool> g_externalOfficerListRefreshRequested{false};
 }
 
-// 기존 대형 구현은 그대로 보존합니다. 배우자 전체 프로세스 스캐너/창만 legacy 이름으로
-// 격리하고 아래에서 검증된 관계 테이블 기반 public entry point로 대체합니다.
+// 기존 대형 구현은 그대로 보존합니다. 전체 프로세스 배우자 스캐너와
+// 프레임 종속 일괄 기재 창만 legacy 이름으로 격리하고 아래 T05 경로로 대체합니다.
 #define StartSpouseScannerAsync StartSpouseScannerAsyncLegacy
 #define DrawSpouseListWindow DrawSpouseListWindowLegacy
 #define DrawOfficerListWindow DrawOfficerListWindowImpl
+#define DrawBatchRandomTraitAssignmentWindow DrawBatchRandomTraitAssignmentWindowLegacy
 #include "SelectOfficercapture_impl.inc"
+#undef DrawBatchRandomTraitAssignmentWindow
 #undef DrawOfficerListWindow
 #undef DrawSpouseListWindow
 #undef StartSpouseScannerAsync
@@ -258,6 +260,58 @@ namespace {
     return true;
   }
 
+  // --- T05 일괄 랜덤 기재 관리 상태 ---
+  uintptr_t g_t05BatchGameBase = 0;
+  uintptr_t g_t05BatchP1 = 0;
+  uintptr_t g_t05BatchRosterBase = 0;
+  size_t g_t05BatchCollectCursor = 0;
+  bool g_t05BatchSeenIds[kBatchRandomOfficerCount + 1] = {};
+  ULONGLONG g_t05BatchLastTickMs = 0;
+  ULONGLONG g_t05BatchLastScanMs = 0;
+
+  void ResetT05BatchRuntime() {
+    g_t05BatchGameBase = 0;
+    g_t05BatchP1 = 0;
+    g_t05BatchRosterBase = 0;
+    g_t05BatchCollectCursor = 0;
+    memset(g_t05BatchSeenIds, 0, sizeof(g_t05BatchSeenIds));
+    g_t05BatchLastTickMs = 0;
+    g_t05BatchLastScanMs = 0;
+  }
+
+  bool ResolveT05BatchSession() {
+    const uintptr_t gameBase = DX11Base::GetGameBaseFast();
+    if (gameBase <= 0x10000)
+      return false;
+
+    uintptr_t p1 = 0;
+    if (!SafeTraitReadPtr(gameBase + 0xE0, p1) || p1 <= 0x10000)
+      return false;
+
+    const uintptr_t exe = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+    uintptr_t rosterBase = 0;
+    if (!exe || !DX11Base::TryResolveOfficerRosterArrayBase(exe, &rosterBase) ||
+        rosterBase <= 0x10000)
+      return false;
+
+    g_t05BatchGameBase = gameBase;
+    g_t05BatchP1 = p1;
+    g_t05BatchRosterBase = rosterBase;
+    return true;
+  }
+
+  bool IsT05BatchSessionCurrent() {
+    if (g_t05BatchGameBase <= 0x10000 || g_t05BatchP1 <= 0x10000)
+      return false;
+    if (DX11Base::GetGameBaseFast() != g_t05BatchGameBase)
+      return false;
+
+    uintptr_t p1 = 0;
+    if (!SafeTraitReadPtr(g_t05BatchGameBase + 0xE0, p1))
+      return false;
+    return p1 == g_t05BatchP1;
+  }
+
 } // namespace
 
 namespace DX11Base {
@@ -375,6 +429,165 @@ namespace DX11Base {
       g_lastTraitMissUntilMs = GetTickCount64() + 5000;
       AddLog(u8"[기재변경/T05] ID:%d 전체 bounded scan 완료 - 객체 미발견", static_cast<int>(traitId));
       g_pendingTraitChange = PendingTraitChangeJob{};
+    }
+  }
+
+  void TickBatchRandomTraitJobT05() {
+    if (!s_batchRandomJob.running)
+      return;
+
+    const ULONGLONG nowMs = GetTickCount64();
+    if (g_t05BatchLastTickMs != 0 && nowMs - g_t05BatchLastTickMs < 50)
+      return;
+    g_t05BatchLastTickMs = nowMs;
+
+    if (!IsT05BatchSessionCurrent()) {
+      s_batchRandomJob.running = false;
+      s_batchRandomJob.collectingOfficers = false;
+      s_batchRandomJob.scanningTraits = false;
+      s_batchRandomStatus = u8"세이브/주인공 변경 감지: 일괄 기재 작업을 취소했습니다.";
+      ResetT05BatchRuntime();
+      return;
+    }
+
+    using Clock = std::chrono::steady_clock;
+
+    if (s_batchRandomJob.collectingOfficers) {
+      const auto deadline = Clock::now() + std::chrono::milliseconds(1);
+      size_t processedThisTick = 0;
+      constexpr size_t kMaxSlotsPerTick = 256;
+
+      while (g_t05BatchCollectCursor < static_cast<size_t>(kBatchRandomOfficerCount) &&
+             processedThisTick < kMaxSlotsPerTick && Clock::now() < deadline) {
+        const uintptr_t base =
+            g_t05BatchRosterBase + g_t05BatchCollectCursor * 0x3D0;
+        ++g_t05BatchCollectCursor;
+        ++processedThisTick;
+
+        const RosterStats stats = SafeReadRosterStats(base);
+        if (!stats.valid || stats.id_08 < 1 || stats.id_08 > kBatchRandomOfficerCount)
+          continue;
+        if (g_t05BatchSeenIds[stats.id_08])
+          continue;
+        if (!IsValidPtr(base + 0x10, 1))
+          continue;
+
+        g_t05BatchSeenIds[stats.id_08] = true;
+        s_batchRandomJob.officers.push_back(base);
+      }
+
+      if (g_t05BatchCollectCursor < static_cast<size_t>(kBatchRandomOfficerCount))
+        return;
+
+      s_batchRandomJob.collectingOfficers = false;
+      if (s_batchRandomJob.officers.empty()) {
+        s_batchRandomJob.running = false;
+        s_batchRandomStatus = u8"1~5102 무장 범위에서 유효 무장을 찾지 못했습니다.";
+        ResetT05BatchRuntime();
+        return;
+      }
+
+      s_batchRandomStatus =
+          std::string(u8"유효 무장 수집 완료: ") +
+          std::to_string(s_batchRandomJob.officers.size()) +
+          u8"명 / 기재 객체 준비 중";
+      return;
+    }
+
+    if (s_batchRandomJob.scanningTraits) {
+      // 단건 기재 cache miss가 있으면 그 요청을 우선 처리해 대규모 scanner 동시 실행을 막습니다.
+      if (g_pendingTraitChange.active)
+        return;
+      if (g_t05BatchLastScanMs != 0 && nowMs - g_t05BatchLastScanMs < 200)
+        return;
+      g_t05BatchLastScanMs = nowMs;
+
+      bool scanFinished = false;
+      constexpr size_t kReadableBytesPerTick = 2 * 1024 * 1024;
+      ScanTraitObjectsForBatchStep(
+          s_batchRandomJob.requestedPool,
+          s_batchRandomJob.traitObjects,
+          s_batchRandomJob.traitVtable,
+          s_batchRandomJob.scanAddress,
+          kReadableBytesPerTick,
+          scanFinished);
+
+      if (!scanFinished)
+        return;
+
+      s_batchRandomJob.pool.clear();
+      s_batchRandomJob.pool.reserve(s_batchRandomJob.requestedPool.size());
+      for (uint16_t id : s_batchRandomJob.requestedPool) {
+        if (s_batchRandomJob.traitObjects.count(id) != 0)
+          s_batchRandomJob.pool.push_back(id);
+      }
+
+      if (s_batchRandomJob.pool.empty()) {
+        s_batchRandomJob.running = false;
+        s_batchRandomJob.scanningTraits = false;
+        s_batchRandomStatus =
+            u8"기재 객체 검색은 완료했지만 사용할 수 있는 기재 객체를 찾지 못했습니다.";
+        ResetT05BatchRuntime();
+        return;
+      }
+
+      s_batchRandomJob.scanningTraits = false;
+      s_batchRandomJob.cursor = 0;
+      s_batchRandomStatus =
+          std::string(u8"기재 객체 검색 완료: ") +
+          std::to_string(s_batchRandomJob.pool.size()) + u8"개 / 무장 적용 시작";
+      return;
+    }
+
+    static std::mt19937 rng(
+        static_cast<unsigned int>(
+            std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+
+    // FPS와 무관하게 50ms cadence에서 호출되며, 한 호출의 실제 작업시간도 2ms로 제한합니다.
+    const auto deadline = Clock::now() + std::chrono::milliseconds(2);
+    size_t processedThisTick = 0;
+    constexpr size_t kHardOfficerCapPerTick = 64;
+
+    while (s_batchRandomJob.cursor < s_batchRandomJob.officers.size() &&
+           processedThisTick < kHardOfficerCapPerTick && Clock::now() < deadline) {
+      const uintptr_t base = s_batchRandomJob.officers[s_batchRandomJob.cursor++];
+      ++processedThisTick;
+
+      const int result = AssignRandomTraitsToOneOfficerBatchFast(
+          base,
+          s_batchRandomJob.pool,
+          s_batchRandomJob.traitObjects,
+          rng,
+          s_batchRandomJob.filledSlots);
+
+      if (result < 0)
+        ++s_batchRandomJob.alreadyFull;
+      else if (result > 0)
+        ++s_batchRandomJob.changedOfficers;
+      else
+        ++s_batchRandomJob.failedOfficers;
+    }
+
+    if (s_batchRandomJob.cursor >= s_batchRandomJob.officers.size()) {
+      const size_t targetCount = s_batchRandomJob.officers.size();
+      s_batchRandomJob.running = false;
+      s_batchRandomStatus =
+          std::string(u8"완료: ") +
+          std::to_string(s_batchRandomJob.changedOfficers) +
+          u8"명 변경 / " +
+          std::to_string(s_batchRandomJob.filledSlots) +
+          u8"개 슬롯 부여 / 이미 3개 보유 " +
+          std::to_string(s_batchRandomJob.alreadyFull) +
+          u8"명 / 미변경 " +
+          std::to_string(s_batchRandomJob.failedOfficers) + u8"명";
+
+      AddLog(u8"[랜덤기재/T05] 대상 %d명, 변경 %d명, 부여 슬롯 %d개, 이미 3개 %d명, 미변경 %d명",
+             static_cast<int>(targetCount),
+             s_batchRandomJob.changedOfficers,
+             s_batchRandomJob.filledSlots,
+             s_batchRandomJob.alreadyFull,
+             s_batchRandomJob.failedOfficers);
+      ResetT05BatchRuntime();
     }
   }
 
@@ -605,6 +818,177 @@ namespace DX11Base {
           StartSpouseScannerAsync();
       }
     }
+    ImGui::End();
+  }
+
+  void DrawBatchRandomTraitAssignmentWindow(float scale) {
+    if (!s_showBatchRandomTraitWindow && !s_batchRandomJob.running)
+      return;
+
+    if (!s_showBatchRandomTraitWindow)
+      return;
+
+    ImGui::SetNextWindowSize(ImVec2(470.0f * scale, 0.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin(u8"모든 무장 일괄 랜덤기재 부여###BatchRandomTraits",
+                      &s_showBatchRandomTraitWindow,
+                      ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::End();
+      return;
+    }
+
+    const std::vector<uint16_t> allPool = BuildBatchRandomTraitPool();
+    const bool hasGreen = BatchPoolHasGrade(allPool, 2);
+    const bool hasRed = BatchPoolHasGrade(allPool, 3);
+
+    int goldCount = 0, greenCount = 0, redCount = 0;
+    for (uint16_t id : allPool) {
+      const int grade = GetBatchTraitGrade(id);
+      if (grade == 1) ++goldCount;
+      else if (grade == 2) ++greenCount;
+      else if (grade == 3) ++redCount;
+    }
+
+    ImGui::TextWrapped(u8"모든 유효 무장의 기존 기재는 유지하고, 비어 있는 기재 슬롯만 중복 없이 랜덤으로 채웁니다.");
+    ImGui::Spacing();
+    ImGui::Text(u8"황금 후보: %d개", goldCount);
+    ImGui::SameLine();
+    ImGui::Text(u8"녹색: %d개", greenCount);
+    ImGui::SameLine();
+    ImGui::Text(u8"적색: %d개", redCount);
+    ImGui::Separator();
+
+    if (s_batchRandomJob.running)
+      ImGui::BeginDisabled();
+
+    ImGui::Checkbox(u8"황금##BatchRandomGold", &s_batchRandomGold);
+    ImGui::SameLine();
+
+    if (!hasGreen)
+      ImGui::BeginDisabled();
+    ImGui::Checkbox(u8"녹색##BatchRandomGreen", &s_batchRandomGreen);
+    if (!hasGreen) {
+      ImGui::EndDisabled();
+      s_batchRandomGreen = false;
+    }
+
+    ImGui::SameLine();
+    if (!hasRed)
+      ImGui::BeginDisabled();
+    ImGui::Checkbox(u8"적색##BatchRandomRed", &s_batchRandomRed);
+    if (!hasRed) {
+      ImGui::EndDisabled();
+      s_batchRandomRed = false;
+    }
+
+    if (s_batchRandomJob.running)
+      ImGui::EndDisabled();
+
+    if (!HasCustomTraitConfigFile())
+      ImGui::TextDisabled(u8"※ san8r_traits_config.json 없음: 기본 황금 기재 72개만 사용");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                       u8"※ 기존 기재는 유지하고 빈 슬롯만 변경합니다.");
+
+    if (s_batchRandomJob.running) {
+      if (s_batchRandomJob.collectingOfficers) {
+        const float progress = static_cast<float>(g_t05BatchCollectCursor) /
+                               static_cast<float>(kBatchRandomOfficerCount);
+        ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), u8"1~5102 무장 분할 수집 중...");
+      } else if (s_batchRandomJob.scanningTraits) {
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f),
+                           u8"기재 객체 bounded scan 중... %zu / %zu개 발견",
+                           s_batchRandomJob.traitObjects.size(),
+                           s_batchRandomJob.requestedPool.size());
+      } else {
+        const float progress = s_batchRandomJob.officers.empty()
+            ? 0.0f
+            : static_cast<float>(s_batchRandomJob.cursor) /
+              static_cast<float>(s_batchRandomJob.officers.size());
+
+        char progressText[128];
+        snprintf(progressText, sizeof(progressText),
+                 u8"%zu / %zu명", s_batchRandomJob.cursor,
+                 s_batchRandomJob.officers.size());
+        ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f), progressText);
+      }
+
+      if (ImGui::Button(u8"작업 취소", ImVec2(-1.0f, 28.0f * scale))) {
+        s_batchRandomJob.running = false;
+        s_batchRandomJob.collectingOfficers = false;
+        s_batchRandomJob.scanningTraits = false;
+        s_batchRandomStatus = u8"사용자가 일괄 기재 작업을 취소했습니다.";
+        ResetT05BatchRuntime();
+      }
+    } else {
+      const bool noGradeSelected =
+          !s_batchRandomGold && !s_batchRandomGreen && !s_batchRandomRed;
+
+      if (noGradeSelected)
+        ImGui::BeginDisabled();
+
+      if (ImGui::Button(u8"모든 무장 일괄 랜덤기재 부여 실행",
+                        ImVec2(-1.0f, 34.0f * scale))) {
+        std::vector<uint16_t> enabledPool;
+        enabledPool.reserve(allPool.size());
+        for (uint16_t id : allPool) {
+          const int grade = GetBatchTraitGrade(id);
+          if ((grade == 1 && s_batchRandomGold) ||
+              (grade == 2 && s_batchRandomGreen) ||
+              (grade == 3 && s_batchRandomRed)) {
+            enabledPool.push_back(id);
+          }
+        }
+
+        if (enabledPool.empty()) {
+          s_batchRandomStatus = u8"선택한 등급에 사용 가능한 기재가 없습니다.";
+        } else {
+          s_batchRandomJob = {};
+          ResetT05BatchRuntime();
+
+          if (!ResolveT05BatchSession()) {
+            s_batchRandomStatus = u8"현재 세이브/무장 배열을 확인하지 못했습니다.";
+          } else {
+            s_batchRandomJob.running = true;
+            s_batchRandomJob.collectingOfficers = true;
+            s_batchRandomJob.requestedPool = std::move(enabledPool);
+            s_batchRandomJob.officers.reserve(kBatchRandomOfficerCount);
+
+            if (!SeedTraitObjectsForBatch(
+                    s_batchRandomJob.requestedPool,
+                    s_batchRandomJob.traitObjects,
+                    s_batchRandomJob.traitVtable)) {
+              s_batchRandomJob.running = false;
+              s_batchRandomJob.collectingOfficers = false;
+              s_batchRandomStatus =
+                  u8"기재 객체 형식(vtable)을 확인할 기준 기재를 찾지 못했습니다.";
+              ResetT05BatchRuntime();
+            } else {
+              s_batchRandomJob.scanningTraits =
+                  s_batchRandomJob.traitObjects.size() <
+                  s_batchRandomJob.requestedPool.size();
+
+              if (!s_batchRandomJob.scanningTraits)
+                s_batchRandomJob.pool = s_batchRandomJob.requestedPool;
+              else
+                s_batchRandomJob.scanAddress = 0;
+
+              s_batchRandomStatus = u8"1~5102 전체 무장 공간 분할 수집 시작";
+            }
+          }
+        }
+      }
+
+      if (noGradeSelected)
+        ImGui::EndDisabled();
+    }
+
+    if (!s_batchRandomStatus.empty()) {
+      ImGui::Spacing();
+      ImGui::TextWrapped("%s", s_batchRandomStatus.c_str());
+    }
+
     ImGui::End();
   }
 
