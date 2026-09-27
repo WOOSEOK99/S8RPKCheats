@@ -56,9 +56,10 @@ namespace DX11Base {
 
 #ifndef DX11BASE_OFFICER_DETAIL_HEADER_INCLUDED
   // [모든 무장 UI 고속 경로]
-  // 기존 SetTraitID는 캐시 미스 시 5102명 x 3슬롯 전체 검색과 프로세스 메모리
-  // 스캔까지 수행할 수 있습니다. 런타임 기재 포인터 배열에서 ID로 바로 찾아
-  // 슬롯에 기록하고, 구조가 예상과 다를 때만 기존 경로로 폴백합니다.
+  // 런타임 기재 포인터 배열에서 ID로 바로 찾아 슬롯에 기록합니다.
+  // T05: 이 빠른 경로가 실패한 경우에는 UI 클릭 경로에서 기존 SetTraitID의
+  // 전체 roster/프로세스 동기 검색으로 떨어지지 않습니다. 실패 케이스는
+  // 별도 분할 scan job으로 처리하여 클릭 순간 프레임 정지를 막습니다.
   inline bool SetTraitIDForOfficerUiFast(uintptr_t officerBase, int slotIndex, uint16_t traitID) {
     if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 || traitID == 0)
       return false;
@@ -96,7 +97,10 @@ namespace DX11Base {
       }
     }
 
-    return SetTraitID(officerBase, slotIndex, traitID);
+    // 기존에는 여기서 SetTraitID()를 호출하면서 캐시 미스 시 5102명 슬롯 검색과
+    // 전체 프로세스 readable 메모리 검색이 UI 스레드에서 동기 실행될 수 있었습니다.
+    // T05에서는 즉시 실패를 반환하고 후속 분할 scan job에 넘깁니다.
+    return false;
   }
 #endif
 
