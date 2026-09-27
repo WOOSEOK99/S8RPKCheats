@@ -353,10 +353,10 @@ static bool TryReadDirectPregnancyTableAt(
     table.spouseIds[(size_t)slot] = spouseId;
   }
 
-  // 배우자가 있는 세이브라면 최소 하나의 슬롯이 현재 배우자와 일치해야
-  // g0_ChildOffset 후보를 정상 테이블로 인정합니다.
-  if (!currentSpouseIds.empty() && matchedCurrentSpouses == 0)
-    return false;
+  // 현재 배우자와 슬롯의 일치 여부는 테이블 자체의 유효성 조건이 아닙니다.
+  // 새 게임/커스텀 배우자는 관계가 성립해도 임신 슬롯이 아직 비어 있을 수 있으므로,
+  // 슬롯 포인터/flag/month/child 구조가 정상이라면 canonical table로 인정합니다.
+  (void)matchedCurrentSpouses;
 
   table.valid = true;
   *out = table;
