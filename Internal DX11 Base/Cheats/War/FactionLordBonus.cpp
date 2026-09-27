@@ -2,6 +2,7 @@
 #include "FactionLordBonus.h"
 #include "../../Cheats.h"
 #include "../../showlog.h"
+#include <atomic>
 #include <psapi.h>
 #include <unordered_map>
 
@@ -14,8 +15,11 @@ namespace DX11Base {
     // ───────────────────────────────────────────────
 
     bool   g_factionLordBonusEnabled = false;
-    static bool   g_factionLordBonusRunning = false;
+    static std::atomic<bool> g_factionLordBonusRunning{false};
+    static std::atomic<bool> g_factionLordBonusStopRequested{false};
     static HANDLE g_factionLordBonusThread  = nullptr;
+    static HANDLE g_factionLordBonusStopEvent = nullptr;
+    static std::mutex g_factionLordLifecycleMutex;
 
     static std::unordered_map<uintptr_t, bool> g_prevAssigned;
     static bool g_titleNamesApplied = false;
@@ -61,21 +65,23 @@ namespace DX11Base {
         return p;
     }
 
-    // forward decls (used by title name patch helpers)
-    static void WriteBytes(uintptr_t addr, const uint8_t* data, size_t size);
-
+    // 동일 값이면 VirtualProtect/쓰기 자체를 생략합니다.
     static void WriteBytes(uintptr_t addr, const uint8_t* data, size_t size) {
         if (!IsValidPtr(addr, size)) return;
+        if (memcmp((const void*)addr, data, size) == 0) return;
+
         DWORD old, tmp;
-        VirtualProtect((LPVOID)addr, size, PAGE_READWRITE, &old);
+        if (!VirtualProtect((LPVOID)addr, size, PAGE_READWRITE, &old)) return;
         memcpy((void*)addr, data, size);
         VirtualProtect((LPVOID)addr, size, old, &tmp);
     }
 
     static void WriteQword(uintptr_t addr, uint64_t val) {
         if (!IsValidPtr(addr, 8)) return;
+        if (*(uint64_t*)addr == val) return;
+
         DWORD old, tmp;
-        VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old);
+        if (!VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old)) return;
         *(uint64_t*)addr = val;
         VirtualProtect((LPVOID)addr, 8, old, &tmp);
     }
@@ -125,8 +131,11 @@ namespace DX11Base {
     }
 
     static void RunOnce() {
+        if (g_factionLordBonusStopRequested.load(std::memory_order_acquire)) return;
+
         uintptr_t root = ResolveRoot();
         if (!root) return;
+        if (g_factionLordBonusStopRequested.load(std::memory_order_acquire)) return;
 
         // 관작 이름 패치 1회 적용 (root가 준비된 시점)
         if (!g_titleNamesApplied) {
@@ -134,7 +143,9 @@ namespace DX11Base {
             g_titleNamesApplied = true;
         }
 
-        // 1. 보너스 테이블 적용
+        if (g_factionLordBonusStopRequested.load(std::memory_order_acquire)) return;
+
+        // 1. 보너스 테이블 적용. WriteBytes 내부에서 동일 값은 실제 쓰기를 생략합니다.
         ApplyBonusTable(root);
 
         uintptr_t ptrEmperor = root + OFF_EMPEROR;
@@ -155,6 +166,8 @@ namespace DX11Base {
 
         // 2. 세력 순회
         for (int i = 0; i < FACTION_COUNT; i++) {
+            if (g_factionLordBonusStopRequested.load(std::memory_order_relaxed)) return;
+
             uintptr_t existAddr    = root + OFF_FACTION_EXIST    + i * FACTION_SIZE;
             uintptr_t wanderAddr   = root + OFF_FACTION_WANDER   + i * FACTION_SIZE;
             uintptr_t lordPtrAddr  = root + OFF_FACTION_LORD_PTR + i * FACTION_SIZE;
@@ -189,6 +202,8 @@ namespace DX11Base {
             if (current != target)
                 WriteQword(bonusAddr, target);
         }
+
+        if (g_factionLordBonusStopRequested.load(std::memory_order_acquire)) return;
 
         // 3. 이전에 배정됐지만 지금은 빠진 대상 정리
         {
@@ -232,25 +247,59 @@ namespace DX11Base {
     }
 
     static DWORD WINAPI FactionLordBonusThread(LPVOID) {
-        // 즉시 1회 실행
         RunOnce();
 
-        while (g_factionLordBonusEnabled) {
-            Sleep(5000);
-            if (!g_factionLordBonusEnabled) break;
+        while (!g_factionLordBonusStopRequested.load(std::memory_order_acquire)) {
+            // 기존 Sleep(5000)은 OFF 요청을 최대 5초 동안 볼 수 없었습니다.
+            // stop event를 사용하면 OFF 즉시 깨어나고, timeout일 때만 정기 재검사를 수행합니다.
+            const DWORD waitResult = WaitForSingleObject(g_factionLordBonusStopEvent, 5000);
+            if (waitResult == WAIT_OBJECT_0 ||
+                g_factionLordBonusStopRequested.load(std::memory_order_acquire)) {
+                break;
+            }
+            if (waitResult == WAIT_FAILED) {
+                AddLog(u8"[군주보너스] stop event 대기 실패. worker를 종료합니다.");
+                break;
+            }
+
             RunOnce();
         }
 
-        g_factionLordBonusRunning = false;
+        g_factionLordBonusRunning.store(false, std::memory_order_release);
         return 0;
     }
 
     void SetFactionLordBonus(bool enable) {
+        std::lock_guard<std::mutex> lifecycleLock(g_factionLordLifecycleMutex);
+
         if (enable) {
-            if (g_factionLordBonusEnabled) return;
+            if (g_factionLordBonusEnabled &&
+                g_factionLordBonusRunning.load(std::memory_order_acquire)) {
+                return;
+            }
+
+            // 이전 worker의 handle이 남아 있으면 반드시 종료 확인 후 정리합니다.
+            if (g_factionLordBonusThread) {
+                WaitForSingleObject(g_factionLordBonusThread, INFINITE);
+                CloseHandle(g_factionLordBonusThread);
+                g_factionLordBonusThread = nullptr;
+            }
+            if (g_factionLordBonusStopEvent) {
+                CloseHandle(g_factionLordBonusStopEvent);
+                g_factionLordBonusStopEvent = nullptr;
+            }
+
+            g_factionLordBonusStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!g_factionLordBonusStopEvent) {
+                g_factionLordBonusEnabled = false;
+                g_factionLordBonusRunning.store(false, std::memory_order_release);
+                AddLog(u8"[군주보너스] stop event 생성 실패");
+                return;
+            }
 
             g_factionLordBonusEnabled = true;
-            g_factionLordBonusRunning = true;
+            g_factionLordBonusStopRequested.store(false, std::memory_order_release);
+            g_factionLordBonusRunning.store(true, std::memory_order_release);
             g_titleNamesApplied = false;
 
             g_factionLordBonusThread = CreateThread(nullptr, 0,
@@ -258,19 +307,37 @@ namespace DX11Base {
 
             if (!g_factionLordBonusThread) {
                 g_factionLordBonusEnabled = false;
-                g_factionLordBonusRunning = false;
+                g_factionLordBonusStopRequested.store(true, std::memory_order_release);
+                g_factionLordBonusRunning.store(false, std::memory_order_release);
+                CloseHandle(g_factionLordBonusStopEvent);
+                g_factionLordBonusStopEvent = nullptr;
                 AddLog(u8"[군주보너스] 스레드 생성 실패");
             } else {
                 AddLog(u8"[군주보너스] 활성화");
             }
 
         } else {
+            if (!g_factionLordBonusEnabled && !g_factionLordBonusThread)
+                return;
+
             g_factionLordBonusEnabled = false;
+            g_factionLordBonusStopRequested.store(true, std::memory_order_release);
+
+            // 5초 Sleep을 기다리지 않고 즉시 worker를 깨웁니다.
+            if (g_factionLordBonusStopEvent)
+                SetEvent(g_factionLordBonusStopEvent);
 
             if (g_factionLordBonusThread) {
-                WaitForSingleObject(g_factionLordBonusThread, 6000);
+                // stop event가 즉시 timed wait를 깨우므로, 여기서는 실제 RunOnce가 진행 중인
+                // 짧은 구간만 기다립니다. 기존의 고정 5~6초 UI 정지는 발생하지 않습니다.
+                WaitForSingleObject(g_factionLordBonusThread, INFINITE);
                 CloseHandle(g_factionLordBonusThread);
                 g_factionLordBonusThread = nullptr;
+            }
+
+            if (g_factionLordBonusStopEvent) {
+                CloseHandle(g_factionLordBonusStopEvent);
+                g_factionLordBonusStopEvent = nullptr;
             }
 
             uintptr_t root = ResolveRoot();
