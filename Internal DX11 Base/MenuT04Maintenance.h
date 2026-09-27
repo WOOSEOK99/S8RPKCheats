@@ -7,6 +7,9 @@
 
 namespace DX11Base {
 
+// SelectOfficercapture.h는 UI 매크로 래퍼도 정의하므로 여기서는 함수만 전방 선언합니다.
+void TickTraitChangeAsync();
+
 inline void RunT04RenderMaintenance() {
   static ULONGLONG s_lastMaintenanceMs = 0;
   const ULONGLONG now = GetTickCount64();
@@ -14,6 +17,9 @@ inline void RunT04RenderMaintenance() {
     return;
 
   s_lastMaintenanceMs = now;
+
+  // T05: 기재 포인터 cache miss 검색도 FPS가 아니라 같은 실제 시간 cadence에서 처리합니다.
+  TickTraitChangeAsync();
 
   // 악명 0 유지도 렌더 FPS가 아니라 실시간 200ms cadence로 처리합니다.
   // 기존 동작처럼 값이 이미 0이면 쓰지 않습니다.
