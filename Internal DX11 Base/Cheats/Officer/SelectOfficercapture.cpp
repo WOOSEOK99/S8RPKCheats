@@ -216,7 +216,7 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
   }
 
   if (IsTraitCompatibilityBypass()) {
-    ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f, 1.0f),
+    ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f),
                        u8"진단 모드: 커스텀 기재 호환 확장 우회 중 (게임 원본 판정만 사용)");
   }
 
