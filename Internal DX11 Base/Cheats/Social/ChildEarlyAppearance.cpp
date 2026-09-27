@@ -93,6 +93,7 @@ struct ChildEntry {
 
 static std::unordered_map<uint16_t, ChildEntry> g_children;
 static ULONGLONG g_lastChildScanMs = 0;
+static ULONGLONG g_lastChildMaintenanceMs = 0;
 static uint16_t g_lastHeroId = 0;
 
 // T04: 5,102슬롯 전체 검색을 한 렌더 호출에 몰지 않고 분할합니다.
@@ -104,9 +105,12 @@ static uintptr_t g_childScanHeroMaster = 0;
 static uintptr_t g_childScanHeroNorm = 0;
 static uint16_t g_childScanHeroId = 0;
 static int g_childScanNextIndex = 0;
+static ULONGLONG g_lastChildScanStepMs = 0;
 static std::unordered_map<uint16_t, ChildEntry> g_childScanFound;
 static constexpr int kChildScanSlotsPerStep = 256;
 static constexpr int kChildRosterSlots = 5102;
+static constexpr ULONGLONG kChildScanStepIntervalMs = 25;
+static constexpr ULONGLONG kChildMaintenanceIntervalMs = 1000;
 
 using ChildManagerDetail::NormalizeOfficerPtr;
 using ChildManagerDetail::ResolveHeroAndRoster;
@@ -238,6 +242,18 @@ static bool IsChildCommissioned(const ChildEntry& e, uint16_t currentYear) {
   return e.appearanceYear != 0 && currentYear >= e.appearanceYear;
 }
 
+static void ResetChildScanState() {
+  g_childScanInProgress = false;
+  g_childScanForceLog = false;
+  g_childScanRosterBase = 0;
+  g_childScanHeroMaster = 0;
+  g_childScanHeroNorm = 0;
+  g_childScanHeroId = 0;
+  g_childScanNextIndex = 0;
+  g_lastChildScanStepMs = 0;
+  g_childScanFound.clear();
+}
+
 static bool BeginChildScan(bool forceLog) {
   uintptr_t rosterBase = 0;
   uintptr_t heroMaster = 0;
@@ -259,6 +275,7 @@ static bool BeginChildScan(bool forceLog) {
   g_childScanHeroNorm = NormalizeOfficerPtr(heroMaster);
   g_childScanHeroId = heroId;
   g_childScanNextIndex = 0;
+  g_lastChildScanStepMs = 0;
   g_childScanFound.clear();
   g_childScanFound.reserve(8);
   return true;
@@ -267,6 +284,13 @@ static bool BeginChildScan(bool forceLog) {
 static bool ProcessChildScanStep() {
   if (!g_childScanInProgress)
     return false;
+
+  const ULONGLONG now = GetTickCount64();
+  if (g_lastChildScanStepMs != 0 &&
+      (now - g_lastChildScanStepMs) < kChildScanStepIntervalMs) {
+    return false;
+  }
+  g_lastChildScanStepMs = now;
 
   const int endIndex = (std::min)(g_childScanNextIndex + kChildScanSlotsPerStep,
                                   kChildRosterSlots);
@@ -319,6 +343,19 @@ static bool ProcessChildScanStep() {
   if (g_childScanNextIndex < kChildRosterSlots)
     return false;
 
+  // 스캔 도중 세이브 로드나 주인공 변경이 있었다면 이전 세대 결과를 게시하지 않습니다.
+  uintptr_t currentRosterBase = 0;
+  uintptr_t currentHeroMaster = 0;
+  uint16_t currentHeroId = 0;
+  if (!ResolveHeroAndRoster(currentRosterBase, currentHeroMaster, currentHeroId) ||
+      currentRosterBase != g_childScanRosterBase ||
+      currentHeroMaster != g_childScanHeroMaster ||
+      currentHeroId != g_childScanHeroId) {
+    AddLog(u8"[ChildManager] 스캔 중 세션 변경 감지 - 이전 결과 폐기 후 재검색");
+    ResetChildScanState();
+    return false;
+  }
+
   if (g_childScanForceLog || g_childScanFound.size() != g_children.size()) {
     AddLog(u8"[ChildManager] 혈연 데이터 기준 자녀 검색 완료: 주인공 ID %u / %zu명",
            g_childScanHeroId, g_childScanFound.size());
@@ -330,17 +367,9 @@ static bool ProcessChildScanStep() {
   }
 
   g_children.swap(g_childScanFound);
-  g_childScanFound.clear();
   g_lastHeroId = g_childScanHeroId;
-  g_lastChildScanMs = GetTickCount64();
-
-  g_childScanInProgress = false;
-  g_childScanForceLog = false;
-  g_childScanRosterBase = 0;
-  g_childScanHeroMaster = 0;
-  g_childScanHeroNorm = 0;
-  g_childScanHeroId = 0;
-  g_childScanNextIndex = 0;
+  g_lastChildScanMs = now;
+  ResetChildScanState();
   return true;
 }
 
@@ -362,13 +391,20 @@ void EnsureChildManagerCapture() {
 void RunChildManagerUpdate() {
   const ULONGLONG now = GetTickCount64();
 
-  // 전체 5,102슬롯 스캔은 1초 cadence로 시작하되 한 호출에 256슬롯만 처리합니다.
-  // 진행 중인 스캔은 호출마다 다음 chunk만 처리하고 완료 시 snapshot을 한 번 게시합니다.
+  // 전체 5,102슬롯 스캔은 1초 cadence로 시작하되 한 step에 256슬롯만 처리합니다.
+  // 25ms step gate가 있으므로 관리창이 열려 동일 프레임에 중복 호출되어도 추가 chunk를 처리하지 않습니다.
   if (!g_childScanInProgress) {
-    if (g_lastChildScanMs == 0 || (now - g_lastChildScanMs) >= 1000)
+    if (g_lastChildScanMs == 0 || (now - g_lastChildScanMs) >= kChildMaintenanceIntervalMs)
       RequestChildScan(false);
   }
   ProcessChildScanStep();
+
+  // 기존 동작처럼 자녀 예약 완료 판정과 임신 관리 갱신은 1초 주기를 유지합니다.
+  if (g_lastChildMaintenanceMs != 0 &&
+      (now - g_lastChildMaintenanceMs) < kChildMaintenanceIntervalMs) {
+    return;
+  }
+  g_lastChildMaintenanceMs = now;
 
   unsigned short currentYear = 0;
   const bool hasCurrentYear =
@@ -417,6 +453,11 @@ void DrawChildManagerWindow(float scale) {
 
   if (ImGui::Button(u8"목록 새로고침", ImVec2(110.0f * scale, 0))) {
     RequestChildScan(true);
+  }
+  if (g_childScanInProgress) {
+    ImGui::SameLine();
+    const int progress = (std::min)(100, (g_childScanNextIndex * 100) / kChildRosterSlots);
+    ImGui::TextDisabled(u8"목록 갱신 중... %d%%", progress);
   }
 
   ImGui::Separator();
