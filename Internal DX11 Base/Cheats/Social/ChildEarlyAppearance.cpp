@@ -94,7 +94,11 @@ struct ChildEntry {
 static std::unordered_map<uint16_t, ChildEntry> g_children;
 static ULONGLONG g_lastChildScanMs = 0;
 static ULONGLONG g_lastChildMaintenanceMs = 0;
+static ULONGLONG g_lastChildSessionProbeMs = 0;
 static uint16_t g_lastHeroId = 0;
+static uintptr_t g_lastObservedRosterBase = 0;
+static uintptr_t g_lastObservedHeroMaster = 0;
+static uint16_t g_lastObservedHeroId = 0;
 
 // T04: 5,102슬롯 전체 검색을 한 렌더 호출에 몰지 않고 분할합니다.
 // 검색 중 결과는 이 임시 상태에만 보관하고 완료 시점에 g_children으로 한 번만 게시합니다.
@@ -111,6 +115,8 @@ static constexpr int kChildScanSlotsPerStep = 256;
 static constexpr int kChildRosterSlots = 5102;
 static constexpr ULONGLONG kChildScanStepIntervalMs = 25;
 static constexpr ULONGLONG kChildMaintenanceIntervalMs = 1000;
+static constexpr ULONGLONG kChildSessionProbeIntervalMs = 1000;
+static constexpr ULONGLONG kChildFullScanFallbackIntervalMs = 5000;
 
 using ChildManagerDetail::NormalizeOfficerPtr;
 using ChildManagerDetail::ResolveHeroAndRoster;
@@ -268,6 +274,10 @@ static bool BeginChildScan(bool forceLog) {
            g_lastHeroId, heroId);
   }
 
+  g_lastObservedRosterBase = rosterBase;
+  g_lastObservedHeroMaster = heroMaster;
+  g_lastObservedHeroId = heroId;
+
   g_childScanInProgress = true;
   g_childScanForceLog = forceLog;
   g_childScanRosterBase = rosterBase;
@@ -391,11 +401,41 @@ void EnsureChildManagerCapture() {
 void RunChildManagerUpdate() {
   const ULONGLONG now = GetTickCount64();
 
-  // 전체 5,102슬롯 스캔은 1초 cadence로 시작하되 한 step에 256슬롯만 처리합니다.
-  // 25ms step gate가 있으므로 관리창이 열려 동일 프레임에 중복 호출되어도 추가 chunk를 처리하지 않습니다.
-  if (!g_childScanInProgress) {
-    if (g_lastChildScanMs == 0 || (now - g_lastChildScanMs) >= kChildMaintenanceIntervalMs)
-      RequestChildScan(false);
+  // 주인공/roster 세대는 1초마다 가볍게 확인합니다.
+  // 세대가 바뀌면 5초 fallback을 기다리지 않고 즉시 새 분할 스캔을 시작합니다.
+  if (!g_childScanInProgress &&
+      (g_lastChildSessionProbeMs == 0 ||
+       (now - g_lastChildSessionProbeMs) >= kChildSessionProbeIntervalMs)) {
+    g_lastChildSessionProbeMs = now;
+
+    uintptr_t rosterBase = 0;
+    uintptr_t heroMaster = 0;
+    uint16_t heroId = 0;
+    if (ResolveHeroAndRoster(rosterBase, heroMaster, heroId)) {
+      const bool firstObservation =
+          g_lastObservedRosterBase == 0 || g_lastObservedHeroMaster == 0 ||
+          g_lastObservedHeroId == 0;
+      const bool sessionChanged =
+          !firstObservation &&
+          (rosterBase != g_lastObservedRosterBase ||
+           heroMaster != g_lastObservedHeroMaster ||
+           heroId != g_lastObservedHeroId);
+
+      if (firstObservation || sessionChanged) {
+        g_lastObservedRosterBase = rosterBase;
+        g_lastObservedHeroMaster = heroMaster;
+        g_lastObservedHeroId = heroId;
+        RequestChildScan(false);
+      }
+    }
+  }
+
+  // 평상시에는 5초마다 한 번만 전체 검색을 재확인합니다.
+  // 실제 검색은 한 step에 256슬롯, 최소 25ms 간격으로 분할 처리합니다.
+  if (!g_childScanInProgress &&
+      (g_lastChildScanMs == 0 ||
+       (now - g_lastChildScanMs) >= kChildFullScanFallbackIntervalMs)) {
+    RequestChildScan(false);
   }
   ProcessChildScanStep();
 
@@ -431,11 +471,11 @@ void DrawChildManagerWindow(float scale) {
     return;
   }
 
-  // 창을 여는 순간에만 배우자 목록과 임신 3슬롯을 즉시 갱신합니다.
-  // 검증된 직접 경로를 우선 사용하고, 실패할 때만 gameBase 주변을 경량 검색합니다.
+  // 창을 여는 순간 배우자/임신 상태와 자녀 목록 갱신을 즉시 요청합니다.
   if (!s_childManagerWasOpen) {
     s_childManagerWasOpen = true;
     RefreshPregnancyManagerOnWindowOpen();
+    RequestChildScan(false);
   }
 
   RunChildManagerUpdate();
