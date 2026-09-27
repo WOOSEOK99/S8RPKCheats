@@ -131,6 +131,9 @@ namespace DX11Base {
     }
 
     static void RunOnce() {
+        // 아직 메모리 쓰기를 시작하지 않은 시점에서만 취소합니다.
+        // 한 번 쓰기를 시작한 뒤에는 120개 세력 순회와 g_prevAssigned 갱신까지
+        // 끝내야 OFF 정리가 이번 pass에서 새로 배정한 군주까지 정확히 복구할 수 있습니다.
         if (g_factionLordBonusStopRequested.load(std::memory_order_acquire)) return;
 
         uintptr_t root = ResolveRoot();
@@ -142,8 +145,6 @@ namespace DX11Base {
             ApplyTitleNames(root);
             g_titleNamesApplied = true;
         }
-
-        if (g_factionLordBonusStopRequested.load(std::memory_order_acquire)) return;
 
         // 1. 보너스 테이블 적용. WriteBytes 내부에서 동일 값은 실제 쓰기를 생략합니다.
         ApplyBonusTable(root);
@@ -164,10 +165,8 @@ namespace DX11Base {
 
         std::unordered_map<uintptr_t, bool> currentAssigned;
 
-        // 2. 세력 순회
+        // 2. 세력 순회. pass 중에는 중간 취소하지 않습니다.
         for (int i = 0; i < FACTION_COUNT; i++) {
-            if (g_factionLordBonusStopRequested.load(std::memory_order_relaxed)) return;
-
             uintptr_t existAddr    = root + OFF_FACTION_EXIST    + i * FACTION_SIZE;
             uintptr_t wanderAddr   = root + OFF_FACTION_WANDER   + i * FACTION_SIZE;
             uintptr_t lordPtrAddr  = root + OFF_FACTION_LORD_PTR + i * FACTION_SIZE;
@@ -203,9 +202,7 @@ namespace DX11Base {
                 WriteQword(bonusAddr, target);
         }
 
-        if (g_factionLordBonusStopRequested.load(std::memory_order_acquire)) return;
-
-        // 3. 이전에 배정됐지만 지금은 빠진 대상 정리
+        // 3. 이전에 배정됐지만 지금은 빠진 대상 정리 및 이번 pass 결과 게시.
         {
             std::lock_guard<std::mutex> lock(g_prevAssignedMutex);
             for (auto& kv : g_prevAssigned) {
