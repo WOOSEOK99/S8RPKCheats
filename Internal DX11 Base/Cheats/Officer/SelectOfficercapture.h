@@ -54,12 +54,17 @@ namespace DX11Base {
   uintptr_t GetGameBaseFast();
   bool SetTraitID(uintptr_t base, int slot, uint16_t traitID);
 
+  // T05: 런타임 기재 포인터 배열에 없는 기재는 UI에서 전체 프로세스를
+  // 동기 검색하지 않고 요청만 등록합니다. TickTraitChangeAsync()가 실제 시간/byte
+  // 예산으로 분할 검색한 뒤 동일 UI 스레드에서 세대를 재검증하고 적용합니다.
+  bool RequestTraitChangeAsync(uintptr_t officerBase, int slotIndex, uint16_t traitID);
+  void TickTraitChangeAsync();
+
 #ifndef DX11BASE_OFFICER_DETAIL_HEADER_INCLUDED
   // [모든 무장 UI 고속 경로]
   // 런타임 기재 포인터 배열에서 ID로 바로 찾아 슬롯에 기록합니다.
   // T05: 이 빠른 경로가 실패한 경우에는 UI 클릭 경로에서 기존 SetTraitID의
-  // 전체 roster/프로세스 동기 검색으로 떨어지지 않습니다. 실패 케이스는
-  // 별도 분할 scan job으로 처리하여 클릭 순간 프레임 정지를 막습니다.
+  // 전체 roster/프로세스 동기 검색으로 떨어지지 않고 bounded scan 요청으로 넘깁니다.
   inline bool SetTraitIDForOfficerUiFast(uintptr_t officerBase, int slotIndex, uint16_t traitID) {
     if (officerBase < 0x10000 || slotIndex < 0 || slotIndex >= 3 || traitID == 0)
       return false;
@@ -97,10 +102,7 @@ namespace DX11Base {
       }
     }
 
-    // 기존에는 여기서 SetTraitID()를 호출하면서 캐시 미스 시 5102명 슬롯 검색과
-    // 전체 프로세스 readable 메모리 검색이 UI 스레드에서 동기 실행될 수 있었습니다.
-    // T05에서는 즉시 실패를 반환하고 후속 분할 scan job에 넘깁니다.
-    return false;
+    return RequestTraitChangeAsync(officerBase, slotIndex, traitID);
   }
 #endif
 
