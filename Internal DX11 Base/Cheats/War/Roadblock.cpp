@@ -7,6 +7,8 @@
 #include "../../showlog.h"
 #include "AIHighHonorSurrenderFix.h"
 #include "AIRefusalWarFix.h"
+#include <atomic>
+#include <mutex>
 #include <psapi.h>
 
 namespace DX11Base {
@@ -269,13 +271,16 @@ namespace DX11Base {
 
   bool g_roadBlockRunning = false;
 
-  static bool g_road1Enabled = false;
-  static bool g_road2Enabled = false;
+  static std::atomic<bool> g_road1Enabled{false};
+  static std::atomic<bool> g_road2Enabled{false};
   static uint64_t g_road1OrigVal1 = 0;
   static uint64_t g_road1OrigVal2 = 0;
   static uint64_t g_road2OrigVal1 = 0;
   static uint64_t g_road2OrigVal2 = 0;
   static HANDLE g_roadThread = nullptr;
+  static HANDLE g_roadStopEvent = nullptr;
+  static std::mutex g_roadLifecycleMutex;
+  static std::mutex g_roadWriteMutex;
 
   static uintptr_t ResolveRoadRoot() {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
@@ -304,8 +309,14 @@ namespace DX11Base {
   static void WriteZeroToAddr(uintptr_t addr) {
     if (!IsValidPtr(addr, 8))
       return;
-    DWORD old, tmp;
-    VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old);
+
+    // 이미 차단값이면 보호 변경과 쓰기를 모두 생략합니다.
+    if (*(uint64_t *)addr == 0)
+      return;
+
+    DWORD old = 0, tmp = 0;
+    if (!VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old))
+      return;
     *(uint64_t *)addr = 0;
     VirtualProtect((LPVOID)addr, 8, old, &tmp);
   }
@@ -313,27 +324,43 @@ namespace DX11Base {
   static void RestoreAddr(uintptr_t addr, uint64_t origVal) {
     if (!IsValidPtr(addr, 8))
       return;
-    DWORD old, tmp;
-    VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old);
+
+    if (*(uint64_t *)addr == origVal)
+      return;
+
+    DWORD old = 0, tmp = 0;
+    if (!VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old))
+      return;
     *(uint64_t *)addr = origVal;
     VirtualProtect((LPVOID)addr, 8, old, &tmp);
   }
 
   static DWORD WINAPI RoadBlockThread(LPVOID) {
-    while (g_road1Enabled || g_road2Enabled) {
-      Sleep(100);
-      if (!g_road1Enabled && !g_road2Enabled)
+    while (true) {
+      const DWORD waitResult = WaitForSingleObject(g_roadStopEvent, 100);
+      if (waitResult == WAIT_OBJECT_0)
+        break;
+      if (waitResult == WAIT_FAILED) {
+        AddLog(u8"[도로차단] stop event 대기 실패. worker를 종료합니다.");
+        break;
+      }
+
+      if (!g_road1Enabled.load(std::memory_order_acquire) &&
+          !g_road2Enabled.load(std::memory_order_acquire))
         break;
 
       uintptr_t root = ResolveRoadRoot();
       if (!root)
         continue;
 
-      if (g_road1Enabled) {
+      // OFF 복구와 동일 mutex를 사용합니다. 플래그는 mutex 진입 후 다시 확인하므로
+      // 복구가 끝난 주소를 이전 worker iteration이 다시 0으로 덮지 못합니다.
+      std::lock_guard<std::mutex> writeLock(g_roadWriteMutex);
+      if (g_road1Enabled.load(std::memory_order_acquire)) {
         WriteZeroToAddr(root + 0x7E30);
         WriteZeroToAddr(root + 0x8368);
       }
-      if (g_road2Enabled) {
+      if (g_road2Enabled.load(std::memory_order_acquire)) {
         WriteZeroToAddr(root + 0x8370);
         WriteZeroToAddr(root + 0x7648);
       }
@@ -343,83 +370,144 @@ namespace DX11Base {
     return 0;
   }
 
-  static void StartRoadThread() {
-    if (!g_roadThread) {
-      g_roadBlockRunning = true;
-      g_roadThread = CreateThread(nullptr, 0, RoadBlockThread, nullptr, 0, nullptr);
-    }
-  }
-
-  static void StopRoadThread() {
+  static bool StartRoadThreadLocked() {
     if (g_roadThread) {
-      if (!g_road1Enabled && !g_road2Enabled) {
-        WaitForSingleObject(g_roadThread, 500);
-        CloseHandle(g_roadThread);
-        g_roadThread = nullptr;
+      if (WaitForSingleObject(g_roadThread, 0) == WAIT_TIMEOUT)
+        return true;
+
+      CloseHandle(g_roadThread);
+      g_roadThread = nullptr;
+      if (g_roadStopEvent) {
+        CloseHandle(g_roadStopEvent);
+        g_roadStopEvent = nullptr;
       }
     }
+
+    g_roadStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!g_roadStopEvent) {
+      g_roadBlockRunning = false;
+      AddLog(u8"[도로차단] stop event 생성 실패");
+      return false;
+    }
+
+    g_roadThread = CreateThread(nullptr, 0, RoadBlockThread, nullptr, 0, nullptr);
+    if (!g_roadThread) {
+      CloseHandle(g_roadStopEvent);
+      g_roadStopEvent = nullptr;
+      g_roadBlockRunning = false;
+      AddLog(u8"[도로차단] worker 생성 실패");
+      return false;
+    }
+
+    g_roadBlockRunning = true;
+    return true;
+  }
+
+  static void StopRoadThreadIfUnusedLocked() {
+    if (g_road1Enabled.load(std::memory_order_acquire) ||
+        g_road2Enabled.load(std::memory_order_acquire))
+      return;
+
+    if (g_roadStopEvent)
+      SetEvent(g_roadStopEvent);
+
+    if (g_roadThread) {
+      // 100ms Sleep을 기다리지 않습니다. event가 즉시 worker를 깨우므로
+      // 진행 중인 짧은 메모리 iteration만 끝나면 반환합니다.
+      WaitForSingleObject(g_roadThread, INFINITE);
+      CloseHandle(g_roadThread);
+      g_roadThread = nullptr;
+    }
+
+    if (g_roadStopEvent) {
+      CloseHandle(g_roadStopEvent);
+      g_roadStopEvent = nullptr;
+    }
+    g_roadBlockRunning = false;
   }
 
   void SetRoadBlock(bool enable) {
+    std::lock_guard<std::mutex> lifecycleLock(g_roadLifecycleMutex);
+
     if (enable) {
-      if (g_road1Enabled)
+      if (g_road1Enabled.load(std::memory_order_acquire))
         return;
 
       uintptr_t root = ResolveRoadRoot();
-      if (!root) {
+      if (!root || !IsValidPtr(root + 0x7E30, 8) || !IsValidPtr(root + 0x8368, 8)) {
         AddLog(u8"[도로차단] 포인터 해석 실패 (건녕↔교지)");
         return;
       }
 
-      g_road1OrigVal1 = *(uint64_t *)(root + 0x7E30);
-      g_road1OrigVal2 = *(uint64_t *)(root + 0x8368);
+      {
+        std::lock_guard<std::mutex> writeLock(g_roadWriteMutex);
+        g_road1OrigVal1 = *(uint64_t *)(root + 0x7E30);
+        g_road1OrigVal2 = *(uint64_t *)(root + 0x8368);
+      }
 
-      g_road1Enabled = true;
-      StartRoadThread();
+      g_road1Enabled.store(true, std::memory_order_release);
+      if (!StartRoadThreadLocked()) {
+        g_road1Enabled.store(false, std::memory_order_release);
+        return;
+      }
       AddLog(u8"[도로차단] 건녕↔교지 차단 활성화");
     } else {
-      if (!g_road1Enabled)
+      if (!g_road1Enabled.exchange(false, std::memory_order_acq_rel))
         return;
-      g_road1Enabled = false;
 
-      uintptr_t root = ResolveRoadRoot();
-      if (root) {
-        RestoreAddr(root + 0x7E30, g_road1OrigVal1);
-        RestoreAddr(root + 0x8368, g_road1OrigVal2);
+      {
+        std::lock_guard<std::mutex> writeLock(g_roadWriteMutex);
+        uintptr_t root = ResolveRoadRoot();
+        if (root) {
+          RestoreAddr(root + 0x7E30, g_road1OrigVal1);
+          RestoreAddr(root + 0x8368, g_road1OrigVal2);
+        }
       }
-      StopRoadThread();
+
+      StopRoadThreadIfUnusedLocked();
       AddLog(u8"[도로차단] 건녕↔교지 차단 해제");
     }
   }
 
   void SetRoadBlock2(bool enable) {
+    std::lock_guard<std::mutex> lifecycleLock(g_roadLifecycleMutex);
+
     if (enable) {
-      if (g_road2Enabled)
+      if (g_road2Enabled.load(std::memory_order_acquire))
         return;
 
       uintptr_t root = ResolveRoadRoot();
-      if (!root) {
+      if (!root || !IsValidPtr(root + 0x8370, 8) || !IsValidPtr(root + 0x7648, 8)) {
         AddLog(u8"[도로차단] 포인터 해석 실패 (교지↔회계)");
         return;
       }
 
-      g_road2OrigVal1 = *(uint64_t *)(root + 0x8370);
-      g_road2OrigVal2 = *(uint64_t *)(root + 0x7648);
+      {
+        std::lock_guard<std::mutex> writeLock(g_roadWriteMutex);
+        g_road2OrigVal1 = *(uint64_t *)(root + 0x8370);
+        g_road2OrigVal2 = *(uint64_t *)(root + 0x7648);
+      }
 
-      g_road2Enabled = true;
-      StartRoadThread();
+      g_road2Enabled.store(true, std::memory_order_release);
+      if (!StartRoadThreadLocked()) {
+        g_road2Enabled.store(false, std::memory_order_release);
+        return;
+      }
       AddLog(u8"[도로차단] 교지↔회계 차단 활성화");
     } else {
-      if (!g_road2Enabled)
+      if (!g_road2Enabled.exchange(false, std::memory_order_acq_rel))
         return;
-      g_road2Enabled = false;
 
-      uintptr_t root = ResolveRoadRoot();
-      if (root) {
-        RestoreAddr(root + 0x8370, g_road2OrigVal1);
-        RestoreAddr(root + 0x7648, g_road2OrigVal2);
+      {
+        std::lock_guard<std::mutex> writeLock(g_roadWriteMutex);
+        uintptr_t root = ResolveRoadRoot();
+        if (root) {
+          RestoreAddr(root + 0x8370, g_road2OrigVal1);
+          RestoreAddr(root + 0x7648, g_road2OrigVal2);
+        }
       }
-      StopRoadThread();
+
+      StopRoadThreadIfUnusedLocked();
       AddLog(u8"[도로차단] 교지↔회계 차단 해제");
     }
   }
