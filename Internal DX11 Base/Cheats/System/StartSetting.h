@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 namespace DX11Base {
     extern bool g_startSettingEnabled;
