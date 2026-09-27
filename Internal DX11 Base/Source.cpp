@@ -206,7 +206,7 @@ BOOL WINAPI hkGetCursorPos(LPPOINT lpPoint) {
   // ���°� �ƴ� ��
   // (���� �޴� ������, �Ǵ� ��� ����Ʈâ �ɼ� ����, �Ǵ�
   // �޸� ������ Ȱ��ȭ)
-  // + �ӱ��̰� ���콺�� ���� ���� ���� ���� ȭ�� ������ ������
+  // + �ӱ��̰� ���콺�� ���� ���� ���� ���� ȭ�� ������ ������ ������
   bool bHardBlock =
       !DX11Base::bIsMenuCollapsed || (DX11Base::bShowOfficerListWin && DX11Base::bBlockClickInOfficerList) ||
       (DX11Base::bShowMemoryEditor && DX11Base::bBlockClickInMemoryEditor) || DX11Base::bShowSpecialtyInfoWin;
@@ -224,11 +224,11 @@ void ClientBGThread() {
   while (g_Running) {
     Menu::Loops();
 
+    // 종료 요청은 상태만 전달합니다. D3D/hook/Engine 정리는 MainThread가
+    // background worker 종료를 확인한 뒤 한 곳에서 수행합니다.
     if (g_KillSwitch) {
-      g_RenderManager->UnhookD3D();
-      g_Hooking->Shutdown();
-      g_Engine.release(); //  releases all created class instances
       g_Running = false;
+      break;
     }
 
     std::this_thread::sleep_for(30ms);
@@ -317,18 +317,25 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   // -----------------------------------------------------------
 
   g_Engine = std::make_unique<Engine>();
+  g_KillSwitch = false;
+  g_Running = true;
+
   // initialize cheats subsystem (resolve pointers)
-  // try immediately, but also retry in background until game finishes loading
+  // try immediately, but also retry until game finishes loading. Keep ownership
+  // of this worker so normal DLL unload can join it before code is unmapped.
   DX11Base::InitCheats();
-  std::thread([]() {
+  std::thread initRetryThread([]() {
     int attempts = 0;
-    while (attempts < 60) { // retry up to ~30 seconds
+    while (attempts < 60 && g_Running && !g_KillSwitch) { // retry up to ~30 seconds
       if (DX11Base::InitCheats())
         break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+      // 500ms cadence, split so normal unload does not wait on one long sleep.
+      for (int slice = 0; slice < 5 && g_Running && !g_KillSwitch; ++slice)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
       attempts++;
     }
-  }).detach();
+  });
 
   // Config Loading and Initial AutoLoad is now deferred to Menu::Loops() when p1 becomes valid
 
@@ -355,7 +362,6 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
   std::thread WCMUpdate(ClientBGThread);
 
   //  RENDER LOOP
-  g_Running = true;
   // [����] int�� ULONGLONG���� ���� (64��Ʈ ������)
   static ULONGLONG LastTick = 0;
 
@@ -374,12 +380,20 @@ DWORD WINAPI MainThread_Initialize(LPVOID dwModule) {
     std::this_thread::sleep_for(30ms);
   }
 
-  //  EXIT
-  DX11Base::Shutdown(false); // ����� ���� ������ ���� ��Ȳ
+  // EXIT: first stop every Source-owned worker while this DLL is still fully mapped.
+  g_Running = false;
 
-  // join() ��⸦ �����Ͽ� ���� �� ����¡ ����
-  // if (WCMUpdate.joinable())
-  //     WCMUpdate.join();
+  if (WCMUpdate.joinable())
+    WCMUpdate.join();
+  if (initRetryThread.joinable())
+    initRetryThread.join();
+
+  // Only the owning MainThread tears down hooks/render resources during normal unload.
+  DX11Base::Shutdown(false);
+
+  // release() intentionally leaked Engine and its RenderManager/Hooking children.
+  // reset() runs their destructors after worker exit and hook teardown.
+  g_Engine.reset();
 
   FreeLibraryAndExitThread(g_hModule, EXIT_SUCCESS);
   return EXIT_SUCCESS;
