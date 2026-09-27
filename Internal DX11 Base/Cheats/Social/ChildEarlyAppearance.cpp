@@ -637,7 +637,7 @@ void DrawChildManagerWindow(float scale) {
                      u8"※ 이미 등장한 자녀는 임관 완료로 표시되며 조기 임관 설정을 다시 적용할 수 없습니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 임관 전 체크를 해제하면 원래 일정으로 복원되며, 임관 완료 후에는 조정된 나이가 유지됩니다.");
-  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 0.4f),
+  ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 임관 예정년도에 도달하면 적용 체크는 자동으로 해제됩니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 자녀 출생/임관/주인공 변경은 혈연 데이터를 다시 읽어 목록에 자동 반영합니다.");
