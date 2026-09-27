@@ -36,14 +36,16 @@ namespace DX11Base {
 
   inline void DrawCompactCouncilStat(const char *label, int offset, int size,
                                      int *inputVal, uintptr_t p1,
-                                     uintptr_t gameBase, float scale) {
+                                     uintptr_t gameBase, float scale,
+                                     float controlX, float inputWidth = 42.0f) {
     const bool useP1 = (p1 != 0 && offset < 0x5000);
     const uintptr_t targetAddr = useP1 ? p1 : gameBase;
 
     ImGui::PushID(label);
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
-    ImGui::SameLine(0.0f, 4.0f * scale);
+    // 라벨 길이와 무관하게 '-' 버튼 시작 X를 고정합니다.
+    ImGui::SameLine(controlX);
 
     if (ImGui::Button("-", ImVec2(20.0f * scale, 25.0f * scale))) {
       --(*inputVal);
@@ -54,7 +56,7 @@ namespace DX11Base {
     }
 
     ImGui::SameLine(0.0f, 3.0f * scale);
-    ImGui::SetNextItemWidth(40.0f * scale);
+    ImGui::SetNextItemWidth(inputWidth * scale);
     ImGui::InputInt("##val", inputVal, 0, 0,
                     ImGuiInputTextFlags_CharsDecimal);
 
@@ -95,32 +97,21 @@ namespace DX11Base {
     BeginCompactCouncilSection();
     ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), u8"[ 평정 ]");
 
-    if (ImGui::BeginTable(
-            "CouncilStatLayout",
-            2,
-            ImGuiTableFlags_SizingStretchSame |
-                ImGuiTableFlags_NoSavedSettings)) {
-      ImGui::TableSetupColumn("Merit", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-      ImGui::TableSetupColumn("CouncilRight", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    const float rowStartX = ImGui::GetCursorPosX();
+    const float leftMinusX = rowStartX + 30.0f * scale;
+    const float rightLabelX = rowStartX + 170.0f * scale;
+    const float rightMinusX = rowStartX + 228.0f * scale;
 
-      // 전략 포인트는 특권과 같은 오른쪽 열에 두어 시작 위치를 맞춥니다.
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(1);
-      DrawCompactCouncilStat(u8"전략 포인트", 0xED, 1, &v_SP,
-                             p1, gameBase, scale);
+    // 오른쪽 열은 전략 포인트/특권 모두 '-' 버튼을 같은 X좌표에 고정합니다.
+    ImGui::SetCursorPosX(rightLabelX);
+    DrawCompactCouncilStat(u8"전략 포인트", 0xED, 1, &v_SP,
+                           p1, gameBase, scale, rightMinusX);
 
-      // 공적 / 특권은 같은 줄 유지.
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      DrawCompactCouncilStat(u8"공적", 0x100, 2, &v_Merit,
-                             p1, gameBase, scale);
-
-      ImGui::TableSetColumnIndex(1);
-      DrawCompactCouncilStat(u8"특권", 0xEA, 1, &v_Priv,
-                             0, gameBase, scale);
-
-      ImGui::EndTable();
-    }
+    DrawCompactCouncilStat(u8"공적", 0x100, 2, 'v_Merit,
+                           p1, gameBase, scale, leftMinusX);
+    ImGui::SameLine(rightLabelX);
+    DrawCompactCouncilStat(u8"특권", 0xEA, 1, 'v_Priv,
+                           0, gameBase, scale, rightMinusX);
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -294,3 +285,4 @@ namespace DX11Base {
   }
 
 } // namespace DX11Base
+
