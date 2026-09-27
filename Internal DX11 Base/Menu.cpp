@@ -3,9 +3,11 @@
 #include "NotificationManager.h"
 #include "MenuT04Maintenance.h"
 
-// Keep CityInfoWindow declarations intact, then suppress only Menu.cpp's
-// per-frame maintenance call inside the preserved implementation.
+// Keep declarations intact, then suppress only the preserved Menu.cpp
+// per-frame maintenance calls. MenuT04Maintenance.h was included above, so it
+// still sees the real bZeroInfamy variable before the temporary macro below.
 #define RunCityRevoltAlwaysZero() ((void)0)
+#define bZeroInfamy false
 
 // Menu::Render calls DrawMarqueeNotifications exactly once per render pass.
 // Piggyback the 200ms maintenance gate there so the work stays on the render/UI
@@ -16,4 +18,5 @@
 #include "Menu_impl.inc"
 
 #undef DrawMarqueeNotifications
+#undef bZeroInfamy
 #undef RunCityRevoltAlwaysZero
