@@ -29,6 +29,40 @@ static void ResetBatchRandomDiag() {
   s_batchRandomDiagApplyStartMs = 0;
 }
 
+static size_t SeedBatchTraitObjectsFromRuntimeTableT05(
+    const std::vector<uint16_t>& traitIds,
+    std::unordered_map<uint16_t, uintptr_t>& outObjects,
+    uintptr_t& inoutTraitVtable) {
+  constexpr uintptr_t kTraitPointerArrayOffset = 0x57A4D0;
+
+  const uintptr_t gameBase = GetGameBaseFast();
+  if (gameBase <= 0x10000)
+    return outObjects.size();
+
+  for (uint16_t expectedId : traitIds) {
+    uintptr_t traitObject = 0;
+    uintptr_t traitVtable = 0;
+    unsigned short actualId = 0;
+
+    if (!UnsafeReadPtr(
+            gameBase + kTraitPointerArrayOffset +
+                static_cast<uintptr_t>(expectedId) * sizeof(uintptr_t),
+            &traitObject) ||
+        traitObject <= 0x10000 ||
+        !UnsafeReadPtr(traitObject, &traitVtable) || traitVtable <= 0x10000 ||
+        !UnsafeRead16(traitObject + 0x08, &actualId) || actualId != expectedId) {
+      continue;
+    }
+
+    if (!inoutTraitVtable)
+      inoutTraitVtable = traitVtable;
+
+    outObjects[expectedId] = traitObject;
+  }
+
+  return outObjects.size();
+}
+
 static void TickBatchRandomTraitJob() {
   if (!s_batchRandomJob.running)
     return;
@@ -182,7 +216,7 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
   }
 
   if (IsTraitCompatibilityBypass()) {
-    ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f),
+    ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f, 1.0f),
                        u8"진단 모드: 커스텀 기재 호환 확장 우회 중 (게임 원본 판정만 사용)");
   }
 
@@ -254,14 +288,26 @@ void DrawBatchRandomTraitAssignmentWindow(float scale) {
           s_batchRandomStatus =
               u8"기재 객체 형식(vtable)을 확인할 기준 기재를 찾지 못했습니다.";
         } else {
+          const size_t directResolved = SeedBatchTraitObjectsFromRuntimeTableT05(
+              s_batchRandomJob.requestedPool,
+              s_batchRandomJob.traitObjects,
+              s_batchRandomJob.traitVtable);
+          AddLog(u8"[랜덤기재/일괄/T05FAST] 런타임 포인터 배열 직접 확인: %zu/%zu개",
+                 directResolved,
+                 s_batchRandomJob.requestedPool.size());
+
           s_batchRandomJob.scanningTraits =
               s_batchRandomJob.traitObjects.size() <
               s_batchRandomJob.requestedPool.size();
 
-          if (!s_batchRandomJob.scanningTraits)
+          if (!s_batchRandomJob.scanningTraits) {
             s_batchRandomJob.pool = s_batchRandomJob.requestedPool;
-          else
+            AddLog(u8"[랜덤기재/일괄/T05FAST] 전체 프로세스 기재 객체 스캔 생략");
+          } else {
             s_batchRandomJob.scanAddress = 0;
+            AddLog(u8"[랜덤기재/일괄/T05FAST] 미확인 %zu개 - 기존 bounded 전체 스캔 fallback",
+                   s_batchRandomJob.requestedPool.size() - s_batchRandomJob.traitObjects.size());
+          }
 
           StartCollectValidOfficerBasesForBatchWorker();
           s_batchRandomStatus = s_batchRandomIncludeCustomTraits
