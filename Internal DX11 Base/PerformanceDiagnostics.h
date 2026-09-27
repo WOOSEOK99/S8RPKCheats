@@ -22,10 +22,6 @@ namespace DX11Base {
     SkillCountSave,
     NotificationProduce,
     NotificationRender,
-    TraitEffectQuery,
-    FindMatchingCustomTrait,
-    FindMatchingCustomTraitSample,
-    OfficerTraitQuery,
     Count
   };
 
@@ -92,10 +88,6 @@ namespace DX11Base {
     case PerfMetric::SkillCountSave: return "SkillCountSave";
     case PerfMetric::NotificationProduce: return "NotificationProduce";
     case PerfMetric::NotificationRender: return "NotificationRender";
-    case PerfMetric::TraitEffectQuery: return "TraitEffectQuery";
-    case PerfMetric::FindMatchingCustomTrait: return "FindMatchingCustom";
-    case PerfMetric::FindMatchingCustomTraitSample: return "FindMatchingSample";
-    case PerfMetric::OfficerTraitQuery: return "OfficerTraitQuery";
     default: return "Unknown";
     }
   }
@@ -105,27 +97,6 @@ namespace DX11Base {
     while (observed < value &&
            !target.compare_exchange_weak(observed, value, std::memory_order_relaxed, std::memory_order_relaxed)) {
     }
-  }
-
-  // Hot hook 진단용 경량 기록. PerfMaybeReport()/시간 API를 호출하지 않으므로
-  // 호출량이 매우 많은 경로에서도 계측 자체의 영향을 최소화합니다.
-  inline void PerfRecordFast(PerfMetric metric, uint64_t elapsed100ns = 0,
-                             uint64_t bytes = 0, uint64_t changes = 0,
-                             uint64_t calls = 1) {
-    if (!PerfDiagnosticsEnabled())
-      return;
-
-    auto &slot = GetPerfDiagnosticsState().metrics[static_cast<size_t>(metric)];
-    if (calls != 0)
-      slot.calls.fetch_add(calls, std::memory_order_relaxed);
-    if (elapsed100ns != 0) {
-      slot.total100ns.fetch_add(elapsed100ns, std::memory_order_relaxed);
-      PerfUpdateMax(slot.max100ns, elapsed100ns);
-    }
-    if (bytes != 0)
-      slot.bytes.fetch_add(bytes, std::memory_order_relaxed);
-    if (changes != 0)
-      slot.changes.fetch_add(changes, std::memory_order_relaxed);
   }
 
   inline void PerfRecordNotificationSizes(size_t queueSize, size_t historySize) {
