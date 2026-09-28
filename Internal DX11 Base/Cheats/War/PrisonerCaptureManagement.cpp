@@ -4,6 +4,7 @@
 #include "AIExecutionConditionChange.h"
 #include "DeputyCaptureFix.h"
 #include "IsolatedCityCaptureFix.h"
+#include "IsolatedTerritoryMovementDiagnostic.h"
 #include "PrisonerCaptureManagement.h"
 
 namespace DX11Base {
@@ -16,6 +17,8 @@ namespace DX11Base {
 
   bool SetPrisonerCaptureManagement(bool enable) {
     if (enable) {
+      RunIsolatedTerritoryMovementDiagnostic();
+
       const bool deputyWasApplied = IsDeputyCaptureFixApplied();
       const bool isolatedWasApplied = IsIsolatedCityCaptureFixApplied();
       const bool executionWasApplied = IsAIExecutionConditionChangeApplied();
