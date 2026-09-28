@@ -119,6 +119,9 @@
     <ClInclude Include="MenuSections.h">
       <Filter>Menu</Filter>
     </ClInclude>
+    <ClInclude Include="MenuSectionsCommon.h">
+      <Filter>Menu</Filter>
+    </ClInclude>
     <ClInclude Include="MainColumns.h">
       <Filter>Menu</Filter>
     </ClInclude>
@@ -409,7 +412,25 @@
     <ClCompile Include="MenuState.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MenuSections.cpp">
+    <ClCompile Include="MenuSectionsDomestic.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MenuSectionsCouncil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MenuSectionsSocial.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MenuSectionsWar.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MenuSectionsOfficerEdit.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MenuSectionsScenario.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MenuSectionsInfo.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MainColumn1.cpp">
