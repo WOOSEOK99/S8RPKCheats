@@ -153,6 +153,7 @@ bool SetRulerTransferProposalMode(int mode) {
             gApplied = false;
         }
         iRulerTransferProposalMode = 0;
+        SaveRulerTransferProposalPreference(false);
         return true;
     }
 
@@ -167,6 +168,7 @@ bool SetRulerTransferProposalMode(int mode) {
     }
 
     iRulerTransferProposalMode = mode;
+    SaveRulerTransferProposalPreference(true);
     return true;
 }
 
