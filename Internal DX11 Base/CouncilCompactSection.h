@@ -7,4 +7,4 @@
 #include "Cheats/War/CouncilExecuteFreeOfficers.h"
 #include "Cheats/War/IsolatedTerritoryMovementFeature.h"
 #include "Cheats/War/RulerTransferProposal.h"
-#include "
+#include "Cheats/War/TotalWarCycleShort
