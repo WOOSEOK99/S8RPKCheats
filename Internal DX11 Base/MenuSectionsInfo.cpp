@@ -14,6 +14,7 @@
 #include "Cheats/Officer/OfficerRosterResolve.h"
 #include "Cheats/Officer/OfficerData.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
+#include "Cheats/Officer/AffinityDisplayVisibilityFix.h"
 #include "Cheats/Social/Fastrelationship.h"
 #include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/Social/Infinitegift.h"
@@ -93,6 +94,27 @@ namespace DX11Base {
         if (ImGui::Checkbox(u8"재야 장수 등장 알림", &bMonitorRonin)) {
           NotifyFeatureToggle(u8"재야 장수 등장 알림", bMonitorRonin);
           SaveConfig();
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        bool requestedAffinity = bAffinityDisplay;
+        if (ImGui::Checkbox(u8"상성 인게임 표시", &requestedAffinity)) {
+          if (SetAffinityDisplayWithVisibilityFix(requestedAffinity)) {
+            bAffinityDisplay = requestedAffinity;
+          } else {
+            bAffinityDisplay = IsAffinityDisplayApplied();
+          }
+          NotifyFeatureToggle(u8"상성 인게임 표시", bAffinityDisplay);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(u8"게임의 무장 목록, 무장 정보, 편집/관계 화면과 도감 상세에 상성 항목을 표시합니다.");
+          ImGui::TextUnformatted(u8"미확인 무장은 상성 대신 ? 로 표시됩니다.");
+          ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+                             u8"※ 관련 화면을 닫은 상태에서 켜거나 끄는 것을 권장합니다.");
+          ImGui::EndTooltip();
         }
 
         ImGui::EndTable();
