@@ -5,6 +5,7 @@
 #include "Cheats/System/TengiCave.h"
 #include "Cheats/War/CouncilContinueAfterMove.h"
 #include "Cheats/War/CouncilExecuteFreeOfficers.h"
+#include "Cheats/War/RulerTransferProposal.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Config.h"
 #include "Framework/imgui.h"
@@ -291,6 +292,28 @@ namespace DX11Base {
       ImGui::TextColored(
           ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
           u8"※ 처단 대상 선택창을 연 상태에서는 체크/해제하지 마세요.");
+      ImGui::EndTooltip();
+    }
+
+    ImGui::SameLine(0.0f, 16.0f * scale);
+    bool rulerTransferProposalEnabled = GetRulerTransferProposalMode() != 0;
+    if (ImGui::Checkbox(u8"부하의 군주 이동 제안",
+                        &rulerTransferProposalEnabled)) {
+      const int requestedMode = rulerTransferProposalEnabled ? 2 : 0;
+      if (!SetRulerTransferProposalMode(requestedMode))
+        rulerTransferProposalEnabled = IsRulerTransferProposalApplied();
+      NotifyFeatureToggle(u8"부하의 군주 이동 제안",
+                          rulerTransferProposalEnabled);
+      SaveConfig();
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::TextColored(
+          ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+          u8"군주 직속 군사와 도독이 평정에서 군주 이동을 제안할 수 있게 합니다.");
+      ImGui::TextColored(
+          ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
+          u8"그 외 장수의 제안 조건은 기존 게임 판정을 유지합니다.");
       ImGui::EndTooltip();
     }
 
