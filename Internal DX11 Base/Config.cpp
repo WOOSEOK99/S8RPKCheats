@@ -5,6 +5,7 @@
 #undef SaveConfig
 
 #include "Cheats/Officer/TraitViewerFeature.h"
+#include "Cheats/Officer/AffinityDisplay.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/System/StartSetting.h"
 #include "Cheats/War/CouncilContinueAfterMove.h"
@@ -201,6 +202,7 @@ namespace DX11Base {
       UpsertIntConfigValue("iStratagem5HealAmount", s.healAmount);
     }
     UpsertBoolConfigValue("bOfficerChangeNotify", bOfficerChangeNotify);
+    UpsertBoolConfigValue("bAffinityDisplay", bAffinityDisplay);
     UpsertBoolConfigValue("bAnnualSpecialAbilityAutoAssign", bAnnualSpecialAbilityAutoAssign);
     UpsertBoolConfigValue("bAIOfficerAutoGrowth", bAIOfficerAutoGrowth);
     UpsertIntConfigValue("iAIOfficerGrowthSpeed", iAIOfficerGrowthSpeed);
@@ -213,9 +215,6 @@ namespace DX11Base {
   void LoadConfig() {
     LoadConfigBase();
 
-    // 이 기능은 gameBase 안정화 3초를 기다리면 첫 세이브 로드를 놓칠 수 있습니다.
-    // 설정 파일에서 이미 ON인 경우 메모리를 쓰지 않고 watcher만 즉시 시작합니다.
-    // watcher가 gameBase/P1이 실제로 유효해지는 순간에 1회 검사를 수행합니다.
     if (bUndiscoveredToRonin) {
       SetUndiscoveredToRonin(true);
       AddLog(u8"[Config] 미발견 무장 재야 변경 watcher 조기 시작");
@@ -348,6 +347,15 @@ namespace DX11Base {
              bOfficerChangeNotify ? "ON" : "OFF");
     }
 
+    bool savedAffinityDisplay = false;
+    if (LoadBoolConfigValue("bAffinityDisplay", savedAffinityDisplay)) {
+      bAffinityDisplay = savedAffinityDisplay;
+      if (!SetAffinityDisplay(bAffinityDisplay))
+        bAffinityDisplay = IsAffinityDisplayApplied();
+      AddLog(u8"[Config] 상성 인게임 표시 설정 로드: %s",
+             bAffinityDisplay ? "ON" : "OFF");
+    }
+
     bool savedAnnualSpecialAbilityAutoAssign = false;
     if (LoadBoolConfigValue("bAnnualSpecialAbilityAutoAssign",
                             savedAnnualSpecialAbilityAutoAssign)) {
@@ -421,7 +429,6 @@ namespace DX11Base {
              bTroopCountCombatScaling ? "ON" : "OFF");
     }
 
-    // 이전 설정 파일에 키가 없으면 기본값(true)으로 실제 패치까지 적용합니다.
     bool savedTraitViewer = true;
     const bool hasTraitViewerSetting = LoadBoolConfigValue("bTraitViewer", savedTraitViewer);
     bTraitViewer = savedTraitViewer;
