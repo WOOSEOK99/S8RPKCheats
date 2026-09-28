@@ -254,6 +254,7 @@ namespace DX11Base {
       if (!SetCouncilContinueAfterMove(requested))
         bCouncilContinueAfterMove = IsCouncilContinueAfterMoveApplied();
       NotifyFeatureToggle(u8"도시 이동 후 평정 지속", bCouncilContinueAfterMove);
+      SaveConfig();
     }
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
@@ -277,6 +278,7 @@ namespace DX11Base {
         bCouncilExecuteFreeOfficers = IsCouncilExecuteFreeOfficersApplied();
       NotifyFeatureToggle(u8"세력 도시 재야 무장 처단",
                           bCouncilExecuteFreeOfficers);
+      SaveConfig();
     }
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
