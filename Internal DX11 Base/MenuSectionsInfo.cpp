@@ -14,7 +14,7 @@
 #include "Cheats/Officer/OfficerRosterResolve.h"
 #include "Cheats/Officer/OfficerData.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
-#include "Cheats/Officer/AffinityDisplay.h"
+#include "Cheats/Officer/AffinityDisplayVisibilityFix.h"
 #include "Cheats/Social/Fastrelationship.h"
 #include "Cheats/Social/ChildEarlyAppearance.h"
 #include "Cheats/Social/Infinitegift.h"
@@ -100,7 +100,7 @@ namespace DX11Base {
         ImGui::TableSetColumnIndex(0);
         bool requestedAffinity = bAffinityDisplay;
         if (ImGui::Checkbox(u8"상성 인게임 표시", &requestedAffinity)) {
-          if (SetAffinityDisplay(requestedAffinity)) {
+          if (SetAffinityDisplayWithVisibilityFix(requestedAffinity)) {
             bAffinityDisplay = requestedAffinity;
           } else {
             bAffinityDisplay = IsAffinityDisplayApplied();
