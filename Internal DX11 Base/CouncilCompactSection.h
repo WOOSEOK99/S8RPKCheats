@@ -305,6 +305,7 @@ namespace DX11Base {
       NotifyFeatureToggle(u8"부하의 군주 이동 제안",
                           rulerTransferProposalEnabled);
       SaveConfig();
+      SaveRulerTransferProposalPreference(rulerTransferProposalEnabled);
     }
     if (ImGui::IsItemHovered()) {
       ImGui::BeginTooltip();
