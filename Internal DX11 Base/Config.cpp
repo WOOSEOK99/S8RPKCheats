@@ -14,6 +14,7 @@
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
+#include "Cheats/War/IsolatedTerritoryMovementFeature.h"
 #include "Cheats/War/PrisonerCaptureManagement.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
@@ -183,6 +184,7 @@ namespace DX11Base {
     UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
     UpsertBoolConfigValue("bTroopCountCombatScaling", bTroopCountCombatScaling);
     UpsertBoolConfigValue("bPrisonerCaptureManagement", bPrisonerCaptureManagement);
+    UpsertBoolConfigValue("bIsolatedTerritoryMovement", bIsolatedTerritoryMovement);
     UpsertBoolConfigValue("bGovernorPrisonerDisposal", bGovernorPrisonerDisposal);
     UpsertBoolConfigValue("bGovernorPrisonerConsumePrivilege", bGovernorPrisonerConsumePrivilege);
     UpsertBoolConfigValue("bReinforcementArrivalAction", bReinforcementArrivalAction);
@@ -260,6 +262,17 @@ namespace DX11Base {
       bStratagemFiveEnabled = false;
     AddLog(u8"[Config] 5번 책략 활성화 설정 로드: %s",
            bStratagemFiveEnabled ? "ON" : "OFF");
+
+    bool savedIsolatedTerritoryMovement = true;
+    const bool hasIsolatedTerritoryMovementSetting =
+        LoadBoolConfigValue("bIsolatedTerritoryMovement",
+                            savedIsolatedTerritoryMovement);
+    bIsolatedTerritoryMovement = savedIsolatedTerritoryMovement;
+    if (!SetIsolatedTerritoryMovementFeature(bIsolatedTerritoryMovement))
+      bIsolatedTerritoryMovement = IsIsolatedTerritoryMovementFeatureApplied();
+    AddLog(u8"[Config] 단절 영토 무장 이동 제한 설정 로드%s: %s",
+           hasIsolatedTerritoryMovementSetting ? "" : "(기본값)",
+           bIsolatedTerritoryMovement ? "ON" : "OFF");
 
     bool savedPrisonerCaptureManagement = bPrisonerCaptureManagement;
     LoadBoolConfigValue("bPrisonerCaptureManagement",

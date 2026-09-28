@@ -1,5 +1,4 @@
 #include "../../pch.h"
-
 #include "../../showlog.h"
 #include "AIExecutionConditionChange.h"
 #include "DeputyCaptureFix.h"
