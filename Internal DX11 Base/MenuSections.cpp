@@ -1219,16 +1219,16 @@ namespace DX11Base {
         }
       }
 
-      static bool s_stratagemFiveEnabled = true;
-      if (ImGui::Checkbox(u8"5번 책략 활성화", &s_stratagemFiveEnabled)) {
-        const bool enable = s_stratagemFiveEnabled;
+      if (ImGui::Checkbox(u8"5번 책략 활성화", &bStratagemFiveEnabled)) {
+        const bool enable = bStratagemFiveEnabled;
         const bool ok = DX11Base::SetStratagemFiveFeature(enable);
         if (!ok) {
-          s_stratagemFiveEnabled = !enable;
+          bStratagemFiveEnabled = !enable;
           AddNotification(enable ? u8"5번 책략 활성화 실패 - 로그 확인"
                                  : u8"5번 책략 해제 실패 - 로그 확인");
         } else {
-          NotifyFeatureToggle(u8"5번 책략 활성화", s_stratagemFiveEnabled);
+          NotifyFeatureToggle(u8"5번 책략 활성화", bStratagemFiveEnabled);
+          SaveConfig();
         }
       }
       if (ImGui::IsItemHovered()) {
