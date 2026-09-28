@@ -3,7 +3,7 @@
 namespace {
 struct RulerTransferProposalBootstrap {
   RulerTransferProposalBootstrap() {
-    DX11Base::SetRulerTransferProposalMode(2);
+    DX11Base::LoadRulerTransferProposalPreference();
   }
 };
 
