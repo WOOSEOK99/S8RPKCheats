@@ -1,1 +1,0 @@
-// affinity display implementation part
