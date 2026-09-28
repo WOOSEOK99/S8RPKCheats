@@ -295,7 +295,7 @@ namespace DX11Base {
       ImGui::EndTooltip();
     }
 
-    ImGui::SameLine(0.0f, 16.0f * scale);
+    ImGui::SameLine(160.0f * scale);
     bool rulerTransferProposalEnabled = GetRulerTransferProposalMode() != 0;
     if (ImGui::Checkbox(u8"부하의 군주 이동 제안",
                         &rulerTransferProposalEnabled)) {
