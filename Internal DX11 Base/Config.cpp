@@ -7,6 +7,8 @@
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/System/StartSetting.h"
+#include "Cheats/War/CouncilContinueAfterMove.h"
+#include "Cheats/War/CouncilExecuteFreeOfficers.h"
 #include "Cheats/War/ShortBattleCooldown.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
@@ -15,6 +17,7 @@
 #include "Cheats/War/ReinforcementArrivalAction.h"
 #include "Cheats/War/ReinforcementDefenderPlacement.h"
 #include "Cheats/War/StratagemGaugeMax.h"
+#include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/Spell5HealProbe.h"
 
 namespace DX11Base {
@@ -172,6 +175,9 @@ namespace DX11Base {
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
     UpsertBoolConfigValue("bTotalWarCycleShortening", bTotalWarCycleShortening);
+    UpsertBoolConfigValue("bCouncilContinueAfterMove", bCouncilContinueAfterMove);
+    UpsertBoolConfigValue("bCouncilExecuteFreeOfficers", bCouncilExecuteFreeOfficers);
+    UpsertBoolConfigValue("bStratagemFiveEnabled", bStratagemFiveEnabled);
     UpsertBoolConfigValue("bShortBattleCooldownEnabled", bShortBattleCooldownEnabled);
     UpsertIntConfigValue("iShortBattleCooldownDays", iShortBattleCooldownDays);
     UpsertBoolConfigValue("bTroopCountCombatScaling", bTroopCountCombatScaling);
@@ -231,6 +237,30 @@ namespace DX11Base {
 
     AddLog(u8"[Config] 결전 발생 주기 단축 설정 로드: %s",
            bTotalWarCycleShortening ? "ON" : "OFF");
+
+    bool savedCouncilContinueAfterMove = false;
+    LoadBoolConfigValue("bCouncilContinueAfterMove", savedCouncilContinueAfterMove);
+    bCouncilContinueAfterMove = savedCouncilContinueAfterMove;
+    if (!SetCouncilContinueAfterMove(bCouncilContinueAfterMove))
+      bCouncilContinueAfterMove = IsCouncilContinueAfterMoveApplied();
+    AddLog(u8"[Config] 도시 이동 후 평정 지속 설정 로드: %s",
+           bCouncilContinueAfterMove ? "ON" : "OFF");
+
+    bool savedCouncilExecuteFreeOfficers = false;
+    LoadBoolConfigValue("bCouncilExecuteFreeOfficers", savedCouncilExecuteFreeOfficers);
+    bCouncilExecuteFreeOfficers = savedCouncilExecuteFreeOfficers;
+    if (!SetCouncilExecuteFreeOfficers(bCouncilExecuteFreeOfficers))
+      bCouncilExecuteFreeOfficers = IsCouncilExecuteFreeOfficersApplied();
+    AddLog(u8"[Config] 세력 도시 재야 무장 처단 설정 로드: %s",
+           bCouncilExecuteFreeOfficers ? "ON" : "OFF");
+
+    bool savedStratagemFiveEnabled = false;
+    LoadBoolConfigValue("bStratagemFiveEnabled", savedStratagemFiveEnabled);
+    bStratagemFiveEnabled = savedStratagemFiveEnabled;
+    if (!SetStratagemFiveFeature(bStratagemFiveEnabled))
+      bStratagemFiveEnabled = false;
+    AddLog(u8"[Config] 5번 책략 활성화 설정 로드: %s",
+           bStratagemFiveEnabled ? "ON" : "OFF");
 
     bool savedPrisonerCaptureManagement = bPrisonerCaptureManagement;
     LoadBoolConfigValue("bPrisonerCaptureManagement",
