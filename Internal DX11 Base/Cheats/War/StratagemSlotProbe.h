@@ -1,6 +1,10 @@
 #pragma once
 
 namespace DX11Base {
+  // 사용자 설정에 저장되는 5번 책략 활성화 희망 상태.
+  // 실제 전투 적용 상태는 StratagemSlotProbe.cpp의 lifecycle gate가 관리합니다.
+  inline bool bStratagemFiveEnabled = false;
+
   // Called from the DLL worker before its startup delay, independently of battle
   // data/toggles. Retry only during that bounded delay if runtime code is not ready.
   bool PrepareStratagemFiveUiBridge(bool reportFailure = true);
