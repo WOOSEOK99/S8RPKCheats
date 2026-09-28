@@ -11,3 +11,15 @@
 #include "IsolatedTerritoryMovement.h"
 #include "IsolatedTerritoryMovementDiagnostic.h"
 #include "PrisonerCaptureManagement.h"
+
+namespace DX11Base {
+
+  bool IsPrisonerCaptureManagementApplied() {
+    return IsDeputyCaptureFixApplied() &&
+           IsIsolatedCityCaptureFixApplied() &&
+           IsAIExecutionConditionChangeApplied();
+  }
+
+  bool SetPrisonerCaptureManagement(bool enable) {
+    if (enable) {
+      RunIsolatedTerritory
