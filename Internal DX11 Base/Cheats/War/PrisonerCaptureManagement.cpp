@@ -1,5 +1,9 @@
 #include "../../pch.h"
 
+#ifdef max
+#undef max
+#endif
+
 #include "../../showlog.h"
 #include "AIExecutionConditionChange.h"
 #include "DeputyCaptureFix.h"
