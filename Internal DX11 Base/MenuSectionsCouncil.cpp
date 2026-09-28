@@ -39,6 +39,7 @@
 #include "Cheats/War/Dongto.h"
 #include "Cheats/War/FactionLordBonus.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
+#include "Cheats/War/IsolatedTerritoryMovementFeature.h"
 #include "Cheats/War/PrisonerCaptureManagement.h"
 #include "Cheats/War/Roadblock.h"
 #include "Cheats/War/ReinforcementArrivalAction.h"
@@ -65,7 +66,6 @@ namespace DX11Base {
 
     void DrawStatRow(const char *label, int offset, int size, int *inputVal, uintptr_t p1, uintptr_t gameBase,
                      float scale) {
-      // 1. 현재 값 미리 읽기
       bool useP1 = (p1 != 0 && offset < 0x5000);
       uintptr_t targetAddr = (useP1) ? p1 : gameBase;
       unsigned int current = 0;
@@ -81,15 +81,11 @@ namespace DX11Base {
           current = *(unsigned int *)(targetAddr + offset);
       }
 
-      // 2. UI 그리기
       ImGui::AlignTextToFramePadding();
       ImGui::Text("%s", label);
-
-      // 레이블 이후 정렬 위치 고정 (테이블 없이 SameLine으로 깔끔하게 처리)
       ImGui::SameLine(100.0f * scale);
 
       ImGui::PushID(label);
-      // 1. [-] 버튼
       if (ImGui::Button("-", ImVec2(25 * scale, 25 * scale))) {
         (*inputVal)--;
         if (useP1 && p1)
@@ -99,12 +95,9 @@ namespace DX11Base {
       }
       ImGui::SameLine();
 
-      // 2. 직접 입력 가능한 수치 박스 (InputInt)
       ImGui::SetNextItemWidth(70 * scale);
-      // EnterReturnsTrue를 제거하여 자판 입력 시 즉시 변수에 반영되도록 함 (숫자만 입력 가능하도록 플래그 추가)
       ImGui::InputInt("##val", inputVal, 0, 0, ImGuiInputTextFlags_CharsDecimal);
 
-      // 포커스를 잃거나 Enter를 쳤을 때(Deactivated) 수정한 내역이 있다면 저장
       bool justFinished = ImGui::IsItemDeactivatedAfterEdit();
       if (justFinished) {
         if (useP1 && p1)
@@ -113,7 +106,6 @@ namespace DX11Base {
           DX11Base::ModifyStat(gameBase, offset, *inputVal, size);
       }
 
-      // [중요] 사용자가 입력 중(포커스 상태)이거나, 막 입력이 끝난 프레임에는 메모리 값을 덮어씌우지 않음
       if (!ImGui::IsItemActive() && !justFinished && targetAddr > 0x10000) {
         if (size == 1)
           *inputVal = (int)(*(unsigned char *)(targetAddr + offset));
@@ -124,7 +116,6 @@ namespace DX11Base {
       }
       ImGui::SameLine();
 
-      // 3. [+] 버튼
       if (ImGui::Button("+", ImVec2(25 * scale, 25 * scale))) {
         (*inputVal)++;
         if (useP1 && p1)
@@ -143,15 +134,9 @@ namespace DX11Base {
         DrawStatRow(u8"공적", 0x100, 2, &v_Merit, p1, gameBase, scale);
         DrawStatRow(u8"특권", 0xEA, 1, &v_Priv, 0, gameBase, scale);
 
-        // DrawStatMini(u8"전략P", &v_SP, 0xED, 1, p1, 60, scale);
-        // ImGui::SameLine(110 * scale);
-        // DrawStatMini(u8"공적", &v_Merit, 0x100, 2, p1, 60, scale);
-        // ImGui::SameLine(210 * scale);
-        // DrawStatMini(u8"특권", &v_Priv, 0xEA, 1, p1, 60, scale);
-
-        ImGui::Spacing(); // 위아래 여백
+        ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Spacing(); // 위아래 여백
+        ImGui::Spacing();
 
         if (ImGui::Checkbox(u8"매 평정 새로운 전기 발생", &bInfTengi)) {
           NotifyFeatureToggle(u8"매 평정 새로운 전기 발생", bInfTengi);
@@ -195,7 +180,6 @@ namespace DX11Base {
         ImGui::SameLine(160.0f * scale);
 
         if (ImGui::Button(u8"전기발생 즉시 취소", ImVec2(120, 26))) {
-          // 일회용 버튼: 현재 캡처된 주소가 있으면 값과 무관하게 취소(플래그 0으로 처리)
           if (DX11Base::GetCapturedTengiAddr() != 0) {
             DX11Base::CancelTengi();
             DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
@@ -207,9 +191,9 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::Spacing(); // 위아래 여백
+        ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Spacing(); // 위아래 여백
+        ImGui::Spacing();
 
         if (ImGui::Checkbox(u8"만병 습득 조건 해제", &bSkillCondition)) {
           DX11Base::ApplySkillCondition(bSkillCondition);
@@ -248,9 +232,26 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::Spacing(); // 위아래 여백
+        ImGui::SameLine(200.0f * scale);
+        if (ImGui::Checkbox(u8"단절 영토 무장 이동 제한", &bIsolatedTerritoryMovement)) {
+          const bool requested = bIsolatedTerritoryMovement;
+          if (!DX11Base::SetIsolatedTerritoryMovementFeature(requested))
+            bIsolatedTerritoryMovement = DX11Base::IsIsolatedTerritoryMovementFeatureApplied();
+          NotifyFeatureToggle(u8"단절 영토 무장 이동 제한", bIsolatedTerritoryMovement);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1),
+                             u8"서로 연결되지 않은 같은 세력 영토 사이의 무장 이동을 제한합니다.");
+          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
+                             u8"수송과 배정은 기존 동작을 유지합니다.");
+          ImGui::EndTooltip();
+        }
+
+        ImGui::Spacing();
         ImGui::Separator();
-        ImGui::Spacing(); // 위아래 여백
+        ImGui::Spacing();
 
         if (ImGui::Checkbox(u8"능력치 한계돌파", &bAutoStatUp99)) {
           NotifyFeatureToggle(u8"능력치 한계돌파", bAutoStatUp99);
@@ -263,7 +264,6 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        // 훅/캡처 상태를 로그로 출력 (상태 변경 시 1회만)
         {
           static uintptr_t s_lastHookAddr = 0;
           static uintptr_t s_lastCaptAddr = 0;
@@ -285,7 +285,7 @@ namespace DX11Base {
             s_lastCaptAddr = captAddr;
           }
         }
-        EndSection(); // 평정 및 진급
+        EndSection();
       }
     }
   } // namespace MenuSections
