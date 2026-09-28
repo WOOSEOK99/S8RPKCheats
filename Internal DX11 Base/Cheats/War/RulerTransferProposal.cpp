@@ -1,6 +1,5 @@
 #include "RulerTransferProposal.h"
 #include "../../MemoryUtils.h"
-#include "../../showlog.h"
 #include <windows.h>
 #include <cstdint>
 #include <cstring>
@@ -133,26 +132,20 @@ bool SetRulerTransferProposalMode(int mode) {
             gApplied = false;
         }
         iRulerTransferProposalMode = 0;
-        AddLog(u8"[군주 이동 제안] OFF");
         return true;
     }
 
     if (!gApplied) {
-        if (!ValidateOriginal()) {
-            AddLog(u8"[군주 이동 제안] 원본 코드 불일치 - 적용 취소");
+        if (!ValidateOriginal())
             return false;
-        }
         if (!gThunk)
             gThunk = BuildThunk(gBase + kCallsite);
-        if (!gThunk || !WriteCall(gBase + kCallsite, gThunk)) {
-            AddLog(u8"[군주 이동 제안] 훅 적용 실패");
+        if (!gThunk || !WriteCall(gBase + kCallsite, gThunk))
             return false;
-        }
         gApplied = true;
     }
 
     iRulerTransferProposalMode = mode;
-    AddLog(u8"[군주 이동 제안] 모드 적용: %d", mode);
     return true;
 }
 
