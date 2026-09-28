@@ -4,6 +4,7 @@
 #include "Cheats/System/SkillCondition.h"
 #include "Cheats/System/TengiCave.h"
 #include "Cheats/War/CouncilContinueAfterMove.h"
+#include "Cheats/War/CouncilExecuteFreeOfficers.h"
 #include "Cheats/War/TotalWarCycleShortening.h"
 #include "Config.h"
 #include "Framework/imgui.h"
@@ -266,6 +267,28 @@ namespace DX11Base {
                          u8"주인공의 행동 완료 bit0은 유지하고 평정 종료에 관여하는 bit1만 해제합니다.");
       ImGui::TextColored(ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
                          u8"※ 6개 hook 지점의 원본 바이트가 모두 일치할 때만 적용됩니다.");
+      ImGui::EndTooltip();
+    }
+
+    if (ImGui::Checkbox(u8"세력 도시 재야 무장 처단",
+                        &bCouncilExecuteFreeOfficers)) {
+      const bool requested = bCouncilExecuteFreeOfficers;
+      if (!SetCouncilExecuteFreeOfficers(requested))
+        bCouncilExecuteFreeOfficers = IsCouncilExecuteFreeOfficersApplied();
+      NotifyFeatureToggle(u8"세력 도시 재야 무장 처단",
+                          bCouncilExecuteFreeOfficers);
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::TextColored(
+          ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+          u8"군주 평정의 처단 대상에 같은 세력 도시의 재야 무장을 추가합니다.");
+      ImGui::TextColored(
+          ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
+          u8"게임 기본 처단 제외조건, 확인창, 처단 결과 처리는 그대로 유지됩니다.");
+      ImGui::TextColored(
+          ImVec4(1.0f, 0.0f, 1.0f, 1.0f),
+          u8"※ 처단 대상 선택창을 연 상태에서는 체크/해제하지 마세요.");
       ImGui::EndTooltip();
     }
 
