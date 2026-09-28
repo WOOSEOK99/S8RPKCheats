@@ -8,5 +8,7 @@ extern int iRulerTransferProposalMode;
 bool SetRulerTransferProposalMode(int mode);
 int GetRulerTransferProposalMode();
 bool IsRulerTransferProposalApplied();
+bool SaveRulerTransferProposalPreference(bool enabled);
+bool LoadRulerTransferProposalPreference();
 
 } // namespace DX11Base
