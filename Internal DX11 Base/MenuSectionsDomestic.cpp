@@ -6,6 +6,7 @@
 #include "Cheats/Civilian/Bigcityconvert.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/JewelSettings.h"
+#include "Cheats/Civilian/MissionCpuHeroExclusion.h"
 #include "Cheats/Civilian/DomesticsMult.h"
 #include "Cheats/Civilian/NonggyeongCity.h"
 #include "Cheats/Civilian/SangeopCity.h"
@@ -137,6 +138,20 @@ namespace DX11Base {
         if (ImGui::Checkbox(u8"명품 자동 배분 (평정 끝날 때)", &bAutoFillSpecialties)) {
           NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
           SaveConfig();
+        }
+
+        if (ImGui::Checkbox(u8"임무 미지원 시 CPU 강제 배정 제외", &bMissionCpuHeroExclusion)) {
+          const bool requested = bMissionCpuHeroExclusion;
+          if (!DX11Base::SetMissionCpuHeroExclusion(requested))
+            bMissionCpuHeroExclusion = DX11Base::IsMissionCpuHeroExclusionApplied();
+          NotifyFeatureToggle(u8"임무 미지원 시 CPU 강제 배정 제외", bMissionCpuHeroExclusion);
+          SaveConfig();
+        }
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(u8"부하 상태의 주인공이 임무에 지원하지 않았을 때 CPU의 강제 후보 배정에서 제외합니다.");
+          ImGui::TextUnformatted(u8"직접 지원한 임무의 자원자 처리는 원래 게임 로직을 유지합니다.");
+          ImGui::EndTooltip();
         }
 
         if (ImGui::Button(u8"명품", ImVec2(70.0f * scale, 0.0f))) {
