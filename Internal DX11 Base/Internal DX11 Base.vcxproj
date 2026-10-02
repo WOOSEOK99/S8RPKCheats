@@ -157,6 +157,7 @@
     <ClInclude Include="BattleMonitor.h" />
     <ClInclude Include="Cheats\Civilian\BangmokCity.h" />
     <ClInclude Include="Cheats\Civilian\JewelSettings.h" />
+    <ClInclude Include="Cheats\Civilian\MissionAppointmentLimit.h" />
     <ClInclude Include="Cheats\War\BattleMapShuffle.h" />
     <ClInclude Include="Cheats\War\Battleunitcapture.h" />
     <ClInclude Include="Cheats\Civilian\Bigcityconvert.h" />
@@ -274,6 +275,7 @@
     <ClCompile Include="BattleMonitor.cpp" />
     <ClCompile Include="Cheats\Civilian\BangmokCity.cpp" />
     <ClCompile Include="Cheats\Civilian\JewelSettings.cpp" />
+    <ClCompile Include="Cheats\Civilian\MissionAppointmentLimit.cpp" />
     <ClCompile Include="Cheats\War\BattleEnvironment.cpp" />
     <ClCompile Include="Cheats\War\BattleMapShuffle.cpp" />
     <ClCompile Include="Cheats\War\Battleunitcapture.cpp" />
