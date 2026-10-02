@@ -37,12 +37,11 @@ inline bool PrepareBoolAbiFix() {
     return false;
 
   // C++ bool helper의 유효 반환은 AL입니다.
-  // 실게임에서 검증한 5개 소비 지점만 test al,al 로 교정합니다.
+  // 실게임에서 검증한 4개 소비 지점만 test al,al 로 교정합니다.
   return PatchBoolConsumer(gHook1Stub, 97) &&
          PatchBoolConsumer(gHook2Stub, 74) &&
          PatchBoolConsumer(gHook3Stub, 94) &&
-         PatchBoolConsumer(gHook45Stub, 73) &&
-         PatchBoolConsumer(gHook6Stub, 132);
+         PatchBoolConsumer(gHook45Stub, 73);
 }
 
 } // namespace IsolatedTerritoryMovementFeatureDetail
