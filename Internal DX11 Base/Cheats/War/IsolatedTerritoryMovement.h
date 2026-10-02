@@ -17,7 +17,9 @@ constexpr uintptr_t kHook2 = 0x196280C;
 constexpr uintptr_t kHook3 = 0x1960F30;
 constexpr uintptr_t kHook4Call = 0x144948B;
 constexpr uintptr_t kHook5Call = 0x144ABE6;
-constexpr uintptr_t kHook6 = 0x17B0BA0;
+constexpr uintptr_t kAiMovementCall1 = 0x144A321;
+constexpr uintptr_t kAiMovementCall2 = 0x144A8F5;
+constexpr uintptr_t kAiMovementCall3 = 0x145096D;
 constexpr uintptr_t kHook7Call = 0x1901F77;
 constexpr uintptr_t kHook8Call = 0x1963D3F;
 constexpr uintptr_t kHook9Call = 0x1961BD5;
@@ -43,8 +45,9 @@ constexpr uint8_t kHook4Guard[] = {
 constexpr uint8_t kHook5Guard[] = {
     0x45,0x33,0xC9,0x4C,0x8B,0x41,0x20,0x48,0x8D,0x54,0x24,0x38,
     0x49,0x8B,0x8C,0x24,0xC0,0x00,0x00,0x00,0xE8,0x25,0x2F,0x4F,0x00};
-constexpr uint8_t kHook6Original[] = {
-    0x48,0x85,0xC9,0x0F,0x84,0xEA,0x12,0x00,0x00,0x44,0x88,0x4C,0x24,0x20};
+constexpr uint8_t kAiMovementCall1Original[] = {0xE8,0x7A,0x68,0x36,0x00};
+constexpr uint8_t kAiMovementCall2Original[] = {0xE8,0xA6,0x62,0x36,0x00};
+constexpr uint8_t kAiMovementCall3Original[] = {0xE8,0x2E,0x02,0x36,0x00};
 constexpr uint8_t kHook7Original[] = {0xE8,0xA4,0x01,0x00,0x00};
 constexpr uint8_t kHook8Original[] = {0xE8,0xDC,0xE3,0xF9,0xFF};
 constexpr uint8_t kHook9Original[] = {0xE8,0x46,0x05,0xFA,0xFF};
@@ -574,7 +577,12 @@ inline bool ValidateOriginalState() {
          ReadEq(gBase + kHook3, kHook3Original, sizeof(kHook3Original)) &&
          ReadEq(gBase + 0x1449477, kHook4Guard, sizeof(kHook4Guard)) &&
          ReadEq(gBase + 0x144ABD2, kHook5Guard, sizeof(kHook5Guard)) &&
-         ReadEq(gBase + kHook6, kHook6Original, sizeof(kHook6Original)) &&
+         ReadEq(gBase + kAiMovementCall1, kAiMovementCall1Original,
+                sizeof(kAiMovementCall1Original)) &&
+         ReadEq(gBase + kAiMovementCall2, kAiMovementCall2Original,
+                sizeof(kAiMovementCall2Original)) &&
+         ReadEq(gBase + kAiMovementCall3, kAiMovementCall3Original,
+                sizeof(kAiMovementCall3Original)) &&
          ReadEq(gBase + kHook7Call, kHook7Original, sizeof(kHook7Original)) &&
          ReadEq(gBase + kHook8Call, kHook8Original, sizeof(kHook8Original)) &&
          ReadEq(gBase + kHook9Call, kHook9Original, sizeof(kHook9Original)) &&
@@ -685,7 +693,6 @@ inline bool SetIsolatedTerritoryMovement(bool enable) {
   ok = ok && PatchAbsoluteJump(gBase + kHook3, gHook3Stub, sizeof(kHook3Original));
   ok = ok && PatchCall(gBase + kHook4Call, gHook45Stub);
   ok = ok && PatchCall(gBase + kHook5Call, gHook45Stub);
-  ok = ok && PatchAbsoluteJump(gBase + kHook6, gHook6Stub, sizeof(kHook6Original));
   ok = ok && PatchCall(gBase + kHook7Call, gHook78Thunk);
   ok = ok && PatchCall(gBase + kHook8Call, gHook78Thunk);
   ok = ok && PatchCall(gBase + kHook9Call, gHook910Thunk);
