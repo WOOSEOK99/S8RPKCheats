@@ -147,10 +147,10 @@ namespace DX11Base {
       out.insert(out.end(), {0x41, 0x80, 0xBD, 0xF8, 0x00, 0x00, 0x00, 0x00});
       nativeBranches.push_back(AppendRel8(out, 0x74)); // je native
 
-      // dword ptr [r13+348] >= 200
+      // dword ptr [r13+348] >= 200. 음수/비정상 값도 원본 경로로 보냅니다.
       out.insert(out.end(), {0x41, 0x81, 0xBD, 0x48, 0x03, 0x00, 0x00,
                              0xC8, 0x00, 0x00, 0x00});
-      nativeBranches.push_back(AppendRel8(out, 0x72)); // jb native
+      nativeBranches.push_back(AppendRel8(out, 0x7C)); // jl native
 
       // 현재 모드는 cave에서 읽습니다. 2=등수 무관, 1=Top3입니다.
       out.insert(out.end(), {0x48, 0xB8});
@@ -253,14 +253,16 @@ namespace DX11Base {
         return false;
       }
 
+      const LONG previousMode =
+          InterlockedExchange(&g_modeValue, 0);
       if (!WriteBytes(hookAddress, kOriginal, kHookSize) ||
           !BytesEqual(hookAddress, kOriginal, kHookSize)) {
+        InterlockedExchange(&g_modeValue, previousMode);
         AddLog(u8"[내정포상] 원본 hook 복구 또는 검증 실패");
         return false;
       }
 
       // 실행 중인 스레드가 cave에 있을 수 있으므로 cave는 프로세스 종료까지 유지합니다.
-      InterlockedExchange(&g_modeValue, 0);
       g_applied = false;
       AddLog(u8"[내정포상] 포상 조건 완화 OFF");
       return true;
@@ -320,6 +322,8 @@ namespace DX11Base {
     }
 
     if (!WriteBytes(hookAddress, g_patched, kHookSize)) {
+      if (BytesEqual(hookAddress, g_patched, kHookSize))
+        WriteBytes(hookAddress, kOriginal, kHookSize);
       InterlockedExchange(&g_modeValue, 0);
       AddLog(u8"[내정포상] hook 적용 실패");
       return false;
