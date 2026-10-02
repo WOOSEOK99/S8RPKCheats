@@ -28,6 +28,7 @@ constexpr uintptr_t kHook10Call = 0x19628D5;
 constexpr uintptr_t kNativeListCall = 0x193DB10;
 constexpr uintptr_t kNativeMovementCheck = 0x1902120;
 constexpr uintptr_t kNativeListErase = 0x1C5A0;
+constexpr uintptr_t kNativeMovementEntry = 0x17B0BA0;
 constexpr uintptr_t kCityContextGlobal = 0x2C643A0;
 
 constexpr uint8_t kHook1Original[] = {
@@ -67,6 +68,7 @@ inline uintptr_t gHook2Stub = 0;
 inline uintptr_t gHook3Stub = 0;
 inline uintptr_t gHook45Stub = 0;
 inline uintptr_t gHook6Stub = 0;
+inline uintptr_t gAiMovementWrapper = 0;
 inline uintptr_t gHook78Thunk = 0;
 inline uintptr_t gHook910Thunk = 0;
 
@@ -540,6 +542,22 @@ inline uintptr_t BuildHook45Stub() {
   return CommitCode(c, gBase + kHook4Call);
 }
 
+inline uintptr_t BuildAiMovementWrapper() {
+  CodeBuilder c;
+  enum { LBlocked = 1 };
+  EmitSaveVolatile(c, 0x88);
+  c.MovRax(reinterpret_cast<uintptr_t>(&MovementContextAllowed));
+  c.CallRax();
+  const uint8_t test[] = {0x84,0xC0}; c.Data(test,sizeof(test));
+  c.Jcc(0x84, LBlocked);
+  EmitRestoreVolatile(c, 0x88);
+  c.AbsJmp(gBase + kNativeMovementEntry);
+  c.Bind(LBlocked);
+  EmitRestoreVolatile(c, 0x88);
+  c.U8(0xC3);
+  return CommitCode(c, gBase + kAiMovementCall1);
+}
+
 inline uintptr_t BuildHook6Stub() {
   CodeBuilder c;
   enum { LCheck = 1, LOriginal, LBlocked, LNull };
@@ -569,6 +587,14 @@ inline uintptr_t BuildNearJumpThunk(uintptr_t site, uintptr_t destination) {
   c.MovRax(destination);
   const uint8_t jmp[] = {0xFF,0xE0}; c.Data(jmp,sizeof(jmp));
   return CommitCode(c, site);
+}
+
+inline bool IsRel32Reachable(uintptr_t address, uintptr_t destination) {
+  if (!address || !destination)
+    return false;
+  const int64_t rel = static_cast<int64_t>(destination) -
+                      static_cast<int64_t>(address + 5);
+  return rel >= INT32_MIN && rel <= INT32_MAX;
 }
 
 inline bool ValidateOriginalState() {
@@ -640,13 +666,17 @@ inline bool PrepareStubs() {
   if (!gHook3Stub) gHook3Stub = BuildHook3Stub();
   if (!gHook45Stub) gHook45Stub = BuildHook45Stub();
   if (!gHook6Stub) gHook6Stub = BuildHook6Stub();
+  if (!gAiMovementWrapper) gAiMovementWrapper = BuildAiMovementWrapper();
   if (!gHook78Thunk) gHook78Thunk = BuildNearJumpThunk(gBase + kHook7Call,
       reinterpret_cast<uintptr_t>(&MovementCheck78));
   if (!gHook910Thunk) gHook910Thunk = BuildNearJumpThunk(gBase + kHook9Call,
       reinterpret_cast<uintptr_t>(&MovementCheck910));
 
   return gHook1Stub && gHook2Stub && gHook3Stub && gHook45Stub &&
-         gHook6Stub && gHook78Thunk && gHook910Thunk;
+         gHook6Stub && gAiMovementWrapper && gHook78Thunk && gHook910Thunk &&
+         IsRel32Reachable(gBase + kAiMovementCall1, gAiMovementWrapper) &&
+         IsRel32Reachable(gBase + kAiMovementCall2, gAiMovementWrapper) &&
+         IsRel32Reachable(gBase + kAiMovementCall3, gAiMovementWrapper);
 }
 
 } // namespace IsolatedTerritoryMovementDetail
