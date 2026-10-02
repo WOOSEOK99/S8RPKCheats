@@ -723,6 +723,9 @@ inline bool SetIsolatedTerritoryMovement(bool enable) {
   ok = ok && PatchAbsoluteJump(gBase + kHook3, gHook3Stub, sizeof(kHook3Original));
   ok = ok && PatchCall(gBase + kHook4Call, gHook45Stub);
   ok = ok && PatchCall(gBase + kHook5Call, gHook45Stub);
+  ok = ok && PatchCall(gBase + kAiMovementCall1, gAiMovementWrapper);
+  ok = ok && PatchCall(gBase + kAiMovementCall2, gAiMovementWrapper);
+  ok = ok && PatchCall(gBase + kAiMovementCall3, gAiMovementWrapper);
   ok = ok && PatchCall(gBase + kHook7Call, gHook78Thunk);
   ok = ok && PatchCall(gBase + kHook8Call, gHook78Thunk);
   ok = ok && PatchCall(gBase + kHook9Call, gHook910Thunk);
