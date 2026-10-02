@@ -6,6 +6,7 @@
 #include "Cheats/Civilian/Bigcityconvert.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/JewelSettings.h"
+#include "Cheats/Civilian/TechCityEditorVisibility.h"
 #include "Cheats/Civilian/DomesticsMult.h"
 #include "Cheats/Civilian/NonggyeongCity.h"
 #include "Cheats/Civilian/SangeopCity.h"
@@ -235,6 +236,8 @@ namespace DX11Base {
                              u8"내용 : 방목도시의 능력치를 저하시키고 최대 수치를 고정합니다.");
           ImGui::EndTooltip();
         }
+
+        DX11Base::DrawTechCityEditorVisibilityUi();
 
         bool wasNongRunning = DX11Base::g_nongCityThreadRunning.load();
         if (wasNongRunning)
