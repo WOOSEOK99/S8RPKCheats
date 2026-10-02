@@ -171,7 +171,9 @@ namespace DX11Base {
         }
 
         ImGui::SameLine();
-        if (!DX11Base::IsMissionAppointmentLimitManaged())
+        const bool missionAppointmentLimitManaged =
+            DX11Base::IsMissionAppointmentLimitManaged();
+        if (!missionAppointmentLimitManaged)
           ImGui::BeginDisabled();
         if (ImGui::Button(u8"원본 복구##MissionAppointmentLimit")) {
           if (DX11Base::RestoreMissionAppointmentLimit()) {
@@ -182,7 +184,7 @@ namespace DX11Base {
             AddNotification(u8"임무 총 임명 한도 원본 복구 실패");
           }
         }
-        if (!DX11Base::IsMissionAppointmentLimitManaged())
+        if (!missionAppointmentLimitManaged)
           ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
           ImGui::BeginTooltip();
