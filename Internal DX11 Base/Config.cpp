@@ -7,6 +7,7 @@
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Officer/AffinityDisplay.h"
 #include "Cheats/Civilian/JewelSettings.h"
+#include "Cheats/Civilian/TechCityEditorVisibility.h"
 #include "Cheats/System/StartSetting.h"
 #include "Cheats/War/CouncilContinueAfterMove.h"
 #include "Cheats/War/CouncilExecuteFreeOfficers.h"
@@ -176,6 +177,7 @@ namespace DX11Base {
 
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
+    UpsertBoolConfigValue("bTechCityEditorVisible", bTechCityEditorVisible);
     UpsertBoolConfigValue("bTotalWarCycleShortening", bTotalWarCycleShortening);
     UpsertBoolConfigValue("bCouncilContinueAfterMove", bCouncilContinueAfterMove);
     UpsertBoolConfigValue("bCouncilExecuteFreeOfficers", bCouncilExecuteFreeOfficers);
@@ -227,6 +229,15 @@ namespace DX11Base {
       bAIWarImprove = savedAIWarImprove;
       SetAIWarImprove(savedAIWarImprove);
       AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
+    }
+
+    bool savedTechCityEditorVisible = false;
+    if (LoadBoolConfigValue("bTechCityEditorVisible", savedTechCityEditorVisible)) {
+      bTechCityEditorVisible = savedTechCityEditorVisible;
+      if (!SetTechCityEditorVisible(savedTechCityEditorVisible))
+        bTechCityEditorVisible = IsTechCityEditorVisibleApplied();
+      AddLog(u8"[Config] 게임 내 도시 편집기 기술도시 표시 설정 로드: %s",
+             bTechCityEditorVisible ? "ON" : "OFF");
     }
 
     bool savedTotalWarCycleShortening = bTotalWarCycleShortening;
