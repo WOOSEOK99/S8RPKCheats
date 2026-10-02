@@ -67,7 +67,6 @@ inline uintptr_t gHook1Stub = 0;
 inline uintptr_t gHook2Stub = 0;
 inline uintptr_t gHook3Stub = 0;
 inline uintptr_t gHook45Stub = 0;
-inline uintptr_t gHook6Stub = 0;
 inline uintptr_t gAiMovementWrapper = 0;
 inline uintptr_t gHook78Thunk = 0;
 inline uintptr_t gHook910Thunk = 0;
@@ -558,30 +557,6 @@ inline uintptr_t BuildAiMovementWrapper() {
   return CommitCode(c, gBase + kAiMovementCall1);
 }
 
-inline uintptr_t BuildHook6Stub() {
-  CodeBuilder c;
-  enum { LCheck = 1, LOriginal, LBlocked, LNull };
-  EmitSaveVolatile(c, 0x88);
-  const uint8_t retLoad[] = {0x48,0x8B,0x84,0x24,0xC8,0x00,0x00,0x00}; c.Data(retLoad,sizeof(retLoad));
-  c.MovR10(gBase + 0x144A326);
-  const uint8_t cmp[] = {0x4C,0x39,0xD0}; c.Data(cmp,sizeof(cmp)); c.Jcc(0x84,LCheck);
-  c.MovR10(gBase + 0x144A8FA); c.Data(cmp,sizeof(cmp)); c.Jcc(0x84,LCheck);
-  c.MovR10(gBase + 0x1450972); c.Data(cmp,sizeof(cmp)); c.Jcc(0x85,LOriginal);
-  c.Bind(LCheck);
-  c.MovRax(reinterpret_cast<uintptr_t>(&MovementContextAllowed)); c.CallRax();
-  const uint8_t test[] = {0x85,0xC0}; c.Data(test,sizeof(test)); c.Jcc(0x84,LBlocked);
-  c.Bind(LOriginal);
-  EmitRestoreVolatile(c, 0x88);
-  const uint8_t original1[] = {0x48,0x85,0xC9}; c.Data(original1,sizeof(original1)); c.Jcc(0x84,LNull);
-  const uint8_t original2[] = {0x44,0x88,0x4C,0x24,0x20}; c.Data(original2,sizeof(original2));
-  c.AbsJmp(gBase + 0x17B0BAE);
-  c.Bind(LNull); c.AbsJmp(gBase + 0x17B1E93);
-  c.Bind(LBlocked);
-  EmitRestoreVolatile(c, 0x88);
-  c.U8(0xC3);
-  return CommitCode(c);
-}
-
 inline uintptr_t BuildNearJumpThunk(uintptr_t site, uintptr_t destination) {
   CodeBuilder c;
   c.MovRax(destination);
@@ -665,7 +640,6 @@ inline bool PrepareStubs() {
   if (!gHook2Stub) gHook2Stub = BuildHook2Stub();
   if (!gHook3Stub) gHook3Stub = BuildHook3Stub();
   if (!gHook45Stub) gHook45Stub = BuildHook45Stub();
-  if (!gHook6Stub) gHook6Stub = BuildHook6Stub();
   if (!gAiMovementWrapper) gAiMovementWrapper = BuildAiMovementWrapper();
   if (!gHook78Thunk) gHook78Thunk = BuildNearJumpThunk(gBase + kHook7Call,
       reinterpret_cast<uintptr_t>(&MovementCheck78));
@@ -673,7 +647,7 @@ inline bool PrepareStubs() {
       reinterpret_cast<uintptr_t>(&MovementCheck910));
 
   return gHook1Stub && gHook2Stub && gHook3Stub && gHook45Stub &&
-         gHook6Stub && gAiMovementWrapper && gHook78Thunk && gHook910Thunk &&
+         gAiMovementWrapper && gHook78Thunk && gHook910Thunk &&
          IsRel32Reachable(gBase + kAiMovementCall1, gAiMovementWrapper) &&
          IsRel32Reachable(gBase + kAiMovementCall2, gAiMovementWrapper) &&
          IsRel32Reachable(gBase + kAiMovementCall3, gAiMovementWrapper);
