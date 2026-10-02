@@ -60,6 +60,7 @@ inline bool gApplied = false;
 struct PatchRecord {
   uintptr_t address = 0;
   std::vector<uint8_t> before;
+  std::vector<uint8_t> after;
 };
 inline std::vector<PatchRecord> gPatches;
 
@@ -594,6 +595,7 @@ inline bool RecordAndWrite(uintptr_t address, const uint8_t* after, size_t size)
   PatchRecord record;
   record.address = address;
   record.before.resize(size);
+  record.after.assign(after, after + size);
   if (!ReadBytes(address, record.before.data(), size))
     return false;
   if (!WriteBytes(address, after, size))
@@ -626,12 +628,20 @@ inline bool PatchCall(uintptr_t address, uintptr_t destination) {
 
 inline bool RestoreAllPatches() {
   bool ok = true;
-  for (auto it = gPatches.rbegin(); it != gPatches.rend(); ++it) {
-    if (!WriteBytes(it->address, it->before.data(), it->before.size()))
+  for (size_t i = gPatches.size(); i-- > 0;) {
+    PatchRecord& record = gPatches[i];
+    std::vector<uint8_t> current(record.after.size());
+    if (!ReadBytes(record.address, current.data(), current.size()) ||
+        current != record.after) {
       ok = false;
+      continue;
+    }
+    if (!WriteBytes(record.address, record.before.data(), record.before.size())) {
+      ok = false;
+      continue;
+    }
+    gPatches.erase(gPatches.begin() + i);
   }
-  if (ok)
-    gPatches.clear();
   return ok;
 }
 
@@ -706,8 +716,10 @@ inline bool SetIsolatedTerritoryMovement(bool enable) {
   ok = ok && PatchCall(gBase + kHook10Call, gHook910Thunk);
 
   if (!ok) {
-    RestoreAllPatches();
-    AddLog(u8"[영토단절] 적용 실패: 부분 변경 복구 완료");
+    if (RestoreAllPatches())
+      AddLog(u8"[영토단절] 적용 실패: 부분 변경 복구 완료");
+    else
+      AddLog(u8"[영토단절] 적용 실패: 부분 변경 복구 실패 또는 외부 변경 충돌");
     return false;
   }
 
