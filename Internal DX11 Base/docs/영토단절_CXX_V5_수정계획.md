@@ -545,12 +545,12 @@ Internal DX11 Base/docs/삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.c
 ## 17. 진행표
 
 - [x] Stage 0 — v5 방향 검토 및 단일 C++ 계획 작성
-- [ ] Stage 1 — Hook6 patch/validation 제거 + 새 caller 3개 정의
-- [ ] Stage 2 — AI caller wrapper 구현 (`test al,al`)
-- [ ] Stage 3 — 새 caller 3개 CALL patch 연결
-- [ ] Stage 4 — `PrepareBoolAbiFix()`에서 Hook6 의존 제거
-- [ ] Stage 5 — restore ownership 검증 강화
-- [ ] Stage 6 — diagnostic 갱신
+- [x] Stage 1 — Hook6 patch/validation 제거 + 새 caller 3개 정의
+- [x] Stage 2 — AI caller wrapper 구현 (`test al,al`)
+- [x] Stage 3 — 새 caller 3개 CALL patch 연결
+- [x] Stage 4 — `PrepareBoolAbiFix()`에서 Hook6 의존 제거
+- [x] Stage 5 — restore ownership 검증 강화
+- [x] Stage 6 — diagnostic 갱신
 - [ ] Stage 7 — 실게임 검증 및 최종 문서화
 
 ---
@@ -564,13 +564,51 @@ Internal DX11 Base/docs/삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.c
 - 소스 코드 변경: 없음
 - 빌드/테스트: 수행하지 않음
 
-향후 각 stage 완료 시 아래에 반드시 기록한다.
+### 2026-10-03 — Stage 1
 
-- 날짜
-- stage
-- 변경 파일
-- 핵심 변경
-- commit SHA
-- 빌드 여부
-- 실게임 테스트 여부
-- 남은 문제
+- 변경 파일: `Internal DX11 Base/Cheats/War/IsolatedTerritoryMovement.h`
+- 핵심 변경: `+17B0BA0` Hook6 patch/validation 제거, AI caller 3개 상수/원본 CALL 검증 추가
+- commit SHA: `9a17e3f0a1057bada3d840770ffdbc0a65f976f9`
+- 빌드: 미실행
+- 실게임 테스트: 미실행
+
+### 2026-10-03 — Stage 2
+
+- 변경 파일: `Internal DX11 Base/Cheats/War/IsolatedTerritoryMovement.h`
+- 핵심 변경: 공통 AI caller wrapper 추가, `MovementContextAllowed()` 호출, `test al,al`, allow tail JMP / block RET 구현
+- commit SHA: `ee5b739b80af9325e9966b19fde476d958d9b4ad`
+- 빌드: 미실행
+- 실게임 테스트: 미실행
+
+### 2026-10-03 — Stage 3
+
+- 변경 파일: `Internal DX11 Base/Cheats/War/IsolatedTerritoryMovement.h`
+- 핵심 변경: AI caller 3개 CALL을 공통 wrapper에 연결
+- commit SHA: `07d1f531b64fd91beb623a3219ab7d5745c15bef`
+- 빌드: 미실행
+- 실게임 테스트: 미실행
+
+### 2026-10-03 — Stage 4
+
+- 변경 파일: `Internal DX11 Base/Cheats/War/IsolatedTerritoryMovementFeature.h`, `Internal DX11 Base/Cheats/War/IsolatedTerritoryMovement.h`
+- 핵심 변경: Hook6 bool ABI fix 제거, `gHook6Stub`/`BuildHook6Stub()` 및 `PrepareStubs()` 의존 제거
+- commit SHA: `45488ad5728c4aeec9a561d1fa77be1b71594f43`, `ce9d28b45621429d45cdb3ad2566378f22e00052`
+- 빌드: 미실행
+- 실게임 테스트: 미실행
+
+### 2026-10-03 — Stage 5
+
+- 변경 파일: `Internal DX11 Base/Cheats/War/IsolatedTerritoryMovement.h`
+- 핵심 변경: `PatchRecord.after` 기록, 현재 바이트 ownership 확인 후에만 원본 복구, 충돌 항목 유지 및 rollback 오류 로그 분리
+- commit SHA: `441a3d30a169079d1672c494a5326e59f25f219b`
+- 빌드: 미실행
+- 실게임 테스트: 미실행
+
+### 2026-10-03 — Stage 6
+
+- 변경 파일: `Internal DX11 Base/Cheats/War/IsolatedTerritoryMovementDiagnostic.h`
+- 핵심 변경: 12개 patch site 진단, 새 AI caller 3개 포함, `+17B0BA0` read-only 참고 출력, version.dll/hid.dll 의존 로그 제거
+- commit SHA: `254764e4050bfd51770a716ad1c2734be829f0b4`
+- 빌드: 미실행
+- 실게임 테스트: 미실행
+- 남은 문제: Stage 7 실게임 검증 및 최종 문서화
