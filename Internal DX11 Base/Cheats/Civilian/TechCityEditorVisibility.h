@@ -5,4 +5,5 @@ namespace DX11Base {
 
   bool SetTechCityEditorVisible(bool enable);
   bool IsTechCityEditorVisibleApplied();
+  void DrawTechCityEditorVisibilityUi();
 } // namespace DX11Base
