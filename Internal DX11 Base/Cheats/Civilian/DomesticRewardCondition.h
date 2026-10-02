@@ -10,4 +10,5 @@ namespace DX11Base {
   bool SetDomesticRewardMode(DomesticRewardMode mode);
   DomesticRewardMode GetDomesticRewardMode();
   bool IsDomesticRewardHookApplied();
+  void DrawDomesticRewardConditionUi(float scale);
 } // namespace DX11Base
