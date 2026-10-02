@@ -1,0 +1,12 @@
+{
+  "삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.CT": "b4b639fb4d737aec7f8ceba02038a17152a4fbf30860dbd528527db8c53e4e73",
+  "삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.cea": "18d23c6d3a5993dcb429a33e49bcf8b3056080f3a9b8a9d0e8411160559f9af9",
+  "runtime_v5.lua": "c7d40dca2680f7b5e25462c9581ed3f44b3e18a4e28d79b1087426f3be4ee5d8",
+  "data_v5.json": "93e74106bda8d56da6709dad5bbf12f5081ea9bf35ec66c8ffadf6bb1b6bbe70",
+  "ai_call_wrapper_v5.asm": "c798f71af2887f4c91a4c7778493babcd93466e53c67a1a09476d758776d50cc",
+  "v5_개발자안내.txt": "d0e82592296ac33f20722dd3de2986382a57a5d075781c12c2b02d94a04615f0",
+  "validation_v5.json": "f43a8bcce903c30b06f2fcbccfa7216af82cefa345007b06ac91d4a91ac502ac",
+  "static_findings.json": "f89c4befbacff5bd0ef9007e795885b38cb78ca539df448453e7b612e55eee89",
+  "live_preflight.json": "1bc162b7c95e28017f3aea3b409b736eb887f46f5655d5a03ac7a3af96c37ede",
+  "v5_검증상태.txt": "29972613112d552d2f866cd55b857b5b9641396cace322db6290c4bfa5f45e41"
+}

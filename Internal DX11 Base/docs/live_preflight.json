@@ -1,0 +1,142 @@
+{
+  "pid": 21920,
+  "base": "0x7ff75dd40000",
+  "hooks": [
+    {
+      "rva": "0x1961b3c",
+      "original": "41837f60007515498b47384885c00f84ca000000",
+      "actual": "41837f60007515498b47384885c00f84ca000000",
+      "match": true
+    },
+    {
+      "rva": "0x196280c",
+      "original": "4c8b058d1b30014180780c010f8565010000",
+      "actual": "4c8b058d1b30014180780c010f8565010000",
+      "match": true
+    },
+    {
+      "rva": "0x1960f30",
+      "original": "405556574154415541564157b8d0200000",
+      "actual": "405556574154415541564157b8d0200000",
+      "match": true
+    },
+    {
+      "rva": "0x1449477",
+      "original": "4533c94c8b4020488d542448498b8c24c0000000e880464f00",
+      "actual": "4533c94c8b4020488d542448498b8c24c0000000e880464f00",
+      "match": true
+    },
+    {
+      "rva": "0x144abd2",
+      "original": "4533c94c8b4120488d542438498b8c24c0000000e8252f4f00",
+      "actual": "4533c94c8b4120488d542438498b8c24c0000000e8252f4f00",
+      "match": true
+    },
+    {
+      "rva": "0x17b0ba0",
+      "original": "4885c90f84ea12000044884c2420",
+      "actual": "e95bf482fe9090909044884c2420",
+      "match": false
+    },
+    {
+      "rva": "0x1901f77",
+      "original": "e8a4010000",
+      "actual": "e8a4010000",
+      "match": true
+    },
+    {
+      "rva": "0x1963d3f",
+      "original": "e8dce3f9ff",
+      "actual": "e8dce3f9ff",
+      "match": true
+    },
+    {
+      "rva": "0x1961bd5",
+      "original": "e84605faff",
+      "actual": "e84605faff",
+      "match": true
+    },
+    {
+      "rva": "0x19628d5",
+      "original": "e846f8f9ff",
+      "actual": "e846f8f9ff",
+      "match": true
+    }
+  ],
+  "guards": [
+    {
+      "rva": "0x19619f0",
+      "match": true
+    },
+    {
+      "rva": "0x1962680",
+      "match": true
+    },
+    {
+      "rva": "0x1960f30",
+      "match": true
+    },
+    {
+      "rva": "0x1962aff",
+      "match": true
+    },
+    {
+      "rva": "0x17ac040",
+      "match": true
+    },
+    {
+      "rva": "0x177d060",
+      "match": true
+    },
+    {
+      "rva": "0x17b6070",
+      "match": true
+    },
+    {
+      "rva": "0x144943f",
+      "match": true
+    },
+    {
+      "rva": "0x144aba3",
+      "match": true
+    },
+    {
+      "rva": "0x17b0ba0",
+      "match": false
+    },
+    {
+      "rva": "0x144a30a",
+      "match": true
+    },
+    {
+      "rva": "0x144a8d3",
+      "match": true
+    },
+    {
+      "rva": "0x145094b",
+      "match": true
+    },
+    {
+      "rva": "0x1c5a0",
+      "match": true
+    },
+    {
+      "rva": "0x1901f77",
+      "match": true
+    },
+    {
+      "rva": "0x1963d25",
+      "match": true
+    },
+    {
+      "rva": "0x1961bc0",
+      "match": true
+    },
+    {
+      "rva": "0x19628c0",
+      "match": true
+    }
+  ],
+  "calls": [],
+  "game_writes": false
+}

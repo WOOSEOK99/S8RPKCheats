@@ -1,0 +1,33 @@
+{
+  "checked_at": "2026-10-02T12:47:07",
+  "analysis": "static files only; game not running; no game or DLL modifications",
+  "hid_md5": "1ab069a8856ead90ff8055672443c2a1",
+  "version_md5": "05861023e39184a5252dd41221c418c5",
+  "config_bIsolatedTerritoryMovement": false,
+  "evidence": [
+    {
+      "hid_rva": "48520",
+      "role": "Validates original bytes for all ten road hook locations; read helper 45BC0 copies raw memory without normalization"
+    },
+    {
+      "hid_rva": "4869F-486DD",
+      "role": "Reads game+17B0BA0 length14; compares with hid+147650; any mismatch returns false",
+      "expected": "4885c90f84ea12000044884c2420"
+    },
+    {
+      "hid_rva": "48D4A-48D66",
+      "role": "Validation failure logs message and returns false before trampoline preparation and installation",
+      "message": "[영토단절] 적용 보류: CT 92011 원본 코드 상태 불일치"
+    },
+    {
+      "hid_rva": "48EC5-48EE7",
+      "role": "Installation directly hooks game+17B0BA0, length14"
+    },
+    {
+      "ct_source": "../runtime_v4a.lua",
+      "role": "Existing CT recognizes version.dll movement entry, replaces version+14FE38 trampoline slot instead of overwriting EXE entry, and adjusts caller return-address handling"
+    }
+  ],
+  "finding": "HID integrated feature rejects the previously verified VERSION movement hook. It does not use the CT bridge for this entry. With VERSION hook installed it cannot activate. Requires live confirmation for current session; do not bypass validation.",
+  "separate_ct_issue": "Existing v4a pins earlier HID MD5 40dd894172a7ec34a76f83a43583e307 and rejects current HID before code guard checks."
+}
