@@ -94,6 +94,8 @@
       <EnableUAC>false</EnableUAC>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -274,6 +276,8 @@
     <ClCompile Include="BattleMonitor.cpp" />
     <ClCompile Include="Cheats\Civilian\BangmokCity.cpp" />
     <ClCompile Include="Cheats\Civilian\JewelSettings.cpp" />
+    <ClCompile Include="Cheats\Civilian\TechCityEditorVisibility.cpp" />
+    <ClCompile Include="Cheats\Civilian\TechCityEditorVisibilityUi.cpp" />
     <ClCompile Include="Cheats\War\BattleEnvironment.cpp" />
     <ClCompile Include="Cheats\War\BattleMapShuffle.cpp" />
     <ClCompile Include="Cheats\War\Battleunitcapture.cpp" />
