@@ -274,6 +274,8 @@
     <ClCompile Include="BattleMonitor.cpp" />
     <ClCompile Include="Cheats\Civilian\BangmokCity.cpp" />
     <ClCompile Include="Cheats\Civilian\JewelSettings.cpp" />
+    <ClCompile Include="Cheats\Civilian\DomesticRewardCondition.cpp" />
+    <ClCompile Include="Cheats\Civilian\DomesticRewardConditionUi.cpp" />
     <ClCompile Include="Cheats\War\BattleEnvironment.cpp" />
     <ClCompile Include="Cheats\War\BattleMapShuffle.cpp" />
     <ClCompile Include="Cheats\War\Battleunitcapture.cpp" />
