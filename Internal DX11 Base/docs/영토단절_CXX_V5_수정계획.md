@@ -495,9 +495,9 @@ v5 자료 기준:
 - graph/source/assignment emulator: 76건
 - AI callsite ABI emulator: 63건
 - DLL entry / internals preserved in mock: 확인
-- live CE activation / 실제 게임 진행 검증: 아직 미확인
+- C++ 포팅 실게임 동작: 사용자 확인으로 정상 동작 보고
 
-따라서 v5 설계는 정적/에뮬레이션 수준의 근거는 충분하지만, C++ 포팅 후 실게임 검증이 최종 완료 조건이다.
+따라서 v5 설계의 정적/에뮬레이션 근거와 C++ 포팅 후 실게임 동작 확인까지 완료되었다. 단, 최소 실게임 테스트 매트릭스의 개별 항목별 로그/스크린샷은 별도로 보존하지 않았다.
 
 ---
 
@@ -518,7 +518,7 @@ Internal DX11 Base/docs/삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.C
 Internal DX11 Base/docs/삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.cea
 ```
 
-이 파일들은 설계 근거/원본 데이터/검증 자료이므로 새 C++ 구현이 완료되기 전까지 보존한다.
+이 파일들은 설계 근거/원본 데이터/검증 자료이므로 새 C++ 구현이 완료된 이후에도 회귀 확인용 근거 자료로 보존한다.
 
 ---
 
@@ -551,7 +551,7 @@ Internal DX11 Base/docs/삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.c
 - [x] Stage 4 — `PrepareBoolAbiFix()`에서 Hook6 의존 제거
 - [x] Stage 5 — restore ownership 검증 강화
 - [x] Stage 6 — diagnostic 갱신
-- [ ] Stage 7 — 실게임 검증 및 최종 문서화
+- [x] Stage 7 — 실게임 검증 및 최종 문서화
 
 ---
 
@@ -611,4 +611,12 @@ Internal DX11 Base/docs/삼8PK_영토단절_이동배정_AI차단_v5_DLL독립.c
 - commit SHA: `254764e4050bfd51770a716ad1c2734be829f0b4`
 - 빌드: 미실행
 - 실게임 테스트: 미실행
-- 남은 문제: Stage 7 실게임 검증 및 최종 문서화
+
+### 2026-10-03 — Stage 7
+
+- 변경 파일: `Internal DX11 Base/docs/영토단절_CXX_V5_수정계획.md`
+- 핵심 변경: 사용자 실게임 정상 동작 확인을 반영하고 Stage 0~7 완료 상태로 최종 문서화
+- 빌드: 사용자 측 수행
+- 실게임 테스트: 사용자 확인으로 정상 동작 보고
+- 비고: 개별 테스트 매트릭스 항목별 로그/스크린샷은 별도 보존하지 않음
+- 남은 문제: 없음
