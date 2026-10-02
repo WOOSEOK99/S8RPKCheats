@@ -113,6 +113,7 @@ namespace DX11Base {
 
       if (!WriteBranch(patchAddress, kPatchedBranch) ||
           !BytesEqual(signatureAddress, kPatchedSignature, kSignatureSize)) {
+        // 설치 과정에서 우리가 쓴 2 bytes가 그대로 남아 있으면 그것만 원복합니다.
         if (BytesEqual(patchAddress, kPatchedBranch, kPatchSize))
           WriteBranch(patchAddress, kOriginalBranch);
         AddLog(u8"[기술도시편집] 패치 적용 또는 검증 실패");
@@ -132,12 +133,20 @@ namespace DX11Base {
       return false;
     }
 
-    if (!WriteBranch(patchAddress, kOriginalBranch) ||
-        !BytesEqual(signatureAddress, kOriginalSignature, kSignatureSize)) {
-      if (BytesEqual(patchAddress, kOriginalBranch, kPatchSize))
-        WriteBranch(patchAddress, kPatchedBranch);
-      AddLog(u8"[기술도시편집] 원본 분기 복구 또는 검증 실패");
+    if (!WriteBranch(patchAddress, kOriginalBranch)) {
+      AddLog(u8"[기술도시편집] 원본 분기 복구 실패");
       bTechCityEditorVisible = g_applied;
+      return false;
+    }
+
+    if (!BytesEqual(signatureAddress, kOriginalSignature, kSignatureSize)) {
+      // 분기 자체가 원본으로 돌아갔다면 우리 patch는 제거된 상태로 취급합니다.
+      // 주변 bytes에 외부 변경이 생긴 경우 이를 덮어쓰지 않습니다.
+      if (BytesEqual(patchAddress, kOriginalBranch, kPatchSize)) {
+        g_applied = false;
+        bTechCityEditorVisible = false;
+      }
+      AddLog(u8"[기술도시편집] 원본 분기 복구 후 주변 시그니처가 변경되어 전체 검증에 실패했습니다.");
       return false;
     }
 
