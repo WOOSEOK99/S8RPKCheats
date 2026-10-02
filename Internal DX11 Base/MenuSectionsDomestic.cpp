@@ -6,6 +6,7 @@
 #include "Cheats/Civilian/Bigcityconvert.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/JewelSettings.h"
+#include "Cheats/Civilian/DomesticRewardCondition.h"
 #include "Cheats/Civilian/DomesticsMult.h"
 #include "Cheats/Civilian/NonggyeongCity.h"
 #include "Cheats/Civilian/SangeopCity.h"
@@ -138,6 +139,8 @@ namespace DX11Base {
           NotifyFeatureToggle(u8"명품 자동 배분 (평정 끝날 때)", bAutoFillSpecialties);
           SaveConfig();
         }
+
+        DX11Base::DrawDomesticRewardConditionUi(scale);
 
         if (ImGui::Button(u8"명품", ImVec2(70.0f * scale, 0.0f))) {
           bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
