@@ -7,6 +7,9 @@
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/Civilian/MissionCpuHeroExclusion.h"
+#include "Cheats/Civilian/MissionAppointmentLimit.h"
+#include "Cheats/Civilian/DomesticRewardCondition.h"
+#include "Cheats/Civilian/TechCityEditorVisibility.h"
 #include "Cheats/Civilian/DomesticsMult.h"
 #include "Cheats/Civilian/NonggyeongCity.h"
 #include "Cheats/Civilian/SangeopCity.h"
@@ -154,6 +157,62 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
+        static int sMissionAppointmentLimitEdit = 10;
+        static bool sMissionAppointmentLimitWasActive = false;
+        int currentMissionAppointmentLimit = 0;
+        const bool missionAppointmentLimitReadable =
+            DX11Base::ReadMissionAppointmentLimit(currentMissionAppointmentLimit);
+        if (missionAppointmentLimitReadable && !sMissionAppointmentLimitWasActive)
+          sMissionAppointmentLimitEdit = currentMissionAppointmentLimit;
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(u8"임무 총 임명 한도");
+        ImGui::SameLine(160.0f * scale);
+        ImGui::SetNextItemWidth(70.0f * scale);
+        if (!missionAppointmentLimitReadable)
+          ImGui::BeginDisabled();
+        ImGui::InputInt("##MissionAppointmentLimit", &sMissionAppointmentLimitEdit, 0, 0);
+        const bool missionAppointmentLimitActive = ImGui::IsItemActive();
+        const bool missionAppointmentLimitCommit = ImGui::IsItemDeactivatedAfterEdit();
+        if (!missionAppointmentLimitReadable)
+          ImGui::EndDisabled();
+        sMissionAppointmentLimitWasActive = missionAppointmentLimitActive;
+
+        if (missionAppointmentLimitCommit) {
+          if (DX11Base::SetMissionAppointmentLimit(sMissionAppointmentLimitEdit)) {
+            AddNotification(u8"임무 총 임명 한도 적용 완료");
+          } else if (DX11Base::ReadMissionAppointmentLimit(currentMissionAppointmentLimit)) {
+            sMissionAppointmentLimitEdit = currentMissionAppointmentLimit;
+            AddNotification(u8"임무 총 임명 한도 적용 실패");
+          }
+        }
+
+        ImGui::SameLine();
+        const bool missionAppointmentLimitManaged =
+            DX11Base::IsMissionAppointmentLimitManaged();
+        if (!missionAppointmentLimitManaged)
+          ImGui::BeginDisabled();
+        if (ImGui::Button(u8"원본 복구##MissionAppointmentLimit")) {
+          if (DX11Base::RestoreMissionAppointmentLimit()) {
+            if (DX11Base::ReadMissionAppointmentLimit(currentMissionAppointmentLimit))
+              sMissionAppointmentLimitEdit = currentMissionAppointmentLimit;
+            AddNotification(u8"임무 총 임명 한도 원본 복구 완료");
+          } else {
+            AddNotification(u8"임무 총 임명 한도 원본 복구 실패");
+          }
+        }
+        if (!missionAppointmentLimitManaged)
+          ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+          ImGui::BeginTooltip();
+          ImGui::TextUnformatted(u8"플레이어와 CPU 도시의 임무 총 임명 한도를 직접 편집합니다.");
+          ImGui::TextUnformatted(u8"CT에서 10 이외 값의 안전 범위는 확인되지 않았으므로 별도 범위 제한을 두지 않습니다.");
+          ImGui::TextUnformatted(u8"값 변경 뒤 임무 화면을 닫았다 다시 열어 반영 여부를 확인하세요.");
+          ImGui::EndTooltip();
+        }
+
+        DX11Base::DrawDomesticRewardConditionUi(scale);
+
         if (ImGui::Button(u8"명품", ImVec2(70.0f * scale, 0.0f))) {
           bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
         }
@@ -250,6 +309,8 @@ namespace DX11Base {
                              u8"내용 : 방목도시의 능력치를 저하시키고 최대 수치를 고정합니다.");
           ImGui::EndTooltip();
         }
+
+        DX11Base::DrawTechCityEditorVisibilityUi();
 
         bool wasNongRunning = DX11Base::g_nongCityThreadRunning.load();
         if (wasNongRunning)

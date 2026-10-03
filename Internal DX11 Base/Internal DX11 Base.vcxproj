@@ -158,6 +158,7 @@
     <ClInclude Include="Cheats\Civilian\BangmokCity.h" />
     <ClInclude Include="Cheats\Civilian\JewelSettings.h" />
     <ClInclude Include="Cheats\Civilian\MissionCpuHeroExclusion.h" />
+    <ClInclude Include="Cheats\Civilian\MissionAppointmentLimit.h" />
     <ClInclude Include="Cheats\War\BattleMapShuffle.h" />
     <ClInclude Include="Cheats\War\Battleunitcapture.h" />
     <ClInclude Include="Cheats\Civilian\Bigcityconvert.h" />
@@ -276,6 +277,11 @@
     <ClCompile Include="Cheats\Civilian\BangmokCity.cpp" />
     <ClCompile Include="Cheats\Civilian\JewelSettings.cpp" />
     <ClCompile Include="Cheats\Civilian\MissionCpuHeroExclusion.cpp" />
+    <ClCompile Include="Cheats\Civilian\MissionAppointmentLimit.cpp" />
+    <ClCompile Include="Cheats\Civilian\DomesticRewardCondition.cpp" />
+    <ClCompile Include="Cheats\Civilian\DomesticRewardConditionUi.cpp" />
+    <ClCompile Include="Cheats\Civilian\TechCityEditorVisibility.cpp" />
+    <ClCompile Include="Cheats\Civilian\TechCityEditorVisibilityUi.cpp" />
     <ClCompile Include="Cheats\War\BattleEnvironment.cpp" />
     <ClCompile Include="Cheats\War\BattleMapShuffle.cpp" />
     <ClCompile Include="Cheats\War\Battleunitcapture.cpp" />
