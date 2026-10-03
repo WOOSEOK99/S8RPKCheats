@@ -1,5 +1,71 @@
 #include "pch.h"
 #include "debug.h"
+#include "Cheats.h"
+#include "Cheats/War/StratagemSlotProbe.h"
+#include "Config.h"
+#include "MenuState.h"
+#include "PerformanceDiagnostics.h"
+#include "showlog.h"
+
+#include <atomic>
+#include <filesystem>
+
+namespace DX11Base {
+
+void T00LoadEarlyLogConfig() {
+  LoadEarlyLogConfig();
+
+  static std::atomic<uint64_t> s_initGeneration{0};
+  const uint64_t generation =
+      s_initGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
+
+  HMODULE selfModule = nullptr;
+  GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                         GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                     reinterpret_cast<LPCSTR>(&T00LoadEarlyLogConfig),
+                     &selfModule);
+
+  char dllPath[MAX_PATH] = {};
+  if (selfModule)
+    GetModuleFileNameA(selfModule, dllPath, MAX_PATH);
+
+  const std::string dllName = dllPath[0]
+                                  ? std::filesystem::path(dllPath).filename().string()
+                                  : std::string("unknown");
+  const uintptr_t exeBase =
+      reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
+
+  AddLog("[Session] pid=%lu init=%llu dll=%s module=%p exeBase=%p version=%s renderer=pending",
+         static_cast<unsigned long>(GetCurrentProcessId()),
+         static_cast<unsigned long long>(generation), dllName.c_str(),
+         selfModule, reinterpret_cast<void *>(exeBase), SAM8_CHEAT_VERSION);
+}
+
+bool T00PrepareStratagemFiveUiBridge(bool reportFailure = true) {
+  if (!PerfDiagnosticsEnabled())
+    return PrepareStratagemFiveUiBridge(reportFailure);
+
+  const uint64_t start = PerfRealNow100ns();
+  const bool ready = PrepareStratagemFiveUiBridge(reportFailure);
+  const uint64_t end = PerfRealNow100ns();
+  PerfRecord(PerfMetric::StartupBridgePrepare,
+             end >= start ? end - start : 0, 0, ready ? 1 : 0);
+  return ready;
+}
+
+bool T00InitCheats() {
+  if (!PerfDiagnosticsEnabled())
+    return InitCheats();
+
+  const uint64_t start = PerfRealNow100ns();
+  const bool ready = InitCheats();
+  const uint64_t end = PerfRealNow100ns();
+  PerfRecord(PerfMetric::InitCheatsAttempt,
+             end >= start ? end - start : 0, 0, ready ? 1 : 0);
+  return ready;
+}
+
+} // namespace DX11Base
 
 namespace {
 
@@ -12,6 +78,12 @@ namespace {
 
 } // namespace
 
+#define LoadEarlyLogConfig T00LoadEarlyLogConfig
+#define PrepareStratagemFiveUiBridge T00PrepareStratagemFiveUiBridge
+#define InitCheats T00InitCheats
 #define FreeLibraryAndExitThread T05FreeLibraryAndExitThread
 #include "Source_impl.inc"
 #undef FreeLibraryAndExitThread
+#undef InitCheats
+#undef PrepareStratagemFiveUiBridge
+#undef LoadEarlyLogConfig
