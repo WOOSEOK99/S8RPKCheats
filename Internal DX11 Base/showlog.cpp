@@ -1,6 +1,7 @@
 #include "showlog.h"
 #include "Framework/imgui.h"
 #include "MenuState.h"
+#include "PerformanceDiagnostics.h"
 #include "debug.h"
 #include <Windows.h>
 #include <cstdarg>
@@ -113,13 +114,22 @@ namespace DX11Base {
     if (!bShowDebug && !bFileLog)
       return;
 
+    const bool perfEnabled = PerfDiagnosticsEnabled();
+    const uint64_t callStart = perfEnabled ? PerfRealNow100ns() : 0;
+
     char buf[1024];
     va_list args;
     va_start(args, fmt);
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    std::lock_guard<std::mutex> lock(g_logMutex);
+    const uint64_t lockStart = perfEnabled ? PerfRealNow100ns() : 0;
+    std::unique_lock<std::mutex> lock(g_logMutex);
+    if (perfEnabled) {
+      const uint64_t lockEnd = PerfRealNow100ns();
+      PerfRecordNoReport(PerfMetric::AddLogMutexWait,
+                         lockEnd >= lockStart ? lockEnd - lockStart : 0);
+    }
     
     // UI 디버그용 메모리 저장
     if (bShowDebug) {
@@ -131,6 +141,9 @@ namespace DX11Base {
 
     // 파일 로그용 저장
     if (bFileLog) {
+      const uint64_t fileStart = perfEnabled ? PerfRealNow100ns() : 0;
+      uint64_t bytesWritten = 0;
+
       std::string logPath = "S8RPK_cheat.log";
       bool isNew = !std::filesystem::exists(logPath) || std::filesystem::file_size(logPath) == 0;
       
@@ -139,6 +152,7 @@ namespace DX11Base {
           if (isNew) {
               unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
               logFile.write((char*)bom, sizeof(bom));
+              bytesWritten += sizeof(bom);
           }
           auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
           struct tm tm_info;
@@ -150,8 +164,22 @@ namespace DX11Base {
              << "] " << utf8Message << "\r\n";
           std::string entry = ss.str();
           logFile.write(entry.c_str(), entry.size());
+          bytesWritten += static_cast<uint64_t>(entry.size());
           logFile.close();
       }
+
+      if (perfEnabled) {
+        const uint64_t fileEnd = PerfRealNow100ns();
+        PerfRecordNoReport(PerfMetric::AddLogFileIo,
+                           fileEnd >= fileStart ? fileEnd - fileStart : 0,
+                           bytesWritten);
+      }
+    }
+
+    if (perfEnabled) {
+      const uint64_t callEnd = PerfRealNow100ns();
+      PerfRecordNoReport(PerfMetric::AddLogCall,
+                         callEnd >= callStart ? callEnd - callStart : 0);
     }
   }
 
