@@ -7,6 +7,7 @@
 #include "Cheats/Officer/TraitViewerFeature.h"
 #include "Cheats/Officer/AffinityDisplay.h"
 #include "Cheats/Civilian/JewelSettings.h"
+#include "Cheats/Civilian/MissionCpuHeroExclusion.h"
 #include "Cheats/System/StartSetting.h"
 #include "Cheats/War/CouncilContinueAfterMove.h"
 #include "Cheats/War/CouncilExecuteFreeOfficers.h"
@@ -176,6 +177,7 @@ namespace DX11Base {
 
     SaveConfigBase();
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
+    UpsertBoolConfigValue("bMissionCpuHeroExclusion", bMissionCpuHeroExclusion);
     UpsertBoolConfigValue("bTotalWarCycleShortening", bTotalWarCycleShortening);
     UpsertBoolConfigValue("bCouncilContinueAfterMove", bCouncilContinueAfterMove);
     UpsertBoolConfigValue("bCouncilExecuteFreeOfficers", bCouncilExecuteFreeOfficers);
@@ -227,6 +229,15 @@ namespace DX11Base {
       bAIWarImprove = savedAIWarImprove;
       SetAIWarImprove(savedAIWarImprove);
       AddLog(u8"[Config] AI 전투 개선 설정 로드: %s", savedAIWarImprove ? "ON" : "OFF");
+    }
+
+    bool savedMissionCpuHeroExclusion = false;
+    if (LoadBoolConfigValue("bMissionCpuHeroExclusion", savedMissionCpuHeroExclusion)) {
+      bMissionCpuHeroExclusion = savedMissionCpuHeroExclusion;
+      if (!SetMissionCpuHeroExclusion(savedMissionCpuHeroExclusion))
+        bMissionCpuHeroExclusion = IsMissionCpuHeroExclusionApplied();
+      AddLog(u8"[Config] 임무 미지원 CPU 강제 배정 제외 설정 로드: %s",
+             bMissionCpuHeroExclusion ? "ON" : "OFF");
     }
 
     bool savedTotalWarCycleShortening = bTotalWarCycleShortening;
