@@ -5,7 +5,7 @@
 기준 브랜치: `main`  
 기준 커밋: `996cb6e78eb5a6908a7572059393e76187a4d65c` (`v0.860 배포`)  
 작업 브랜치: `perf/user-lag-investigation-20261003`  
-문서 상태: **PLAN ONLY — 코드 수정 전**  
+문서 상태: **S00 계측 구현 완료 — 빌드/실게임 검증 대기**  
 실게임 실행: 미실행  
 빌드: 미실행  
 
@@ -59,8 +59,8 @@
 
 | 단계 | 상태 | 목적 | 코드 변경 여부 | 검증 |
 |---|---|---|---|---|
-| PLAN | 완료 | 로그/현재 main 확인, 작업 브랜치와 본 문서 생성 | 문서만 | 저장소 상태 확인 예정 |
-| S00 | 미착수 | v0.860 재현 가능성 확인 + 저비용 계측/식별 정보 보강 | 없음 또는 계측만 | 미실행 |
+| PLAN | 완료 | 로그/현재 main 확인, 작업 브랜치와 본 문서 생성 | 문서만 | 브랜치/기준 HEAD 확인 완료 |
+| S00 | 부분 완료 | v0.860 재현 가능성 확인 + 저비용 계측/식별 정보 보강 | 계측 4파일 수정 | 정적 diff 완료 / 빌드·실게임 미실행 |
 | S01 | 미착수 | 5번 책략 시작 경로의 기능 활성화와 bridge/진단 분리 | 미수정 | 미실행 |
 | S02 | 미착수 | 동기 파일 로그 hot path 제거/완화 | 미수정 | 미실행 |
 | S03 | 미착수 | 지속 렉 후보의 실제 호출량/비용 계측 | 미수정 | 미실행 |
@@ -70,7 +70,9 @@
 
 ### 정확한 현재 재개 지점
 
-**다음 작업은 `S00`부터 시작한다. 현재 브랜치에는 이 계획 문서 외의 이번 렉 대응 코드 변경을 넣지 않은 상태여야 한다.**
+**S00 계측 코드는 연결되어 있다. 다음 작업은 `perf/user-lag-investigation-20261003`의 최신 HEAD를 확인한 뒤 빌드/실게임으로 계측이 정상 동작하는지 검증하는 것이다. 이 검증 전에는 S01의 기능 변경을 섞지 않는다.**
+
+검증 시 환경 변수 `S8RPK_PERF_DIAGNOSTICS=1`과 파일 로그 또는 화면 로그 중 하나를 활성화해야 `[Perf:T00]` 결과가 보인다.
 
 ---
 
@@ -131,7 +133,7 @@ SetStratagemFiveFeature(true);
 AddLog("[Stratagem5UI] unified ID5 experiment armed before battle UI");
 ```
 
-그리고 최대 약 10초 동안 `PrepareStratagemFiveUiBridge(false)` 재시도 루프가 있다. 따라서 S01의 최우선 확인 대상이다.
+추가 정적 확인 결과, startup loop는 단순히 ‘최대 10초 재시도’가 아니다. 현재 구현은 `stratagemUiBridgeReady`가 첫 호출에서 이미 `true`여도 `Sleep(100)`을 100회 모두 수행한다. 즉 **bridge 준비 성공 여부와 무관하게 MainThread가 약 10초를 의도적으로 대기한 뒤 일반 초기화/D3D 단계로 진행한다.** bridge가 실패한 동안에만 `PrepareStratagemFiveUiBridge(false)`가 추가 호출된다. 이 고정 대기는 S01의 최우선 수정 검토 대상이다.
 
 #### B. 파일 로그 자체가 렉을 증폭시킬 가능성이 있음
 
@@ -220,11 +222,12 @@ session generation
 LoadEarlyLogConfig
 → PrepareStratagemFiveUiBridge
 → SetStratagemFiveFeature(true)
-→ 최대 100 × Sleep(100ms) 동안 bridge 재시도
+→ 100 × Sleep(100ms) 고정 대기
+   └─ bridge가 아직 준비되지 않았을 때만 PrepareStratagemFiveUiBridge(false) 추가 호출
 → 일반 초기화 / D3D / Config 처리
 ```
 
-이 구조는 사용자 설정 OFF와 독립적으로 먼저 실행된다. 단, early bridge가 실제로 battle UI 생성 전에 반드시 설치되어야 하는 이유가 있을 수 있으므로 **bridge 설치 자체를 무조건 삭제하지 않는다.**
+따라서 첫 bridge 호출이 즉시 성공해도 약 10초 startup 대기는 유지된다. 이 구조는 사용자 설정 OFF와 독립적으로 먼저 실행된다. 단, early bridge가 실제로 battle UI 생성 전에 반드시 설치되어야 하는 이유가 있을 수 있으므로 **bridge 설치 자체를 무조건 삭제하지 않는다.**
 
 ### 4.2 `showlog.cpp`: 파일 로그는 producer thread에서 동기 I/O
 
@@ -280,6 +283,7 @@ LoadEarlyLogConfig
 | 우선순위 | 항목 | 현재 판단 |
 |---|---|---|
 | P0 | 설정 OFF인데도 5번 책략 early feature ON + 대량 runtime probe | 로그와 현재 소스 양쪽에서 확인. 가장 먼저 분리해야 함 |
+| P0 | startup의 100 × `Sleep(100)` 고정 대기 | 현재 v0.860 소스에서 확인. bridge 성공 여부와 무관하게 약 10초 대기 |
 | P0/P1 | `AddLog`의 동기 파일 I/O + global mutex | 대량 probe의 hitch를 증폭할 수 있음. 현재 소스에서 확인 |
 | P1 | 지속 플레이 runtime hook/thread 비용 | 로그만으로 미확정. 반드시 계측 후 수정 |
 | P2 | MonthCapture 전체 모듈 scan | 현재 worker 실행 확인. 지속 렉 단일 원인으로 단정 금지 |
@@ -414,6 +418,7 @@ diagnostics/probe enabled
 7. 이미 검증된 고정 RVA/signature를 쓸 수 있는 부분이 있다면 매 시작마다 callback table 전체를 dump하여 알아내는 방식을 반복하지 않는다. 단, 게임 버전별 안전 검증은 유지한다.
 8. 기능 ON 시 필요한 5번째 버튼, model/registry, 횟수, 회복 기능, 세대 보호는 그대로 유지한다.
 9. 생성된 게임 UI 객체의 ownership이 불분명하면 임의 `free/delete`를 추가하지 않는다.
+10. 현재 `100 × Sleep(100ms)` 루프는 bridge가 준비된 뒤에도 계속 대기하므로, early bridge가 준비되는 즉시 대기를 종료할 수 있는지 호출 타이밍과 원래 의도를 확인한다. 단순히 10초를 삭제하기 전에 battle UI 생성보다 bridge가 먼저 준비되어야 한다는 안전 조건을 보존한다.
 
 ## 예상 수정 파일
 
@@ -749,7 +754,7 @@ S03에서 별도 증거가 나오기 전에는 아래를 이유 없이 손대지
 
 ---
 
-## 8. 최초 작업 기록
+## 8. 작업 기록
 
 ### 2026-10-03 / PLAN
 
@@ -777,6 +782,49 @@ S03에서 별도 증거가 나오기 전에는 아래를 이유 없이 손대지
   - 지속 렉의 실제 hot path 미확인.
 - 다음 재개 지점:
   - **S00: 현재 branch/HEAD 재확인 → 기존 PerformanceDiagnostics 상태 확인 → 기능을 바꾸지 않는 식별/계측부터 시작.**
+
+### 2026-10-03 / S00 구현 진행
+
+- 작업 브랜치: `perf/user-lag-investigation-20261003`
+- 시작 HEAD: `9beda193a48137d424c80ec65aa3f327939a22dc`
+- 계측 코드 HEAD(문서 갱신 전): `68a6a350f78241ef42cd71b74882d98020abbd85`
+- 변경 파일:
+  - `Internal DX11 Base/PerformanceDiagnostics.h`
+  - `Internal DX11 Base/Source.cpp`
+  - `Internal DX11 Base/showlog.cpp`
+  - `Internal DX11 Base/Cheats/System/MonthCapture.cpp`
+- 확인한 사실:
+  - `main`은 작업 시작 시점에도 `996cb6e...`로 변함없었다.
+  - 기존 `PerformanceDiagnostics.h`는 `S8RPK_PERF_DIAGNOSTICS=1`, `QueryUnbiasedInterruptTime`, 10초 집계 보고를 이미 제공하므로 새 진단 프레임워크를 만들 필요가 없었다.
+  - `Source_impl.inc`의 startup loop는 bridge가 첫 호출에서 성공해도 `Sleep(100)`을 100회 모두 수행한다. 즉 약 10초 고정 대기다.
+  - Config 로드는 `Menu::Loops()`에서 p1이 유효해질 때 지연되므로 startup의 `SetStratagemFiveFeature(true)`가 사용자 설정 OFF보다 먼저 실행되는 구조가 현재도 맞다.
+- 핵심 변경:
+  - 기존 진단 프레임워크에 `StartupBridgePrepare`, `InitCheatsAttempt`, `MonthCaptureScan`, `AddLogCall`, `AddLogMutexWait`, `AddLogFileIo` metric을 추가했다.
+  - `AddLog` 자체를 계측해도 10초 보고가 다시 `AddLog`를 호출하여 재귀하지 않도록 `PerfRecordNoReport()`를 추가했다.
+  - `Source.cpp`의 기존 wrapper 구조를 활용해 대형 `Source_impl.inc`를 수정하지 않고 `LoadEarlyLogConfig`, `PrepareStratagemFiveUiBridge`, `InitCheats` 호출을 계측 wrapper로 연결했다.
+  - startup 로그에 `[Session] pid=... init=... dll=... module=... exeBase=... version=... renderer=pending` 식별자를 추가했다.
+  - `AddLog`에서 mutex 대기 시간, 전체 호출 시간, 파일 I/O 시간/기록 bytes를 측정하도록 했다. 파일/화면 로그가 모두 OFF일 때의 기존 빠른 return은 그대로 유지했다.
+  - MonthCapture worker에서 전체 scan duration과 module image bytes, 설치 성공 여부를 기존 10초 집계 metric에 기록하도록 했다.
+- 의도적으로 변경하지 않은 것:
+  - `SetStratagemFiveFeature(true)`는 아직 그대로다.
+  - startup의 100 × `Sleep(100)` 고정 대기도 아직 그대로다.
+  - logger를 비동기로 바꾸지 않았다.
+  - MonthCapture worker ownership/stop flag를 아직 바꾸지 않았다.
+  - `StratagemSlotProbe.cpp`와 `Source_impl.inc` 대형 파일은 수정하지 않았다.
+- diff 확인:
+  - 기준 `main@996cb6e...` 대비 문서 포함 5개 파일만 변경됨.
+  - 코드 변경은 `MonthCapture.cpp` +13, `PerformanceDiagnostics.h` +46 변화, `Source.cpp` +72, `showlog.cpp` +32 변화 수준이며 대형 파일 전체 재format은 없음.
+- 빌드:
+  - **미실행.** 현재 작업 환경에서 Windows/MSVC Release x64 빌드를 실제 실행하지 않았다.
+- 실게임 테스트:
+  - **미실행.** 계측 수치와 기능 회귀는 아직 확인되지 않았다.
+- 남은 불확실성:
+  - 계측 wrapper가 실제 MSVC 빌드에서 문제없이 컴파일되는지 미확인.
+  - v0.860 실게임에서 `[Session]`, `[Perf:T00]`가 기대대로 출력되는지 미확인.
+  - AddLog I/O가 실제 사용자 환경에서 얼마만큼 hitch에 기여하는지 미확인.
+  - startup 10초 고정 대기를 줄여도 early bridge timing이 안전한지는 S01에서 검증 필요.
+- 다음 재개 지점:
+  - **S00 검증: branch 최신 HEAD 확인 → Release x64 빌드 → `S8RPK_PERF_DIAGNOSTICS=1`로 v0.860 실행 → 파일로그 OFF/ON 및 5번 책략 OFF/ON 조건의 로그 수집. 검증 전 S01 기능 변경 금지.**
 
 ---
 
