@@ -8,12 +8,37 @@
 #include "showlog.h"
 
 #include <atomic>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <utility>
 
 namespace DX11Base {
 
+namespace {
+bool s_earlyStratagemFiveEnabled = false;
+bool s_startupStratagemBridgeReady = false;
+
+bool ReadEarlyStratagemFiveSetting() {
+  std::ifstream file(GetConfigPath());
+  if (!file.is_open())
+    return false;
+
+  std::string line;
+  while (std::getline(file, line)) {
+    if (line.find("\"bStratagemFiveEnabled\"") == std::string::npos)
+      continue;
+    return line.find("true") != std::string::npos;
+  }
+  return false;
+}
+} // namespace
+
 void T00LoadEarlyLogConfig() {
   LoadEarlyLogConfig();
+
+  s_earlyStratagemFiveEnabled = ReadEarlyStratagemFiveSetting();
+  bStratagemFiveEnabled = s_earlyStratagemFiveEnabled;
 
   static std::atomic<uint64_t> s_initGeneration{0};
   const uint64_t generation =
@@ -39,18 +64,57 @@ void T00LoadEarlyLogConfig() {
          static_cast<unsigned long>(GetCurrentProcessId()),
          static_cast<unsigned long long>(generation), dllName.c_str(),
          selfModule, reinterpret_cast<void *>(exeBase), SAM8_CHEAT_VERSION);
+  AddLog("[Stratagem5UI] early saved setting=%s",
+         s_earlyStratagemFiveEnabled ? "ON" : "OFF");
 }
 
 bool T00PrepareStratagemFiveUiBridge(bool reportFailure = true) {
-  if (!PerfDiagnosticsEnabled())
-    return PrepareStratagemFiveUiBridge(reportFailure);
+  if (!s_earlyStratagemFiveEnabled) {
+    s_startupStratagemBridgeReady = true;
+    return true;
+  }
+
+  if (!PerfDiagnosticsEnabled()) {
+    const bool ready = PrepareStratagemFiveUiBridge(reportFailure);
+    s_startupStratagemBridgeReady = ready;
+    return ready;
+  }
 
   const uint64_t start = PerfRealNow100ns();
   const bool ready = PrepareStratagemFiveUiBridge(reportFailure);
   const uint64_t end = PerfRealNow100ns();
   PerfRecord(PerfMetric::StartupBridgePrepare,
              end >= start ? end - start : 0, 0, ready ? 1 : 0);
+  s_startupStratagemBridgeReady = ready;
   return ready;
+}
+
+bool T01SetStratagemFiveFeature(bool enable) {
+  if (enable && !s_earlyStratagemFiveEnabled)
+    return true;
+  return SetStratagemFiveFeature(enable);
+}
+
+void T01StartupSleep(DWORD milliseconds) {
+  if (milliseconds == 100 && s_startupStratagemBridgeReady)
+    return;
+  ::Sleep(milliseconds);
+}
+
+template <typename... Args>
+void T01AddLog(const char *fmt, Args &&...args) {
+  if (!s_earlyStratagemFiveEnabled && fmt) {
+    if (std::strcmp(fmt,
+                    "[Stratagem5UI] early bridge preparation before startup delay") == 0) {
+      AddLog("[Stratagem5UI] early bridge skipped: saved setting OFF");
+      return;
+    }
+    if (std::strcmp(fmt,
+                    "[Stratagem5UI] unified ID5 experiment armed before battle UI") == 0)
+      return;
+  }
+
+  AddLog(fmt, std::forward<Args>(args)...);
 }
 
 bool T00InitCheats() {
@@ -80,10 +144,16 @@ namespace {
 
 #define LoadEarlyLogConfig T00LoadEarlyLogConfig
 #define PrepareStratagemFiveUiBridge T00PrepareStratagemFiveUiBridge
+#define SetStratagemFiveFeature T01SetStratagemFiveFeature
 #define InitCheats T00InitCheats
+#define AddLog T01AddLog
+#define Sleep T01StartupSleep
 #define FreeLibraryAndExitThread T05FreeLibraryAndExitThread
 #include "Source_impl.inc"
 #undef FreeLibraryAndExitThread
+#undef Sleep
+#undef AddLog
 #undef InitCheats
+#undef SetStratagemFiveFeature
 #undef PrepareStratagemFiveUiBridge
 #undef LoadEarlyLogConfig
