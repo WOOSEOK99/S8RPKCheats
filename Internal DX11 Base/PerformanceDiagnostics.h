@@ -22,6 +22,12 @@ namespace DX11Base {
     SkillCountSave,
     NotificationProduce,
     NotificationRender,
+    StartupBridgePrepare,
+    InitCheatsAttempt,
+    MonthCaptureScan,
+    AddLogCall,
+    AddLogMutexWait,
+    AddLogFileIo,
     Count
   };
 
@@ -88,6 +94,12 @@ namespace DX11Base {
     case PerfMetric::SkillCountSave: return "SkillCountSave";
     case PerfMetric::NotificationProduce: return "NotificationProduce";
     case PerfMetric::NotificationRender: return "NotificationRender";
+    case PerfMetric::StartupBridgePrepare: return "StartupBridgePrepare";
+    case PerfMetric::InitCheatsAttempt: return "InitCheatsAttempt";
+    case PerfMetric::MonthCaptureScan: return "MonthCaptureScan";
+    case PerfMetric::AddLogCall: return "AddLogCall";
+    case PerfMetric::AddLogMutexWait: return "AddLogMutexWait";
+    case PerfMetric::AddLogFileIo: return "AddLogFileIo";
     default: return "Unknown";
     }
   }
@@ -97,6 +109,26 @@ namespace DX11Base {
     while (observed < value &&
            !target.compare_exchange_weak(observed, value, std::memory_order_relaxed, std::memory_order_relaxed)) {
     }
+  }
+
+  // AddLog itself is instrumented. This raw recorder intentionally does not
+  // call PerfMaybeReport(), otherwise a diagnostics report would recurse back
+  // into AddLog while AddLog is trying to record its own cost.
+  inline void PerfRecordNoReport(PerfMetric metric, uint64_t elapsed100ns = 0,
+                                 uint64_t bytes = 0, uint64_t changes = 0) {
+    if (!PerfDiagnosticsEnabled())
+      return;
+
+    auto &slot = GetPerfDiagnosticsState().metrics[static_cast<size_t>(metric)];
+    slot.calls.fetch_add(1, std::memory_order_relaxed);
+    if (elapsed100ns != 0) {
+      slot.total100ns.fetch_add(elapsed100ns, std::memory_order_relaxed);
+      PerfUpdateMax(slot.max100ns, elapsed100ns);
+    }
+    if (bytes != 0)
+      slot.bytes.fetch_add(bytes, std::memory_order_relaxed);
+    if (changes != 0)
+      slot.changes.fetch_add(changes, std::memory_order_relaxed);
   }
 
   inline void PerfRecordNotificationSizes(size_t queueSize, size_t historySize) {
@@ -234,17 +266,7 @@ namespace DX11Base {
     if (!PerfDiagnosticsEnabled())
       return;
 
-    auto &slot = GetPerfDiagnosticsState().metrics[static_cast<size_t>(metric)];
-    slot.calls.fetch_add(1, std::memory_order_relaxed);
-    if (elapsed100ns != 0) {
-      slot.total100ns.fetch_add(elapsed100ns, std::memory_order_relaxed);
-      PerfUpdateMax(slot.max100ns, elapsed100ns);
-    }
-    if (bytes != 0)
-      slot.bytes.fetch_add(bytes, std::memory_order_relaxed);
-    if (changes != 0)
-      slot.changes.fetch_add(changes, std::memory_order_relaxed);
-
+    PerfRecordNoReport(metric, elapsed100ns, bytes, changes);
     PerfMaybeReport();
   }
 
