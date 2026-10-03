@@ -213,10 +213,6 @@ namespace DX11Base {
 
         DX11Base::DrawDomesticRewardConditionUi(scale);
 
-        if (ImGui::Button(u8"명품", ImVec2(70.0f * scale, 0.0f))) {
-          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
-        }
-
         // -----------------------
         // ImGui::Separator();
         // ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), u8"[ 내정 배율 설정 ]");
@@ -238,6 +234,11 @@ namespace DX11Base {
           bShowCityInfoWin = !bShowCityInfoWin;
         const bool cityManageHov = ImGui::IsItemHovered();
         ImGui::PopStyleColor(2);
+
+        ImGui::SameLine();
+        if (ImGui::Button(u8"명품", ImVec2(70.0f * scale, 0.0f))) {
+          bShowSpecialtyInfoWin = !bShowSpecialtyInfoWin;
+        }
 
         if (cityManageHov) {
           ImGui::BeginTooltip();
