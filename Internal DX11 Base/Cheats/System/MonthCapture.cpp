@@ -3,6 +3,7 @@
 #include "../../Cheats.h"
 #include "../../showlog.h"
 #include "../../MemoryUtils.h"
+#include "../../PerformanceDiagnostics.h"
 #include <psapi.h>
 #include <string>
 
@@ -223,6 +224,8 @@ namespace DX11Base {
                 MODULEINFO mi;
                 GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi));
                 uintptr_t searchEnd = exeBase + mi.SizeOfImage;
+                const bool perfEnabled = PerfDiagnosticsEnabled();
+                const uint64_t perfStart = perfEnabled ? PerfRealNow100ns() : 0;
 
                 AddLog(u8"[MonthCapture] 월 캡처 검색 시작... (%p ~ %p)", (void*)exeBase, (void*)searchEnd);
 
@@ -258,6 +261,14 @@ namespace DX11Base {
 
                 if (!g_monthApplied && !g_stopScan) {
                     AddLog(u8"[Error] 월 캡처 지점을 끝내 찾지 못했습니다.");
+                }
+
+                if (perfEnabled) {
+                    const uint64_t perfEnd = PerfRealNow100ns();
+                    PerfRecord(PerfMetric::MonthCaptureScan,
+                               perfEnd >= perfStart ? perfEnd - perfStart : 0,
+                               searchEnd > exeBase ? searchEnd - exeBase : 0,
+                               g_monthApplied ? 1 : 0);
                 }
 
                 g_monthCaptureRunning = false;
