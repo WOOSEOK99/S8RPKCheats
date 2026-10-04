@@ -362,9 +362,17 @@ namespace DX11Base {
     DrawConfigSaveErrorPopup(scale);
   }
 
+  static uintptr_t ReadLoopSessionP1(uintptr_t gameBase) {
+    __try {
+      if (gameBase > 0x10000 && IsValidPtr(gameBase + 0xE0, sizeof(uintptr_t)))
+        return *(uintptr_t *)(gameBase + 0xE0);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return 0;
+  }
+
   void Menu::Loops() {
     uintptr_t gameBase = GetGameBase();
-    uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;
+    uintptr_t p1 = ReadLoopSessionP1(gameBase);
 
     // IsValidPtr → VirtualQuery 비용 큼: 주소/시간 기준으로만 재검증
     static uintptr_t s_loopProbeGameBase = 0;
@@ -395,18 +403,24 @@ namespace DX11Base {
     // 전투/평정 모니터가 이전 전투 UI 포인터를 만지기 전에 5번 책략의
     // object-bound 상태를 먼저 폐기합니다. 체크 의도는 유지되므로 다음 전투에서 재적용됩니다.
     static uintptr_t s_stratagem5SessionP1 = 0;
-    if (s_stratagem5SessionP1 != 0 && p1 != s_stratagem5SessionP1) {
+    static uintptr_t s_battleSessionGameBase = 0;
+    if (s_stratagem5SessionP1 != 0 &&
+        (p1 != s_stratagem5SessionP1 || gameBase != s_battleSessionGameBase || !p1Ready)) {
       // Important: consume the transition immediately, including p1->0.
       // Otherwise the 30ms loop repeats the same reset/log while a save or
       // battle transition is in progress and can contend with the UI thread.
       const uintptr_t oldSessionP1 = s_stratagem5SessionP1;
+      DX11Base::ResetBattleSessionRuntime(oldSessionP1, p1);
       DX11Base::ResetStratagemFiveSessionRuntime(oldSessionP1, p1);
       DX11Base::ResetSpell5HealProbeSession(oldSessionP1, p1);
       s_stratagem5SessionP1 = p1Ready ? p1 : 0;
+      s_battleSessionGameBase = gameBase;
     } else if (s_stratagem5SessionP1 == 0 && p1Ready) {
       // First stable p1 after startup/load. The old generation was already
       // abandoned when it went to zero, so only attach the new generation.
       s_stratagem5SessionP1 = p1;
+      s_battleSessionGameBase = gameBase;
+      DX11Base::ResetBattleSessionRuntime(0, p1);
       AddLog(u8"[책략5수명] 새 p1 세대 연결: %p", reinterpret_cast<void *>(p1));
     }
 

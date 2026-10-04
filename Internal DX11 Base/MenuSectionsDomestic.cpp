@@ -143,11 +143,11 @@ namespace DX11Base {
           SaveConfig();
         }
 
-        if (ImGui::Checkbox(u8"임무 미지원 시 CPU 강제 배정 제외", &bMissionCpuHeroExclusion)) {
+        if (ImGui::Checkbox(u8"임무 미지원시 강제 배정 제외", &bMissionCpuHeroExclusion)) {
           const bool requested = bMissionCpuHeroExclusion;
           if (!DX11Base::SetMissionCpuHeroExclusion(requested))
             bMissionCpuHeroExclusion = DX11Base::IsMissionCpuHeroExclusionApplied();
-          NotifyFeatureToggle(u8"임무 미지원 시 CPU 강제 배정 제외", bMissionCpuHeroExclusion);
+          NotifyFeatureToggle(u8"임무 미지원시 강제 배정 제외", bMissionCpuHeroExclusion);
           SaveConfig();
         }
         if (ImGui::IsItemHovered()) {

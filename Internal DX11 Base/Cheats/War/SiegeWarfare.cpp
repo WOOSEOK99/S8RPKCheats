@@ -313,6 +313,16 @@ namespace DX11Base {
   static bool g_siege2ShallowApplied = false;
   static int g_siege2PrevDay = -1;
 
+  void ResetSiegeBattleRuntime() {
+    // A load abandons the previous battle; never restore through its pointers.
+    g_siegeMoveCostApplied = false;
+    g_siegeShallowApplied = false;
+    g_siegePrevDay = -1;
+    g_siege2MoveCostApplied = false;
+    g_siege2ShallowApplied = false;
+    g_siege2PrevDay = -1;
+  }
+
   static bool ApplyShallowTerrain2Once() {
     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
 

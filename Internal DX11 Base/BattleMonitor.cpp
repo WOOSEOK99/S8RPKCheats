@@ -34,7 +34,25 @@ namespace DX11Base {
   static uintptr_t s_cachedUnitListBase = 0;
   static uintptr_t s_cachedDayBaseAddr = 0;
   static uintptr_t s_cachedDefenderAddr = 0;
-  static DWORD s_lastResolveTick = 0;
+  static bool s_battleRuntimeReady = false;
+  static bool s_battleSessionResetPending = false;
+
+  bool IsBattleRuntimeReady() { return s_battleRuntimeReady; }
+
+  void ResetBattleSessionRuntime(uintptr_t oldP1, uintptr_t newP1) {
+    // Abandon old addresses without restoring through memory owned by the old save.
+    s_battleRuntimeReady = false;
+    s_battleSessionResetPending = true;
+    s_cachedUnitListBase = 0;
+    s_cachedDayBaseAddr = 0;
+    s_cachedDefenderAddr = 0;
+    g_battleUnitAddr1 = 0;
+    g_battleUnitAddr2 = 0;
+    ClearBattleCache();
+    ClearBattleEnvCache();
+    AddLog(u8"[BattleLoad] 전투 캐시 폐기: p1 %p -> %p",
+           (void *)oldP1, (void *)newP1);
+  }
 
   struct ResolveRegionEntry {
     uintptr_t start = 0;
@@ -49,7 +67,7 @@ namespace DX11Base {
   };
 
   // 한 번의 전투 포인터 갱신 안에서 같은 VirtualQuery 영역의 결과를 재사용합니다.
-  // 캐시는 호출마다 새로 만들어지므로 다음 500ms 갱신까지 오래된 메모리 상태를 유지하지 않습니다.
+  // 캐시는 호출마다 새로 만들어지므로 다음 모니터 틱까지 오래된 메모리 상태를 유지하지 않습니다.
   static bool IsValidPtrForResolve(uintptr_t addr, SIZE_T size, ResolveRegionCache &cache) {
     if (!addr || size == 0)
       return false;
@@ -122,7 +140,7 @@ namespace DX11Base {
   }
 
   // unitList/day는 같은 0x02E99460 루트와 첫 전투 데이터 포인터를 공유합니다.
-  // 500ms 갱신 주기 자체는 유지하되, 공통 포인터는 한 번만 읽고 같은 메모리 영역의 VirtualQuery 결과를 재사용합니다.
+  // 공통 포인터는 한 번만 읽고 같은 메모리 영역의 VirtualQuery 결과를 재사용합니다.
   static void ResolveBattlePointers(uintptr_t exeBase, bool needDefender) {
     ResolveRegionCache cache{};
 
@@ -269,6 +287,24 @@ namespace DX11Base {
     static float s_lastSeenTime = 0.0f;
     static int s_lastAppliedDay = -1;
     static int s_lastNotifiedDay = -1;
+    static uintptr_t s_readyUnitList = 0;
+    static uintptr_t s_readyDayBase = 0;
+    static uint64_t s_readyUnitSignature = 0;
+    static uint64_t s_stableSince = 0;
+    static int s_readyUnitCount = 0;
+    const uint64_t nowMs = GetTickCount64();
+
+    if (s_battleSessionResetPending) {
+      s_battleSessionResetPending = false;
+      s_isWarModsApplied = false;
+      s_isCacheBuilt = false;
+      s_lastSeenTime = 0;
+      s_lastAppliedDay = -1;
+      s_lastNotifiedDay = -1;
+      s_readyUnitList = 0;
+      s_readyDayBase = 0;
+      s_stableSince = 0;
+    }
 
     // 디버그 모드 전용 전투 상태 변화 스냅샷.
     // 디버그를 다시 켤 때 현재 상태를 즉시 한 번 출력하도록 OFF 시 초기화합니다.
@@ -286,14 +322,22 @@ namespace DX11Base {
     // 0. 기반 주소 체크 (게임 로딩/메뉴 시 자동 초기화)
     uintptr_t gameBase = DX11Base::GetGameBase();
     if (gameBase == 0) {
-      if (s_isWarModsApplied) {
+      s_battleRuntimeReady = false;
+      s_stableSince = 0;
+      s_cachedUnitListBase = 0;
+      s_cachedDayBaseAddr = 0;
+      s_cachedDefenderAddr = 0;
+      if (s_isWarModsApplied || s_isCacheBuilt) {
+        ClearBattleCache();
+        ClearBattleEnvCache();
         s_isWarModsApplied = false;
         s_isCacheBuilt = false;
         s_lastSeenTime = 0;
         s_lastAppliedDay = -1;
-        DX11Base::g_battleUnitAddr1 = 0;
-        DX11Base::g_battleUnitAddr2 = 0;
+        s_lastNotifiedDay = -1;
       }
+      DX11Base::g_battleUnitAddr1 = 0;
+      DX11Base::g_battleUnitAddr2 = 0;
       return;
     }
 
@@ -301,17 +345,10 @@ namespace DX11Base {
     uintptr_t addr1 = DX11Base::g_battleUnitAddr1;
     uintptr_t addr2 = DX11Base::g_battleUnitAddr2;
 
-    // 2. 체인 주소 500ms 갱신 캐시
-    DWORD currentTick = GetTickCount();
-    static bool s_initialResolveDone = false;
+    // Resolve fresh pointers every 100ms monitor tick; readable cached memory
+    // can already belong to a different save generation.
     const bool needDefender = (bSiegeWarfare || bSiegeWarfare2);
-
-    if (currentTick - s_lastResolveTick >= 500 || !s_initialResolveDone) {
-      s_lastResolveTick = currentTick;
-      s_initialResolveDone = true;
-      uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-      ResolveBattlePointers(exeBase, needDefender);
-    }
+    ResolveBattlePointers((uintptr_t)GetModuleHandle(NULL), needDefender);
 
     uintptr_t unitListBase = s_cachedUnitListBase;
     uintptr_t dayBaseAddr = s_cachedDayBaseAddr;
@@ -393,6 +430,76 @@ namespace DX11Base {
       }
     }
 
+    // A heartbeat or a partially deserialized list only indicates a possible battle.
+    // Require both date and all unit records, with an unchanged identity for 1 second,
+    // before any automatic battle writes (including ApplyStoredConfigs) are allowed.
+    bool recordsReady = isDateValid && isUnitListValid &&
+                        lifecycleGameState != 0x00 && lifecycleGameState != 0xFF &&
+                        lifecycleGameState != 0x05 && lifecycleGameState != 0x07;
+    uint64_t unitSignature = 14695981039346656037ull;
+    __try {
+      if (!IsValidPtr(gameBase + 0xE0, sizeof(uintptr_t)) ||
+          !IsValidPtr(*(uintptr_t *)(gameBase + 0xE0), 0x200))
+        recordsReady = false;
+      for (int i = 0; recordsReady && i < unitCountTotal; ++i) {
+        const uintptr_t slot = unitListBase + 0x08 + (uintptr_t)i * 0x10;
+        if (!IsValidPtr(slot, sizeof(uintptr_t))) {
+          recordsReady = false;
+          break;
+        }
+        const uintptr_t unit = *(uintptr_t *)slot;
+        if (!IsValidPtr(unit, 0x600)) {
+          recordsReady = false;
+          break;
+        }
+        const uintptr_t member = *(uintptr_t *)(unit + 0x18);
+        if (!IsValidPtr(member, 0x100)) {
+          recordsReady = false;
+          break;
+        }
+        unitSignature = (unitSignature ^ unit) * 1099511628211ull;
+        unitSignature = (unitSignature ^ member) * 1099511628211ull;
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      recordsReady = false;
+    }
+
+    const bool battleIdentityChanged = unitListBase != s_readyUnitList ||
+                                       dayBaseAddr != s_readyDayBase;
+    const bool identityChanged = battleIdentityChanged ||
+                                 unitCountTotal != s_readyUnitCount ||
+                                 unitSignature != s_readyUnitSignature;
+    if (!recordsReady || identityChanged) {
+      s_battleRuntimeReady = false;
+      s_stableSince = recordsReady ? nowMs : 0;
+      s_readyUnitList = unitListBase;
+      s_readyDayBase = dayBaseAddr;
+      s_readyUnitCount = unitCountTotal;
+      s_readyUnitSignature = unitSignature;
+      if (battleActive && (s_isWarModsApplied || s_isCacheBuilt)) {
+        ClearBattleCache();
+        s_isCacheBuilt = false;
+        // Reinforcements change the roster within the same battle. Rebuild
+        // unit caches without applying entry/day effects a second time.
+        if (!recordsReady || battleIdentityChanged) {
+          ClearBattleEnvCache();
+          s_isWarModsApplied = false;
+          s_lastAppliedDay = -1;
+          s_lastNotifiedDay = -1;
+        }
+      }
+    } else if (s_stableSince == 0) {
+      s_stableSince = nowMs;
+    } else {
+      s_battleRuntimeReady = nowMs - s_stableSince >= 1000;
+    }
+
+    if (battleActive && !s_battleRuntimeReady) {
+      g_battleUnitAddr1 = 0;
+      g_battleUnitAddr2 = 0;
+      return;
+    }
+
     if (battleActive) {
       s_lastSeenTime = currentTime;
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
@@ -404,41 +511,40 @@ namespace DX11Base {
         AddLog(u8"[자동화] 전투 감지(%llX) -> 모든 전쟁 모드 리프레시 (부대:%d, 현재일:%d)", addr1, unitCountTotal, currentDay);
 
         __try {
-          // 켜져 있는 기능들에 대해 원본 복구 후 다시 적용 (Refresh)
+          // 안정된 새 데이터에 설정을 직접 적용합니다.
           if (bSelfHeal) {
-            DX11Base::SetSelfHeal(false);
             DX11Base::SetSelfHeal(true);
           }
           if (bDongto) {
-            DX11Base::SetDongto(false);
             DX11Base::SetDongto(true);
           }
           if (bTerrainIgnore) {
-            DX11Base::SetTerrainIgnore(false);
             DX11Base::SetTerrainIgnore(true);
           }
           if (bDefBuilding) {
-            DX11Base::SetDefBuildingBoost(false);
             DX11Base::SetDefBuildingBoost(true);
           }
           if (bCatapult) {
-            DX11Base::SetCatapultCheat(false);
             DX11Base::SetCatapultCheat(true);
           }
           if (bCelestial) {
-            DX11Base::SetCelestialMod(false);
             DX11Base::SetCelestialMod(true);
           }
           if (bSiegeWarfare) {
-            DX11Base::SetSiegeWarfare(false);
+            DX11Base::ResetSiegeBattleRuntime();
             DX11Base::SetSiegeWarfare(true);
           }
           else if (bSiegeWarfare2) {
-            DX11Base::SetSiegeWarfare2(false);
+            DX11Base::ResetSiegeBattleRuntime();
             DX11Base::SetSiegeWarfare2(true);
           }
         } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
+
+        // Build the new generation's cache before any environment update uses it.
+        __try {
+          DX11Base::InitBattleEnvCache(exeBase);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         // 전투 진입 즉시 환경(날짜 등) 업데이트 실행하여 알림에 정확한 데이터 반영
         __try {
@@ -446,11 +552,6 @@ namespace DX11Base {
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         s_isWarModsApplied = true;
-        // 환경 변수 캐싱
-        __try {
-          DX11Base::InitBattleEnvCache(exeBase);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-        }
         s_lastAppliedDay = currentDay;
       }
 

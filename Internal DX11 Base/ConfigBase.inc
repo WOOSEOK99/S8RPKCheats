@@ -787,7 +787,7 @@ namespace DX11Base {
           if (!entry.requiresP1)
             continue;
         }
-        if (entry.isWar && !IsInBattle()) {
+        if (entry.isWar && !IsBattleRuntimeReady()) {
           continue;
         }
 
