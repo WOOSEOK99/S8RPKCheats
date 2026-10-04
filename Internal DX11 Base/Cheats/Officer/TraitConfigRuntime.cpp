@@ -107,6 +107,51 @@ bool EnsureEmbeddedTraitConfigLoaded() {
 
 } // namespace
 
+bool GetEmbeddedTraitTextCatalog(
+    std::vector<EmbeddedTraitTextInfo> &out,
+    std::string *error) {
+  out.clear();
+
+  std::string jsonText;
+  if (!LoadEmbeddedJsonResource(IDR_JSON_TRAITS_DEFAULT, jsonText)) {
+    if (error)
+      *error = "내장 기본기재 리소스를 읽지 못했습니다.";
+    return false;
+  }
+
+  std::istringstream file(jsonText);
+  bool inCustomNames = false;
+  std::string line;
+  while (std::getline(file, line)) {
+    if (!inCustomNames) {
+      if (line.find("\"customNames\"") != std::string::npos)
+        inCustomNames = true;
+      continue;
+    }
+
+    int index = -1;
+    TraitMetaEntry entry;
+    if (!ParseCustomMetaLine(line, index, entry) ||
+        !entry.hasCustomText || entry.name.empty()) {
+      continue;
+    }
+
+    EmbeddedTraitTextInfo info;
+    info.traitId = index + 1;
+    info.name = entry.name;
+    info.desc = entry.desc;
+    out.push_back(std::move(info));
+  }
+
+  if (out.empty()) {
+    if (error)
+      *error = "내장 기본기재 customNames에서 편집 가능한 이름을 찾지 못했습니다.";
+    return false;
+  }
+
+  return true;
+}
+
 void TickTraitConfigRuntime() {
   static bool externalPairLogged = false;
 
