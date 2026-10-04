@@ -1826,6 +1826,7 @@ namespace DX11Base {
       if (!SafeCopySeh(fn, code, sizeof(code)))
         return false;
 
+#if defined(S8RPK_STRATAGEM5_DEEP_DIAGNOSTICS)
       // Previous assumption proved wrong in live game: this symbol contains no
       // direct +1E0 access, no GetTrickButton call and no cmp ...,4. Dump this
       // tiny function exactly once so the real downstream selection path can
@@ -1840,12 +1841,15 @@ namespace DX11Base {
         AddLog(u8"[책략5UISELPROBE] +%02llX : %s",
                (unsigned long long)p,line);
       }
+#endif
 
       unsigned directButtonsDisp = 0;
       unsigned getButtonCalls = 0;
       unsigned cmp4Count = 0;
       uintptr_t cmpImmAddr = 0;
+#if defined(S8RPK_STRATAGEM5_DEEP_DIAGNOSTICS)
       unsigned directCallCount = 0;
+#endif
 
       for (size_t i=0; i<sizeof(code); ++i) {
         if (i+4<=sizeof(code) &&
@@ -1864,10 +1868,13 @@ namespace DX11Base {
           int32_t rel=0;
           std::memcpy(&rel,code+i+1,sizeof(rel));
           const uintptr_t target=fn+i+5+static_cast<intptr_t>(rel);
+#if defined(S8RPK_STRATAGEM5_DEEP_DIAGNOSTICS)
           ++directCallCount;
+#endif
           if(target==getButton)
             ++getButtonCalls;
 
+#if defined(S8RPK_STRATAGEM5_DEEP_DIAGNOSTICS)
           uint8_t head[24]={};
           if (target>=exeBase && IsValidPtr(target,sizeof(head)) &&
               SafeCopySeh(target,head,sizeof(head))) {
@@ -1882,11 +1889,14 @@ namespace DX11Base {
             AddLog(u8"[책략5UISELPROBE] call +%02llX -> %p",
                    (unsigned long long)i,reinterpret_cast<void *>(target));
           }
+#endif
         }
       }
 
+#if defined(S8RPK_STRATAGEM5_DEEP_DIAGNOSTICS)
       AddLog(u8"[책략5UISELPROBE] summary: direct+1E0=%u getButtonCalls=%u cmp4=%u directCalls=%u",
              directButtonsDisp,getButtonCalls,cmp4Count,directCallCount);
+#endif
 
       // Keep the originally planned narrow patch only if the exact safe shape
       // ever appears. Current live build is expected to take the probe-only path.
@@ -1920,7 +1930,7 @@ namespace DX11Base {
       // Not a failure of the already-working fifth UI. Mark the diagnostic as
       // complete so startup does not retry/spam this probe hundreds of times.
       g_fifthUiOnSelectProbeDone=true;
-      AddLog(u8"[책략5UISEL] OnTrickSelect 직접 패치 보류. 실제 하위 호출 경로를 위 probe로 추적합니다.");
+      AddLog(u8"[책략5UISEL] OnTrickSelect 직접 범위 패치 불필요. runtime hook 경로를 유지합니다.");
       return true;
     }
 
@@ -4251,9 +4261,11 @@ namespace DX11Base {
     const bool resetCompactReady = EnsureFifthUiResetCompactHook();
     const bool onSelectReady = EnsureFifthUiOnTrickSelectBoundHook();
     const bool onSelectRuntimeReady = EnsureFifthUiOnTrickSelectRuntimeHook();
+#if defined(S8RPK_STRATAGEM5_DEEP_DIAGNOSTICS)
     LogFifthUiSignalCallsites();
     LogFifthUiCallbackTargets();
     LogFifthUiCallbackCodeTargets();
+#endif
     const bool preCallbackReady = EnsureFifthUiPreCallbackHook();
     const bool callbackLoopReady = EnsureFifthUiCallbackLoopHook();
     const bool ready = initReady && layoutPostReady && resetCompactReady &&
