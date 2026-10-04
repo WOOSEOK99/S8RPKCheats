@@ -4,7 +4,6 @@
 #include "Fonts.h"
 #include "Menu.h"
 #include "MenuState.h"
-#include "PerformanceDiagnostics.h"
 #include "pch.h"
 #include "resource.h"
 #include "showlog.h"
@@ -201,11 +200,8 @@ namespace DX11Base {
   }
 
   HRESULT APIENTRY RenderManager::SwapChain_Present_hook(IDXGISwapChain *pSwapChain, UINT SyncInterval, UINT Flags) {
-    {
-      PerfScopeNoReport perfScope(PerfMetric::PresentHook);
-      if (DX11Base::IsAnyUIOpen()) {
-        g_RenderManager->Overlay(pSwapChain);
-      }
+    if (DX11Base::IsAnyUIOpen()) {
+      g_RenderManager->Overlay(pSwapChain);
     }
     return g_RenderManager->IDXGISwapChain_Present_stub(pSwapChain, SyncInterval, Flags);
   }
@@ -557,8 +553,6 @@ namespace DX11Base {
   }
 
   void RenderManager::Overlay(IDXGISwapChain *pSwapChain) {
-    PerfScopeNoReport perfScope(PerfMetric::Overlay);
-
     if (!bInitImGui) {
       if (!InitImGui(pSwapChain))
         return;
@@ -608,26 +602,16 @@ namespace DX11Base {
     s_prevWantText = currWantText;
 
     if (currAnyUIOpen) {
-      PerfScopeNoReport perfMenuRender(PerfMetric::OverlayMenuRender);
       Menu::Render();
     }
+    RoninMonitor_Draw();
 
-    {
-      PerfScopeNoReport perfRoninDraw(PerfMetric::OverlayRoninDraw);
-      RoninMonitor_Draw();
-    }
-
-    {
-      PerfScopeNoReport perfImGuiRender(PerfMetric::OverlayImGuiRender);
-      ImGui::Render();
-    }
+    ImGui::Render();
 
     if (m_RenderType == RenderType::DX11) {
-      PerfScopeNoReport perfBackendDraw(PerfMetric::OverlayBackendDraw);
       m_DeviceContext->OMSetRenderTargets(1, &m_RenderTargetView, NULL);
       ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     } else {
-      PerfScopeNoReport perfBackendDraw(PerfMetric::OverlayBackendDraw);
       IDXGISwapChain3 *pSwapChain3 = (IDXGISwapChain3 *)pSwapChain;
       UINT backBufferIdx = pSwapChain3->GetCurrentBackBufferIndex();
 

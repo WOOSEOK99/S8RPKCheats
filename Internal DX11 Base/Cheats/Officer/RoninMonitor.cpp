@@ -16,7 +16,6 @@
 #include "../../Framework/imgui.h"
 #include "../../MenuState.h"
 #include "../../NotificationManager.h"
-#include "../../PerformanceDiagnostics.h"
 #include "OfficerData.h"
 #include "OfficerRosterResolve.h"
 #include "../../pch.h"
@@ -250,8 +249,6 @@ namespace DX11Base {
     if (s_arrayBase <= 0x10000)
       return;
 
-    PerfScopeNoReport perfScope(PerfMetric::RoninMonitorFullScan);
-
     std::vector<RoninNotification> found;
     uintptr_t lastPage = 0;
     bool pageOk = false;
@@ -315,8 +312,6 @@ namespace DX11Base {
     if (s_arrayBase <= 0x10000)
       return;
 
-    PerfScopeNoReport perfScope(PerfMetric::RoninMonitorFullScan);
-
     OfficerChangeSnapshot next[5103]{};
     bool seenThisTick[5103] = {false};
     uintptr_t lastPage = 0;
@@ -362,8 +357,6 @@ namespace DX11Base {
   static void ScanOfficerChangesAndNotify() {
     if (s_arrayBase <= 0x10000 || !s_changeBaselineInitialized)
       return;
-
-    PerfScopeNoReport perfScope(PerfMetric::RoninMonitorFullScan);
 
     LoadOfficerNames();
 
@@ -522,8 +515,6 @@ namespace DX11Base {
   // Tick – 백그라운드 스레드
   // ---------------------------------------------------------------------------
   void RoninMonitor_Tick(uintptr_t p1) {
-    PerfScopeNoReport perfScope(PerfMetric::RoninMonitorUpdate);
-
     const bool anyMonitorEnabled = bMonitorRonin || bOfficerChangeNotify;
     if (!anyMonitorEnabled) {
       if (s_wasEnabled) {

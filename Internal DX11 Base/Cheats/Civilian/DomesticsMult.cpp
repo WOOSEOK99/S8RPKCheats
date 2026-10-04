@@ -3,7 +3,6 @@
 #include "../../Cheats.h"
 #include "../../showlog.h"
 #include "../../MemoryUtils.h"
-#include "../../PerformanceDiagnostics.h"
 #include <psapi.h>
 #include <string>
 
@@ -50,17 +49,6 @@ namespace DX11Base {
         cave[idx++] = 0x9C; // pushfq
         cave[idx++] = 0x50; // push rax
         cave[idx++] = 0x53; // push rbx
-
-        // S03 diagnostics: count actual cave entries without a function call.
-        // rax and flags are already preserved by this cave.
-        cave[idx++] = 0x48; cave[idx++] = 0xB8; // mov rax, imm64
-        *(uintptr_t*)&cave[idx] = PerfDiagnosticsGateAddress(); idx += 8;
-        cave[idx++] = 0x83; cave[idx++] = 0x38; cave[idx++] = 0x00; // cmp dword ptr [rax], 0
-        cave[idx++] = 0x74; int pPerfSkip = idx; cave[idx++] = 0x00; // je perf_skip
-        cave[idx++] = 0x48; cave[idx++] = 0xB8; // mov rax, imm64
-        *(uintptr_t*)&cave[idx] = PerfRawHookCallCounterAddress(PerfMetric::DomesticsHook); idx += 8;
-        cave[idx++] = 0xF0; cave[idx++] = 0x48; cave[idx++] = 0xFF; cave[idx++] = 0x00; // lock inc qword ptr [rax]
-        cave[pPerfSkip] = static_cast<uint8_t>(idx - pPerfSkip - 1);
 
         // ── 0. R12 Null check ──
         cave[idx++] = 0x4D; cave[idx++] = 0x85; cave[idx++] = 0xE4; // test r12, r12

@@ -13,7 +13,6 @@
 namespace DX11Base {
 
   void AddLog(const char *fmt, ...);
-  extern bool bFileLog;
 
   enum class PerfMetric : uint8_t {
     MenuLoopHeartbeat = 0,
@@ -29,29 +28,6 @@ namespace DX11Base {
     AddLogCall,
     AddLogMutexWait,
     AddLogFileIo,
-    MenuLoops,
-    PresentHook,
-    Overlay,
-    RoninMonitorUpdate,
-    RoninMonitorFullScan,
-    BattleUnitCaptureHook,
-    DomesticsHook,
-    OverlayMenuRender,
-    OverlayRoninDraw,
-    OverlayImGuiRender,
-    OverlayBackendDraw,
-    MenuRenderDrawMenu,
-    MenuRenderAuxWindows,
-    MenuRenderNotifications,
-    MenuLoopTraitConfig,
-    MenuLoopBattleMonitor,
-    MenuLoopTechMonitor,
-    MenuLoopApplyConfigs,
-    MenuLoopYearlySupport,
-    MenuLoopAffinityGrowth,
-    MenuLoopSpecialAbility,
-    MenuLoopTengiTick,
-    MenuLoopTavernUpdate,
     Count
   };
 
@@ -63,14 +39,8 @@ namespace DX11Base {
     std::atomic<uint64_t> changes{0};
   };
 
-  struct PerfRawHookCounter {
-    alignas(8) volatile LONG64 calls = 0;
-  };
-
   struct PerfDiagnosticsState {
     std::array<PerfMetricSlot, static_cast<size_t>(PerfMetric::Count)> metrics{};
-    std::array<PerfRawHookCounter, static_cast<size_t>(PerfMetric::Count)> rawHookCounters{};
-    volatile LONG diagnosticsGate = 0;
     std::atomic<uint64_t> nextReport100ns{0};
     std::atomic<uint64_t> maxNotificationQueue{0};
     std::atomic<uint64_t> maxNotificationHistory{0};
@@ -100,10 +70,7 @@ namespace DX11Base {
   }
 
   inline bool PerfDiagnosticsEnabled() {
-    if (bFileLog)
-      return true;
-
-    static const bool environmentEnabled = []() {
+    static const bool enabled = []() {
       char value[32] = {};
       const DWORD len = GetEnvironmentVariableA("S8RPK_PERF_DIAGNOSTICS", value, static_cast<DWORD>(sizeof(value)));
       if (len == 0 || len >= sizeof(value))
@@ -115,58 +82,13 @@ namespace DX11Base {
       return std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
              std::strcmp(value, "on") == 0 || std::strcmp(value, "yes") == 0;
     }();
-    return environmentEnabled;
-  }
-
-  inline void PerfRefreshRawHookGate() {
-    auto &state = GetPerfDiagnosticsState();
-    const LONG desiredGate = PerfDiagnosticsEnabled() ? 1L : 0L;
-    if (state.diagnosticsGate != desiredGate)
-      InterlockedExchange(&state.diagnosticsGate, desiredGate);
-  }
-
-  inline uintptr_t PerfDiagnosticsGateAddress() {
-    PerfRefreshRawHookGate();
-    return reinterpret_cast<uintptr_t>(&GetPerfDiagnosticsState().diagnosticsGate);
-  }
-
-  inline uintptr_t PerfRawHookCallCounterAddress(PerfMetric metric) {
-    auto &counter = GetPerfDiagnosticsState().rawHookCounters[static_cast<size_t>(metric)];
-    return reinterpret_cast<uintptr_t>(&counter.calls);
-  }
-
-  inline bool PerfMetricIsCountOnly(PerfMetric metric) {
-    return metric == PerfMetric::BattleUnitCaptureHook ||
-           metric == PerfMetric::DomesticsHook;
+    return enabled;
   }
 
   inline const char *PerfMetricName(PerfMetric metric) {
     switch (metric) {
     case PerfMetric::MenuLoopHeartbeat: return "MenuLoopHeartbeat";
     case PerfMetric::SpeedHackUpdate: return "SpeedHackUpdate";
-    case PerfMetric::MenuLoops: return "MenuLoops";
-    case PerfMetric::PresentHook: return "PresentHook";
-    case PerfMetric::Overlay: return "Overlay";
-    case PerfMetric::RoninMonitorUpdate: return "RoninMonitorUpdate";
-    case PerfMetric::RoninMonitorFullScan: return "RoninFull5102Scan";
-    case PerfMetric::BattleUnitCaptureHook: return "BattleUnitHookCalls";
-    case PerfMetric::DomesticsHook: return "DomesticsHookCalls";
-    case PerfMetric::OverlayMenuRender: return "OverlayMenuRender";
-    case PerfMetric::OverlayRoninDraw: return "OverlayRoninDraw";
-    case PerfMetric::OverlayImGuiRender: return "OverlayImGuiRender";
-    case PerfMetric::OverlayBackendDraw: return "OverlayBackendDraw";
-    case PerfMetric::MenuRenderDrawMenu: return "MenuRenderDrawMenu";
-    case PerfMetric::MenuRenderAuxWindows: return "MenuRenderAux";
-    case PerfMetric::MenuRenderNotifications: return "MenuRenderNotify";
-    case PerfMetric::MenuLoopTraitConfig: return "MenuLoopTraitConfig";
-    case PerfMetric::MenuLoopBattleMonitor: return "MenuBattleMonitor";
-    case PerfMetric::MenuLoopTechMonitor: return "MenuTechMonitor";
-    case PerfMetric::MenuLoopApplyConfigs: return "MenuApplyConfigs";
-    case PerfMetric::MenuLoopYearlySupport: return "MenuYearlySupport";
-    case PerfMetric::MenuLoopAffinityGrowth: return "MenuAffinityGrowth";
-    case PerfMetric::MenuLoopSpecialAbility: return "MenuSpecialAbility";
-    case PerfMetric::MenuLoopTengiTick: return "MenuTengiTick";
-    case PerfMetric::MenuLoopTavernUpdate: return "MenuTavernUpdate";
     case PerfMetric::IsValidPtr: return "IsValidPtr";
     case PerfMetric::FindPattern: return "FindPattern";
     case PerfMetric::SkillCountSave: return "SkillCountSave";
@@ -321,24 +243,13 @@ namespace DX11Base {
 
     for (size_t i = 0; i < static_cast<size_t>(PerfMetric::Count); ++i) {
       auto &slot = state.metrics[i];
-      const uint64_t rawHookCalls = static_cast<uint64_t>(
-          InterlockedExchange64(&state.rawHookCounters[i].calls, 0));
-      const uint64_t calls =
-          slot.calls.exchange(0, std::memory_order_relaxed) + rawHookCalls;
+      const uint64_t calls = slot.calls.exchange(0, std::memory_order_relaxed);
       const uint64_t total = slot.total100ns.exchange(0, std::memory_order_relaxed);
       const uint64_t maximum = slot.max100ns.exchange(0, std::memory_order_relaxed);
       const uint64_t bytes = slot.bytes.exchange(0, std::memory_order_relaxed);
       const uint64_t changes = slot.changes.exchange(0, std::memory_order_relaxed);
       if (calls == 0 && bytes == 0 && changes == 0)
         continue;
-
-      const PerfMetric metric = static_cast<PerfMetric>(i);
-      if (PerfMetricIsCountOnly(metric)) {
-        AddLog("[Perf:T00] %-20s calls=%llu mode=count-only",
-               PerfMetricName(metric),
-               static_cast<unsigned long long>(calls));
-        continue;
-      }
 
       const double totalMs = static_cast<double>(total) / 10000.0;
       const double avgUs = calls ? (static_cast<double>(total) / static_cast<double>(calls)) / 10.0 : 0.0;
@@ -358,31 +269,6 @@ namespace DX11Base {
     PerfRecordNoReport(metric, elapsed100ns, bytes, changes);
     PerfMaybeReport();
   }
-
-  class PerfScopeNoReport {
-  public:
-    explicit PerfScopeNoReport(PerfMetric metric, uint64_t bytes = 0, uint64_t changes = 0)
-        : m_metric(metric), m_bytes(bytes), m_changes(changes),
-          m_enabled(PerfDiagnosticsEnabled()), m_start(m_enabled ? PerfRealNow100ns() : 0) {}
-
-    ~PerfScopeNoReport() {
-      if (!m_enabled)
-        return;
-      const uint64_t end = PerfRealNow100ns();
-      const uint64_t elapsed = (end >= m_start) ? (end - m_start) : 0;
-      PerfRecordNoReport(m_metric, elapsed, m_bytes, m_changes);
-    }
-
-    PerfScopeNoReport(const PerfScopeNoReport &) = delete;
-    PerfScopeNoReport &operator=(const PerfScopeNoReport &) = delete;
-
-  private:
-    PerfMetric m_metric;
-    uint64_t m_bytes;
-    uint64_t m_changes;
-    bool m_enabled;
-    uint64_t m_start;
-  };
 
   class PerfScope {
   public:

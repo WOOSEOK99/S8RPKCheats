@@ -2,7 +2,6 @@
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "NotificationManager.h"
 #include "MenuT04Maintenance.h"
-#include "PerformanceDiagnostics.h"
 
 // Keep declarations intact, then suppress only the preserved Menu.cpp
 // per-frame maintenance calls. MenuT04Maintenance.h was included above, so it
