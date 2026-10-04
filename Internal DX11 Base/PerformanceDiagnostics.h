@@ -36,6 +36,22 @@ namespace DX11Base {
     RoninMonitorFullScan,
     BattleUnitCaptureHook,
     DomesticsHook,
+    OverlayMenuRender,
+    OverlayRoninDraw,
+    OverlayImGuiRender,
+    OverlayBackendDraw,
+    MenuRenderDrawMenu,
+    MenuRenderAuxWindows,
+    MenuRenderNotifications,
+    MenuLoopTraitConfig,
+    MenuLoopBattleMonitor,
+    MenuLoopTechMonitor,
+    MenuLoopApplyConfigs,
+    MenuLoopYearlySupport,
+    MenuLoopAffinityGrowth,
+    MenuLoopSpecialAbility,
+    MenuLoopTengiTick,
+    MenuLoopTavernUpdate,
     Count
   };
 
@@ -135,6 +151,22 @@ namespace DX11Base {
     case PerfMetric::RoninMonitorFullScan: return "RoninFull5102Scan";
     case PerfMetric::BattleUnitCaptureHook: return "BattleUnitHookCalls";
     case PerfMetric::DomesticsHook: return "DomesticsHookCalls";
+    case PerfMetric::OverlayMenuRender: return "OverlayMenuRender";
+    case PerfMetric::OverlayRoninDraw: return "OverlayRoninDraw";
+    case PerfMetric::OverlayImGuiRender: return "OverlayImGuiRender";
+    case PerfMetric::OverlayBackendDraw: return "OverlayBackendDraw";
+    case PerfMetric::MenuRenderDrawMenu: return "MenuRenderDrawMenu";
+    case PerfMetric::MenuRenderAuxWindows: return "MenuRenderAux";
+    case PerfMetric::MenuRenderNotifications: return "MenuRenderNotify";
+    case PerfMetric::MenuLoopTraitConfig: return "MenuLoopTraitConfig";
+    case PerfMetric::MenuLoopBattleMonitor: return "MenuBattleMonitor";
+    case PerfMetric::MenuLoopTechMonitor: return "MenuTechMonitor";
+    case PerfMetric::MenuLoopApplyConfigs: return "MenuApplyConfigs";
+    case PerfMetric::MenuLoopYearlySupport: return "MenuYearlySupport";
+    case PerfMetric::MenuLoopAffinityGrowth: return "MenuAffinityGrowth";
+    case PerfMetric::MenuLoopSpecialAbility: return "MenuSpecialAbility";
+    case PerfMetric::MenuLoopTengiTick: return "MenuTengiTick";
+    case PerfMetric::MenuLoopTavernUpdate: return "MenuTavernUpdate";
     case PerfMetric::IsValidPtr: return "IsValidPtr";
     case PerfMetric::FindPattern: return "FindPattern";
     case PerfMetric::SkillCountSave: return "SkillCountSave";

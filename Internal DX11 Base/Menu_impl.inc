@@ -350,16 +350,24 @@ namespace DX11Base {
     UINT dpi = GetDpiForWindow(g_Engine->pGameWindow);
     float scale = (dpi == 0) ? 1.0f : (float)dpi / 96.0f;
 
-    if (g_Engine->bShowMenu)
+    if (g_Engine->bShowMenu) {
+      PerfScopeNoReport perfDrawMenu(PerfMetric::MenuRenderDrawMenu);
       DrawMenu();
+    }
 
-    DrawBattleEnvWindow(scale);
-    DrawTerrainBonusSettingsWin(scale);
-    DrawMemoryNotepadWindow(scale);
+    {
+      PerfScopeNoReport perfAuxWindows(PerfMetric::MenuRenderAuxWindows);
+      DrawBattleEnvWindow(scale);
+      DrawTerrainBonusSettingsWin(scale);
+      DrawMemoryNotepadWindow(scale);
+    }
 
     // 상단 마퀴 알림 및 설정 저장 실패 팝업은 치트메뉴와 독립적으로 항상 실행
-    DrawMarqueeNotifications(scale);
-    DrawConfigSaveErrorPopup(scale);
+    {
+      PerfScopeNoReport perfNotifications(PerfMetric::MenuRenderNotifications);
+      DrawMarqueeNotifications(scale);
+      DrawConfigSaveErrorPopup(scale);
+    }
   }
 
   void Menu::Loops() {
@@ -392,7 +400,10 @@ namespace DX11Base {
 
     // version.dll 없이도 san8r_traits_config.json의 254개 기재 정의를 런타임 테이블에 적용합니다.
     // 내부에서 500ms 주기로 제한되며 테이블 재생성/효과 초기화 때만 실제 쓰기를 수행합니다.
-    DX11Base::TickTraitConfigRuntime();
+    {
+      PerfScopeNoReport perfTraitConfig(PerfMetric::MenuLoopTraitConfig);
+      DX11Base::TickTraitConfigRuntime();
+    }
 
     // 저장게임/새 게임 로드 시 p1은 새 세대 주소로 교체되거나 잠시 0이 됩니다.
     // 전투/평정 모니터가 이전 전투 UI 포인터를 만지기 전에 5번 책략의
@@ -491,6 +502,7 @@ namespace DX11Base {
 
     if (nowTick - s_lastBattleMonitorTick >= 100) {
       s_lastBattleMonitorTick = nowTick;
+      PerfScopeNoReport perfBattleMonitor(PerfMetric::MenuLoopBattleMonitor);
       MonitorBattleStatus();
     }
     if (nowTick - s_lastTechMonitorTick >= 500) {
@@ -498,6 +510,7 @@ namespace DX11Base {
 
       // 1월 평정에서는 AI 성장을 먼저 확정한 뒤
       // MonitorTechStatus()의 특수능력 자동판정이 성장 후 데이터를 읽도록 합니다.
+      PerfScopeNoReport perfTechMonitor(PerfMetric::MenuLoopTechMonitor);
       DX11Base::TickAIOfficerAutoGrowth();
       MonitorTechStatus();
       MonitorAllAggressive();
@@ -516,10 +529,22 @@ namespace DX11Base {
       }
     }
 
-    ApplyStoredConfigs(p1, gameBase);
-    RunYearlyRearSupport(p1);
-    TickAutoAffinityGrowth(p1);
-    DX11Base::TickSpecialAbilityAutoAssign();
+    {
+      PerfScopeNoReport perfApplyConfigs(PerfMetric::MenuLoopApplyConfigs);
+      ApplyStoredConfigs(p1, gameBase);
+    }
+    {
+      PerfScopeNoReport perfYearlySupport(PerfMetric::MenuLoopYearlySupport);
+      RunYearlyRearSupport(p1);
+    }
+    {
+      PerfScopeNoReport perfAffinityGrowth(PerfMetric::MenuLoopAffinityGrowth);
+      TickAutoAffinityGrowth(p1);
+    }
+    {
+      PerfScopeNoReport perfSpecialAbility(PerfMetric::MenuLoopSpecialAbility);
+      DX11Base::TickSpecialAbilityAutoAssign();
+    }
 
     // 2026-04-04 재야장수 모니터링: RoninMonitor 모듈에 p1 전달 (3초 대기 + 자동 주소 계산 포함)
     RoninMonitor_Tick(p1);
@@ -528,7 +553,10 @@ namespace DX11Base {
     SpeedHack_Update(p1);
 
     // [추가] 전기 주소 캡처 감시 (알림 발생용)
-    DX11Base::TengiCave_Tick();
+    {
+      PerfScopeNoReport perfTengiTick(PerfMetric::MenuLoopTengiTick);
+      DX11Base::TengiCave_Tick();
+    }
 
     // 2026-04-04 월 값 감지 로그 (500ms 주기로 완화하여 안정성 확보)
     if (bMonthCapture) {
@@ -553,6 +581,7 @@ namespace DX11Base {
     static uint64_t s_lastTavernMonitor = 0;
     if (GetTickCount64() - s_lastTavernMonitor >= 500) {
         s_lastTavernMonitor = GetTickCount64();
+        PerfScopeNoReport perfTavernUpdate(PerfMetric::MenuLoopTavernUpdate);
         DX11Base::UpdateTavernRequests();
     }
   }

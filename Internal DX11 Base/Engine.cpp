@@ -608,16 +608,26 @@ namespace DX11Base {
     s_prevWantText = currWantText;
 
     if (currAnyUIOpen) {
+      PerfScopeNoReport perfMenuRender(PerfMetric::OverlayMenuRender);
       Menu::Render();
     }
-    RoninMonitor_Draw();
 
-    ImGui::Render();
+    {
+      PerfScopeNoReport perfRoninDraw(PerfMetric::OverlayRoninDraw);
+      RoninMonitor_Draw();
+    }
+
+    {
+      PerfScopeNoReport perfImGuiRender(PerfMetric::OverlayImGuiRender);
+      ImGui::Render();
+    }
 
     if (m_RenderType == RenderType::DX11) {
+      PerfScopeNoReport perfBackendDraw(PerfMetric::OverlayBackendDraw);
       m_DeviceContext->OMSetRenderTargets(1, &m_RenderTargetView, NULL);
       ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     } else {
+      PerfScopeNoReport perfBackendDraw(PerfMetric::OverlayBackendDraw);
       IDXGISwapChain3 *pSwapChain3 = (IDXGISwapChain3 *)pSwapChain;
       UINT backBufferIdx = pSwapChain3->GetCurrentBackBufferIndex();
 
