@@ -36,6 +36,7 @@ bool ReadEarlyStratagemFiveSetting() {
 
 void T00LoadEarlyLogConfig() {
   LoadEarlyLogConfig();
+  StartFileLogWriter();
 
   s_earlyStratagemFiveEnabled = ReadEarlyStratagemFiveSetting();
   bStratagemFiveEnabled = s_earlyStratagemFiveEnabled;
@@ -137,6 +138,7 @@ namespace {
   // 정상 unload 경로에서만 실행됩니다. DllMain 종료 경로에서는 loader lock 아래
   // join하지 않도록 기존 terminating cleanup 경로를 그대로 유지합니다.
   DX11Base::ShutdownDebugScannerT05();
+  DX11Base::ShutdownFileLogWriter();
   ::FreeLibraryAndExitThread(module, exitCode);
 }
 

@@ -5,8 +5,8 @@
 기준 브랜치: `main`  
 기준 커밋: `996cb6e78eb5a6908a7572059393e76187a4d65c` (`v0.860 배포`)  
 작업 브랜치: `perf/user-lag-investigation-20261003`  
-작업 브랜치 확인 HEAD(문서 갱신 직전): `470f3e6f758c77fe03402186b5abef8e5d37d67b`  
-문서 상태: **S00 완료 / S01 기능 회귀 검증 완료, ON release raw diagnostics 분리 잔여**  
+작업 브랜치 확인 HEAD(문서 갱신 직전): `e91e397e3e735ed35b21dde9ad9b09f75601bcb5`
+문서 상태: **S00 / S01 완료, 다음 단계 S02**
 빌드: **Release x64 사용자 환경 빌드 성공 확인**  
 실게임: **S00 계측, S01 5번 책략 OFF/ON 실제 실행 확인**
 
@@ -38,7 +38,7 @@
 - 저장소: `WOOSEOK99/S8RPKCheats`
 - 기준 `main`: `996cb6e78eb5a6908a7572059393e76187a4d65c`
 - 작업 브랜치: `perf/user-lag-investigation-20261003`
-- 문서 갱신 직전 작업 HEAD: `470f3e6f758c77fe03402186b5abef8e5d37d67b`
+- 문서 갱신 직전 작업 HEAD: `e91e397e3e735ed35b21dde9ad9b09f75601bcb5`
 - `main`은 2026-10-03 S01 검증 시점까지 기준 SHA에서 움직이지 않았다.
 
 ### 주요 작업 commit
@@ -61,8 +61,8 @@
 |---|---|---|---|
 | PLAN | 완료 | 로그 분석, 브랜치/작업계획 생성 | 완료 |
 | S00 | **완료** | v0.860 식별 + 저비용 계측 | Release x64 빌드 및 실게임 로그 출력 확인 |
-| S01 | **부분 완료** | 5번 책략 startup 기능/bridge/진단 분리 | OFF/ON 기능 실게임 검증 완료. ON release raw diagnostics 분리만 잔여 |
-| S02 | 미착수 | 동기 파일 로그 hot path 제거/완화 | 미실행 |
+| S01 | **완료** | 5번 책략 startup 기능/bridge/진단 분리 | Release x64 빌드 성공, OFF/ON 기능 및 deep diagnostics 제거 실게임 확인 |
+| S02 | 구현 검증 중 | 동기 파일 로그 hot path 제거/완화 | 정적 검토 / Release x64 빌드 예정, 실게임 검증 미실행 |
 | S03 | 미착수 | 지속 렉 후보 실제 호출량/비용 계측 | 기존 metric에서 참고 spike만 확보 |
 | S04 | 미착수 | MonthCapture worker/search lifecycle | duration 계측만 완료 |
 | S05 | BLOCKED | 측정으로 확인된 runtime 병목만 수정 | S03 결과 필요 |
@@ -70,27 +70,12 @@
 
 ### 정확한 현재 재개 지점
 
-**S01을 먼저 마무리한다.**
+**다음 단계는 S02다. S01은 완료됐다.**
 
-1. branch/main HEAD를 다시 확인한다.
-2. `Internal DX11 Base/Cheats/War/StratagemSlotProbe.cpp`의 `PrepareStratagemFiveUiBridge()`에서 일반 release startup에 필요 없는 다음 deep diagnostics 호출을 기능 hook과 분리한다.
-   - `LogFifthUiSignalCallsites()` → `[책략5UISIG]`
-   - `LogFifthUiCallbackTargets()` → `[책략5UICBTGT]`
-   - `LogFifthUiCallbackCodeTargets()` → `[책략5UICBCODE]`
-   - `EnsureFifthUiOnTrickSelectBoundHook()` 안의 `[책략5UISELPROBE]` raw dump도 기능 판정 로직과 출력 로직을 구분한다.
-3. **중요:** 단순히 `AddLog`만 숨기고 동일한 코드 scan/dump 계산을 그대로 돌리지 않는다. 기능에 불필요한 deep diagnostic 작업 자체가 실행되지 않아야 한다.
-4. 대형 `StratagemSlotProbe.cpp`는 전체 파일 재작성하지 않는다. 원격 도구가 최소 patch를 지원하지 않으면 무리하게 contents 전체 replacement를 하지 말고 중단/기록한다.
-5. 기능 훅은 유지한다.
-   - InitLayouts 7→8 bridge
-   - Layout post-buttons
-   - ResetBtnPos 5버튼 재배치
-   - OnTrickSelect runtime hook
-   - pre-callback/callback loop
-   - GetTrickButton/Open sidecar
-   - model/count/Camp/회복 및 lifetime gate
-6. 수정 후 Release x64 빌드.
-7. 5번 책략 ON으로 전투에서 5번 책략이 계속 정상인지 확인하고 startup 로그에 `UISIG/UICBTGT/UICBCODE/UISELPROBE` 대량 raw dump가 사라졌는지 확인한다.
-8. 그 검증까지 끝나야 S01 완료로 변경하고 S02로 이동한다.
+1. 지정 작업 브랜치와 branch/main HEAD를 다시 확인한다.
+2. S02 비동기 파일 writer만 수정하고 diff 및 Release x64 빌드를 확인한다.
+3. 파일 로그 OFF/ON, queue overflow/drop, 정상 unload drain/join을 실게임에서 검증한다.
+4. S02 실게임 검증 전 S03 이후 단계로 진행하지 않는다.
 
 ---
 
@@ -202,9 +187,9 @@ OFF startup에서는 기존의 조기 `ON 예약`, `unified ID5 experiment armed
 
 따라서 S01의 기능 회귀는 현재 확인되지 않았다.
 
-### 5.4 S01 잔여 문제 — ON startup deep diagnostics
+### 5.4 이전 측정 — ON startup deep diagnostics (해결 완료)
 
-ON 로그에서는 다음 release 진단이 아직 무조건 실행된다.
+수정 전 ON 로그에서는 다음 release 진단이 무조건 실행됐다.
 
 - `[책략5UISELPROBE]` raw bytes
 - `[책략5UISIG]`
@@ -220,7 +205,16 @@ total≈7922ms
 
 다만 같은 구간 `AddLogFileIo`는 약 45ms / 198회 수준이므로 **7.9초 전체를 파일 I/O 탓으로 돌리면 안 된다.** hook 설치/scan/deep diagnostic 내부 작업을 분리해서 봐야 한다.
 
-S01 완료 전 기능에 불필요한 deep diagnostics 자체를 일반 release 경로에서 gate해야 한다.
+일반 release 경로에서 기능에 불필요한 deep diagnostics 자체를 gate했고, 아래 실게임 로그로 제거를 확인했다.
+
+### 5.5 S01 완료 확인 (2026-10-04)
+
+- Release x64 빌드 성공.
+- 수정 후 실게임 로그에서 `UISELPROBE / UISIG / UICBTGT / UICBCODE` 모두 사라짐.
+- ID7 등록, GetTrickButton/Open READY, model `N=3 -> total=4`, runtime stage `ready=1` 확인.
+- 이번 `StartupBridgePrepare` 약 **6177ms**, 이전 약 **7922ms**. 단일 실행 비교이므로 감소량을 deep diagnostics 제거 효과로 단정하지 않는다.
+- 이번 startup `AddLogFileIo` 약 **22ms / 84회**.
+- S01 완료, 다음 단계 S02.
 
 ---
 
@@ -385,12 +379,21 @@ S03에서 실제 total time/frametime 영향이 확인된 runtime path만 수정
 - ON 테스트: **기능 성공**
   - 실제 전투 5번 책략 정상 동작 사용자 확인
   - sidecar/ID7/model/count/runtime READY 로그 확인
-- 남은 불확실성/작업:
-  - ON release startup의 deep raw diagnostics가 남아 있음.
-  - `StartupBridgePrepare≈7.92s`의 세부 구성은 아직 분리 계측되지 않음.
-  - 대형 `StratagemSlotProbe.cpp`는 반드시 최소 patch로만 변경해야 함.
-- 다음 재개 지점:
-  - **S01 잔여: 기능 훅은 보존하고 `UISELPROBE/UISIG/UICBTGT/UICBCODE` deep diagnostics의 일반 release 실행 자체를 gate → Release x64 build → ON 전투 회귀 확인 → S01 완료 처리.**
+- 이후 완료 검증: 5.5 참조. S01 잔여 deep diagnostics 제거 및 실게임 확인 완료.
+- 다음 재개 지점: **S02**.
+
+### 2026-10-04 / S02
+
+- 범위: `showlog.cpp`, `showlog.h`, `Source.cpp` wrapper와 이 문서만 수정. `Source_impl.inc` 변경 없음.
+- producer는 UTF-8 변환/호출 시각 기록 및 enqueue만 수행. UI는 기존 `g_logMutex`, 파일 queue는 별도 mutex 사용.
+- queue 상한: 4096 entries / 4 MiB. writer의 진행 중 batch도 같은 상한이므로 최대 8192 entries / 8 MiB payload. full이면 대기 없이 drop하고 `GetFileLogDropCount()`에 누적.
+- `_beginthreadex` writer 하나가 stream을 유지하며 batch write/flush/최종 close. 빈 파일에만 UTF-8 BOM 기록.
+- `AddLogCall`은 producer 비용, `AddLogFileIo`는 writer의 실제 open/write/flush/close 비용 및 batch 단위 calls로 변경. 이전 per-line calls와 직접 비교하지 않는다.
+- 초기화 MainThread가 writer를 시작하고, 정상 unload 마지막 wrapper가 scanner 종료 후 enqueue 차단 → drain → join → handle close → 보유 DLL 참조 해제 순으로 종료.
+- 실행 중 DLL 참조를 보유해 예상 밖 FreeLibrary에 의한 선행 unload 방지. 정상 unload 참조는 마지막 `FreeLibraryAndExitThread`까지 유지. DllMain/Shutdown(true)는 join하지 않고 프로세스 종료 시 OS가 thread를 종료한다.
+- 정적 검토: 수행. 분리 DLL harness: writer I/O 지연 중 4 producer/12000회 → 4096 enqueue, 7904 drop, drain/join 후 DLL unload 통과. UTF-8/CP949, timestamp, append 시 BOM 1개 확인. 실게임 검증과 구분.
+- Release x64 빌드: 진행 중. 실게임/overflow/unload 검증: 미실행.
+- commit/push 없음. S03 이후 변경 없음.
 
 ---
 
