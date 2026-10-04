@@ -13,6 +13,7 @@
 #include <array>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace DX11Base {
@@ -260,8 +261,10 @@ void DrawTraitTextEditorWindow(float scale) {
     g_selectedEmbedded = !g_selectedEmbedded;
     g_selected = 0;
   }
-  auto& rows = SelectedRows();
-  g_selected = std::clamp(g_selected, 0, static_cast<int>(rows.size()) - 1);
+  {
+    auto& activeRows = SelectedRows();
+    g_selected = std::clamp(g_selected, 0, static_cast<int>(activeRows.size()) - 1);
+  }
 
   ImGui::BeginChild("##trait_list", ImVec2(260.0f * scale, -42.0f * scale), true);
   ImGui::TextDisabled(u8"게임 기본 기재 (기존 72개)");
@@ -298,7 +301,9 @@ void DrawTraitTextEditorWindow(float scale) {
   ImGui::SameLine();
   ImGui::BeginGroup();
 
-  const auto& row = rows[g_selected];
+  auto& activeRows = SelectedRows();
+  g_selected = std::clamp(g_selected, 0, static_cast<int>(activeRows.size()) - 1);
+  const auto& row = activeRows[g_selected];
   if (g_selectedEmbedded)
     ImGui::Text(u8"기재: %s  (내장 ID %d)", row.oldName.c_str(), row.traitId);
   else
@@ -348,8 +353,8 @@ void DrawTraitTextEditorWindow(float scale) {
   }
   ImGui::SameLine();
   if (ImGui::Button(u8"선택 초기화", ImVec2(100.0f * scale, 28.0f * scale))) {
-    rows[g_selected].newName.clear();
-    rows[g_selected].newDesc.clear();
+    activeRows[g_selected].newName.clear();
+    activeRows[g_selected].newDesc.clear();
     LoadSelectionBuffers();
     SetStatus(u8"선택 항목 초기화");
   }
