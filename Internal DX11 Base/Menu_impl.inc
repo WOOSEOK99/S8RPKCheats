@@ -363,6 +363,9 @@ namespace DX11Base {
   }
 
   void Menu::Loops() {
+    PerfRefreshRawHookGate();
+    PerfScope perfScope(PerfMetric::MenuLoops);
+
     uintptr_t gameBase = GetGameBase();
     uintptr_t p1 = (gameBase) ? *(uintptr_t *)(gameBase + 0xE0) : 0;
 

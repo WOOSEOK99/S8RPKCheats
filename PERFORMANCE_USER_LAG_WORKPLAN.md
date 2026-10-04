@@ -62,7 +62,7 @@
 | PLAN | 완료 | 로그 분석, 브랜치/작업계획 생성 | 완료 |
 | S00 | **완료** | v0.860 식별 + 저비용 계측 | Release x64 빌드 및 실게임 로그 출력 확인 |
 | S01 | **완료** | 5번 책략 startup 기능/bridge/진단 분리 | Release x64 빌드 성공, OFF/ON 기능 및 deep diagnostics 제거 실게임 확인 |
-| S02 | 구현 검증 중 | 동기 파일 로그 hot path 제거/완화 | 정적 검토 / Release x64 빌드 예정, 실게임 검증 미실행 |
+| S02 | 구현/빌드 완료 | 동기 파일 로그 hot path 제거/완화 | 정적 검토, 분리 harness, Release x64 빌드 성공. 실게임 검증 대기 |
 | S03 | 미착수 | 지속 렉 후보 실제 호출량/비용 계측 | 기존 metric에서 참고 spike만 확보 |
 | S04 | 미착수 | MonthCapture worker/search lifecycle | duration 계측만 완료 |
 | S05 | BLOCKED | 측정으로 확인된 runtime 병목만 수정 | S03 결과 필요 |
@@ -73,7 +73,7 @@
 **다음 단계는 S02다. S01은 완료됐다.**
 
 1. 지정 작업 브랜치와 branch/main HEAD를 다시 확인한다.
-2. S02 비동기 파일 writer만 수정하고 diff 및 Release x64 빌드를 확인한다.
+2. S02 구현/diff/Release x64 빌드 확인 완료. 다음은 사용자 환경 실게임 검증이다.
 3. 파일 로그 OFF/ON, queue overflow/drop, 정상 unload drain/join을 실게임에서 검증한다.
 4. S02 실게임 검증 전 S03 이후 단계로 진행하지 않는다.
 
@@ -392,8 +392,8 @@ S03에서 실제 total time/frametime 영향이 확인된 runtime path만 수정
 - 초기화 MainThread가 writer를 시작하고, 정상 unload 마지막 wrapper가 scanner 종료 후 enqueue 차단 → drain → join → handle close → 보유 DLL 참조 해제 순으로 종료.
 - 실행 중 DLL 참조를 보유해 예상 밖 FreeLibrary에 의한 선행 unload 방지. 정상 unload 참조는 마지막 `FreeLibraryAndExitThread`까지 유지. DllMain/Shutdown(true)는 join하지 않고 프로세스 종료 시 OS가 thread를 종료한다.
 - 정적 검토: 수행. 분리 DLL harness: writer I/O 지연 중 4 producer/12000회 → 4096 enqueue, 7904 drop, drain/join 후 DLL unload 통과. UTF-8/CP949, timestamp, append 시 BOM 1개 확인. 실게임 검증과 구분.
-- Release x64 빌드: 진행 중. 실게임/overflow/unload 검증: 미실행.
-- commit/push 없음. S03 이후 변경 없음.
+- Release x64 빌드: 성공 (exit 0, 경고 0 / 오류 0, `x64/Release/hid.dll`). 사용자 빌드 전환 요청 확인 시 기존 실행은 이미 종료됨. 추가 빌드 없음. 실게임/overflow/unload 검증: 미실행.
+- 에이전트 commit/push 실행 없음. 작업 중 외부에서 HEAD가 `b3c1b6ab2adc147fc6aabe419d5ab0633ccb92e6`로 변경됨. S03 이후 변경 없음.
 
 ---
 

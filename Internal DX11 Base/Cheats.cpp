@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Cheats/System/SkillCountManager.h"
+#include "PerformanceDiagnostics.h"
 
 namespace DX11Base {
 
@@ -55,6 +56,17 @@ namespace DX11Base {
     }
 
     uintptr_t FindPattern(uintptr_t start, uintptr_t end, const std::string &pattern) {
+        const bool perfEnabled = PerfDiagnosticsEnabled();
+        const uint64_t perfStart = perfEnabled ? PerfRealNow100ns() : 0;
+        const auto recordPerf = [&](uint64_t scannedBytes) {
+            if (!perfEnabled)
+                return;
+            const uint64_t perfEnd = PerfRealNow100ns();
+            PerfRecordNoReport(PerfMetric::FindPattern,
+                               perfEnd >= perfStart ? perfEnd - perfStart : 0,
+                               scannedBytes);
+        };
+
         std::vector<uint8_t> bytes;
         std::vector<bool> mask;
         for (size_t i = 0; i < pattern.size(); ++i) {
@@ -81,9 +93,12 @@ namespace DX11Base {
                     break;
                 }
             }
-            if (found)
+            if (found) {
+                recordPerf(static_cast<uint64_t>(i + bytes.size()));
                 return (uintptr_t)(pStart + i);
+            }
         }
+        recordPerf(end > start ? static_cast<uint64_t>(end - start) : 0);
         return 0;
     }
 

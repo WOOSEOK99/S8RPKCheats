@@ -11,6 +11,7 @@
 #include "../Social/Resonancecave.h"
 #include "Selfheal.h"
 #include "../../showlog.h"
+#include "../../PerformanceDiagnostics.h"
 
 #include <psapi.h>
 #include <string>
@@ -45,6 +46,18 @@ namespace DX11Base {
         // push r15  (41 57)
         cave[idx++] = 0x41;
         cave[idx++] = 0x57;
+
+        // S03 diagnostics: count actual cave entries without a function call.
+        // r15 is already preserved by this cave, so the disabled path is only
+        // a gate load/compare/branch and the enabled path adds one locked inc.
+        cave[idx++] = 0x49; cave[idx++] = 0xBF; // mov r15, imm64
+        *(uintptr_t *)&cave[idx] = PerfDiagnosticsGateAddress(); idx += 8;
+        cave[idx++] = 0x41; cave[idx++] = 0x83; cave[idx++] = 0x3F; cave[idx++] = 0x00; // cmp dword ptr [r15], 0
+        cave[idx++] = 0x74; int pPerfSkip = idx; cave[idx++] = 0x00; // je perf_skip
+        cave[idx++] = 0x49; cave[idx++] = 0xBF; // mov r15, imm64
+        *(uintptr_t *)&cave[idx] = PerfRawHookCallCounterAddress(PerfMetric::BattleUnitCaptureHook); idx += 8;
+        cave[idx++] = 0xF0; cave[idx++] = 0x49; cave[idx++] = 0xFF; cave[idx++] = 0x07; // lock inc qword ptr [r15]
+        cave[pPerfSkip] = static_cast<uint8_t>(idx - pPerfSkip - 1);
 
         // cmp qword ptr [rax+60], 0  (48 83 78 60 00)
         cave[idx++] = 0x48;

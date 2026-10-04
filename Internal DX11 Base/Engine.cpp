@@ -4,6 +4,7 @@
 #include "Fonts.h"
 #include "Menu.h"
 #include "MenuState.h"
+#include "PerformanceDiagnostics.h"
 #include "pch.h"
 #include "resource.h"
 #include "showlog.h"
@@ -200,8 +201,11 @@ namespace DX11Base {
   }
 
   HRESULT APIENTRY RenderManager::SwapChain_Present_hook(IDXGISwapChain *pSwapChain, UINT SyncInterval, UINT Flags) {
-    if (DX11Base::IsAnyUIOpen()) {
-      g_RenderManager->Overlay(pSwapChain);
+    {
+      PerfScopeNoReport perfScope(PerfMetric::PresentHook);
+      if (DX11Base::IsAnyUIOpen()) {
+        g_RenderManager->Overlay(pSwapChain);
+      }
     }
     return g_RenderManager->IDXGISwapChain_Present_stub(pSwapChain, SyncInterval, Flags);
   }
@@ -553,6 +557,8 @@ namespace DX11Base {
   }
 
   void RenderManager::Overlay(IDXGISwapChain *pSwapChain) {
+    PerfScopeNoReport perfScope(PerfMetric::Overlay);
+
     if (!bInitImGui) {
       if (!InitImGui(pSwapChain))
         return;
