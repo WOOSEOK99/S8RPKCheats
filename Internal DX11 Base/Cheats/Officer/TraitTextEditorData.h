@@ -11,10 +11,15 @@ struct TraitTextEditRow {
   std::string oldDesc;
   std::string newName;
   std::string newDesc;
+
+  // 기존 72개 CT 행은 false/0을 유지합니다. 내장 기본기재 행은 true이며
+  // traitId는 실제 게임 기재 ID(1..254)입니다.
+  bool embedded = false;
+  int traitId = 0;
 };
 
-// CT 87200의 72개 기재 원문/편집 상태.
-// Step 1에서는 데이터와 trait_texts.ini 저장/불러오기만 담당하며 게임 메모리는 건드리지 않습니다.
+// 기존 72개 기재와 내장 기본기재의 편집 상태를 반환합니다.
+// 기존 72개 행의 내용/순서는 하위 호환을 위해 그대로 유지합니다.
 std::vector<TraitTextEditRow>& GetTraitTextEditRows();
 
 std::string GetTraitTextStoragePath();
