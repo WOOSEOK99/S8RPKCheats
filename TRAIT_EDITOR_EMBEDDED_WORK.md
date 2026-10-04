@@ -4,130 +4,143 @@
 
 Expand the existing `기재 이름/설명 편집기` so the embedded default trait set can be edited without changing the existing `version.dll` source-priority policy.
 
-The implementation must preserve the existing game-default 72-row behavior unless a step explicitly replaces part of it with a verified equivalent.
+The implementation preserves the existing game-default 72-row behavior and adds a separate ID-backed path for embedded default traits.
 
 ## Branch / baseline
 
 - Repository: `WOOSEOK99/S8RPKCheats`
 - Branch: `feature/trait-editor-embedded`
 - Starting `main` HEAD: `e988c4e358086d536bdcc0f992a39cd125849a8a`
+- Implementation HEAD before this status-document update: `a36e35e72f9f86e284c61bca74c970d6ef2ecb57`
 - Build/test ownership: **user only**. ChatGPT must not build or run the project.
 
-## Confirmed current behavior
+## Confirmed behavior / design
 
-- `TraitTextEditorData.cpp` owns a static 72-row editor data set.
-- `trait_texts.ini` persists edits by `ROW:<1-based row index>`.
-- The editor UI iterates `GetTraitTextEditRows()` and therefore has no independent 72-item UI limit.
-- When `version.dll` is absent, `TraitConfigRuntime` loads the embedded `S8RPK_traits_default.json` and publishes custom names/descriptions for the active trait table.
-- The embedded JSON contains ID-keyed `customNames` data for many custom traits through the 253 range.
-- Existing runtime name editing is string-based (`oldName -> newName`), which is unsafe for duplicate custom trait names if the embedded set is simply appended.
-- Existing game-default description editing uses code-cave string replacement and contains special handling for `괴물` / `잔병첩보`.
+- `TraitTextEditorData.cpp` still owns the original static 72-row editor data set.
+- Existing `trait_texts.ini` persistence and `ROW:<1-based row index>` behavior are unchanged.
+- The embedded JSON `customNames` table is parsed with the same runtime parser already used by `TraitConfigRuntime`.
+- A JSON `customNames` key is treated as a 0-based table index; editor `traitId` is `index + 1`, matching the runtime's `nativeNamePtrs[traitId - 1]` lookup.
+- Existing 72-row name/description hooks remain unchanged.
+- Embedded rows are stored and applied separately by real trait ID, so duplicate display names can be edited independently.
+- Embedded edits are persisted separately in `trait_texts_embedded.ini`; this intentionally avoids changing or migrating the legacy `trait_texts.ini` format.
+- Embedded text overrides are active only when `version.dll` is absent. The established external `version.dll + san8r_traits_config.json` priority policy is unchanged.
 
 ## Safety decisions
 
-1. Do not assume the 72 editor row indexes are identical to in-game trait IDs unless verified.
+1. Do not assume the 72 editor row indexes are identical to in-game trait IDs.
 2. Keep the legacy 72-row edit path behavior intact.
-3. Add embedded custom traits using their explicit JSON trait IDs.
-4. Do not change the `version.dll` priority policy. When `version.dll` exists, embedded runtime data remains disabled.
-5. Avoid broad refactors and unrelated formatting changes.
-6. Do not build or run tests; only source-level review/diff verification is performed here.
+3. Add embedded custom traits using explicit JSON/runtime trait IDs.
+4. Do not change the `version.dll` priority policy.
+5. Use the existing embedded runtime name/description pointer machinery rather than installing another broad hook.
+6. Keep old published string allocations alive, matching the existing runtime safety rule for UI-held pointers.
+7. Do not build or run tests; only source-level review/diff verification is performed here.
 
-## Planned steps
+## Steps
 
 ### Step 0 — resumable work log and branch
 
-- [x] Create `feature/trait-editor-embedded` from the verified `main` HEAD.
-- [x] Add this resumable work log.
+- [x] Created `feature/trait-editor-embedded` from verified `main` HEAD `e988c4e358086d536bdcc0f992a39cd125849a8a`.
+- [x] Added this resumable work log before implementation.
 
-### Step 1 — editor row model and embedded-row loading
+Status: complete.
 
-Goal: make the editor data model distinguish legacy game rows from embedded ID-backed rows.
+### Step 1 — embedded editor row model and catalog
 
-Planned changes:
+- [x] Extended `TraitTextEditRow` with optional `embedded` / `traitId` metadata while keeping the existing 4-field aggregate initializers valid.
+- [x] Added `GetEmbeddedTraitTextCatalog()` using `IDR_JSON_TRAITS_DEFAULT` and the runtime's existing `ParseCustomMetaLine()` behavior.
+- [x] Added a separate embedded editor-row vector so the legacy 72-row vector is not reordered or remapped.
+- [x] Only named embedded `customNames` entries are exposed as editable embedded rows.
 
-- Extend `TraitTextEditRow` with source/identity metadata needed for embedded rows.
-- Keep the existing 72 static rows unchanged in content and order.
-- Load embedded `customNames` from `IDR_JSON_TRAITS_DEFAULT` and append only editable named custom traits.
-- Avoid duplicates where an embedded entry represents an existing legacy row; do not guess ID mappings.
-- Keep `GetTraitTextEditRows()` as the UI source so the window expands automatically.
+Status: complete.
 
-Status: pending.
+### Step 2 — ID-based persistence without legacy migration
 
-### Step 2 — persistence format with backward compatibility
+Original plan proposed adding `ID:` records to `trait_texts.ini`. During implementation this was changed to the safer option below so the legacy file/parser is untouched.
 
-Goal: save embedded edits by stable trait ID without breaking existing `trait_texts.ini` files.
+- [x] Existing `trait_texts.ini` behavior remains unchanged.
+- [x] Embedded edits use `trait_texts_embedded.ini` next to `trait_texts.ini`.
+- [x] Embedded format: `ID:<traitId>:<hex name>:<hex desc>`.
+- [x] Unknown/stale IDs are ignored while loading.
+- [x] Window save/load and auto-apply handle legacy and embedded files independently.
 
-Planned changes:
-
-- Continue accepting legacy `ROW:` records for the original 72 rows.
-- Add an ID-keyed record form for embedded rows (for example `ID:<traitId>:...`).
-- Save legacy rows in the legacy-compatible form and embedded rows by ID.
-- Ignore unknown/stale IDs safely.
-
-Status: pending.
+Status: complete.
 
 ### Step 3 — embedded runtime name override
 
-Goal: edit embedded custom names without relying on duplicate-prone string matching.
+- [x] Preserved the existing 72-row name hook.
+- [x] Added ID-based embedded overrides to `TraitConfigRuntime`.
+- [x] Overrides republish the runtime's `nativeNamePtrs` table rather than comparing old display-name strings.
+- [x] Apply/clear uses stable allocated strings through the existing `PublishNativeTexts()` path.
+- [x] `version.dll` presence blocks non-empty embedded overrides rather than changing external priority behavior.
 
-Planned changes:
-
-- Preserve the existing 72-row name hook behavior.
-- Add an ID-based override path for embedded rows in the no-`version.dll` runtime backend.
-- Prefer integrating the override with `TraitConfigRuntime`'s existing `traitObject + 0x08` ID lookup / published name pointer path rather than adding another broad game hook.
-- Ensure apply/remove/reapply are safe and do not free strings still potentially referenced by the UI.
-
-Status: pending.
+Status: complete.
 
 ### Step 4 — embedded runtime description override
 
-Goal: edit embedded descriptions through the runtime's existing ID-keyed description data instead of forcing them through the legacy 72-row code-cave replacement path.
+- [x] Preserved legacy 72-row description and special-description hooks.
+- [x] Embedded descriptions republish `nativeDescPtrs` / `nativeDescFormatPtrs` by real trait ID.
+- [x] Republish marks `descTablesSynced = false` so the existing 71~200 text-table synchronization runs again on the next runtime tick.
+- [x] Existing 201+ descmap fallback automatically reads the republished pointer arrays.
+- [x] Existing `%` format conversion in `PublishNativeTexts()` remains the single formatting implementation.
 
-Planned changes:
+Status: complete at source level; user runtime testing required.
 
-- Preserve legacy 72-row description hooks unchanged.
-- Add embedded ID-based description overrides in `TraitConfigRuntime`.
-- Invalidate/resync any description pointer tables required by the runtime after changes.
-- Keep format-string (`%`) handling compatible with the existing runtime's normal/format description pointers.
+### Step 5 — editor UI and validation
 
-Status: pending.
+- [x] Editor list now has separate headings for the legacy 72 rows and embedded ID-backed rows.
+- [x] Embedded rows display the real trait ID.
+- [x] Existing UTF-8, 5 UTF-16-code-unit name, 512-code-unit description, and format-token rules are mirrored for embedded rows.
+- [x] Apply / remove / save / reset / automatic saved-edit loading now include both sources.
+- [x] Fixed a source-review finding where switching between legacy and embedded lists could retain the previous vector reference for the rest of the frame.
 
-### Step 5 — editor UI distinction and validation
-
-Goal: make the expanded list understandable and keep validation source-correct.
-
-Planned changes:
-
-- Show embedded trait IDs in the list for ID-backed rows.
-- Keep the existing 5 UTF-16 code-unit name limit unless runtime evidence requires otherwise.
-- Keep description format-token validation.
-- Clearly distinguish legacy game rows and embedded custom rows without changing unrelated UI behavior.
-
-Status: pending.
+Status: complete at source level.
 
 ### Step 6 — source review / diff verification
 
-- Review branch diff against starting `main` HEAD.
-- Confirm only intended files changed.
-- Confirm no build/test claims are made.
-- Update this file with exact final branch HEAD, changed files, unresolved risks, and user-side test checklist.
+- [x] Compared branch against starting `main` HEAD.
+- [x] Confirmed no project/build-system file changes were required because implementation stays in already-compiled translation units.
+- [x] Confirmed the existing 72-row `.cpp` data and legacy hook `.cpp` files were not modified.
+- [x] Confirmed `version.dll` source-priority logic remains in place.
+- [x] No build or game runtime test was executed.
 
-Status: pending.
+Changed files at implementation HEAD `a36e35e72f9f86e284c61bca74c970d6ef2ecb57`:
+
+- `Internal DX11 Base/Cheats/Officer/TraitConfigRuntime.cpp`
+- `Internal DX11 Base/Cheats/Officer/TraitConfigRuntime.h`
+- `Internal DX11 Base/Cheats/Officer/TraitTextEditorData.h`
+- `Internal DX11 Base/Cheats/Officer/TraitTextEditorWindow.cpp`
+- `TRAIT_EDITOR_EMBEDDED_WORK.md`
+
+Status: source review complete; user build/runtime verification pending.
+
+## Known verification points / risks
+
+- Build has intentionally not been run. Compile/link errors, if any, must be reported from the user's build and fixed on this same branch.
+- Runtime behavior must be checked in game for both description paths: IDs in the existing description text-table synchronization range and IDs handled by the descmap fallback.
+- The editor intentionally refuses non-empty embedded overrides while external `version.dll` is present; legacy 72-row editing continues through its existing version.dll-aware backend.
+- Embedded rows with duplicate displayed names must be tested independently to confirm ID isolation in game.
+- `PublishNativeTexts()` intentionally retains old allocated strings, matching pre-existing runtime behavior; repeated apply operations therefore favor pointer safety over reclaiming those small allocations immediately.
 
 ## Resume procedure for a new chat
 
 1. Read this file first.
 2. Inspect branch `feature/trait-editor-embedded` and its current HEAD.
 3. Compare it with starting HEAD `e988c4e358086d536bdcc0f992a39cd125849a8a`.
-4. Read the latest completed/pending step markers in this file.
+4. Treat `a36e35e72f9f86e284c61bca74c970d6ef2ecb57` as the last implementation commit before this documentation update.
 5. Inspect actual changed files before continuing; do not rely only on chat history.
-6. Do not build. The user performs all builds/tests.
+6. If the user reports a build error, fix only that verified error first and commit it on this branch.
+7. Do not build. The user performs all builds/tests.
 
-## User-side test checklist (to be finalized)
+## User-side build/runtime checklist
 
-- Existing 72 default traits still load/edit/save/apply as before.
-- Embedded custom traits appear in the editor when the embedded runtime is active.
-- Two traits sharing the same displayed name can be edited independently.
-- Embedded edits survive save/reload through `trait_texts.ini`.
-- Apply / remove / reapply does not accumulate hooks or corrupt displayed text.
-- With external `version.dll`, the established external runtime priority remains unchanged.
+1. Build the branch using the user's normal configuration. Send the exact compiler/linker errors if the build fails.
+2. Start without external `version.dll` and open `기재 이름/설명 편집기`.
+3. Confirm the original 72 rows still appear and behave as before.
+4. Confirm a second `내장 기본기재 (ID 기반)` section appears with real IDs.
+5. Edit one embedded name only, apply it, and verify the matching in-game trait changes.
+6. Edit two embedded traits that share the same displayed name and verify they change independently.
+7. Edit one embedded description in the lower-ID text-table range and one in the 201+ range if available; verify both display correctly.
+8. Save, restart, and confirm `trait_texts_embedded.ini` edits auto-apply.
+9. Use `적용 해제`, then confirm embedded text returns to the embedded default values.
+10. Reapply multiple times and switch rapidly between legacy/embedded list entries; confirm no UI crash or stale selection.
+11. Repeat with external `version.dll` present: verify embedded override application is rejected and the established external trait runtime remains authoritative.
