@@ -1,6 +1,7 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "TraitTextEditorWindow.h"
 
+#include "TraitConfigRuntime.h"
 #include "TraitTextEditorData.h"
 #include "TraitTextNameHook.h"
 #include "TraitTextDescHook.h"
@@ -12,6 +13,7 @@
 #include <array>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace DX11Base {
 namespace {
@@ -19,6 +21,7 @@ namespace {
 static bool g_open = false;
 static bool g_loadedOnce = false;
 static int g_selected = 0;
+static bool g_selectedEmbedded = false;
 static std::array<char, 128> g_nameBuf{};
 static std::array<char, 4096> g_descBuf{};
 static std::string g_status;
@@ -37,9 +40,19 @@ void CopyToBuffer(const std::string& text, char* dst, size_t size) {
   dst[size - 1] = '\0';
 }
 
+std::vector<TraitTextEditRow>& SelectedRows() {
+  return g_selectedEmbedded ? GetEmbeddedTraitTextEditRows() : GetTraitTextEditRows();
+}
+
 void LoadSelectionBuffers() {
-  auto& rows = GetTraitTextEditRows();
+  auto& rows = SelectedRows();
   if (rows.empty()) {
+    if (g_selectedEmbedded && !GetTraitTextEditRows().empty()) {
+      g_selectedEmbedded = false;
+      g_selected = 0;
+      LoadSelectionBuffers();
+      return;
+    }
     g_nameBuf[0] = '\0';
     g_descBuf[0] = '\0';
     return;
@@ -50,16 +63,47 @@ void LoadSelectionBuffers() {
 }
 
 void StoreSelectionBuffers() {
-  auto& rows = GetTraitTextEditRows();
+  auto& rows = SelectedRows();
   if (rows.empty() || g_selected < 0 || g_selected >= static_cast<int>(rows.size()))
     return;
   rows[g_selected].newName = g_nameBuf.data();
   rows[g_selected].newDesc = g_descBuf.data();
 }
 
+bool ApplyEmbeddedRows(std::string& error) {
+  std::vector<EmbeddedTraitTextOverride> overrides;
+  auto& rows = GetEmbeddedTraitTextEditRows();
+  overrides.reserve(rows.size());
+
+  for (size_t i = 0; i < rows.size(); ++i) {
+    if (!ValidateEmbeddedTraitTextRow(i, &error))
+      return false;
+
+    const auto& row = rows[i];
+    const bool nameChanged = !row.newName.empty() && row.newName != row.oldName;
+    const bool descChanged = !row.newDesc.empty() && row.newDesc != row.oldDesc;
+    if (!nameChanged && !descChanged)
+      continue;
+
+    EmbeddedTraitTextOverride item;
+    item.traitId = row.traitId;
+    if (nameChanged)
+      item.name = row.newName;
+    if (descChanged)
+      item.desc = row.newDesc;
+    overrides.push_back(std::move(item));
+  }
+
+  return ApplyEmbeddedTraitTextOverrides(overrides, &error);
+}
+
 bool ApplyAll(std::string& error) {
   for (size_t i = 0; i < GetTraitTextEditRows().size(); ++i) {
     if (!ValidateTraitTextRow(i, &error))
+      return false;
+  }
+  for (size_t i = 0; i < GetEmbeddedTraitTextEditRows().size(); ++i) {
+    if (!ValidateEmbeddedTraitTextRow(i, &error))
       return false;
   }
 
@@ -76,6 +120,13 @@ bool ApplyAll(std::string& error) {
     RemoveTraitTextNameHook(&ignored);
     return false;
   }
+  if (!ApplyEmbeddedRows(error)) {
+    std::string ignored;
+    RemoveTraitTextSpecialDescHook(&ignored);
+    RemoveTraitTextDescHook(&ignored);
+    RemoveTraitTextNameHook(&ignored);
+    return false;
+  }
   return true;
 }
 
@@ -84,9 +135,14 @@ bool RemoveAll(std::string& error) {
   bool ok = true;
   std::string e;
 
-  if (!RemoveTraitTextSpecialDescHook(&e)) {
+  if (!ClearEmbeddedTraitTextOverrides(&e)) {
     ok = false;
     firstError = e;
+  }
+  e.clear();
+  if (!RemoveTraitTextSpecialDescHook(&e)) {
+    ok = false;
+    if (firstError.empty()) firstError = e;
   }
   e.clear();
   if (!RemoveTraitTextDescHook(&e)) {
@@ -115,9 +171,14 @@ void SetStatus(const std::string& text) {
 void OpenTraitTextEditorWindow() {
   g_open = true;
   if (!g_loadedOnce) {
-    std::string error;
-    if (!LoadTraitTextEdits(&error) && !error.empty())
-      SetStatus(std::string("저장값 불러오기 실패: ") + error);
+    std::string legacyError;
+    std::string embeddedError;
+    const bool legacyLoaded = LoadTraitTextEdits(&legacyError);
+    const bool embeddedLoaded = LoadEmbeddedTraitTextEdits(&embeddedError);
+    if (!legacyLoaded && !embeddedLoaded && (!legacyError.empty() || !embeddedError.empty())) {
+      SetStatus(std::string("저장값 불러오기 실패: ") +
+                (!legacyError.empty() ? legacyError : embeddedError));
+    }
     g_loadedOnce = true;
     LoadSelectionBuffers();
   }
@@ -132,16 +193,20 @@ void TickTraitTextEditorAutoApply() {
     return;
 
   if (!g_autoLoaded) {
-    std::string error;
-    if (!LoadTraitTextEdits(&error)) {
+    std::string legacyError;
+    std::string embeddedError;
+    const bool legacyLoaded = LoadTraitTextEdits(&legacyError);
+    const bool embeddedLoaded = LoadEmbeddedTraitTextEdits(&embeddedError);
+    if (!legacyLoaded && !embeddedLoaded) {
       g_autoFinished = true;
+      const std::string& error = !legacyError.empty() ? legacyError : embeddedError;
       if (!error.empty())
         AddLog(u8"[기재 문구/Step6] 저장값 자동 로드 실패: %s", error.c_str());
       return;
     }
     g_autoLoaded = true;
     g_loadedOnce = true;
-    if (!HasTraitTextEdits()) {
+    if (!HasTraitTextEdits() && !HasEmbeddedTraitTextEdits()) {
       g_autoFinished = true;
       return;
     }
@@ -176,27 +241,54 @@ void DrawTraitTextEditorWindow(float scale) {
   if (!g_open)
     return;
 
-  ImGui::SetNextWindowSize(ImVec2(820.0f * scale, 620.0f * scale), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(900.0f * scale, 650.0f * scale), ImGuiCond_FirstUseEver);
   if (!ImGui::Begin(u8"기재 이름/설명 편집기", &g_open)) {
     ImGui::End();
     return;
   }
 
-  auto& rows = GetTraitTextEditRows();
-  if (rows.empty()) {
+  auto& legacyRows = GetTraitTextEditRows();
+  auto& embeddedRows = GetEmbeddedTraitTextEditRows();
+  if (legacyRows.empty() && embeddedRows.empty()) {
     ImGui::TextUnformatted(u8"기재 데이터가 없습니다.");
     ImGui::End();
     return;
   }
 
-  ImGui::BeginChild("##trait_list", ImVec2(220.0f * scale, -42.0f * scale), true);
-  for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
-    const bool modified = !rows[i].newName.empty() || !rows[i].newDesc.empty();
-    char label[256] = {};
-    std::snprintf(label, sizeof(label), "%02d  %s%s", i + 1,
-                  rows[i].oldName.c_str(), modified ? "  O" : "");
-    if (ImGui::Selectable(label, g_selected == i)) {
+  auto& selectedRows = SelectedRows();
+  if (selectedRows.empty()) {
+    g_selectedEmbedded = !g_selectedEmbedded;
+    g_selected = 0;
+  }
+  auto& rows = SelectedRows();
+  g_selected = std::clamp(g_selected, 0, static_cast<int>(rows.size()) - 1);
+
+  ImGui::BeginChild("##trait_list", ImVec2(260.0f * scale, -42.0f * scale), true);
+  ImGui::TextDisabled(u8"게임 기본 기재 (기존 72개)");
+  for (int i = 0; i < static_cast<int>(legacyRows.size()); ++i) {
+    const bool modified = !legacyRows[i].newName.empty() || !legacyRows[i].newDesc.empty();
+    char label[320] = {};
+    std::snprintf(label, sizeof(label), "%02d  %s%s##legacy_%d", i + 1,
+                  legacyRows[i].oldName.c_str(), modified ? "  O" : "", i);
+    if (ImGui::Selectable(label, !g_selectedEmbedded && g_selected == i)) {
       StoreSelectionBuffers();
+      g_selectedEmbedded = false;
+      g_selected = i;
+      LoadSelectionBuffers();
+    }
+  }
+
+  ImGui::Separator();
+  ImGui::TextDisabled(u8"내장 기본기재 (ID 기반)");
+  for (int i = 0; i < static_cast<int>(embeddedRows.size()); ++i) {
+    const bool modified = !embeddedRows[i].newName.empty() || !embeddedRows[i].newDesc.empty();
+    char label[320] = {};
+    std::snprintf(label, sizeof(label), "ID %03d  %s%s##embedded_%d",
+                  embeddedRows[i].traitId, embeddedRows[i].oldName.c_str(),
+                  modified ? "  O" : "", embeddedRows[i].traitId);
+    if (ImGui::Selectable(label, g_selectedEmbedded && g_selected == i)) {
+      StoreSelectionBuffers();
+      g_selectedEmbedded = true;
       g_selected = i;
       LoadSelectionBuffers();
     }
@@ -207,7 +299,10 @@ void DrawTraitTextEditorWindow(float scale) {
   ImGui::BeginGroup();
 
   const auto& row = rows[g_selected];
-  ImGui::Text(u8"기재: %s", row.oldName.c_str());
+  if (g_selectedEmbedded)
+    ImGui::Text(u8"기재: %s  (내장 ID %d)", row.oldName.c_str(), row.traitId);
+  else
+    ImGui::Text(u8"기재: %s", row.oldName.c_str());
   ImGui::Separator();
 
   ImGui::TextUnformatted(u8"기존 설명");
@@ -228,6 +323,8 @@ void DrawTraitTextEditorWindow(float scale) {
     StoreSelectionBuffers();
 
   ImGui::TextDisabled(u8"%%d 등의 형식 토큰을 유지할 경우 원문과 종류/순서가 같아야 합니다. %% 표시는 %%%% 사용.");
+  if (g_selectedEmbedded)
+    ImGui::TextDisabled(u8"내장 기본기재 편집은 version.dll이 없을 때만 ID 기준으로 적용됩니다.");
 
   ImGui::Spacing();
   if (ImGui::Button(u8"적용", ImVec2(90.0f * scale, 28.0f * scale))) {
@@ -260,14 +357,18 @@ void DrawTraitTextEditorWindow(float scale) {
   if (ImGui::Button(u8"저장", ImVec2(90.0f * scale, 28.0f * scale))) {
     StoreSelectionBuffers();
     std::string error;
-    if (SaveTraitTextEdits(&error))
-      SetStatus(u8"trait_texts.ini 저장 완료");
-    else
+    if (!SaveTraitTextEdits(&error)) {
       SetStatus(std::string(u8"저장 실패: ") + error);
+    } else if (!SaveEmbeddedTraitTextEdits(&error)) {
+      SetStatus(std::string(u8"내장 기재 저장 실패: ") + error);
+    } else {
+      SetStatus(u8"기본/내장 기재 편집값 저장 완료");
+    }
   }
   ImGui::SameLine();
   if (ImGui::Button(u8"전체 기본값", ImVec2(100.0f * scale, 28.0f * scale))) {
     ResetTraitTextEdits();
+    ResetEmbeddedTraitTextEdits();
     LoadSelectionBuffers();
     SetStatus(u8"전체 편집값 초기화");
   }
