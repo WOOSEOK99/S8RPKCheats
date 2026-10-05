@@ -3,6 +3,7 @@
 #include "Battleunitcapture.h"
 #include "Catapult.h"
 #include "Celestia.h"
+#include "../../BattleMonitor.h"
 #include "../../Cheats.h"
 #include "../Social/Fastrelationship.h"
 #include "../Social/Infinitetalk.h"
@@ -33,6 +34,40 @@ namespace DX11Base {
     static uintptr_t g_battUnitCaveAddr = 0;
     static bool g_battUnitApplied = false;
     std::atomic_bool g_battUnitThreadRunning{false};
+    static std::atomic_bool g_battUnitInstallRequested{false};
+
+    namespace {
+        constexpr uintptr_t kBattUnitV0860Rva = 0x1E3A5D4;
+        constexpr uint8_t kBattUnitV0860Bytes[7] = {0x0F, 0xB6, 0x80, 0x80, 0x00, 0x00, 0x00};
+
+        bool ResolveKnownBattUnitHook(uintptr_t exeBase, uintptr_t searchEnd, uintptr_t* outHook) {
+            if (!outHook || searchEnd <= exeBase)
+                return false;
+            const uintptr_t imageSize = searchEnd - exeBase;
+            if (imageSize < kBattUnitV0860Rva + sizeof(kBattUnitV0860Bytes))
+                return false;
+
+            const uintptr_t candidate = exeBase + kBattUnitV0860Rva;
+            if (!IsValidPtr(candidate, sizeof(kBattUnitV0860Bytes)))
+                return false;
+            if (memcmp((const void*)candidate, kBattUnitV0860Bytes,
+                       sizeof(kBattUnitV0860Bytes)) != 0)
+                return false;
+
+            *outHook = candidate;
+            return true;
+        }
+
+        bool IsBattleInstallWindow() {
+            int battleDay = -1;
+            __try {
+                battleDay = GetBattleDay();
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+            return battleDay >= 1 && battleDay <= 30;
+        }
+    }
 
     static bool InstallBattUnitCave(uintptr_t hookAddr) {
         g_battUnitCaveAddr = AllocNear(hookAddr, 256);
@@ -220,6 +255,8 @@ namespace DX11Base {
             return;
 
         if (enable) {
+            g_battUnitInstallRequested.store(true);
+
             if (g_battUnitApplied)
                 return;
             if (g_battUnitThreadRunning.exchange(true))
@@ -228,21 +265,40 @@ namespace DX11Base {
             HANDLE hThread = CreateThread(
                 nullptr, 0,
                 [](LPVOID) -> DWORD {
+                    bool deferredLogged = false;
+                    while (g_battUnitInstallRequested.load() && !IsBattleInstallWindow()) {
+                        if (!deferredLogged) {
+                            AddLog(u8"[BattleUnitCapture] 전투 진입 전: 캡처 후크 설치 보류");
+                            deferredLogged = true;
+                        }
+                        Sleep(100);
+                    }
+
+                    if (!g_battUnitInstallRequested.load()) {
+                        g_battUnitThreadRunning.store(false);
+                        return 0;
+                    }
+
                     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
                     MODULEINFO mi;
                     GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi));
                     uintptr_t searchEnd = exeBase + mi.SizeOfImage;
 
-                    // 패턴: 08 0F B6 80 80 00 00 00
-                    // 훅 위치는 +1 (08 다음)
-                    uintptr_t found = FindPattern(exeBase, searchEnd, "08 0F B6 80 80 00 00 00");
+                    if (!ResolveKnownBattUnitHook(exeBase, searchEnd, &g_battUnitHookAddr)) {
+                        // 패턴: 08 0F B6 80 80 00 00 00
+                        // 훅 위치는 +1 (08 다음)
+                        uintptr_t found = FindPattern(exeBase, searchEnd, "08 0F B6 80 80 00 00 00");
 
-                    if (found)
-                        g_battUnitHookAddr = found + 1; // +1 위치에 훅
+                        if (found)
+                            g_battUnitHookAddr = found + 1; // +1 위치에 훅
+                    } else {
+                        AddLog(u8"[BattleUnitCapture] V0.860 고정 RVA 검증 성공: +0x%llX",
+                               (unsigned long long)kBattUnitV0860Rva);
+                    }
 
                     AddLog("[DEBUG] battUnitHook: %p", (void *)g_battUnitHookAddr);
 
-                    if (g_battUnitHookAddr && !g_battUnitApplied) {
+                    if (g_battUnitInstallRequested.load() && g_battUnitHookAddr && !g_battUnitApplied) {
                         memcpy(g_battUnitOriginal, (void *)g_battUnitHookAddr, 7);
                         if (InstallBattUnitCave(g_battUnitHookAddr))
                             g_battUnitApplied = true;
@@ -260,6 +316,8 @@ namespace DX11Base {
                 g_battUnitThreadRunning.store(false);
 
         } else {
+            g_battUnitInstallRequested.store(false);
+
             // 유닛 주소 초기화
             g_battleUnitAddr1 = 0;
             g_battleUnitAddr2 = 0;

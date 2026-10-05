@@ -2,8 +2,8 @@
 #include <cstdint>
 
 namespace DX11Base {
-    // 2025-04-05 시스템 월 값 (신규 AOB 방식)
-    // 패턴: 88 48 6C 41 C7 06 01 00 00 00 (mov [rax+6c], cl)
+    // 호환 API. 현재 월의 단일 기준은 MonthCapture의 시나리오 날짜 경로입니다.
+    // 별도 SystemMonth 후크는 설치하지 않습니다.
     void InstallSystemMonthHook();
     uint8_t GetSystemMonthValue();
 }
