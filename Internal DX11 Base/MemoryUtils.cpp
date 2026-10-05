@@ -7,32 +7,104 @@ namespace DX11Base {
     void AddLog(const char* fmt, ...);
 
     uintptr_t AllocNear(uintptr_t target, size_t size) {
-        SYSTEM_INFO si;
+        SYSTEM_INFO si{};
         GetSystemInfo(&si);
-        uintptr_t pageSize = si.dwPageSize;
+        const uintptr_t granularity = si.dwAllocationGranularity;
+        const uintptr_t maxDistance = 0x70000000ull;
+        const uintptr_t low = (target > maxDistance) ? target - maxDistance : 0x10000ull;
+        const uintptr_t high = (target <= UINTPTR_MAX - maxDistance) ? target + maxDistance : UINTPTR_MAX;
+        const ULONGLONG started = GetTickCount64();
+        unsigned queryCount = 0;
+        unsigned allocAttempts = 0;
 
-        uintptr_t high = target + 0x70000000;
-        for (uintptr_t addr = (target + pageSize) & ~(pageSize - 1); addr < high; addr += pageSize) {
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == 0) break;
-            if (mbi.State == MEM_FREE) {
-                void* result = VirtualAlloc((LPVOID)addr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-                if (result) return (uintptr_t)result;
+        auto tryRegion = [&](uintptr_t regionStart, uintptr_t regionEnd, bool preferHigh) -> uintptr_t {
+            if (regionEnd <= regionStart || regionEnd - regionStart < size)
+                return 0;
+
+            uintptr_t candidate = 0;
+            if (preferHigh) {
+                uintptr_t latest = regionEnd - size;
+                candidate = latest & ~(granularity - 1);
+                if (candidate < regionStart)
+                    return 0;
+            } else {
+                if (regionStart > UINTPTR_MAX - (granularity - 1))
+                    return 0;
+                candidate = (regionStart + granularity - 1) & ~(granularity - 1);
+                if (candidate < regionStart || candidate > regionEnd - size)
+                    return 0;
             }
-            addr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize - pageSize;
+
+            ++allocAttempts;
+            void* result = VirtualAlloc((LPVOID)candidate, size,
+                                        MEM_COMMIT | MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE);
+            return (uintptr_t)result;
+        };
+
+        uintptr_t cursor = target;
+        while (cursor < high) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            ++queryCount;
+            if (VirtualQuery((LPCVOID)cursor, &mbi, sizeof(mbi)) == 0)
+                break;
+
+            const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+            const uintptr_t regionEnd = regionStart + mbi.RegionSize;
+            if (regionEnd <= cursor)
+                break;
+
+            if (mbi.State == MEM_FREE) {
+                const uintptr_t clippedStart = (regionStart < low) ? low : regionStart;
+                const uintptr_t clippedEnd = (regionEnd > high) ? high : regionEnd;
+                const uintptr_t result = tryRegion(clippedStart, clippedEnd, false);
+                if (result) {
+                    const ULONGLONG elapsed = GetTickCount64() - started;
+                    if (elapsed >= 50)
+                        AddLog("[Perf:AllocNear] target=%p elapsed=%llums query=%u alloc=%u result=%p",
+                               (void*)target, (unsigned long long)elapsed,
+                               queryCount, allocAttempts, (void*)result);
+                    return result;
+                }
+            }
+            cursor = regionEnd;
         }
 
-        uintptr_t low = (target > 0x70000000) ? target - 0x70000000 : 0x10000;
-        for (uintptr_t addr = (target - pageSize) & ~(pageSize - 1); addr > low; addr -= pageSize) {
+        cursor = target;
+        while (cursor > low) {
+            const uintptr_t probe = cursor - 1;
             MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == 0) break;
+            ++queryCount;
+            if (VirtualQuery((LPCVOID)probe, &mbi, sizeof(mbi)) == 0)
+                break;
+
+            const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+            const uintptr_t regionEnd = regionStart + mbi.RegionSize;
+            if (regionEnd <= regionStart)
+                break;
+
             if (mbi.State == MEM_FREE) {
-                void* result = VirtualAlloc((LPVOID)addr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-                if (result) return (uintptr_t)result;
+                const uintptr_t clippedStart = (regionStart < low) ? low : regionStart;
+                const uintptr_t clippedEnd = (regionEnd > high) ? high : regionEnd;
+                const uintptr_t result = tryRegion(clippedStart, clippedEnd, true);
+                if (result) {
+                    const ULONGLONG elapsed = GetTickCount64() - started;
+                    if (elapsed >= 50)
+                        AddLog("[Perf:AllocNear] target=%p elapsed=%llums query=%u alloc=%u result=%p",
+                               (void*)target, (unsigned long long)elapsed,
+                               queryCount, allocAttempts, (void*)result);
+                    return result;
+                }
             }
-            if (addr < mbi.RegionSize + pageSize) break;
-            addr = (uintptr_t)mbi.BaseAddress;
+
+            if (regionStart <= low)
+                break;
+            cursor = regionStart;
         }
+
+        const ULONGLONG elapsed = GetTickCount64() - started;
+        AddLog("[Perf:AllocNear] FAILED target=%p elapsed=%llums query=%u alloc=%u",
+               (void*)target, (unsigned long long)elapsed, queryCount, allocAttempts);
         return 0;
     }
 
