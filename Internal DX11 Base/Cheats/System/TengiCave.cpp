@@ -24,6 +24,29 @@ namespace DX11Base {
   static uintptr_t g_tengiCaveAddr = 0;
   static bool g_tengiApplied = false;
 
+  namespace {
+    constexpr uintptr_t kTengiV0860Rva = 0x1338830;
+    constexpr uint8_t kTengiV0860Bytes[7] = {0x41, 0x88, 0x87, 0x18, 0x4B, 0x1E, 0x00};
+
+    bool ResolveKnownTengiHook(uintptr_t exeBase, uintptr_t searchEnd, uintptr_t *outHook) {
+      if (!outHook || searchEnd <= exeBase)
+        return false;
+      const uintptr_t imageSize = searchEnd - exeBase;
+      if (imageSize < kTengiV0860Rva + sizeof(kTengiV0860Bytes))
+        return false;
+
+      const uintptr_t candidate = exeBase + kTengiV0860Rva;
+      if (!IsValidPtr(candidate, sizeof(kTengiV0860Bytes)))
+        return false;
+      if (memcmp((const void *)candidate, kTengiV0860Bytes,
+                 sizeof(kTengiV0860Bytes)) != 0)
+        return false;
+
+      *outHook = candidate;
+      return true;
+    }
+  }
+
   static bool InstallTengiCave(uintptr_t hookAddr) {
     g_tengiCaveAddr = AllocNear(hookAddr, 128);
     if (!g_tengiCaveAddr)
@@ -94,8 +117,14 @@ namespace DX11Base {
             GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi));
             uintptr_t searchEnd = exeBase + mi.SizeOfImage;
 
-            if (!g_tengiHookAddr)
-              g_tengiHookAddr = FindPattern(exeBase, searchEnd, "41 88 87 18 4B 1E 00");
+            if (!g_tengiHookAddr) {
+              if (ResolveKnownTengiHook(exeBase, searchEnd, &g_tengiHookAddr)) {
+                AddLog(u8"[Tengi] V0.860 고정 RVA 검증 성공: +0x%llX",
+                       (unsigned long long)kTengiV0860Rva);
+              } else {
+                g_tengiHookAddr = FindPattern(exeBase, searchEnd, "41 88 87 18 4B 1E 00");
+              }
+            }
 
             AddLog("[DEBUG] tengiHook: %p", (void *)g_tengiHookAddr);
 
