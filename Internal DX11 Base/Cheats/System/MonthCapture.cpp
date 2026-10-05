@@ -14,7 +14,7 @@ namespace DX11Base {
         constexpr uintptr_t kScenarioMonthOffset = 0x72D2;
 
         // 사용자 제공 CT의 현재 날짜 포인터 체인:
-        // SAN8RPK.exe+034C8630 -> +3D20 -> +8 -> +10 -> +0 -> +E8 -> +E0 -> +7332(월)
+        // SAN8RPK.exe+034C8630 -> * +3D20 -> * +8 -> * +10 -> * +0 -> * +E8 -> * +E0 -> * +7332(월)
         constexpr uintptr_t kCtDateRootStaticOffset = 0x34C8630;
         constexpr uintptr_t kCtCurrentMonthOffset = 0x7332;
 
@@ -44,25 +44,23 @@ namespace DX11Base {
                 return 0;
 
             // Cheat Engine pointer record semantics:
-            // base itself is not dereferenced first. Apply +3D20, dereference,
-            // then continue the remaining offsets in order.
+            // 가장 높은 Offset부터: 현재 주소를 dereference한 뒤 offset을 더합니다.
+            // Offset[0](0x7332)은 마지막에 적용되며, 그 뒤에는 추가 dereference가 없습니다.
             uintptr_t current = moduleBase + kCtDateRootStaticOffset;
-
             constexpr uintptr_t kPointerOffsets[] = {
-                0x3D20, 0x8, 0x10, 0x0, 0xE8, 0xE0
+                0x3D20, 0x8, 0x10, 0x0, 0xE8, 0xE0, kCtCurrentMonthOffset
             };
 
             for (const uintptr_t offset : kPointerOffsets) {
                 uintptr_t next = 0;
-                if (!ReadPointerChecked(current + offset, &next))
+                if (!ReadPointerChecked(current, &next))
                     return 0;
-                current = next;
+                current = next + offset;
             }
 
-            const uintptr_t monthAddr = current + kCtCurrentMonthOffset;
-            if (!IsValidPtr(monthAddr, 1))
+            if (!IsValidPtr(current, 1))
                 return 0;
-            return monthAddr;
+            return current;
         }
 
         // 연·월 필드만 검사 (넓은 범위 IsValidPtr는 VirtualQuery 비용이 큼)
