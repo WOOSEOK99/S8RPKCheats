@@ -388,27 +388,23 @@ namespace DX11Base {
 
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 보주가 개방됩니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"담력 소비 없이 정의된 보주를 전체 개방합니다.");
           ImGui::EndTooltip();
         }
 
-        bool allSecondaryJewels = DX11Base::IsAllSecondaryJewelsEnabled();
         ImGui::SameLine(160 * scale);
-        if (ImGui::Checkbox(u8"보조 보주 모두 사용", &allSecondaryJewels)) {
-          if (DX11Base::SetAllSecondaryJewelsEnabled(allSecondaryJewels)) {
-            DX11Base::AddNotification(allSecondaryJewels ? u8"보조 보주 모두 사용 ON"
-                                                         : u8"보조 보주 모두 사용 OFF");
-            SaveConfig();
-          }
+        if (ImGui::Button(u8"보조 보주 설정")) {
+          DX11Base::OpenJewelSettingsWindow();
         }
-
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), u8"모든 보주를 사용할수 있도록 설정합니다.");
+          ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
+                             u8"계통별 또는 개별로 동시에 강제 사용할 보조 보주를 선택합니다.");
           ImGui::EndTooltip();
         }
 
         EndSection();
+        DX11Base::DrawJewelSettingsWindow(scale);
 
       }
     }
