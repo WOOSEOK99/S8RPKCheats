@@ -35,6 +35,9 @@ static ULONGLONG g_autoFirstTick = 0;
 static ULONGLONG g_autoLastAttempt = 0;
 static int g_autoAttempts = 0;
 
+constexpr const char* kEmbeddedVersionDllUnsupportedError =
+    u8"version.dll 사용 중에는 내장 기본기재 문구 편집을 적용할 수 없습니다.";
+
 void CopyToBuffer(const std::string& text, char* dst, size_t size) {
   if (!dst || size == 0)
     return;
@@ -107,7 +110,7 @@ bool ApplyEmbeddedRows(std::string& error) {
   return true;
 }
 
-bool ApplyAll(std::string& error) {
+bool ApplyAll(std::string& error, bool keepLegacyHooksOnUnsupportedEmbedded = false) {
   for (size_t i = 0; i < GetTraitTextEditRows().size(); ++i) {
     if (!ValidateTraitTextRow(i, &error))
       return false;
@@ -131,6 +134,10 @@ bool ApplyAll(std::string& error) {
     return false;
   }
   if (!ApplyEmbeddedRows(error)) {
+    if (keepLegacyHooksOnUnsupportedEmbedded &&
+        error == kEmbeddedVersionDllUnsupportedError) {
+      return false;
+    }
     std::string ignored;
     RemoveTraitTextSpecialDescHook(&ignored);
     RemoveTraitTextDescHook(&ignored);
@@ -236,9 +243,15 @@ void TickTraitTextEditorAutoApply() {
   ++g_autoAttempts;
 
   std::string error;
-  if (ApplyAll(error)) {
+  if (ApplyAll(error, true)) {
     g_autoFinished = true;
     AddLog(u8"[기재 문구/Step6] 저장된 이름/설명 자동 적용 완료");
+    return;
+  }
+
+  if (error == kEmbeddedVersionDllUnsupportedError) {
+    g_autoFinished = true;
+    AddLog(u8"[기재 문구/Step6] version.dll 사용 중: 내장 기본기재 문구 자동 적용 생략");
     return;
   }
 
