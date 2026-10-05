@@ -23,6 +23,8 @@ namespace DX11Base {
   static uint8_t g_tengiOriginal[7] = {};
   static uintptr_t g_tengiCaveAddr = 0;
   static bool g_tengiApplied = false;
+  static bool g_tengiInstallRequested = false;
+  static bool g_tengiDeferredLogged = false;
 
   namespace {
     constexpr uintptr_t kTengiV0860Rva = 0x1338830;
@@ -102,11 +104,24 @@ namespace DX11Base {
       return;
 
     if (enable) {
+      g_tengiInstallRequested = true;
+
+      // 전기 캡처는 무한 전기 또는 전기취소 위젯에서만 필요합니다.
+      // 설정 로드가 상시 SetTengiCapture(true)를 호출하더라도 실제 사용 전에는 cave를 만들지 않습니다.
+      if (!bInfTengi && !bShowWidgetTengi) {
+        if (!g_tengiDeferredLogged) {
+          AddLog(u8"[Tengi] 기능 미사용 상태: 캡처 후크 설치 보류");
+          g_tengiDeferredLogged = true;
+        }
+        return;
+      }
+
       if (g_tengiApplied)
         return;
       if (g_tengiRunning)
         return;
 
+      g_tengiDeferredLogged = false;
       g_tengiRunning = true;
 
       HANDLE hThread = CreateThread(
@@ -128,7 +143,7 @@ namespace DX11Base {
 
             AddLog("[DEBUG] tengiHook: %p", (void *)g_tengiHookAddr);
 
-            if (g_tengiHookAddr && !g_tengiApplied) {
+            if (g_tengiInstallRequested && g_tengiHookAddr && !g_tengiApplied) {
               memcpy(g_tengiOriginal, (void *)g_tengiHookAddr, 7);
               if (InstallTengiCave(g_tengiHookAddr)) {
                 g_tengiApplied = true;
@@ -146,6 +161,8 @@ namespace DX11Base {
         CloseHandle(hThread);
 
     } else {
+      g_tengiInstallRequested = false;
+      g_tengiDeferredLogged = false;
       g_tengiAddr = 0;
 
       if (g_tengiApplied) {
@@ -169,7 +186,7 @@ namespace DX11Base {
   uint8_t GetTengi() {
     if (!g_tengiAddr || !IsValidPtr(g_tengiAddr, 1))
       return 0;
-    return *(uint8_t *)g_tengiAddr;
+    return *(uint8_t*)g_tengiAddr;
   }
 
   // 전기 쓰기
@@ -188,7 +205,7 @@ namespace DX11Base {
     }
 
     // 전기 게이지 값 쓰기
-    *(uint8_t *)g_tengiAddr = value;
+    *(uint8_t*)g_tengiAddr = value;
 
     // 전기 발생 플래그 동기화 (오프셋 +0x18 -> xxA8)
     uintptr_t flagAddr = g_tengiAddr + 0x18;
@@ -207,7 +224,7 @@ namespace DX11Base {
       uintptr_t ptr1 = *(uintptr_t *)(g_tengiAddr + 0x08);
       uintptr_t ptr2 = *(uintptr_t *)(g_tengiAddr + 0x10);
       if (ptr1 != 0 && ptr2 != 0) {
-        *(uint8_t *)flagAddr = 1;
+        *(uint8_t*)flagAddr = 1;
       }
     }
   }
@@ -219,7 +236,7 @@ namespace DX11Base {
 
     // 1. 발생 플래그(+0x18)를 0으로 초기화
     uintptr_t flagAddr = g_tengiAddr + 0x18;
-    *(uint8_t *)flagAddr = 0;
+    *(uint8_t*)flagAddr = 0;
 
     // 2. 전기 이벤트 포인터 1 (+0x08): 유저 요청대로 포인터 0으로 초기화 (64비트 크기인 8바이트를 0으로 밀어 6바이트
     // 모두 0 처리)
@@ -236,6 +253,12 @@ namespace DX11Base {
   // --- [신규] 전기 주소 캡처 감시 및 알림 발생 ---
   void TengiCave_Tick() {
       static bool s_notifiedForThisSession = false;
+
+      // 시작 설정 로드에서는 캡처 요청만 기록하고, 실제 기능을 사용할 때 최초 설치합니다.
+      if (g_tengiInstallRequested && !g_tengiApplied && !g_tengiRunning &&
+          (bInfTengi || bShowWidgetTengi)) {
+          SetTengiCapture(true);
+      }
       
       // 1. 주소가 캡처되었고 아직 알림을 주지 않았을 때
       if (g_tengiAddr != 0 && !s_notifiedForThisSession) {
