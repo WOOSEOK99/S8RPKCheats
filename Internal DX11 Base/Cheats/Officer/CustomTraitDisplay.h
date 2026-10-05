@@ -129,6 +129,13 @@ inline Cache &GetCache() {
   return cache;
 }
 
+// 치트 내부의 주인공/모든 무장 편집 UI는 게임 getter가 아니라 이 표시 캐시를
+// 사용하므로, 런타임에 실제 적용된 내장 편집값만 별도 오버레이로 보관합니다.
+inline std::unordered_map<int, CustomTraitDisplayInfo> &GetAppliedEditorOverrides() {
+  static std::unordered_map<int, CustomTraitDisplayInfo> overrides;
+  return overrides;
+}
+
 inline bool HasExternalGameVersionDll() {
   wchar_t exePath[MAX_PATH] = {};
   const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
@@ -256,6 +263,22 @@ inline bool ReloadIfNeeded() {
 
 } // namespace CustomTraitDisplayDetail
 
+inline void ClearCustomTraitDisplayTextOverrides() {
+  CustomTraitDisplayDetail::GetAppliedEditorOverrides().clear();
+}
+
+inline void SetCustomTraitDisplayTextOverride(
+    uint16_t traitId, const std::string &name, const std::string &desc) {
+  if (traitId == 0)
+    return;
+
+  const int customIndex = static_cast<int>(traitId) - 1;
+  CustomTraitDisplayInfo info;
+  info.name = name;
+  info.desc = desc;
+  CustomTraitDisplayDetail::GetAppliedEditorOverrides()[customIndex] = std::move(info);
+}
+
 // 게임의 기재 ID는 1부터 시작하고 customNames 키는 0부터 시작하므로 ID - 1을 사용합니다.
 inline bool GetCustomTraitDisplayInfo(uint16_t traitId, CustomTraitDisplayInfo &out) {
   if (traitId == 0)
@@ -269,6 +292,19 @@ inline bool GetCustomTraitDisplayInfo(uint16_t traitId, CustomTraitDisplayInfo &
     return false;
 
   out = it->second;
+
+  // 외부 version.dll 사용 시에는 내장 편집 런타임이 비활성화되므로 표시 오버레이도 사용하지 않습니다.
+  if (!CustomTraitDisplayDetail::HasExternalGameVersionDll()) {
+    auto &overrides = CustomTraitDisplayDetail::GetAppliedEditorOverrides();
+    auto overrideIt = overrides.find(customIndex);
+    if (overrideIt != overrides.end()) {
+      if (!overrideIt->second.name.empty())
+        out.name = overrideIt->second.name;
+      if (!overrideIt->second.desc.empty())
+        out.desc = overrideIt->second.desc;
+    }
+  }
+
   return !out.name.empty() || !out.desc.empty();
 }
 
