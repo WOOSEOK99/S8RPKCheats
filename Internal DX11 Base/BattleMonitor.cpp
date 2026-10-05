@@ -292,6 +292,7 @@ namespace DX11Base {
     static uint64_t s_readyUnitSignature = 0;
     static uint64_t s_stableSince = 0;
     static int s_readyUnitCount = 0;
+    static uint64_t s_lastReadinessLog = 0;
     const uint64_t nowMs = GetTickCount64();
 
     if (s_battleSessionResetPending) {
@@ -304,6 +305,7 @@ namespace DX11Base {
       s_readyUnitList = 0;
       s_readyDayBase = 0;
       s_stableSince = 0;
+      s_lastReadinessLog = 0;
     }
 
     // 디버그 모드 전용 전투 상태 변화 스냅샷.
@@ -433,19 +435,28 @@ namespace DX11Base {
     // A heartbeat or a partially deserialized list only indicates a possible battle.
     // Require a valid date/list and at least one usable unit/member record.
     // Stabilize the battle roots for 1 second; roster changes only rebuild unit caches.
-    bool recordsReady = isDateValid && isUnitListValid &&
-                        lifecycleGameState != 0x00 && lifecycleGameState != 0xFF &&
-                        lifecycleGameState != 0x05 && lifecycleGameState != 0x07;
+    const bool stateReady = lifecycleGameState != 0x00 && lifecycleGameState != 0xFF &&
+                            lifecycleGameState != 0x05 && lifecycleGameState != 0x07;
+    bool recordsReady = isDateValid && isUnitListValid && stateReady;
+    const char *readinessReason = !isDateValid ? "day" :
+                                  !isUnitListValid ? "unit-list" :
+                                  !stateReady ? "game-state" : "stabilizing";
+    bool sessionReady = false;
     uint64_t unitSignature = 14695981039346656037ull;
     int validUnitCount = 0;
     ResolveRegionCache readinessRegions{};
     __try {
-      if (!IsValidPtr(gameBase + 0xE0, sizeof(uintptr_t)) ||
-          !IsValidPtr(*(uintptr_t *)(gameBase + 0xE0), 0x200))
+      sessionReady = IsValidPtr(gameBase + 0xE0, sizeof(uintptr_t)) &&
+                     IsValidPtr(*(uintptr_t *)(gameBase + 0xE0), 0x200);
+      if (!sessionReady) {
+        if (recordsReady)
+          readinessReason = "session-p1";
         recordsReady = false;
+      }
       for (int i = 0; recordsReady && i < unitCountTotal; ++i) {
         const uintptr_t slot = unitListBase + 0x08 + (uintptr_t)i * 0x10;
         if (!IsValidPtrForResolve(slot, sizeof(uintptr_t), readinessRegions)) {
+          readinessReason = "unit-slot";
           recordsReady = false;
           break;
         }
@@ -460,14 +471,18 @@ namespace DX11Base {
         unitSignature = (unitSignature ^ member) * 1099511628211ull;
       }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+      readinessReason = "read-exception";
       recordsReady = false;
     }
+    if (recordsReady && validUnitCount == 0)
+      readinessReason = "no-usable-unit";
     recordsReady = recordsReady && validUnitCount > 0;
 
     const bool battleIdentityChanged = unitListBase != s_readyUnitList ||
                                        dayBaseAddr != s_readyDayBase;
     const bool rosterChanged = unitCountTotal != s_readyUnitCount ||
                                unitSignature != s_readyUnitSignature;
+    const bool wasRuntimeReady = s_battleRuntimeReady;
     if (!recordsReady || battleIdentityChanged) {
       s_battleRuntimeReady = false;
       s_stableSince = recordsReady ? nowMs : 0;
@@ -498,12 +513,25 @@ namespace DX11Base {
     s_readyUnitSignature = unitSignature;
 
     if (battleActive && !s_battleRuntimeReady) {
+      if (s_lastReadinessLog == 0 || nowMs - s_lastReadinessLog >= 5000) {
+        s_lastReadinessLog = nowMs;
+        AddLog(u8"[BattleReady] blocked=%s State:0x%02X Day:%d Units:%d Usable:%d P1Ready:%d List:%p DayBase:%p RootsChanged:%d StableMs:%llu Siege:%d/%d",
+               readinessReason, (unsigned int)lifecycleGameState, currentDay, unitCountTotal,
+               validUnitCount, sessionReady ? 1 : 0, (void *)unitListBase, (void *)dayBaseAddr,
+               battleIdentityChanged ? 1 : 0, (unsigned long long)(s_stableSince ? nowMs - s_stableSince : 0),
+               bSiegeWarfare ? 1 : 0, bSiegeWarfare2 ? 1 : 0);
+      }
       g_battleUnitAddr1 = 0;
       g_battleUnitAddr2 = 0;
       return;
     }
 
     if (battleActive) {
+      if (!wasRuntimeReady) {
+        s_lastReadinessLog = 0;
+        AddLog(u8"[BattleReady] ready Day:%d Units:%d Usable:%d Siege:%d/%d",
+               currentDay, unitCountTotal, validUnitCount, bSiegeWarfare ? 1 : 0, bSiegeWarfare2 ? 1 : 0);
+      }
       s_lastSeenTime = currentTime;
       uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
 
