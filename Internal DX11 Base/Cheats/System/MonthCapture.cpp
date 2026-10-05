@@ -43,9 +43,10 @@ namespace DX11Base {
             if (!moduleBase)
                 return 0;
 
-            uintptr_t current = 0;
-            if (!ReadPointerChecked(moduleBase + kCtDateRootStaticOffset, &current))
-                return 0;
+            // Cheat Engine pointer record semantics:
+            // base itself is not dereferenced first. Apply +3D20, dereference,
+            // then continue the remaining offsets in order.
+            uintptr_t current = moduleBase + kCtDateRootStaticOffset;
 
             constexpr uintptr_t kPointerOffsets[] = {
                 0x3D20, 0x8, 0x10, 0x0, 0xE8, 0xE0
