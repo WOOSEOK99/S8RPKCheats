@@ -16,6 +16,30 @@ namespace DX11Base {
         // 월 후킹 패턴 mov [rsi+0x72D2], al 과 동일 오프셋
         constexpr uintptr_t kScenarioMonthOffset = 0x72D2;
 
+        // V0.860 실게임 로그에서 반복 확인된 월 쓰기 명령 RVA.
+        // 고정 주소를 그대로 신뢰하지 않고 원본 6바이트가 일치할 때만 fast path로 사용합니다.
+        constexpr uintptr_t kMonthHookV0860Rva = 0x1BDCAD1;
+        constexpr uint8_t kMonthHookV0860Bytes[6] = { 0x88, 0x86, 0xD2, 0x72, 0x00, 0x00 };
+
+        bool ResolveKnownMonthHook(uintptr_t exeBase, uintptr_t searchEnd, uintptr_t* outHook) {
+            if (!outHook || searchEnd <= exeBase)
+                return false;
+
+            const uintptr_t imageSize = searchEnd - exeBase;
+            if (imageSize < kMonthHookV0860Rva + sizeof(kMonthHookV0860Bytes))
+                return false;
+
+            const uintptr_t candidate = exeBase + kMonthHookV0860Rva;
+            if (!IsValidPtr(candidate, sizeof(kMonthHookV0860Bytes)))
+                return false;
+            if (memcmp((const void*)candidate, kMonthHookV0860Bytes,
+                       sizeof(kMonthHookV0860Bytes)) != 0)
+                return false;
+
+            *outHook = candidate;
+            return true;
+        }
+
         // 연·월 필드만 검사 (넓은 범위 IsValidPtr는 VirtualQuery 비용이 큼)
         uintptr_t ResolveScenarioDataCenter() {
             uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
@@ -226,25 +250,34 @@ namespace DX11Base {
                 uintptr_t searchEnd = exeBase + mi.SizeOfImage;
                 const bool perfEnabled = PerfDiagnosticsEnabled();
                 const uint64_t perfStart = perfEnabled ? PerfRealNow100ns() : 0;
+                uint64_t scannedBytes = 0;
 
                 AddLog(u8"[MonthCapture] 월 캡처 검색 시작... (%p ~ %p)", (void*)exeBase, (void*)searchEnd);
 
-                // 1. 정확한 패턴 검색 우선
-                g_monthHookAddr = FindPattern(exeBase, searchEnd, "88 86 D2 72 00 00");
+                if (ResolveKnownMonthHook(exeBase, searchEnd, &g_monthHookAddr)) {
+                    scannedBytes = sizeof(kMonthHookV0860Bytes);
+                    AddLog(u8"[MonthCapture] V0.860 고정 RVA 검증 성공: +0x%llX",
+                           (unsigned long long)kMonthHookV0860Rva);
+                } else {
+                    scannedBytes = searchEnd > exeBase ? searchEnd - exeBase : 0;
 
-                // 2. 다중 매칭 순회 및 중단 체크
-                if (!g_monthHookAddr) {
-                    uintptr_t currentStart = exeBase;
-                    while (currentStart < searchEnd && !g_stopScan) {
-                        uintptr_t found = FindPattern(currentStart, searchEnd, "88 86 ? ? 00 00");
-                        if (!found) break;
+                    // 1. 정확한 패턴 검색 우선
+                    g_monthHookAddr = FindPattern(exeBase, searchEnd, "88 86 D2 72 00 00");
 
-                        uint32_t offset = *(uint32_t*)(found + 2);
-                        if (offset != 0x593) {
-                            g_monthHookAddr = found;
-                            break;
+                    // 2. 다중 매칭 순회 및 중단 체크
+                    if (!g_monthHookAddr) {
+                        uintptr_t currentStart = exeBase;
+                        while (currentStart < searchEnd && !g_stopScan) {
+                            uintptr_t found = FindPattern(currentStart, searchEnd, "88 86 ? ? 00 00");
+                            if (!found) break;
+
+                            uint32_t offset = *(uint32_t*)(found + 2);
+                            if (offset != 0x593) {
+                                g_monthHookAddr = found;
+                                break;
+                            }
+                            currentStart = found + 1;
                         }
-                        currentStart = found + 1;
                     }
                 }
 
@@ -267,7 +300,7 @@ namespace DX11Base {
                     const uint64_t perfEnd = PerfRealNow100ns();
                     PerfRecord(PerfMetric::MonthCaptureScan,
                                perfEnd >= perfStart ? perfEnd - perfStart : 0,
-                               searchEnd > exeBase ? searchEnd - exeBase : 0,
+                               scannedBytes,
                                g_monthApplied ? 1 : 0);
                 }
 
