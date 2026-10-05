@@ -12,6 +12,7 @@ namespace DX11Base {
   namespace {
     constexpr ULONGLONG kBattleMonitorNotReadyIntervalMs = 500;
     constexpr ULONGLONG kSpecialFallbackIntervalMs = 100;
+    constexpr ULONGLONG kSpecialFallbackResolveRefreshMs = 500;
 
     uintptr_t ResolveBattleFallbackChain(uintptr_t base, std::initializer_list<uintptr_t> offsets) {
       uintptr_t current = base;
@@ -52,21 +53,27 @@ namespace DX11Base {
 
     void RunSpecialAbilityReadinessFallback() {
       static bool s_fallbackActive = false;
+      static uintptr_t s_cachedGameBase = 0;
       static uintptr_t s_cachedUnitList = 0;
+      static uintptr_t s_cachedDayBase = 0;
       static int s_cachedUnitCount = 0;
       static ULONGLONG s_lastFallbackTick = 0;
+      static ULONGLONG s_lastResolveTick = 0;
 
       if (IsBattleRuntimeReady()) {
         s_fallbackActive = false;
+        s_cachedGameBase = 0;
         s_cachedUnitList = 0;
+        s_cachedDayBase = 0;
         s_cachedUnitCount = 0;
         s_lastFallbackTick = 0;
+        s_lastResolveTick = 0;
         return;
       }
 
-      // The menu/background loop is faster than the intended battle monitor
-      // cadence. Keep the recovery path responsive without re-running all
-      // pointer chains and special-ability checks every loop iteration.
+      // The special-ability state still needs near-real-time turn switching,
+      // but the long unit/day pointer chains do not need to be rebuilt every
+      // background-loop iteration.
       const ULONGLONG now = GetTickCount64();
       if (s_lastFallbackTick != 0 && now - s_lastFallbackTick < kSpecialFallbackIntervalMs)
         return;
@@ -76,10 +83,79 @@ namespace DX11Base {
       if (!exeBase)
         return;
 
-      const uintptr_t unitListBase = ResolveBattleFallbackChain(
-          exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
-      const uintptr_t dayBaseAddr = ResolveBattleFallbackChain(
-          exeBase + 0x02E99460, {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0});
+      const uintptr_t gameBase = DX11Base::GetGameBase();
+      if (!gameBase) {
+        if (s_fallbackActive) {
+          UpdateSpecialAbilities(0, 0, exeBase);
+          ClearBattleCache();
+        }
+        s_fallbackActive = false;
+        s_cachedGameBase = 0;
+        s_cachedUnitList = 0;
+        s_cachedDayBase = 0;
+        s_cachedUnitCount = 0;
+        s_lastResolveTick = 0;
+        return;
+      }
+
+      // A new save generation gets a different gameBase/P1. Drop all fallback
+      // addresses immediately so no old-save pointer survives into the new one.
+      if (s_cachedGameBase != gameBase) {
+        if (s_fallbackActive) {
+          UpdateSpecialAbilities(0, 0, exeBase);
+          ClearBattleCache();
+        }
+        s_fallbackActive = false;
+        s_cachedGameBase = gameBase;
+        s_cachedUnitList = 0;
+        s_cachedDayBase = 0;
+        s_cachedUnitCount = 0;
+        s_lastResolveTick = 0;
+      }
+
+      uintptr_t unitListBase = s_cachedUnitList;
+      uintptr_t dayBaseAddr = s_cachedDayBase;
+
+      bool cachedPointersReadable = false;
+      const bool cachedPointersPresent = unitListBase > 0x10000 && dayBaseAddr > 0x10000;
+      if (cachedPointersPresent) {
+        __try {
+          cachedPointersReadable = IsValidPtr(unitListBase - 0x08, 1) &&
+                                   IsValidPtr(dayBaseAddr + 0x28, 1);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+          cachedPointersReadable = false;
+        }
+      }
+
+      // Full chain refresh is periodic, or immediate only when a previously
+      // usable cached address becomes unreadable. In normal battle runtime this
+      // cuts the two long chain walks from ~10/sec to ~2/sec.
+      const bool refreshPointers =
+          s_lastResolveTick == 0 ||
+          now - s_lastResolveTick >= kSpecialFallbackResolveRefreshMs ||
+          (cachedPointersPresent && !cachedPointersReadable);
+
+      if (refreshPointers) {
+        const uintptr_t resolvedUnitList = ResolveBattleFallbackChain(
+            exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
+        const uintptr_t resolvedDayBase = ResolveBattleFallbackChain(
+            exeBase + 0x02E99460, {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0});
+        s_lastResolveTick = now;
+
+        if (resolvedUnitList != s_cachedUnitList || resolvedDayBase != s_cachedDayBase) {
+          if (s_fallbackActive) {
+            UpdateSpecialAbilities(0, 0, exeBase);
+            ClearBattleCache();
+          }
+          s_fallbackActive = false;
+          s_cachedUnitCount = 0;
+          s_cachedUnitList = resolvedUnitList;
+          s_cachedDayBase = resolvedDayBase;
+        }
+
+        unitListBase = s_cachedUnitList;
+        dayBaseAddr = s_cachedDayBase;
+      }
 
       int unitCount = 0;
       int currentDay = -1;
@@ -102,14 +178,12 @@ namespace DX11Base {
           AddLog(u8"[BattleFallback] readiness fallback 종료");
         }
         s_fallbackActive = false;
-        s_cachedUnitList = 0;
         s_cachedUnitCount = 0;
         return;
       }
 
-      if (!s_fallbackActive || s_cachedUnitList != unitListBase || s_cachedUnitCount != unitCount) {
+      if (!s_fallbackActive || s_cachedUnitCount != unitCount) {
         InitializeBattleCache(unitCount, unitListBase, exeBase);
-        s_cachedUnitList = unitListBase;
         s_cachedUnitCount = unitCount;
         s_fallbackActive = true;
         AddLog(u8"[BattleFallback] readiness 미완료 상태에서 특수능력 캐시 복구: Units=%d Day=%d",
