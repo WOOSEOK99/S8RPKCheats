@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "TraitTextEditorWindow.h"
 
+#include "CustomTraitDisplay.h"
 #include "TraitConfigRuntime.h"
 #include "TraitTextEditorData.h"
 #include "TraitTextNameHook.h"
@@ -95,7 +96,15 @@ bool ApplyEmbeddedRows(std::string& error) {
     overrides.push_back(std::move(item));
   }
 
-  return ApplyEmbeddedTraitTextOverrides(overrides, &error);
+  if (!ApplyEmbeddedTraitTextOverrides(overrides, &error))
+    return false;
+
+  // 주인공/모든 무장 편집 UI는 게임의 이름 getter가 아닌 CustomTraitDisplay 캐시를
+  // 사용하므로, 실제 적용 성공 후 같은 ID 기반 편집값을 표시 오버레이에도 반영합니다.
+  ClearCustomTraitDisplayTextOverrides();
+  for (const auto& item : overrides)
+    SetCustomTraitDisplayTextOverride(static_cast<uint16_t>(item.traitId), item.name, item.desc);
+  return true;
 }
 
 bool ApplyAll(std::string& error) {
@@ -140,6 +149,7 @@ bool RemoveAll(std::string& error) {
     ok = false;
     firstError = e;
   }
+  ClearCustomTraitDisplayTextOverrides();
   e.clear();
   if (!RemoveTraitTextSpecialDescHook(&e)) {
     ok = false;
