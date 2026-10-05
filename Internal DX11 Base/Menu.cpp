@@ -192,6 +192,47 @@ namespace DX11Base {
 
       UpdateSpecialAbilities(unitCount, unitListBase, exeBase);
     }
+
+    void ProfiledSpecialAbilityReadinessFallback() {
+      if (!PerfDiagnosticsEnabled()) {
+        RunSpecialAbilityReadinessFallback();
+        return;
+      }
+
+      static uint64_t s_calls = 0;
+      static uint64_t s_total100ns = 0;
+      static uint64_t s_max100ns = 0;
+      static uint64_t s_nextReport100ns = 0;
+
+      const uint64_t start = PerfRealNow100ns();
+      RunSpecialAbilityReadinessFallback();
+      const uint64_t end = PerfRealNow100ns();
+      const uint64_t elapsed = end >= start ? end - start : 0;
+
+      ++s_calls;
+      s_total100ns += elapsed;
+      if (elapsed > s_max100ns)
+        s_max100ns = elapsed;
+
+      constexpr uint64_t kReportInterval100ns = 5ull * 1000ull * 1000ull * 10ull;
+      if (s_nextReport100ns == 0) {
+        s_nextReport100ns = end + kReportInterval100ns;
+        return;
+      }
+      if (end < s_nextReport100ns)
+        return;
+
+      const double totalMs = static_cast<double>(s_total100ns) / 10000.0;
+      const double avgUs = s_calls ? (static_cast<double>(s_total100ns) / static_cast<double>(s_calls)) / 10.0 : 0.0;
+      const double maxUs = static_cast<double>(s_max100ns) / 10.0;
+      AddLog("[Perf:T04] BattleFallback calls=%llu total=%.3fms avg=%.2fus max=%.2fus",
+             static_cast<unsigned long long>(s_calls), totalMs, avgUs, maxUs);
+
+      s_calls = 0;
+      s_total100ns = 0;
+      s_max100ns = 0;
+      s_nextReport100ns = end + kReportInterval100ns;
+    }
   } // namespace
 
   static void ProfiledMonitorBattleStatus() {
@@ -204,7 +245,7 @@ namespace DX11Base {
       }
     }
 
-    RunSpecialAbilityReadinessFallback();
+    ProfiledSpecialAbilityReadinessFallback();
   }
 } // namespace DX11Base
 
