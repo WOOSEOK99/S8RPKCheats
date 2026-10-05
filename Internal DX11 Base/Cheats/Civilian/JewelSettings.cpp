@@ -71,8 +71,10 @@ SecondaryJewelJudgeFn g_originalSecondaryJewelJudge = nullptr;
 bool g_secondaryJewelHookInstalled = false;
 
 // 0 = 미확인, 1 = 런타임 데이터 없음, 2 = 런타임 데이터 존재.
-// 원 version.dll도 ID별 캐시를 사용해 hot path에서 반복 포인터 검증을 피합니다.
+// 데이터 존재 판정은 캐시하고, 데이터 없음 판정은 일정 간격으로 다시 확인합니다.
+constexpr ULONGLONG kSecondaryRuntimeRetryIntervalMs = 250ull;
 std::array<uint8_t, kMaxSecondaryJewelId + 1> g_secondaryRuntimeCache{};
+std::array<ULONGLONG, kMaxSecondaryJewelId + 1> g_secondaryRuntimeLastProbeMs{};
 uintptr_t g_secondaryRuntimeCacheBase = 0;
 
 bool g_showJewelSettingsWindow = false;
@@ -140,6 +142,7 @@ bool ApplyAllJewelsOpenAtBase(uintptr_t gameBase, bool enable) {
 
 void ResetSecondaryJewelRuntimeCache() {
   g_secondaryRuntimeCache.fill(0);
+  g_secondaryRuntimeLastProbeMs.fill(0);
   g_secondaryRuntimeCacheBase = 0;
 }
 
@@ -211,14 +214,22 @@ bool HasSecondaryJewelRuntimeDataCached(uintptr_t gameBase, uint16_t jewelId) {
 
   // 세이브/시나리오 전환 등으로 gameBase가 바뀌면 캐시를 다시 계산합니다.
   if (g_secondaryRuntimeCacheBase != gameBase) {
-    g_secondaryRuntimeCache.fill(0);
+    ResetSecondaryJewelRuntimeCache();
     g_secondaryRuntimeCacheBase = gameBase;
   }
 
   uint8_t &cached = g_secondaryRuntimeCache[jewelId];
-  if (cached == 0)
-    cached = ProbeSecondaryJewelRuntimeData(gameBase, jewelId) ? 2 : 1;
+  if (cached == 2)
+    return true;
 
+  const ULONGLONG now = GetTickCount64();
+  ULONGLONG &lastProbeMs = g_secondaryRuntimeLastProbeMs[jewelId];
+  if (cached == 1 && now - lastProbeMs < kSecondaryRuntimeRetryIntervalMs)
+    return false;
+
+  // 같은 gameBase에서도 로드/지연 생성 후 데이터가 생길 수 있으므로 실패는 영구 캐시하지 않습니다.
+  lastProbeMs = now;
+  cached = ProbeSecondaryJewelRuntimeData(gameBase, jewelId) ? 2 : 1;
   return cached == 2;
 }
 
