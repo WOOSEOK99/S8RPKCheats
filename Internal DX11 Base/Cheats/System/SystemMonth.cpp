@@ -18,6 +18,31 @@ namespace DX11Base {
     static uintptr_t g_monthUICaveAddr     = 0;
     static bool      g_monthUIApplied      = false;
 
+    namespace {
+        constexpr uintptr_t kSystemMonthV0860Rva = 0x6609BF;
+        constexpr uint8_t kSystemMonthV0860Bytes[10] = {
+            0x88, 0x48, 0x6C, 0x41, 0xC7, 0x06, 0x01, 0x00, 0x00, 0x00
+        };
+
+        bool ResolveKnownSystemMonthHook(uintptr_t exeBase, uintptr_t searchEnd, uintptr_t* outHook) {
+            if (!outHook || searchEnd <= exeBase)
+                return false;
+            const uintptr_t imageSize = searchEnd - exeBase;
+            if (imageSize < kSystemMonthV0860Rva + sizeof(kSystemMonthV0860Bytes))
+                return false;
+
+            const uintptr_t candidate = exeBase + kSystemMonthV0860Rva;
+            if (!IsValidPtr(candidate, sizeof(kSystemMonthV0860Bytes)))
+                return false;
+            if (memcmp((const void*)candidate, kSystemMonthV0860Bytes,
+                       sizeof(kSystemMonthV0860Bytes)) != 0)
+                return false;
+
+            *outHook = candidate;
+            return true;
+        }
+    }
+
     // ---------------------------------------------------------------------------
     // InstallSystemMonthHook: 신규 AOB(10바이트 패턴) 기반 후킹 설치
     // ---------------------------------------------------------------------------
@@ -74,8 +99,14 @@ namespace DX11Base {
             GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi));
             uintptr_t searchEnd = exeBase + mi.SizeOfImage;
 
-            if (!g_monthUIHookAddr)
-                g_monthUIHookAddr = FindPattern(exeBase, searchEnd, "88 48 6C 41 C7 06 01 00 00 00");
+            if (!g_monthUIHookAddr) {
+                if (ResolveKnownSystemMonthHook(exeBase, searchEnd, &g_monthUIHookAddr)) {
+                    AddLog(u8"[SystemMonth] V0.860 고정 RVA 검증 성공: +0x%llX",
+                           (unsigned long long)kSystemMonthV0860Rva);
+                } else {
+                    g_monthUIHookAddr = FindPattern(exeBase, searchEnd, "88 48 6C 41 C7 06 01 00 00 00");
+                }
+            }
 
             if (g_monthUIHookAddr && !g_monthUIApplied) {
                 memcpy(g_monthUIOriginal, (void*)g_monthUIHookAddr, 10);
