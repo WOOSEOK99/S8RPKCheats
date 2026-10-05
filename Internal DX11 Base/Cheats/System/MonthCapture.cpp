@@ -3,41 +3,59 @@
 #include "../../Cheats.h"
 #include "../../showlog.h"
 #include "../../MemoryUtils.h"
-#include "../../PerformanceDiagnostics.h"
-#include <psapi.h>
-#include <string>
 
 namespace DX11Base {
 
     namespace {
-        // 게임 모듈 내 인스턴스 포인터(고정) → 실제 데이터 블록
+        // 기존 시나리오 데이터 블록. 연회/중개 및 기존 날짜 API는 이 경로를 유지합니다.
         constexpr uintptr_t kScenarioInstanceStaticOffset = 0x2E98BC8;
         constexpr uintptr_t kScenarioYearOffset = 0x72D0;
-        // 월 후킹 패턴 mov [rsi+0x72D2], al 과 동일 오프셋
         constexpr uintptr_t kScenarioMonthOffset = 0x72D2;
 
-        // V0.860 실게임 로그에서 반복 확인된 월 쓰기 명령 RVA.
-        // 고정 주소를 그대로 신뢰하지 않고 원본 6바이트가 일치할 때만 fast path로 사용합니다.
-        constexpr uintptr_t kMonthHookV0860Rva = 0x1BDCAD1;
-        constexpr uint8_t kMonthHookV0860Bytes[6] = { 0x88, 0x86, 0xD2, 0x72, 0x00, 0x00 };
+        // 사용자 제공 CT의 현재 날짜 포인터 체인:
+        // SAN8RPK.exe+034C8630 -> +3D20 -> +8 -> +10 -> +0 -> +E8 -> +E0 -> +7332(월)
+        constexpr uintptr_t kCtDateRootStaticOffset = 0x34C8630;
+        constexpr uintptr_t kCtCurrentMonthOffset = 0x7332;
 
-        bool ResolveKnownMonthHook(uintptr_t exeBase, uintptr_t searchEnd, uintptr_t* outHook) {
-            if (!outHook || searchEnd <= exeBase)
+        bool ReadPointerChecked(uintptr_t address, uintptr_t* outValue) {
+            if (!outValue || address < 0x10000 || !IsValidPtr(address, sizeof(uintptr_t)))
                 return false;
 
-            const uintptr_t imageSize = searchEnd - exeBase;
-            if (imageSize < kMonthHookV0860Rva + sizeof(kMonthHookV0860Bytes))
+            __try {
+                const uintptr_t value = *(uintptr_t*)address;
+                if (value < 0x10000)
+                    return false;
+                *outValue = value;
+                return true;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
                 return false;
+            }
+        }
 
-            const uintptr_t candidate = exeBase + kMonthHookV0860Rva;
-            if (!IsValidPtr(candidate, sizeof(kMonthHookV0860Bytes)))
-                return false;
-            if (memcmp((const void*)candidate, kMonthHookV0860Bytes,
-                       sizeof(kMonthHookV0860Bytes)) != 0)
-                return false;
+        uintptr_t ResolveCtCurrentMonthAddress() {
+            const uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
+            if (!moduleBase)
+                return 0;
 
-            *outHook = candidate;
-            return true;
+            uintptr_t current = 0;
+            if (!ReadPointerChecked(moduleBase + kCtDateRootStaticOffset, &current))
+                return 0;
+
+            constexpr uintptr_t kPointerOffsets[] = {
+                0x3D20, 0x8, 0x10, 0x0, 0xE8, 0xE0
+            };
+
+            for (const uintptr_t offset : kPointerOffsets) {
+                uintptr_t next = 0;
+                if (!ReadPointerChecked(current + offset, &next))
+                    return 0;
+                current = next;
+            }
+
+            const uintptr_t monthAddr = current + kCtCurrentMonthOffset;
+            if (!IsValidPtr(monthAddr, 1))
+                return 0;
+            return monthAddr;
         }
 
         // 연·월 필드만 검사 (넓은 범위 IsValidPtr는 VirtualQuery 비용이 큼)
@@ -188,147 +206,39 @@ namespace DX11Base {
     bool bMonthCapture = true;       // 상설 기능화 (기본값 true)
     bool s_appMonthCapture = false;  // 현재 적용 여부
 
-    // ───────────────────────────────────────────────
-    //  사용자 제공 로직: 월 주소 실시간 캡처
-    // ───────────────────────────────────────────────
-
-    uintptr_t g_realMonthAddr      = 0;  // 실제 월 데이터 주소
-    static uintptr_t g_monthHookAddr    = 0;
-    static uint8_t   g_monthOriginal[6] = { 0 };
-    static uintptr_t g_monthCaveAddr    = 0;
-    static bool      g_monthApplied     = false;
-    static bool      g_monthCaptureRunning = false;
-    static volatile bool g_stopScan     = false; // 스캔 중단 플래그
-
-    static bool InstallMonthCave(uintptr_t hookAddr, uint32_t offset) {
-        g_monthCaveAddr = AllocNear(hookAddr, 128);
-        if (!g_monthCaveAddr) return false;
-
-        uint8_t* cave = (uint8_t*)g_monthCaveAddr;
-        int idx = 0;
-
-        // push rax
-        cave[idx++] = 0x50;
-
-        // lea rax, [rsi + dynamic_offset] (48 8D 86 [4-byte offset])
-        cave[idx++] = 0x48; cave[idx++] = 0x8D; cave[idx++] = 0x86;
-        *(uint32_t*)&cave[idx] = offset; idx += 4;
-
-        // mov [g_realMonthAddr], rax
-        cave[idx++] = 0x48; cave[idx++] = 0xA3;
-        *(uintptr_t*)&cave[idx] = (uintptr_t)&g_realMonthAddr; idx += 8;
-
-        // pop rax
-        cave[idx++] = 0x58;
-
-        // 원본: mov [rsi + dynamic_offset], al (88 86 [4-byte offset])
-        cave[idx++] = 0x88; cave[idx++] = 0x86;
-        *(uint32_t*)&cave[idx] = offset; idx += 4;
-
-        // 복귀 점프
-        uintptr_t retAddr = hookAddr + 6;
-        cave[idx++] = 0xFF; cave[idx++] = 0x25;
-        cave[idx++] = 0x00; cave[idx++] = 0x00; cave[idx++] = 0x00; cave[idx++] = 0x00;
-        *(uintptr_t*)&cave[idx] = retAddr; idx += 8;
-
-        return ApplyJmp(hookAddr, g_monthCaveAddr, 6);
-    }
+    // CT 포인터 체인을 필요할 때마다 직접 해석합니다.
+    // 세이브 로드로 포인터 세대가 바뀌어도 오래된 주소를 유지하지 않습니다.
+    static bool g_monthDirectEnabled = false;
+    static uintptr_t g_realMonthAddr = 0;
 
     void SetMonthCapture(bool enable) {
-        uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-        if (!exeBase) return;
-
         if (enable) {
-            if (g_monthCaptureRunning) return;
-            g_monthCaptureRunning = true;
-            g_stopScan = false;
-
-            HANDLE hThread = CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
-                uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-                MODULEINFO mi;
-                GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi));
-                uintptr_t searchEnd = exeBase + mi.SizeOfImage;
-                const bool perfEnabled = PerfDiagnosticsEnabled();
-                const uint64_t perfStart = perfEnabled ? PerfRealNow100ns() : 0;
-                uint64_t scannedBytes = 0;
-
-                AddLog(u8"[MonthCapture] 월 캡처 검색 시작... (%p ~ %p)", (void*)exeBase, (void*)searchEnd);
-
-                if (ResolveKnownMonthHook(exeBase, searchEnd, &g_monthHookAddr)) {
-                    scannedBytes = sizeof(kMonthHookV0860Bytes);
-                    AddLog(u8"[MonthCapture] V0.860 고정 RVA 검증 성공: +0x%llX",
-                           (unsigned long long)kMonthHookV0860Rva);
-                } else {
-                    scannedBytes = searchEnd > exeBase ? searchEnd - exeBase : 0;
-
-                    // 1. 정확한 패턴 검색 우선
-                    g_monthHookAddr = FindPattern(exeBase, searchEnd, "88 86 D2 72 00 00");
-
-                    // 2. 다중 매칭 순회 및 중단 체크
-                    if (!g_monthHookAddr) {
-                        uintptr_t currentStart = exeBase;
-                        while (currentStart < searchEnd && !g_stopScan) {
-                            uintptr_t found = FindPattern(currentStart, searchEnd, "88 86 ? ? 00 00");
-                            if (!found) break;
-
-                            uint32_t offset = *(uint32_t*)(found + 2);
-                            if (offset != 0x593) {
-                                g_monthHookAddr = found;
-                                break;
-                            }
-                            currentStart = found + 1;
-                        }
-                    }
-                }
-
-                if (g_monthHookAddr && !g_monthApplied && !g_stopScan) {
-                    uint32_t detectedOffset = *(uint32_t*)(g_monthHookAddr + 2);
-                    AddLog("[DEBUG] monthHook matched: %p (Offset: 0x%X)", (void*)g_monthHookAddr, detectedOffset);
-
-                    memcpy(g_monthOriginal, (void*)g_monthHookAddr, 6);
-                    if (InstallMonthCave(g_monthHookAddr, detectedOffset)) {
-                        g_monthApplied = true;
-                        AddLog(u8"[MonthCapture] 실시간 월 캡처 설치 완료.");
-                    }
-                }
-
-                if (!g_monthApplied && !g_stopScan) {
-                    AddLog(u8"[Error] 월 캡처 지점을 끝내 찾지 못했습니다.");
-                }
-
-                if (perfEnabled) {
-                    const uint64_t perfEnd = PerfRealNow100ns();
-                    PerfRecord(PerfMetric::MonthCaptureScan,
-                               perfEnd >= perfStart ? perfEnd - perfStart : 0,
-                               scannedBytes,
-                               g_monthApplied ? 1 : 0);
-                }
-
-                g_monthCaptureRunning = false;
-                g_stopScan = false;
-                return 0;
-            }, nullptr, 0, nullptr);
-
-            if (hThread) CloseHandle(hThread);
-
+            if (g_monthDirectEnabled)
+                return;
+            g_monthDirectEnabled = true;
+            g_realMonthAddr = ResolveCtCurrentMonthAddress();
+            AddLog(u8"[MonthCapture] CT 포인터 체인 직접 조회 활성화: root=+0x34C8630 month=+0x7332 addr=%p",
+                   (void*)g_realMonthAddr);
         } else {
-            g_stopScan = true; // 스캔 중인 스레드가 있다면 중단 요청
+            g_monthDirectEnabled = false;
             g_realMonthAddr = 0;
-
-            if (g_monthApplied) {
-                RestoreBytes(g_monthHookAddr, g_monthOriginal, 6);
-                VirtualFree((LPVOID)g_monthCaveAddr, 0, MEM_RELEASE);
-                g_monthCaveAddr  = 0;
-                g_monthApplied   = false;
-                g_monthHookAddr  = 0;
-            }
         }
     }
 
-    // 현재 월 값 읽기
     uint8_t GetCurrentMonth() {
-        if (!g_realMonthAddr || !IsValidPtr(g_realMonthAddr, 1)) return 0;
-        return *(uint8_t*)g_realMonthAddr;
+        if (!g_monthDirectEnabled)
+            return 0;
+
+        g_realMonthAddr = ResolveCtCurrentMonthAddress();
+        if (!g_realMonthAddr)
+            return 0;
+
+        __try {
+            return *(uint8_t*)g_realMonthAddr;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            g_realMonthAddr = 0;
+            return 0;
+        }
     }
 
 } // namespace DX11Base
