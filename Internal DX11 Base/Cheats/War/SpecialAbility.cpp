@@ -7,6 +7,7 @@
 #include "../../pch.h"
 #include "../../showlog.h"
 
+#include <array>
 #include <vector>
 
 #include "../System/SkillCountManager.h"
@@ -23,6 +24,56 @@ namespace DX11Base {
       current = next + offset;
     }
     return current;
+  }
+
+  struct SARegionEntry {
+    uintptr_t start = 0;
+    uintptr_t end = 0;
+    bool readable = false;
+  };
+
+  struct SARegionCache {
+    static constexpr size_t kCapacity = 16;
+    std::array<SARegionEntry, kCapacity> entries{};
+    size_t next = 0;
+  };
+
+  // UpdateSpecialAbilities 1회 호출 안에서만 VirtualQuery 결과를 재사용합니다.
+  // 호출 사이에는 보존하지 않으며, 영역 경계를 넘는 검사는 기존 IsValidPtr로 폴백합니다.
+  static bool SAIsValidPtr(uintptr_t addr, SIZE_T size, SARegionCache &cache) {
+    if (!addr || size == 0)
+      return false;
+
+    const uintptr_t endAddr = addr + size - 1;
+    if (endAddr < addr)
+      return false;
+
+    for (const auto &entry : cache.entries) {
+      if (entry.start != 0 && addr >= entry.start && endAddr < entry.end)
+        return entry.readable;
+    }
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) != sizeof(mbi))
+      return false;
+
+    const uintptr_t regionStart = (uintptr_t)mbi.BaseAddress;
+    const uintptr_t regionEnd = regionStart + mbi.RegionSize;
+    const bool regionEndValid = regionEnd >= regionStart;
+    const bool readable = regionEndValid && mbi.State == MEM_COMMIT &&
+                          !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+
+    auto &slot = cache.entries[cache.next++ % SARegionCache::kCapacity];
+    slot.start = regionStart;
+    slot.end = regionEndValid ? regionEnd : regionStart;
+    slot.readable = readable;
+
+    if (!readable)
+      return false;
+    if (endAddr < regionEnd)
+      return true;
+
+    return IsValidPtr(addr, size);
   }
 
   //  총사령관 (Generalissimo)
@@ -191,6 +242,7 @@ namespace DX11Base {
     static DWORD lastUpdateTick = 0;
     static DWORD lastBuffVerifyTick = 0;
     DWORD currentTick = GetTickCount();
+    SARegionCache regionCache{};
 
     // 무신 등 개별 부대 데이터는 기존과 동일하게 500ms마다 유지 확인합니다.
     bool runGlobalScan = (unitCountTotal > 0 && currentTick - lastUpdateTick >= 500);
@@ -266,8 +318,8 @@ namespace DX11Base {
         uint8_t targetVal = isActive ? t.active : t.normal;
 
         // 성능 최적화: 현재 값이 이미 목표값과 같으면 VirtualProtect 및 쓰기 건너뜀
-        // [크래시 방지] 캐시 포인터가 무효화됐을 경우를 대비한 IsValidPtr 추가
-        if (!IsValidPtr(targetAddr, 1))
+        // [크래시 방지] 호출 단위 영역 캐시로 유효성을 유지하면서 중복 VirtualQuery를 줄입니다.
+        if (!SAIsValidPtr(targetAddr, 1, regionCache))
           continue;
         if (*(uint8_t *)targetAddr == targetVal)
           continue;
@@ -436,11 +488,11 @@ namespace DX11Base {
 
         if (!cu.hasDeunggab) break;
 
-        if (!IsValidPtr(activeUnitData, 0x280)) break;
+        if (!SAIsValidPtr(activeUnitData, 0x280, regionCache)) break;
         bool isBurning = false;
-        if (IsValidPtr(activeUnitData + 0x40, 8)) {
+        if (SAIsValidPtr(activeUnitData + 0x40, 8, regionCache)) {
           uintptr_t ptr40 = *(uintptr_t *)(activeUnitData + 0x40);
-          if (IsValidPtr(ptr40, 0x40) && *(uint8_t *)(ptr40 + 0x38) == 1)
+          if (SAIsValidPtr(ptr40, 0x40, regionCache) && *(uint8_t *)(ptr40 + 0x38) == 1)
             isBurning = true;
         }
         uint8_t ab1 = *(uint8_t *)(activeUnitData + 0x238);
@@ -472,22 +524,22 @@ namespace DX11Base {
         if (!cu.hasMusin) continue;
 
         uintptr_t unitData = cu.unitAddress;
-        if (!IsValidPtr(unitData, 0x600)) continue;
+        if (!SAIsValidPtr(unitData, 0x600, regionCache)) continue;
 
-        if (!IsValidPtr(unitData + SKILL_PTR_OFF, 8)) continue;
+        if (!SAIsValidPtr(unitData + SKILL_PTR_OFF, 8, regionCache)) continue;
         uintptr_t skillStart = *(uintptr_t *)(unitData + SKILL_PTR_OFF);
-        if (!IsValidPtr(skillStart, SKILL_REC_SIZE)) continue;
+        if (!SAIsValidPtr(skillStart, SKILL_REC_SIZE, regionCache)) continue;
 
         int skillCount = 0;
         for (int j = 0; j < MAX_SKILLS; j++) {
           uintptr_t skillRec = skillStart + j * SKILL_REC_SIZE;
-          if (!IsValidPtr(skillRec + INDEX_OFF, 4)) break;
+          if (!SAIsValidPtr(skillRec + INDEX_OFF, 4, regionCache)) break;
           if ((int)*(uint32_t *)(skillRec + INDEX_OFF) != j) break;
           uint8_t firstByte = *(uint8_t *)skillRec;
           if (firstByte != 0x58 && firstByte != 0xD8) break;
 
           uintptr_t limitAddr = skillRec + SKILL_LIMIT_OFF;
-          if (!IsValidPtr(limitAddr, 1)) continue;
+          if (!SAIsValidPtr(limitAddr, 1, regionCache)) continue;
           if (*(uint8_t *)limitAddr != 0) {
             DWORD old;
             if (VirtualProtect((LPVOID)limitAddr, 1, PAGE_EXECUTE_READWRITE, &old)) {
