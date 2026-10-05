@@ -13,6 +13,7 @@
 namespace DX11Base {
 
   void AddLog(const char *fmt, ...);
+  extern bool bFileLog;
 
   enum class PerfMetric : uint8_t {
     MenuLoopHeartbeat = 0,
@@ -28,6 +29,7 @@ namespace DX11Base {
     AddLogCall,
     AddLogMutexWait,
     AddLogFileIo,
+    BattleMonitorTotal,
     Count
   };
 
@@ -70,6 +72,9 @@ namespace DX11Base {
   }
 
   inline bool PerfDiagnosticsEnabled() {
+    if (bFileLog)
+      return true;
+
     static const bool enabled = []() {
       char value[32] = {};
       const DWORD len = GetEnvironmentVariableA("S8RPK_PERF_DIAGNOSTICS", value, static_cast<DWORD>(sizeof(value)));
@@ -100,6 +105,7 @@ namespace DX11Base {
     case PerfMetric::AddLogCall: return "AddLogCall";
     case PerfMetric::AddLogMutexWait: return "AddLogMutexWait";
     case PerfMetric::AddLogFileIo: return "AddLogFileIo";
+    case PerfMetric::BattleMonitorTotal: return "BattleMonitor";
     default: return "Unknown";
     }
   }
@@ -214,7 +220,7 @@ namespace DX11Base {
 
     auto &state = GetPerfDiagnosticsState();
     const uint64_t now = PerfRealNow100ns();
-    constexpr uint64_t kReportInterval100ns = 10ull * 1000ull * 1000ull * 10ull;
+    constexpr uint64_t kReportInterval100ns = 5ull * 1000ull * 1000ull * 10ull;
 
     uint64_t deadline = state.nextReport100ns.load(std::memory_order_relaxed);
     if (deadline == 0) {
@@ -236,7 +242,7 @@ namespace DX11Base {
     const uint64_t historyNow = state.currentNotificationHistory.load(std::memory_order_relaxed);
     const uint64_t historyMax = state.maxNotificationHistory.exchange(historyNow, std::memory_order_relaxed);
 
-    AddLog("[Perf:T00] interval=10s speed=%s/%.1fx notification(queue=%llu max=%llu history=%llu max=%llu)",
+    AddLog("[Perf:T00] interval=5s speed=%s/%.1fx notification(queue=%llu max=%llu history=%llu max=%llu)",
            speedEnabled ? "ON" : "OFF", speed,
            static_cast<unsigned long long>(queueNow), static_cast<unsigned long long>(queueMax),
            static_cast<unsigned long long>(historyNow), static_cast<unsigned long long>(historyMax));
