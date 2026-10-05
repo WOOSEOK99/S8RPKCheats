@@ -1,5 +1,6 @@
 #include "../../pch.h"
 #include "MonthCapture.h"
+#include "SystemMonth.h"
 #include "../../Cheats.h"
 #include "../../showlog.h"
 #include "../../MemoryUtils.h"
@@ -16,6 +17,11 @@ namespace DX11Base {
         // SAN8RPK.exe+034C8630 -> +3D20 -> +8 -> +10 -> +0 -> +E8 -> +E0 -> +7332(월)
         constexpr uintptr_t kCtDateRootStaticOffset = 0x34C8630;
         constexpr uintptr_t kCtCurrentMonthOffset = 0x7332;
+
+        uint64_t s_lastMonthCheckTick = 0;
+        uint8_t s_lastCtMonth = 0xFF;
+        uint8_t s_lastScenarioMonth = 0xFF;
+        uint8_t s_lastSystemMonth = 0xFF;
 
         bool ReadPointerChecked(uintptr_t address, uintptr_t* outValue) {
             if (!outValue || address < 0x10000 || !IsValidPtr(address, sizeof(uintptr_t)))
@@ -74,6 +80,30 @@ namespace DX11Base {
             if (!IsValidPtr(yearAddr, 2) || !IsValidPtr(monthAddr, 1))
                 return 0;
             return inst;
+        }
+
+        void LogMonthCheckIfChanged(uint8_t ctMonth) {
+            const uint64_t now = GetTickCount64();
+            if (s_lastMonthCheckTick != 0 && now - s_lastMonthCheckTick < 500)
+                return;
+            s_lastMonthCheckTick = now;
+
+            uint8_t scenarioMonth = 0;
+            ReadScenarioMonth(&scenarioMonth);
+            const uint8_t systemMonth = GetSystemMonthValue();
+
+            if (ctMonth == s_lastCtMonth &&
+                scenarioMonth == s_lastScenarioMonth &&
+                systemMonth == s_lastSystemMonth)
+                return;
+
+            s_lastCtMonth = ctMonth;
+            s_lastScenarioMonth = scenarioMonth;
+            s_lastSystemMonth = systemMonth;
+            AddLog(u8"[MonthCheck] CT=%u Scenario=%u System=%u",
+                   (unsigned)ctMonth,
+                   (unsigned)scenarioMonth,
+                   (unsigned)systemMonth);
         }
     } // namespace
 
@@ -217,11 +247,19 @@ namespace DX11Base {
                 return;
             g_monthDirectEnabled = true;
             g_realMonthAddr = ResolveCtCurrentMonthAddress();
+            s_lastMonthCheckTick = 0;
+            s_lastCtMonth = 0xFF;
+            s_lastScenarioMonth = 0xFF;
+            s_lastSystemMonth = 0xFF;
             AddLog(u8"[MonthCapture] CT 포인터 체인 직접 조회 활성화: root=+0x34C8630 month=+0x7332 addr=%p",
                    (void*)g_realMonthAddr);
         } else {
             g_monthDirectEnabled = false;
             g_realMonthAddr = 0;
+            s_lastMonthCheckTick = 0;
+            s_lastCtMonth = 0xFF;
+            s_lastScenarioMonth = 0xFF;
+            s_lastSystemMonth = 0xFF;
         }
     }
 
@@ -234,7 +272,9 @@ namespace DX11Base {
             return 0;
 
         __try {
-            return *(uint8_t*)g_realMonthAddr;
+            const uint8_t month = *(uint8_t*)g_realMonthAddr;
+            LogMonthCheckIfChanged(month);
+            return month;
         } __except (EXCEPTION_EXECUTE_HANDLER) {
             g_realMonthAddr = 0;
             return 0;
