@@ -30,14 +30,6 @@ namespace DX11Base {
     AddLogMutexWait,
     AddLogFileIo,
     BattleMonitorTotal,
-    BattleResolvePointers,
-    BattleRosterIdentity,
-    BattleSpecialAbility,
-    SpecialActiveUnitResolve,
-    SpecialActiveUnitLookup,
-    SpecialSharedBuffs,
-    SpecialDeunggab,
-    SpecialMusin,
     Count
   };
 
@@ -83,7 +75,7 @@ namespace DX11Base {
     if (bFileLog)
       return true;
 
-    static const bool environmentEnabled = []() {
+    static const bool enabled = []() {
       char value[32] = {};
       const DWORD len = GetEnvironmentVariableA("S8RPK_PERF_DIAGNOSTICS", value, static_cast<DWORD>(sizeof(value)));
       if (len == 0 || len >= sizeof(value))
@@ -95,7 +87,7 @@ namespace DX11Base {
       return std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
              std::strcmp(value, "on") == 0 || std::strcmp(value, "yes") == 0;
     }();
-    return environmentEnabled;
+    return enabled;
   }
 
   inline const char *PerfMetricName(PerfMetric metric) {
@@ -114,14 +106,6 @@ namespace DX11Base {
     case PerfMetric::AddLogMutexWait: return "AddLogMutexWait";
     case PerfMetric::AddLogFileIo: return "AddLogFileIo";
     case PerfMetric::BattleMonitorTotal: return "BattleMonitor";
-    case PerfMetric::BattleResolvePointers: return "BattleResolvePtr";
-    case PerfMetric::BattleRosterIdentity: return "BattleRosterIdentity";
-    case PerfMetric::BattleSpecialAbility: return "BattleSpecialAbility";
-    case PerfMetric::SpecialActiveUnitResolve: return "SAActiveResolve";
-    case PerfMetric::SpecialActiveUnitLookup: return "SAActiveLookup";
-    case PerfMetric::SpecialSharedBuffs: return "SASharedBuffs";
-    case PerfMetric::SpecialDeunggab: return "SADeunggab";
-    case PerfMetric::SpecialMusin: return "SAMusin";
     default: return "Unknown";
     }
   }
@@ -133,8 +117,9 @@ namespace DX11Base {
     }
   }
 
-  // AddLog itself may be instrumented elsewhere. This raw recorder intentionally
-  // does not call PerfMaybeReport(), preventing diagnostics reporting recursion.
+  // AddLog itself is instrumented. This raw recorder intentionally does not
+  // call PerfMaybeReport(), otherwise a diagnostics report would recurse back
+  // into AddLog while AddLog is trying to record its own cost.
   inline void PerfRecordNoReport(PerfMetric metric, uint64_t elapsed100ns = 0,
                                  uint64_t bytes = 0, uint64_t changes = 0) {
     if (!PerfDiagnosticsEnabled())
@@ -217,7 +202,7 @@ namespace DX11Base {
     const char *buildConfig = "Release";
 #endif
 
-    AddLog("[Perf:Battle] diagnostics=ON build=%s arch=%s modules(dinput8=%u dxgi=%u hid=%u version=%u)",
+    AddLog("[Perf:T00] diagnostics=ON build=%s arch=%s modules(dinput8=%u dxgi=%u hid=%u version=%u)",
            buildConfig,
 #ifdef _WIN64
            "x64",
@@ -257,7 +242,7 @@ namespace DX11Base {
     const uint64_t historyNow = state.currentNotificationHistory.load(std::memory_order_relaxed);
     const uint64_t historyMax = state.maxNotificationHistory.exchange(historyNow, std::memory_order_relaxed);
 
-    AddLog("[Perf:Battle] interval=5s speed=%s/%.1fx notification(queue=%llu max=%llu history=%llu max=%llu)",
+    AddLog("[Perf:T00] interval=5s speed=%s/%.1fx notification(queue=%llu max=%llu history=%llu max=%llu)",
            speedEnabled ? "ON" : "OFF", speed,
            static_cast<unsigned long long>(queueNow), static_cast<unsigned long long>(queueMax),
            static_cast<unsigned long long>(historyNow), static_cast<unsigned long long>(historyMax));
@@ -275,7 +260,7 @@ namespace DX11Base {
       const double totalMs = static_cast<double>(total) / 10000.0;
       const double avgUs = calls ? (static_cast<double>(total) / static_cast<double>(calls)) / 10.0 : 0.0;
       const double maxUs = static_cast<double>(maximum) / 10.0;
-      AddLog("[Perf:Battle] %-20s calls=%llu total=%.3fms avg=%.2fus max=%.2fus bytes=%llu changes=%llu",
+      AddLog("[Perf:T00] %-20s calls=%llu total=%.3fms avg=%.2fus max=%.2fus bytes=%llu changes=%llu",
              PerfMetricName(static_cast<PerfMetric>(i)),
              static_cast<unsigned long long>(calls), totalMs, avgUs, maxUs,
              static_cast<unsigned long long>(bytes), static_cast<unsigned long long>(changes));
@@ -307,31 +292,6 @@ namespace DX11Base {
 
     PerfScope(const PerfScope &) = delete;
     PerfScope &operator=(const PerfScope &) = delete;
-
-  private:
-    PerfMetric m_metric;
-    uint64_t m_bytes;
-    uint64_t m_changes;
-    bool m_enabled;
-    uint64_t m_start;
-  };
-
-  class PerfScopeNoReport {
-  public:
-    explicit PerfScopeNoReport(PerfMetric metric, uint64_t bytes = 0, uint64_t changes = 0)
-        : m_metric(metric), m_bytes(bytes), m_changes(changes),
-          m_enabled(PerfDiagnosticsEnabled()), m_start(m_enabled ? PerfRealNow100ns() : 0) {}
-
-    ~PerfScopeNoReport() {
-      if (!m_enabled)
-        return;
-      const uint64_t end = PerfRealNow100ns();
-      const uint64_t elapsed = (end >= m_start) ? (end - m_start) : 0;
-      PerfRecordNoReport(m_metric, elapsed, m_bytes, m_changes);
-    }
-
-    PerfScopeNoReport(const PerfScopeNoReport &) = delete;
-    PerfScopeNoReport &operator=(const PerfScopeNoReport &) = delete;
 
   private:
     PerfMetric m_metric;
