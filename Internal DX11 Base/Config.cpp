@@ -170,6 +170,80 @@ namespace DX11Base {
     return false;
   }
 
+  static void UpsertStringConfigValue(const char *name, const std::string &value) {
+    std::ifstream in(GetConfigPath(), std::ios::binary);
+    if (!in.is_open()) {
+      ReportConfigSaveFailure("추가 설정 파일 읽기", name);
+      return;
+    }
+
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    in.close();
+    std::string data = ss.str();
+
+    const std::string key = std::string("\"") + name + "\"";
+    size_t existing = data.find(key);
+    if (existing != std::string::npos) {
+      size_t lineStart = data.rfind('\n', existing);
+      lineStart = (lineStart == std::string::npos) ? 0 : lineStart + 1;
+      size_t lineEnd = data.find('\n', existing);
+      if (lineEnd == std::string::npos)
+        lineEnd = data.size();
+      else
+        ++lineEnd;
+      data.erase(lineStart, lineEnd - lineStart);
+    }
+
+    const size_t configEnd = data.find("\"config_end\"");
+    if (configEnd == std::string::npos) {
+      ReportConfigSaveFailure("설정 파일 형식 확인", name);
+      return;
+    }
+
+    size_t insertPos = data.rfind('\n', configEnd);
+    insertPos = (insertPos == std::string::npos) ? configEnd : insertPos + 1;
+    const std::string line = std::string("  \"") + name + "\": \"" + value + "\",\n";
+    data.insert(insertPos, line);
+
+    std::ofstream out(GetConfigPath(), std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+      ReportConfigSaveFailure("추가 설정 파일 열기", name);
+      return;
+    }
+    out << data;
+    out.flush();
+    const bool writeOk = out.good();
+    out.close();
+    if (!writeOk || out.fail())
+      ReportConfigSaveFailure("추가 설정 파일 쓰기", name);
+  }
+
+  static bool LoadStringConfigValue(const char *name, std::string &value) {
+    std::ifstream file(GetConfigPath());
+    if (!file.is_open())
+      return false;
+
+    const std::string key = std::string("\"") + name + "\"";
+    std::string line;
+    while (std::getline(file, line)) {
+      if (line.find(key) == std::string::npos)
+        continue;
+      const size_t colonPos = line.find(':');
+      if (colonPos == std::string::npos)
+        return false;
+      const size_t quoteStart = line.find('"', colonPos + 1);
+      if (quoteStart == std::string::npos)
+        return false;
+      const size_t quoteEnd = line.find('"', quoteStart + 1);
+      if (quoteEnd == std::string::npos)
+        return false;
+      value = line.substr(quoteStart + 1, quoteEnd - quoteStart - 1);
+      return true;
+    }
+    return false;
+  }
+
   void SaveConfig() {
     if (IsConfigFileReadOnly()) {
       ReportConfigSaveFailure("설정 파일 읽기 전용");
@@ -216,6 +290,7 @@ namespace DX11Base {
     UpsertBoolConfigValue("bTraitViewer", bTraitViewer);
     UpsertBoolConfigValue("bAllJewelsOpen", IsAllJewelsOpenPreferred());
     UpsertBoolConfigValue("bAllSecondaryJewels", IsAllSecondaryJewelsEnabled());
+    UpsertStringConfigValue("secondaryJewelForceMask", GetSecondaryJewelForceMaskHex());
   }
 
   void LoadConfig() {
@@ -480,15 +555,26 @@ namespace DX11Base {
            hasAllJewelOpenSetting ? "" : "(기본값)",
            savedAllJewelsOpen ? "ON" : "OFF");
 
-    bool savedAllSecondaryJewels = false;
-    const bool hasAllSecondaryJewelSetting =
-        LoadBoolConfigValue("bAllSecondaryJewels", savedAllSecondaryJewels);
-    if (!SetAllSecondaryJewelsEnabled(savedAllSecondaryJewels)) {
-      savedAllSecondaryJewels = IsAllSecondaryJewelsEnabled();
+    std::string savedSecondaryJewelMask;
+    const bool hasSecondaryJewelMask =
+        LoadStringConfigValue("secondaryJewelForceMask", savedSecondaryJewelMask);
+    if (hasSecondaryJewelMask) {
+      if (!LoadSecondaryJewelForceMaskHex(savedSecondaryJewelMask)) {
+        SetAllSecondaryJewelsEnabled(false);
+        AddLog(u8"[Config] 보조 보주 선택 마스크가 유효하지 않아 전체 해제 처리");
+      } else {
+        AddLog(u8"[Config] 보조 보주 개별 강제 사용 선택 마스크 로드");
+      }
+    } else {
+      bool savedAllSecondaryJewels = false;
+      const bool hasAllSecondaryJewelSetting =
+          LoadBoolConfigValue("bAllSecondaryJewels", savedAllSecondaryJewels);
+      if (!SetAllSecondaryJewelsEnabled(savedAllSecondaryJewels))
+        savedAllSecondaryJewels = IsAllSecondaryJewelsEnabled();
+      AddLog(u8"[Config] 보조 보주 구버전 전체 사용 설정 마이그레이션%s: %s",
+             hasAllSecondaryJewelSetting ? "" : "(기본값)",
+             savedAllSecondaryJewels ? "ON" : "OFF");
     }
-    AddLog(u8"[Config] 보조 보주 전체 사용 설정 로드%s: %s",
-           hasAllSecondaryJewelSetting ? "" : "(기본값)",
-           savedAllSecondaryJewels ? "ON" : "OFF");
 
   }
 } // namespace DX11Base
