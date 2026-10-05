@@ -10,6 +10,9 @@
 
 namespace DX11Base {
   namespace {
+    constexpr ULONGLONG kBattleMonitorNotReadyIntervalMs = 500;
+    constexpr ULONGLONG kSpecialFallbackIntervalMs = 100;
+
     uintptr_t ResolveBattleFallbackChain(uintptr_t base, std::initializer_list<uintptr_t> offsets) {
       uintptr_t current = base;
       for (uintptr_t offset : offsets) {
@@ -28,17 +31,46 @@ namespace DX11Base {
       return current;
     }
 
+    bool ShouldRunFullBattleMonitor() {
+      static ULONGLONG s_lastNotReadyRun = 0;
+
+      // Once the native runtime has passed readiness, preserve the original
+      // monitor cadence. The expensive readiness scan is only throttled while
+      // the runtime is still not ready.
+      if (IsBattleRuntimeReady()) {
+        s_lastNotReadyRun = 0;
+        return true;
+      }
+
+      const ULONGLONG now = GetTickCount64();
+      if (s_lastNotReadyRun == 0 || now - s_lastNotReadyRun >= kBattleMonitorNotReadyIntervalMs) {
+        s_lastNotReadyRun = now;
+        return true;
+      }
+      return false;
+    }
+
     void RunSpecialAbilityReadinessFallback() {
       static bool s_fallbackActive = false;
       static uintptr_t s_cachedUnitList = 0;
       static int s_cachedUnitCount = 0;
+      static ULONGLONG s_lastFallbackTick = 0;
 
       if (IsBattleRuntimeReady()) {
         s_fallbackActive = false;
         s_cachedUnitList = 0;
         s_cachedUnitCount = 0;
+        s_lastFallbackTick = 0;
         return;
       }
+
+      // The menu/background loop is faster than the intended battle monitor
+      // cadence. Keep the recovery path responsive without re-running all
+      // pointer chains and special-ability checks every loop iteration.
+      const ULONGLONG now = GetTickCount64();
+      if (s_lastFallbackTick != 0 && now - s_lastFallbackTick < kSpecialFallbackIntervalMs)
+        return;
+      s_lastFallbackTick = now;
 
       const uintptr_t exeBase = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
       if (!exeBase)
@@ -89,16 +121,15 @@ namespace DX11Base {
   } // namespace
 
   static void ProfiledMonitorBattleStatus() {
-    if (!PerfDiagnosticsEnabled()) {
-      MonitorBattleStatus();
-      RunSpecialAbilityReadinessFallback();
-      return;
+    if (ShouldRunFullBattleMonitor()) {
+      if (!PerfDiagnosticsEnabled()) {
+        MonitorBattleStatus();
+      } else {
+        PerfScope perf(PerfMetric::BattleMonitorTotal);
+        MonitorBattleStatus();
+      }
     }
 
-    {
-      PerfScope perf(PerfMetric::BattleMonitorTotal);
-      MonitorBattleStatus();
-    }
     RunSpecialAbilityReadinessFallback();
   }
 } // namespace DX11Base
