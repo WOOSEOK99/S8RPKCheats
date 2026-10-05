@@ -435,8 +435,9 @@ namespace DX11Base {
     // A heartbeat or a partially deserialized list only indicates a possible battle.
     // Require a valid date/list and at least one usable unit/member record.
     // Stabilize the battle roots for 1 second; roster changes only rebuild unit caches.
-    const bool stateReady = lifecycleGameState != 0x00 && lifecycleGameState != 0xFF &&
-                            lifecycleGameState != 0x05 && lifecycleGameState != 0x07;
+    // Council/domestic state can persist during battle; validated battle data
+    // takes precedence over 0x05/0x07. Keep menu/unreadable-state load guards.
+    const bool stateReady = lifecycleGameState != 0x00 && lifecycleGameState != 0xFF;
     bool recordsReady = isDateValid && isUnitListValid && stateReady;
     const char *readinessReason = !isDateValid ? "day" :
                                   !isUnitListValid ? "unit-list" :
