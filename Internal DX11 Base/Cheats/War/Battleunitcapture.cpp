@@ -59,16 +59,13 @@ namespace DX11Base {
         }
 
         bool IsBattleInstallWindow() {
-            const uintptr_t gameBase = GetGameBase();
-            if (!gameBase || !IsValidPtr(gameBase + 0xD0, 1))
-                return false;
-
+            int battleDay = -1;
             __try {
-                const uint8_t state = *(uint8_t*)(gameBase + 0xD0);
-                return state != 0x00 && state != 0x05 && state != 0x07 && state != 0xFF;
+                battleDay = GetBattleDay();
             } __except (EXCEPTION_EXECUTE_HANDLER) {
                 return false;
             }
+            return battleDay >= 1 && battleDay <= 30;
         }
     }
 
