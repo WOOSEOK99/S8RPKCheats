@@ -119,28 +119,6 @@ namespace DX11Base {
                     for (int s = 0; s < 5; s++) {
                         if (*(unsigned char*)(targetBase + statOffsets[s]) == 99) {
                             *(unsigned char*)(targetBase + statOffsets[s]) = 100;
-                            
-                            // [알림 추가] 무장 이름 가져오기
-                            unsigned short officerID = *(unsigned short*)(targetBase + 0x08);
-                            char objIdBuf[16];
-                            sprintf_s(objIdBuf, "#%u", officerID);
-                            std::string name(objIdBuf);
-                            if (DX11Base::g_officerNames.count(officerID)) {
-                                name = DX11Base::g_officerNames[officerID];
-                            }
-                            
-                            const char* statName = "???";
-                            switch(s) {
-                                case 0: statName = "통솔"; break;
-                                case 1: statName = "무력"; break;
-                                case 2: statName = "지력"; break;
-                                case 3: statName = "정치"; break;
-                                case 4: statName = "매력"; break;
-                            }
-                            
-                            char buf[128];
-                            sprintf_s(buf, "%s 한계돌파!! %s 100", name.c_str(), statName);
-                            DX11Base::AddNotification(std::string(buf));
                         }
                     }
                     VirtualProtect((LPVOID)(targetBase + 0xAA), 8, old, &old);

@@ -715,6 +715,28 @@ namespace DX11Base {
       ImGui::PopStyleColor();
       ImGui::Separator();
 
+      const bool showOfficerList = showRonin || showOfficerChange;
+      if (showOfficerList) {
+        const ImGuiStyle &style = ImGui::GetStyle();
+        const float rowHeight = ImGui::GetTextLineHeight() + style.CellPadding.y * 2.f;
+        const float rowCount = showRonin
+            ? (float)roninSnap.size() + 1.f
+            : (float)(recruitRows.size() + deadRows.size()) + 8.f;
+        // Reserve space below the list for a close button, even with many officers.
+        const float maxListHeight = (std::max)(1.f,
+            disp.y * 0.88f - 20.f - style.WindowPadding.y * 2.f -
+            ImGui::GetTextLineHeight() - ImGui::GetFrameHeight() -
+            style.ItemSpacing.y * 8.f - 8.f);
+        const float listHeight = (std::min)(
+            rowCount * rowHeight + style.WindowPadding.y * 2.f, maxListHeight);
+        const float listWidth = (std::min)(
+            (showRonin ? 220.f : 510.f) * sc +
+                style.CellPadding.x * (showRonin ? 4.f : 6.f) + style.ScrollbarSize,
+            (std::max)(1.f, disp.x - 40.f - style.WindowPadding.x * 2.f));
+        ImGui::BeginChild("##OfficerNotificationList", ImVec2(listWidth, listHeight),
+                          0, ImGuiWindowFlags_HorizontalScrollbar);
+      }
+
       if (showRonin) {
         if (ImGui::BeginTable(
                 "##RoninTable",
@@ -834,27 +856,6 @@ namespace DX11Base {
             ImGui::EndTable();
           }
         }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        const float closeButtonWidth = 120.f * sc;
-        const float closeAvail = ImGui::GetContentRegionAvail().x;
-        if (closeAvail > closeButtonWidth)
-          ImGui::SetCursorPosX(
-              ImGui::GetCursorPosX() + (closeAvail - closeButtonWidth) * 0.5f);
-
-        if (ImGui::Button(
-                u8"닫기",
-                ImVec2(closeButtonWidth, 0.f))) {
-          std::lock_guard<std::mutex> lk(s_notifMtx);
-          if (!s_sharedPopupQueue.empty() &&
-              s_sharedPopupQueue.front().kind ==
-                  SharedPopup::Kind::OfficerChange) {
-            s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
-          }
-        }
       } else {
         if (ImGui::BeginTable(
                 "##SharedNotificationTable",
@@ -874,6 +875,29 @@ namespace DX11Base {
                 line.c_str());
           }
           ImGui::EndTable();
+        }
+      }
+
+      if (showOfficerList) {
+        ImGui::EndChild();
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        const float closeButtonWidth = 120.f * sc;
+        const float closeAvail = ImGui::GetContentRegionAvail().x;
+        if (closeAvail > closeButtonWidth)
+          ImGui::SetCursorPosX(
+              ImGui::GetCursorPosX() + (closeAvail - closeButtonWidth) * 0.5f);
+
+        if (ImGui::Button(u8"닫기", ImVec2(closeButtonWidth, 0.f))) {
+          std::lock_guard<std::mutex> lk(s_notifMtx);
+          if (showRonin) {
+            s_notifications.clear();
+          } else if (!s_sharedPopupQueue.empty() &&
+                     s_sharedPopupQueue.front().kind == SharedPopup::Kind::OfficerChange) {
+            s_sharedPopupQueue.erase(s_sharedPopupQueue.begin());
+          }
         }
       }
     }
