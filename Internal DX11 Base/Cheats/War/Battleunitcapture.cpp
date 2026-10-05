@@ -3,6 +3,7 @@
 #include "Battleunitcapture.h"
 #include "Catapult.h"
 #include "Celestia.h"
+#include "../../BattleMonitor.h"
 #include "../../Cheats.h"
 #include "../Social/Fastrelationship.h"
 #include "../Social/Infinitetalk.h"
@@ -33,6 +34,7 @@ namespace DX11Base {
     static uintptr_t g_battUnitCaveAddr = 0;
     static bool g_battUnitApplied = false;
     std::atomic_bool g_battUnitThreadRunning{false};
+    static std::atomic_bool g_battUnitInstallRequested{false};
 
     namespace {
         constexpr uintptr_t kBattUnitV0860Rva = 0x1E3A5D4;
@@ -243,6 +245,8 @@ namespace DX11Base {
             return;
 
         if (enable) {
+            g_battUnitInstallRequested.store(true);
+
             if (g_battUnitApplied)
                 return;
             if (g_battUnitThreadRunning.exchange(true))
@@ -251,6 +255,20 @@ namespace DX11Base {
             HANDLE hThread = CreateThread(
                 nullptr, 0,
                 [](LPVOID) -> DWORD {
+                    bool deferredLogged = false;
+                    while (g_battUnitInstallRequested.load() && !IsBattleRuntimeReady()) {
+                        if (!deferredLogged) {
+                            AddLog(u8"[BattleUnitCapture] 전투 런타임 준비 전: 캡처 후크 설치 보류");
+                            deferredLogged = true;
+                        }
+                        Sleep(100);
+                    }
+
+                    if (!g_battUnitInstallRequested.load()) {
+                        g_battUnitThreadRunning.store(false);
+                        return 0;
+                    }
+
                     uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
                     MODULEINFO mi;
                     GetModuleInformation(GetCurrentProcess(), (HMODULE)exeBase, &mi, sizeof(mi));
@@ -270,7 +288,7 @@ namespace DX11Base {
 
                     AddLog("[DEBUG] battUnitHook: %p", (void *)g_battUnitHookAddr);
 
-                    if (g_battUnitHookAddr && !g_battUnitApplied) {
+                    if (g_battUnitInstallRequested.load() && g_battUnitHookAddr && !g_battUnitApplied) {
                         memcpy(g_battUnitOriginal, (void *)g_battUnitHookAddr, 7);
                         if (InstallBattUnitCave(g_battUnitHookAddr))
                             g_battUnitApplied = true;
@@ -288,6 +306,8 @@ namespace DX11Base {
                 g_battUnitThreadRunning.store(false);
 
         } else {
+            g_battUnitInstallRequested.store(false);
+
             // 유닛 주소 초기화
             g_battleUnitAddr1 = 0;
             g_battleUnitAddr2 = 0;
