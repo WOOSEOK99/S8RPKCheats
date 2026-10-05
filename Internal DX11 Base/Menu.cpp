@@ -1,7 +1,21 @@
 #include "pch.h"
+#include "BattleMonitor.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "NotificationManager.h"
 #include "MenuT04Maintenance.h"
+#include "PerformanceDiagnostics.h"
+
+namespace DX11Base {
+  static void ProfiledMonitorBattleStatus() {
+    if (!PerfDiagnosticsEnabled()) {
+      MonitorBattleStatus();
+      return;
+    }
+
+    PerfScope perf(PerfMetric::BattleMonitorTotal);
+    MonitorBattleStatus();
+  }
+} // namespace DX11Base
 
 // Keep declarations intact, then suppress only the preserved Menu.cpp
 // per-frame maintenance calls. MenuT04Maintenance.h was included above, so it
@@ -15,7 +29,9 @@
 #define DrawMarqueeNotifications(scale) \
   (DX11Base::RunT04RenderMaintenance(), DrawMarqueeNotifications(scale))
 
+#define MonitorBattleStatus ProfiledMonitorBattleStatus
 #include "Menu_impl.inc"
+#undef MonitorBattleStatus
 
 #undef DrawMarqueeNotifications
 #undef bZeroInfamy
