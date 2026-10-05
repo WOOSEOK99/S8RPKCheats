@@ -1,5 +1,5 @@
 #pragma once
-#define SAM8_CHEAT_VERSION "V0.870"
+#define SAM8_CHEAT_VERSION "V0.871"
 #include "Framework/imgui.h"
 #include <string>
 #include <vector>
