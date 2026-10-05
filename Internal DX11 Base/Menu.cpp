@@ -139,10 +139,13 @@ namespace DX11Base {
           (cachedPointersPresent && !cachedPointersReadable);
 
       if (refreshPointers) {
+        // Unit list/day share the first three dereferences; resolve them once.
+        const uintptr_t battleDataRoot = ResolveBattleFallbackChain(
+            exeBase + 0x02E99460, {0x28, 0x250, 0});
         const uintptr_t resolvedUnitList = ResolveBattleFallbackChain(
-            exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
+            battleDataRoot ? battleDataRoot + 0x1D8 : 0, {0, 0x180, 0});
         const uintptr_t resolvedDayBase = ResolveBattleFallbackChain(
-            exeBase + 0x02E99460, {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0});
+            battleDataRoot ? battleDataRoot + 0x218 : 0, {0, 0x3D8, 0x478, 0, 0});
         s_lastResolveTick = now;
 
         if (resolvedUnitList != s_cachedUnitList || resolvedDayBase != s_cachedDayBase) {

@@ -431,56 +431,51 @@ namespace DX11Base {
     }
 
     // A heartbeat or a partially deserialized list only indicates a possible battle.
-    // Require both date and all unit records, with an unchanged identity for 1 second,
-    // before any automatic battle writes (including ApplyStoredConfigs) are allowed.
+    // Require a valid date/list and at least one usable unit/member record.
+    // Stabilize the battle roots for 1 second; roster changes only rebuild unit caches.
     bool recordsReady = isDateValid && isUnitListValid &&
                         lifecycleGameState != 0x00 && lifecycleGameState != 0xFF &&
                         lifecycleGameState != 0x05 && lifecycleGameState != 0x07;
     uint64_t unitSignature = 14695981039346656037ull;
+    int validUnitCount = 0;
+    ResolveRegionCache readinessRegions{};
     __try {
       if (!IsValidPtr(gameBase + 0xE0, sizeof(uintptr_t)) ||
           !IsValidPtr(*(uintptr_t *)(gameBase + 0xE0), 0x200))
         recordsReady = false;
       for (int i = 0; recordsReady && i < unitCountTotal; ++i) {
         const uintptr_t slot = unitListBase + 0x08 + (uintptr_t)i * 0x10;
-        if (!IsValidPtr(slot, sizeof(uintptr_t))) {
+        if (!IsValidPtrForResolve(slot, sizeof(uintptr_t), readinessRegions)) {
           recordsReady = false;
           break;
         }
         const uintptr_t unit = *(uintptr_t *)slot;
-        if (!IsValidPtr(unit, 0x600)) {
-          recordsReady = false;
-          break;
-        }
+        if (!IsValidPtrForResolve(unit, 0x600, readinessRegions))
+          continue;
         const uintptr_t member = *(uintptr_t *)(unit + 0x18);
-        if (!IsValidPtr(member, 0x100)) {
-          recordsReady = false;
-          break;
-        }
+        if (!IsValidPtrForResolve(member, 0x100, readinessRegions))
+          continue;
+        ++validUnitCount;
         unitSignature = (unitSignature ^ unit) * 1099511628211ull;
         unitSignature = (unitSignature ^ member) * 1099511628211ull;
       }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       recordsReady = false;
     }
+    recordsReady = recordsReady && validUnitCount > 0;
 
     const bool battleIdentityChanged = unitListBase != s_readyUnitList ||
                                        dayBaseAddr != s_readyDayBase;
-    const bool identityChanged = battleIdentityChanged ||
-                                 unitCountTotal != s_readyUnitCount ||
-                                 unitSignature != s_readyUnitSignature;
-    if (!recordsReady || identityChanged) {
+    const bool rosterChanged = unitCountTotal != s_readyUnitCount ||
+                               unitSignature != s_readyUnitSignature;
+    if (!recordsReady || battleIdentityChanged) {
       s_battleRuntimeReady = false;
       s_stableSince = recordsReady ? nowMs : 0;
       s_readyUnitList = unitListBase;
       s_readyDayBase = dayBaseAddr;
-      s_readyUnitCount = unitCountTotal;
-      s_readyUnitSignature = unitSignature;
       if (battleActive && (s_isWarModsApplied || s_isCacheBuilt)) {
         ClearBattleCache();
         s_isCacheBuilt = false;
-        // Reinforcements change the roster within the same battle. Rebuild
-        // unit caches without applying entry/day effects a second time.
         if (!recordsReady || battleIdentityChanged) {
           ClearBattleEnvCache();
           s_isWarModsApplied = false;
@@ -493,6 +488,14 @@ namespace DX11Base {
     } else {
       s_battleRuntimeReady = nowMs - s_stableSince >= 1000;
     }
+
+    if (recordsReady && rosterChanged && s_isCacheBuilt) {
+      // Reinforcements change the roster without restarting entry/day effects.
+      ClearBattleCache();
+      s_isCacheBuilt = false;
+    }
+    s_readyUnitCount = unitCountTotal;
+    s_readyUnitSignature = unitSignature;
 
     if (battleActive && !s_battleRuntimeReady) {
       g_battleUnitAddr1 = 0;
