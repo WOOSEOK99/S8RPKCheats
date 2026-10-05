@@ -235,8 +235,6 @@ namespace DX11Base {
     bool bMonthCapture = true;       // 상설 기능화 (기본값 true)
     bool s_appMonthCapture = false;  // 현재 적용 여부
 
-    // CT 포인터 체인을 필요할 때마다 직접 해석합니다.
-    // 세이브 로드로 포인터 세대가 바뀌어도 오래된 주소를 유지하지 않습니다.
     static bool g_monthDirectEnabled = false;
     static uintptr_t g_realMonthAddr = 0;
 
@@ -245,13 +243,12 @@ namespace DX11Base {
             if (g_monthDirectEnabled)
                 return;
             g_monthDirectEnabled = true;
-            g_realMonthAddr = ResolveCtCurrentMonthAddress();
+            g_realMonthAddr = 0;
             s_lastMonthCheckTick = 0;
             s_lastCtMonth = 0xFF;
             s_lastScenarioMonth = 0xFF;
             s_lastSystemMonth = 0xFF;
-            AddLog(u8"[MonthCapture] CT 포인터 체인 직접 조회 활성화: root=+0x34C8630 month=+0x7332 addr=%p",
-                   (void*)g_realMonthAddr);
+            AddLog(u8"[MonthCapture] 시나리오 월 직접 조회 활성화: base=+0x2E98BC8 month=+0x72D2");
         } else {
             g_monthDirectEnabled = false;
             g_realMonthAddr = 0;
@@ -266,18 +263,10 @@ namespace DX11Base {
         if (!g_monthDirectEnabled)
             return 0;
 
-        g_realMonthAddr = ResolveCtCurrentMonthAddress();
-        if (!g_realMonthAddr)
+        uint8_t month = 0;
+        if (!ReadScenarioMonth(&month))
             return 0;
-
-        __try {
-            const uint8_t month = *(uint8_t*)g_realMonthAddr;
-            LogMonthCheckIfChanged(month);
-            return month;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            g_realMonthAddr = 0;
-            return 0;
-        }
+        return month;
     }
 
 } // namespace DX11Base
