@@ -57,6 +57,19 @@ namespace DX11Base {
             *outHook = candidate;
             return true;
         }
+
+        bool IsBattleInstallWindow() {
+            const uintptr_t gameBase = GetGameBase();
+            if (!gameBase || !IsValidPtr(gameBase + 0xD0, 1))
+                return false;
+
+            __try {
+                const uint8_t state = *(uint8_t*)(gameBase + 0xD0);
+                return state != 0x00 && state != 0x05 && state != 0x07 && state != 0xFF;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+        }
     }
 
     static bool InstallBattUnitCave(uintptr_t hookAddr) {
@@ -256,9 +269,9 @@ namespace DX11Base {
                 nullptr, 0,
                 [](LPVOID) -> DWORD {
                     bool deferredLogged = false;
-                    while (g_battUnitInstallRequested.load() && !IsBattleRuntimeReady()) {
+                    while (g_battUnitInstallRequested.load() && !IsBattleInstallWindow()) {
                         if (!deferredLogged) {
-                            AddLog(u8"[BattleUnitCapture] 전투 런타임 준비 전: 캡처 후크 설치 보류");
+                            AddLog(u8"[BattleUnitCapture] 전투 진입 전: 캡처 후크 설치 보류");
                             deferredLogged = true;
                         }
                         Sleep(100);
