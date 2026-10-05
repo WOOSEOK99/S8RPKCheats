@@ -12,6 +12,7 @@ namespace DX11Base {
   namespace {
     constexpr ULONGLONG kBattleMonitorNotReadyIntervalMs = 500;
     constexpr ULONGLONG kSpecialFallbackIntervalMs = 100;
+    constexpr ULONGLONG kSpecialFallbackActiveIntervalMs = 1000;
     constexpr ULONGLONG kSpecialFallbackResolveRefreshMs = 500;
 
     uintptr_t ResolveBattleFallbackChain(uintptr_t base, std::initializer_list<uintptr_t> offsets) {
@@ -71,11 +72,13 @@ namespace DX11Base {
         return;
       }
 
-      // The special-ability state still needs near-real-time turn switching,
-      // but the long unit/day pointer chains do not need to be rebuilt every
-      // background-loop iteration.
+      // Keep battle detection responsive before the fallback cache is ready.
+      // Once active, UpdateSpecialAbilities can be expensive, so avoid running
+      // it back-to-back while preserving at most ~1s state-change latency.
       const ULONGLONG now = GetTickCount64();
-      if (s_lastFallbackTick != 0 && now - s_lastFallbackTick < kSpecialFallbackIntervalMs)
+      const ULONGLONG fallbackInterval =
+          s_fallbackActive ? kSpecialFallbackActiveIntervalMs : kSpecialFallbackIntervalMs;
+      if (s_lastFallbackTick != 0 && now - s_lastFallbackTick < fallbackInterval)
         return;
       s_lastFallbackTick = now;
 
