@@ -8,6 +8,26 @@
 #undef TickTraitConfigRuntime
 
 namespace DX11Base {
+
+bool LoadDefaultTraitJsonFromFile(std::string &out) {
+  out.clear();
+  wchar_t modulePath[MAX_PATH] = {};
+  const DWORD length = GetModuleFileNameW(g_hModule, modulePath, MAX_PATH);
+  if (length > 0 && length < MAX_PATH) {
+    const auto path = std::filesystem::path(modulePath).parent_path() /
+                      L"S8RPK_traits_default.json";
+    if (ReadUtf8TextFile(path, out))
+      return true;
+  }
+
+  std::error_code ec;
+  const auto cwd = std::filesystem::current_path(ec);
+  return !ec && ReadUtf8TextFile(cwd / L"S8RPK_traits_default.json", out);
+}
+
+} // namespace DX11Base
+
+namespace DX11Base {
 namespace {
 
 std::array<std::string, kTraitCount> g_editorNameOverrides{};
@@ -196,7 +216,7 @@ bool EnsureEmbeddedTraitConfigLoaded() {
 
   std::string jsonText;
   if (!LoadEmbeddedJsonResource(IDR_JSON_TRAITS_DEFAULT, jsonText)) {
-    AddLog(u8"[기재JSON] 내장 기본 설정을 읽지 못했습니다.");
+    AddLog(u8"[기재JSON] 외부 S8RPK_traits_default.json을 읽지 못했습니다.");
     return false;
   }
 
@@ -280,7 +300,7 @@ bool EnsureEmbeddedTraitConfigLoaded() {
   state.descTablesSynced = false;
   state.descTableFailureLogged = false;
 
-  AddLog(u8"[기재JSON] version.dll 없음 -> 내장 기본기재 사용 / traits %d개 / customNames %d개 / 감시 index %d",
+  AddLog(u8"[기재JSON] version.dll 없음 -> 외부 S8RPK_traits_default.json 사용 / traits %d개 / customNames %d개 / 감시 index %d",
          traitCount, customCount, sentinel);
   return true;
 }
@@ -294,7 +314,7 @@ bool GetEmbeddedTraitTextCatalog(
 
   std::string jsonText;
   if (!LoadEmbeddedJsonResource(IDR_JSON_TRAITS_DEFAULT, jsonText)) {
-    SetTextError(error, "내장 기본기재 리소스를 읽지 못했습니다.");
+    SetTextError(error, "외부 S8RPK_traits_default.json을 읽지 못했습니다.");
     return false;
   }
 
@@ -542,7 +562,7 @@ void TickTraitConfigRuntime() {
   externalPairLogged = false;
 
   // version.dll이 없을 때는 같은 폴더에 san8r_traits_config.json이 남아 있어도
-  // 단독 설정으로 취급하지 않습니다. 임베디드 기본기재만 사용합니다.
+  // 단독 설정으로 취급하지 않습니다. 외부 기본기재 파일을 사용합니다.
   if (!EnsureEmbeddedTraitConfigLoaded())
     return;
 

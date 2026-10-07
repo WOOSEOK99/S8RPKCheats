@@ -16,6 +16,7 @@
 #include <sstream>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 // 명품(Specialty) 관련 오프셋 및 데이터 구조 정리
 /*
@@ -78,10 +79,13 @@ namespace DX11Base {
     static bool s_specialityDefsLoaded = false;
     static std::unordered_map<int, std::string> s_specialityNameById;
     static std::unordered_map<int, std::string> s_specialityDescById;
-    static uintptr_t s_selectedSpecialtyObj = 0;
-    static uintptr_t s_selectedSpecialtySlotAddr = 0;
-    static std::string s_selectedSpecialtyName;
-    static std::string s_selectedSpecialtyDesc;
+    struct SelectedSpecialty {
+      uintptr_t obj;
+      uintptr_t slotAddr;
+      std::string name;
+      std::string desc;
+    };
+    static std::vector<SelectedSpecialty> s_selectedSpecialties;
     static int s_giveOfficerSelectedId = 0;
     static bool s_showGiveOfficerListWindow = false;
 
@@ -278,6 +282,38 @@ namespace DX11Base {
       if (it == s_specialityDescById.end())
         return std::string();
       return it->second;
+    }
+
+    static bool IsSpecialtySelected(uintptr_t obj) {
+      return std::any_of(s_selectedSpecialties.begin(), s_selectedSpecialties.end(),
+                         [obj](const SelectedSpecialty &sp) { return sp.obj == obj; });
+    }
+
+    static void ToggleSpecialtySelection(uintptr_t obj, uintptr_t slotAddr, const std::string &name, uint16_t no) {
+      auto it = std::find_if(s_selectedSpecialties.begin(), s_selectedSpecialties.end(),
+                            [obj](const SelectedSpecialty &sp) { return sp.obj == obj; });
+      if (it != s_selectedSpecialties.end())
+        s_selectedSpecialties.erase(it);
+      else
+        s_selectedSpecialties.push_back({obj, slotAddr, name, ResolveSpecialityDescByNo(no)});
+    }
+
+    static int GiveSelectedSpecialties(uintptr_t targetBase) {
+      int succeeded = 0;
+      for (const auto &sp : s_selectedSpecialties) {
+        uintptr_t slotObj = 0;
+        if (sp.slotAddr > 0x10000 && (!ReadPtr(sp.slotAddr, &slotObj) || Ptr48(slotObj) != sp.obj)) {
+          AddLog(u8"[명품] %s 수여 실패 (도시 슬롯 변경)", sp.name.c_str());
+          continue;
+        }
+        if (WritePtrSafe(sp.obj + 0x30, targetBase) && Write32Safe(sp.obj + 0x38, 1) &&
+            (sp.slotAddr <= 0x10000 || Write32Safe(sp.slotAddr + 0x08, 1))) {
+          ++succeeded;
+        } else {
+          AddLog(u8"[명품] %s 수여 실패", sp.name.c_str());
+        }
+      }
+      return succeeded;
     }
 
     static bool ResolveOwnerNameFromObj(uintptr_t objPtr, std::string &outName, uintptr_t cityArrayBase = 0) {
@@ -785,13 +821,17 @@ namespace DX11Base {
     // ImGui::Separator();
 
     // 다른 창과 비슷한 주황 계열 섹션 스타일
-    ImGui::BeginChild("SpecialtyActionSection", ImVec2(0, 140 * scale), true);
-    if (s_selectedSpecialtyObj > 0x10000) {
-      ImGui::Text(u8"선택 명품: %s",
-                  s_selectedSpecialtyName.empty() ? u8"(이름 미확인)" : s_selectedSpecialtyName.c_str());
+    ImGui::BeginChild("SpecialtyActionSection", ImVec2(0, 170 * scale), true);
+    ImGui::Text(u8"선택 명품: %d개 (클릭으로 선택/해제)", (int)s_selectedSpecialties.size());
+    ImGui::SameLine();
+    if (ImGui::SmallButton(u8"전체 선택 해제"))
+      s_selectedSpecialties.clear();
+    if (!s_selectedSpecialties.empty()) {
+      const auto &selected = s_selectedSpecialties.back();
+      ImGui::Text(u8"명품 정보: %s", selected.name.empty() ? u8"(이름 미확인)" : selected.name.c_str());
       if (bShowDebug) {
         char addrHex[32];
-        snprintf(addrHex, sizeof(addrHex), "%p", (void *)s_selectedSpecialtyObj);
+        snprintf(addrHex, sizeof(addrHex), "%p", (void *)selected.obj);
         ImGui::SameLine();
         ImGui::TextDisabled(u8"(객체 %s)", addrHex);
         ImGui::SameLine();
@@ -800,13 +840,13 @@ namespace DX11Base {
           AddLog(u8"[복사] 명품 객체 주소: %s", addrHex);
         }
       }
-      if (!s_selectedSpecialtyDesc.empty()) {
+      if (!selected.desc.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.0f, 1.0f));
-        ImGui::TextWrapped(u8"설명: %s", s_selectedSpecialtyDesc.c_str());
+        ImGui::TextWrapped(u8"설명: %s", selected.desc.c_str());
         ImGui::PopStyleColor();
       }
 
-      std::string attrStr = GetSpecialtyAttributesString(s_selectedSpecialtyObj);
+      std::string attrStr = GetSpecialtyAttributesString(selected.obj);
       if (!attrStr.empty()) {
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s", attrStr.c_str());
       }
@@ -827,12 +867,9 @@ namespace DX11Base {
           ReadPtr(gameBase + 0xE0, &heroBase);
         heroBase = Ptr48(heroBase);
         if (heroBase > 0x10000) {
-          if (WritePtrSafe(s_selectedSpecialtyObj + 0x30, heroBase) && Write32Safe(s_selectedSpecialtyObj + 0x38, 1) &&
-              (s_selectedSpecialtySlotAddr <= 0x10000 || Write32Safe(s_selectedSpecialtySlotAddr + 0x08, 1))) {
-            AddLog(u8"[명품] 주인공에게 소유 완료 (타입:장수)");
-          } else {
-            AddLog(u8"[명품] 주인공 소유 실패");
-          }
+          int succeeded = GiveSelectedSpecialties(heroBase);
+          AddLog(u8"[명품] 주인공에게 소유: 성공 %d개, 실패 %d개", succeeded,
+                 (int)s_selectedSpecialties.size() - succeeded);
         } else {
           AddLog(u8"[명품] 주인공 주소를 찾지 못했습니다.");
         }
@@ -841,7 +878,7 @@ namespace DX11Base {
       ImGui::TextWrapped(u8"* 명품 수여 또는 소유시 반드시 저장후 재 로딩 해야 적용됩니다.");
       ImGui::PopStyleColor(4);
     } else {
-      ImGui::TextDisabled(u8"표에서 명품을 클릭하면 수여 기능을 사용할 수 있습니다.");
+      ImGui::TextDisabled(u8"표에서 명품을 여러 개 클릭하여 선택한 뒤 수여할 수 있습니다.");
       s_showGiveOfficerListWindow = false;
     }
     ImGui::EndChild();
@@ -906,7 +943,7 @@ namespace DX11Base {
                 continue;
               }
 
-              bool isSelected = (s_selectedSpecialtyObj == slotObjPtr);
+              bool isSelected = IsSpecialtySelected(slotObjPtr);
               char label[128];
               snprintf(label, sizeof(label), "%s##sp_%d_%d", specialityName.c_str(), cityIdx, slot);
 
@@ -927,10 +964,7 @@ namespace DX11Base {
 
               ImGui::BeginGroup();
               if (ImGui::Selectable(label, isSelected, ImGuiSelectableFlags_AllowItemOverlap)) {
-                s_selectedSpecialtyObj = slotObjPtr;
-                s_selectedSpecialtySlotAddr = slotAddr;
-                s_selectedSpecialtyName = specialityName;
-                s_selectedSpecialtyDesc = ResolveSpecialityDescByNo(specialityNo);
+                ToggleSpecialtySelection(slotObjPtr, slotAddr, specialityName, specialityNo);
               }
 
               if (spValue >= 50 || hasAttr) {
@@ -1036,11 +1070,8 @@ namespace DX11Base {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.0f, 1.0f)); // 황금색
               }
 
-              if (ImGui::Selectable(label, false, ImGuiSelectableFlags_SpanAllColumns)) {
-                s_selectedSpecialtyObj = objPtr;
-                s_selectedSpecialtySlotAddr = 0;
-                s_selectedSpecialtyName = name;
-                s_selectedSpecialtyDesc = ResolveSpecialityDescByNo(spId);
+              if (ImGui::Selectable(label, IsSpecialtySelected(objPtr), ImGuiSelectableFlags_SpanAllColumns)) {
+                ToggleSpecialtySelection(objPtr, 0, name, (uint16_t)spId);
               }
 
               if (spValue >= 50 || hasAttr) {
@@ -1066,11 +1097,11 @@ namespace DX11Base {
 
     ImGui::End();
 
-    if (s_showGiveOfficerListWindow && s_selectedSpecialtyObj > 0x10000) {
+    if (s_showGiveOfficerListWindow && !s_selectedSpecialties.empty()) {
       static char officerSearch[64] = {};
       ImGui::SetNextWindowSize(ImVec2(520 * scale, 420 * scale), ImGuiCond_FirstUseEver);
       if (ImGui::Begin(u8"수여 대상 장수 선택###GiveOfficerListWin", &s_showGiveOfficerListWindow)) {
-        ImGui::TextUnformatted(u8"수여할 장수를 선택하세요");
+        ImGui::Text(u8"선택 명품 %d개를 수여할 장수를 선택하세요", (int)s_selectedSpecialties.size());
         ImGui::SetNextItemWidth(-1);
         ImGui::InputTextWithHint("##officerSearchWindow", u8"이름/ID 검색", officerSearch, sizeof(officerSearch));
         ImGui::Separator();
@@ -1101,15 +1132,12 @@ namespace DX11Base {
         if (ImGui::Button(u8"선택 장수에게 수여 실행", ImVec2(190 * scale, 0))) {
           uintptr_t targetBase = ResolveOfficerBaseById((uint16_t)s_giveOfficerSelectedId);
           if (targetBase > 0x10000) {
-            if (WritePtrSafe(s_selectedSpecialtyObj + 0x30, targetBase) &&
-                Write32Safe(s_selectedSpecialtyObj + 0x38, 1) &&
-                (s_selectedSpecialtySlotAddr <= 0x10000 || Write32Safe(s_selectedSpecialtySlotAddr + 0x08, 1))) {
-              AddLog(u8"[명품] %s(ID:%d)에게 수여 완료 (타입:장수)", g_officerNames[s_giveOfficerSelectedId].c_str(),
-                     s_giveOfficerSelectedId);
+            int succeeded = GiveSelectedSpecialties(targetBase);
+            AddLog(u8"[명품] %s(ID:%d)에게 수여: 성공 %d개, 실패 %d개",
+                   g_officerNames[s_giveOfficerSelectedId].c_str(), s_giveOfficerSelectedId,
+                   succeeded, (int)s_selectedSpecialties.size() - succeeded);
+            if (succeeded == (int)s_selectedSpecialties.size())
               s_showGiveOfficerListWindow = false;
-            } else {
-              AddLog(u8"[명품] 장수 수여 실패");
-            }
           } else {
             AddLog(u8"[명품] 대상 장수 주소를 찾지 못했습니다. (ID:%d)", s_giveOfficerSelectedId);
           }

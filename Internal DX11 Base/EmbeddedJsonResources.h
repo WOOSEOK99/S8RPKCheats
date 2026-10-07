@@ -13,7 +13,13 @@ namespace DX11Base {
 
 extern HMODULE g_hModule;
 
+// 기본 기재 JSON은 DLL에 포함하지 않고 외부 파일에서 읽습니다.
+bool LoadDefaultTraitJsonFromFile(std::string &out);
+
 inline bool LoadEmbeddedJsonResource(int resourceId, std::string &out) {
+    if (resourceId == IDR_JSON_TRAITS_DEFAULT)
+        return LoadDefaultTraitJsonFromFile(out);
+
     out.clear();
     if (!g_hModule)
         return false;
