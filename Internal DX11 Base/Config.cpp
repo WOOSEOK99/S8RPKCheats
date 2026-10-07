@@ -5,7 +5,7 @@
 #undef SaveConfig
 
 #include "Cheats/Officer/TraitViewerFeature.h"
-#include "Cheats/Officer/AffinityDisplay.h"
+#include "Cheats/Officer/AffinityDisplayVisibilityFix.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/Civilian/MissionCpuHeroExclusion.h"
 #include "Cheats/Civilian/TechCityEditorVisibility.h"
@@ -460,7 +460,7 @@ namespace DX11Base {
     bool savedAffinityDisplay = false;
     if (LoadBoolConfigValue("bAffinityDisplay", savedAffinityDisplay)) {
       bAffinityDisplay = savedAffinityDisplay;
-      if (!SetAffinityDisplay(bAffinityDisplay))
+      if (!SetAffinityDisplayWithVisibilityFix(bAffinityDisplay))
         bAffinityDisplay = IsAffinityDisplayApplied();
       AddLog(u8"[Config] 상성 인게임 표시 설정 로드: %s",
              bAffinityDisplay ? "ON" : "OFF");
