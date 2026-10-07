@@ -9,20 +9,33 @@
 
 namespace DX11Base {
 
-bool LoadDefaultTraitJsonFromFile(std::string &out) {
-  out.clear();
+namespace {
+
+std::filesystem::path ResolveDefaultTraitJsonPath() {
+  std::filesystem::path preferred;
   wchar_t modulePath[MAX_PATH] = {};
   const DWORD length = GetModuleFileNameW(g_hModule, modulePath, MAX_PATH);
-  if (length > 0 && length < MAX_PATH) {
-    const auto path = std::filesystem::path(modulePath).parent_path() /
-                      L"S8RPK_traits_default.json";
-    if (ReadUtf8TextFile(path, out))
-      return true;
-  }
-
   std::error_code ec;
+  if (length > 0 && length < MAX_PATH) {
+    preferred = std::filesystem::path(modulePath).parent_path() / L"S8RPK_traits_default.json";
+    if (std::filesystem::is_regular_file(preferred, ec) && !ec)
+      return preferred;
+  }
   const auto cwd = std::filesystem::current_path(ec);
-  return !ec && ReadUtf8TextFile(cwd / L"S8RPK_traits_default.json", out);
+  if (!ec) {
+    const auto path = cwd / L"S8RPK_traits_default.json";
+    if (std::filesystem::is_regular_file(path, ec) && !ec)
+      return path;
+    if (preferred.empty())
+      preferred = path;
+  }
+  return preferred;
+}
+
+} // namespace
+
+bool LoadDefaultTraitJsonFromFile(std::string &out) {
+  return ReadUtf8TextFile(ResolveDefaultTraitJsonPath(), out);
 }
 
 } // namespace DX11Base
@@ -94,36 +107,46 @@ std::vector<std::string> EditorFormatTokens(const std::string &text) {
   return out;
 }
 
-std::string HexEncodeText(const std::string &text) {
-  static constexpr char kHex[] = "0123456789ABCDEF";
-  std::string out;
-  out.reserve(text.size() * 2);
-  for (unsigned char ch : text) {
-    out.push_back(kHex[ch >> 4]);
-    out.push_back(kHex[ch & 0x0F]);
-  }
-  return out;
-}
-
-int HexTextValue(char ch) {
-  if (ch >= '0' && ch <= '9') return ch - '0';
-  if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-  if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-  return -1;
-}
-
-bool HexDecodeText(const std::string &text, std::string &out) {
-  if ((text.size() & 1u) != 0)
+bool ReplaceJsonText(std::string &line, const char *field, const std::string &text) {
+  const std::string key = std::string("\"") + field + "\"";
+  const auto keyPos = line.find(key);
+  if (keyPos == std::string::npos)
     return false;
-  out.clear();
-  out.reserve(text.size() / 2);
-  for (std::size_t i = 0; i < text.size(); i += 2) {
-    const int hi = HexTextValue(text[i]);
-    const int lo = HexTextValue(text[i + 1]);
-    if (hi < 0 || lo < 0)
-      return false;
-    out.push_back(static_cast<char>((hi << 4) | lo));
+  const auto colon = line.find(':', keyPos + key.size());
+  if (colon == std::string::npos)
+    return false;
+  const auto begin = line.find('"', colon + 1);
+  if (begin == std::string::npos)
+    return false;
+  auto end = begin + 1;
+  for (; end < line.size(); ++end) {
+    if (line[end] == '\\')
+      ++end;
+    else if (line[end] == '"')
+      break;
   }
+  if (end >= line.size())
+    return false;
+
+  std::string quoted = "\"";
+  for (unsigned char ch : text) {
+    switch (ch) {
+    case '"': quoted += "\\\""; break;
+    case '\\': quoted += "\\\\"; break;
+    case '\b': quoted += "\\b"; break;
+    case '\f': quoted += "\\f"; break;
+    case '\n': quoted += "\\n"; break;
+    case '\r': quoted += "\\r"; break;
+    case '\t': quoted += "\\t"; break;
+    default:
+      if (ch < 0x20)
+        return false;
+      quoted.push_back(static_cast<char>(ch));
+      break;
+    }
+  }
+  quoted += '"';
+  line.replace(begin, end - begin + 1, quoted);
   return true;
 }
 
@@ -183,30 +206,6 @@ bool EnsureEmbeddedEditorRows() {
   g_embeddedEditorRowsInitialized = true;
   g_embeddedEditorRowsInitFailureLogged = false;
   return true;
-}
-
-bool ParseEmbeddedEditLine(
-    const std::string &line, int &traitId, std::string &name, std::string &desc) {
-  if (line.rfind("ID:", 0) != 0)
-    return false;
-
-  const std::size_t p1 = line.find(':', 3);
-  if (p1 == std::string::npos)
-    return false;
-  const std::size_t p2 = line.find(':', p1 + 1);
-  if (p2 == std::string::npos)
-    return false;
-
-  try {
-    traitId = std::stoi(line.substr(3, p1 - 3));
-  } catch (...) {
-    return false;
-  }
-  if (traitId < 1 || traitId > kTraitCount)
-    return false;
-
-  return HexDecodeText(line.substr(p1 + 1, p2 - p1 - 1), name) &&
-         HexDecodeText(line.substr(p2 + 1), desc);
 }
 
 bool EnsureEmbeddedTraitConfigLoaded() {
@@ -415,9 +414,7 @@ std::vector<TraitTextEditRow>& GetEmbeddedTraitTextEditRows() {
 }
 
 std::string GetEmbeddedTraitTextStoragePath() {
-  const std::filesystem::path legacyPath(GetTraitTextStoragePath());
-  const std::filesystem::path parent = legacyPath.parent_path();
-  return (parent / L"trait_texts_embedded.ini").string();
+  return ResolveDefaultTraitJsonPath().string();
 }
 
 bool LoadEmbeddedTraitTextEdits(std::string *error) {
@@ -425,31 +422,33 @@ bool LoadEmbeddedTraitTextEdits(std::string *error) {
     SetTextError(error, "내장 기본기재 편집 목록을 준비하지 못했습니다.");
     return false;
   }
-  ResetEmbeddedTraitTextEdits();
-
-  const std::string path = GetEmbeddedTraitTextStoragePath();
-  std::ifstream file(path, std::ios::binary);
-  if (!file.is_open()) {
-    SetTextError(error, "trait_texts_embedded.ini가 없습니다.");
+  std::string jsonText;
+  if (!LoadDefaultTraitJsonFromFile(jsonText)) {
+    SetTextError(error, "기본 기재 JSON을 읽지 못했습니다.");
     return false;
   }
+  ResetEmbeddedTraitTextEdits();
 
+  std::istringstream file(jsonText);
+  bool inCustomNames = false;
   std::string line;
   while (std::getline(file, line)) {
-    if (!line.empty() && line.back() == '\r')
-      line.pop_back();
-
-    int traitId = 0;
-    std::string name;
-    std::string desc;
-    if (!ParseEmbeddedEditLine(line, traitId, name, desc))
+    if (!inCustomNames) {
+      if (line.find("\"customNames\"") != std::string::npos)
+        inCustomNames = true;
       continue;
-
+    }
+    int index = -1;
+    TraitMetaEntry entry;
+    if (!ParseCustomMetaLine(line, index, entry))
+      continue;
     for (auto &row : g_embeddedEditorRows) {
-      if (row.traitId != traitId)
+      if (row.traitId != index + 1)
         continue;
-      row.newName = std::move(name);
-      row.newDesc = std::move(desc);
+      if (entry.name != row.oldName)
+        row.newName = entry.name;
+      if (entry.desc != row.oldDesc)
+        row.newDesc = entry.desc;
       break;
     }
   }
@@ -461,28 +460,61 @@ bool SaveEmbeddedTraitTextEdits(std::string *error) {
     SetTextError(error, "내장 기본기재 편집 목록을 준비하지 못했습니다.");
     return false;
   }
-
   for (std::size_t i = 0; i < g_embeddedEditorRows.size(); ++i) {
     if (!ValidateEmbeddedTraitTextRow(i, error))
       return false;
   }
 
-  const std::string path = GetEmbeddedTraitTextStoragePath();
-  std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  if (!file.is_open()) {
-    SetTextError(error, "내장 기재 편집 저장 파일을 열 수 없습니다: " + path);
+  std::string jsonText;
+  if (!LoadDefaultTraitJsonFromFile(jsonText)) {
+    SetTextError(error, "기본 기재 JSON을 읽지 못했습니다.");
+    return false;
+  }
+  std::istringstream input(jsonText);
+  std::ostringstream output;
+  bool inCustomNames = false;
+  std::size_t updatedCount = 0;
+  std::string line;
+  while (std::getline(input, line)) {
+    if (!inCustomNames) {
+      if (line.find("\"customNames\"") != std::string::npos)
+        inCustomNames = true;
+    } else {
+      int index = -1;
+      TraitMetaEntry entry;
+      if (ParseCustomMetaLine(line, index, entry)) {
+        for (const auto &row : g_embeddedEditorRows) {
+          if (row.traitId != index + 1)
+            continue;
+          if ((!row.newName.empty() && !ReplaceJsonText(line, "name", row.newName)) ||
+              (!row.newDesc.empty() && !ReplaceJsonText(line, "desc", row.newDesc))) {
+            SetTextError(error, "기재 JSON의 이름/설명 형식이 올바르지 않습니다.");
+            return false;
+          }
+          ++updatedCount;
+          break;
+        }
+      }
+    }
+    output << line;
+    if (!input.eof())
+      output << '\n';
+  }
+  if (updatedCount != g_embeddedEditorRows.size()) {
+    SetTextError(error, "기재 JSON에서 편집 대상 ID를 모두 찾지 못했습니다.");
     return false;
   }
 
-  file << "[SAN8RPK_EMBEDDED_TRAIT_TEXTS]\r\n";
-  for (const auto &row : g_embeddedEditorRows) {
-    file << "ID:" << row.traitId << ':'
-         << HexEncodeText(row.newName) << ':'
-         << HexEncodeText(row.newDesc) << "\r\n";
+  const auto path = ResolveDefaultTraitJsonPath();
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  if (!file.is_open()) {
+    SetTextError(error, "기재 JSON 저장 파일을 열 수 없습니다: " + path.string());
+    return false;
   }
-
+  file << output.str();
+  file.flush();
   if (!file.good()) {
-    SetTextError(error, "trait_texts_embedded.ini 저장 중 쓰기 오류가 발생했습니다.");
+    SetTextError(error, "S8RPK_traits_default.json 저장 중 쓰기 오류가 발생했습니다.");
     return false;
   }
   return true;

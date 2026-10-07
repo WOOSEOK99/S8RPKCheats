@@ -305,7 +305,7 @@ void DrawTraitTextEditorWindow(float scale) {
   }
 
   ImGui::Separator();
-  ImGui::TextDisabled(u8"내장 기본기재 (ID 기반)");
+  ImGui::TextDisabled(u8"추가 기재 (JSON, ID 기반)");
   for (int i = 0; i < static_cast<int>(embeddedRows.size()); ++i) {
     const bool modified = !embeddedRows[i].newName.empty() || !embeddedRows[i].newDesc.empty();
     char label[320] = {};
@@ -328,7 +328,7 @@ void DrawTraitTextEditorWindow(float scale) {
   g_selected = std::clamp(g_selected, 0, static_cast<int>(activeRows.size()) - 1);
   const auto& row = activeRows[g_selected];
   if (g_selectedEmbedded)
-    ImGui::Text(u8"기재: %s  (내장 ID %d)", row.oldName.c_str(), row.traitId);
+    ImGui::Text(u8"기재: %s  (ID %d)", row.oldName.c_str(), row.traitId);
   else
     ImGui::Text(u8"기재: %s", row.oldName.c_str());
   ImGui::Separator();
@@ -352,7 +352,7 @@ void DrawTraitTextEditorWindow(float scale) {
 
   ImGui::TextDisabled(u8"%%d 등의 형식 토큰을 유지할 경우 원문과 종류/순서가 같아야 합니다. %% 표시는 %%%% 사용.");
   if (g_selectedEmbedded)
-    ImGui::TextDisabled(u8"내장 기본기재 편집은 version.dll이 없을 때만 ID 기준으로 적용됩니다.");
+    ImGui::TextDisabled(u8"추가 기재 편집은 version.dll이 없을 때만 적용되며, 저장 시 외부 JSON을 수정합니다.");
 
   ImGui::Spacing();
   if (ImGui::Button(u8"적용", ImVec2(90.0f * scale, 28.0f * scale))) {
@@ -385,12 +385,11 @@ void DrawTraitTextEditorWindow(float scale) {
   if (ImGui::Button(u8"저장", ImVec2(90.0f * scale, 28.0f * scale))) {
     StoreSelectionBuffers();
     std::string error;
-    if (!SaveTraitTextEdits(&error)) {
+    const bool saved = g_selectedEmbedded ? SaveEmbeddedTraitTextEdits(&error) : SaveTraitTextEdits(&error);
+    if (!saved) {
       SetStatus(std::string(u8"저장 실패: ") + error);
-    } else if (!SaveEmbeddedTraitTextEdits(&error)) {
-      SetStatus(std::string(u8"내장 기재 저장 실패: ") + error);
     } else {
-      SetStatus(u8"기본/내장 기재 편집값 저장 완료");
+      SetStatus(g_selectedEmbedded ? u8"S8RPK_traits_default.json에 이름/설명 저장 완료" : u8"기본 기재 편집값 저장 완료");
     }
   }
   ImGui::SameLine();
