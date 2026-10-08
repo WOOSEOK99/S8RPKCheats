@@ -305,75 +305,80 @@ namespace DX11Base {
       // 3) 도시 유형 변경
       ImGui::TextColored(ImVec4(0.75f, 0.86f, 1.f, 1.f), u8"[ 도시 유형 변경 ]");
 
-      const bool bigCityBusy = g_bigCityThreadRunning.load();
-      if (bigCityBusy)
-        ImGui::BeginDisabled();
-      if (ImGui::Checkbox(u8"기술도시로 전환", &bBigCity)) {
-        SetBigCityConvert(bBigCity);
-        NotifyFeatureToggle(u8"기술도시로 전환", bBigCity);
-        SaveConfig();
-      }
-      if (bigCityBusy)
-        ImGui::EndDisabled();
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 낙양, 장안, 허창, 업, 양양, 건업, 성도");
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 기술도시로 변환 및 최대 수치 한도 보정");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(240.f * sc);
-      const bool bangmokBusy = g_bangmokThreadRunning.load();
-      if (bangmokBusy)
-        ImGui::BeginDisabled();
-      if (ImGui::Checkbox(u8"방목도시 황폐화", &bBangmokCity)) {
-        SetBangmokCity(bBangmokCity);
-        NotifyFeatureToggle(u8"방목도시 황폐화", bBangmokCity);
-        SaveConfig();
-      }
-      if (bangmokBusy)
-        ImGui::EndDisabled();
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 오환, 강, 선비, 저, 남만 등 방목도시");
-        ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), u8"내용 : 방목도시의 능력치를 저하시키고 최대 수치를 고정합니다.");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(240.f * sc);
-      const bool nongBusy = g_nongCityThreadRunning.load();
-      if (nongBusy)
-        ImGui::BeginDisabled();
-      if (ImGui::Checkbox(u8"농경도시 버프", &bNonggyeongCity)) {
-        SetNonggyeongCity(bNonggyeongCity);
-        NotifyFeatureToggle(u8"농경도시 버프", bNonggyeongCity);
-        SaveConfig();
-      }
-      if (nongBusy)
-        ImGui::EndDisabled();
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 남피, 평원, 북해, 제남, 하비, 소패, 계양 등");
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 농경도시로 변환 및 농촌/상가 수치 한도 상향");
-        ImGui::EndTooltip();
-      }
-
-      ImGui::SameLine(240.f * sc);
-      const bool sangeopBusy = g_sagCityThreadRunning.load();
-      if (sangeopBusy)
-        ImGui::BeginDisabled();
-      if (ImGui::Checkbox(u8"상업도시 버프", &bSangeopCity)) {
-        SetSangeopCity(bSangeopCity);
-        NotifyFeatureToggle(u8"상업도시 버프", bSangeopCity);
-        SaveConfig();
-      }
-      if (sangeopBusy)
-        ImGui::EndDisabled();
-      if (ImGui::IsItemHovered()) {
-        ImGui::BeginTooltip();
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 무희, 제남, 요동, 업, 성도, 건업 등 (기술도시 제외)");
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
-        ImGui::EndTooltip();
+      // 네 체크박스를 4개 균등 열에 배치해 동일 X 좌표에서 겹치지 않도록 한다.
+      if (ImGui::BeginTable("##CityTypeModifierRow", 4, ImGuiTableFlags_SizingStretchSame)) {
+        ImGui::TableNextColumn();
+        const bool bigCityBusy = g_bigCityThreadRunning.load();
+        if (bigCityBusy)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"기술도시로 전환", &bBigCity)) {
+          SetBigCityConvert(bBigCity);
+          NotifyFeatureToggle(u8"기술도시로 전환", bBigCity);
+          SaveConfig();
+        }
+        if (bigCityBusy)
+          ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 낙양, 장안, 허창, 업, 양양, 건업, 성도");
+          ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 기술도시로 변환 및 최대 수치 한도 보정");
+          ImGui::EndTooltip();
+        }
+  
+        ImGui::TableNextColumn();
+        const bool bangmokBusy = g_bangmokThreadRunning.load();
+        if (bangmokBusy)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"방목도시 황폐화", &bBangmokCity)) {
+          SetBangmokCity(bBangmokCity);
+          NotifyFeatureToggle(u8"방목도시 황폐화", bBangmokCity);
+          SaveConfig();
+        }
+        if (bangmokBusy)
+          ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 오환, 강, 선비, 저, 남만 등 방목도시");
+          ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), u8"내용 : 방목도시의 능력치를 저하시키고 최대 수치를 고정합니다.");
+          ImGui::EndTooltip();
+        }
+  
+        ImGui::TableNextColumn();
+        const bool nongBusy = g_nongCityThreadRunning.load();
+        if (nongBusy)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"농경도시 버프", &bNonggyeongCity)) {
+          SetNonggyeongCity(bNonggyeongCity);
+          NotifyFeatureToggle(u8"농경도시 버프", bNonggyeongCity);
+          SaveConfig();
+        }
+        if (nongBusy)
+          ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 남피, 평원, 북해, 제남, 하비, 소패, 계양 등");
+          ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 농경도시로 변환 및 농촌/상가 수치 한도 상향");
+          ImGui::EndTooltip();
+        }
+  
+        ImGui::TableNextColumn();
+        const bool sangeopBusy = g_sagCityThreadRunning.load();
+        if (sangeopBusy)
+          ImGui::BeginDisabled();
+        if (ImGui::Checkbox(u8"상업도시 버프", &bSangeopCity)) {
+          SetSangeopCity(bSangeopCity);
+          NotifyFeatureToggle(u8"상업도시 버프", bSangeopCity);
+          SaveConfig();
+        }
+        if (sangeopBusy)
+          ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) {
+          ImGui::BeginTooltip();
+          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 무희, 제남, 요동, 업, 성도, 건업 등 (기술도시 제외)");
+          ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
+          ImGui::EndTooltip();
+        }
+        ImGui::EndTable();
       }
 
       ImGui::Spacing();
