@@ -116,7 +116,11 @@ namespace DX11Base {
   extern bool bAutoStatUp99;        // 능력치 99 -> 100 자동 보정
   extern bool bInfTengi;            // 2026-04-05 무한 전기
   extern bool bTotalWarCycleShortening; // 결전 재발생 대기 주기 단축 (기본 ON)
-  extern bool bCancelCastleEvent;   // 2026-04-05 중지 성성 취소
+  extern bool bCancelCastleEvent;   // 기존 설정 호환용 (메뉴에서는 숨김)
+  // 전기 목록 관리 설정 (UI·저장용; 실제 전기 발생 제한은 별도 구현 필요).
+  constexpr int kTengiListEventCount = 15;
+  extern bool g_tengiListAllowed[kTengiListEventCount];
+  extern int g_tengiListDurationMonths[kTengiListEventCount]; // 0=기본 기간
   extern bool bSkillCondition;      // 만병 습득 조건 해제
   extern bool bYumokCondition;      // 유목기병 습득 조건 해제
   extern bool bSangbyeongCondition; // 상병 습득 조건 해제
