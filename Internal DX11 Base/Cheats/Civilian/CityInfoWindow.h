@@ -17,6 +17,9 @@ namespace DX11Base {
   void RunCityRevoltAlwaysZero();
   void ResetAllCityRevoltCounters();
   void MaximizeAllCityResources();
+  void MaximizeAllCityGold();
+  void MaximizeAllCityGrain();
+  void MaximizeAllCityTroops();
   void MaximizeAllCityDevMax();
   void MaximizeAllCityComMax();
   void MaximizeAllCityDefMax();
