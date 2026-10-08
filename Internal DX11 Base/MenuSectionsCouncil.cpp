@@ -138,6 +138,7 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing();
 
+        // 기존 두 체크박스의 실행 코드는 변경하지 않고 배치만 정리한다.
         if (ImGui::Checkbox(u8"매 평정 새로운 전기 발생", &bInfTengi)) {
           NotifyFeatureToggle(u8"매 평정 새로운 전기 발생", bInfTengi);
           SaveConfig();
@@ -148,19 +149,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::SameLine(160.0f * scale);
-
-        if (ImGui::Checkbox(u8"중지 성성 취소", &bCancelCastleEvent)) {
-          NotifyFeatureToggle(u8"중지 성성 취소", bCancelCastleEvent);
-          SaveConfig();
-        }
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"중지 성성이 발생하면 즉시 취소합니다.");
-          ImGui::EndTooltip();
-        }
-
+        ImGui::SameLine(0.f, 24.f * scale);
         if (ImGui::Checkbox(u8"결전 발생 주기 단축", &bTotalWarCycleShortening)) {
           const bool requested = bTotalWarCycleShortening;
           if (!DX11Base::SetTotalWarCycleShortening(requested))
@@ -177,18 +166,75 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        ImGui::SameLine(160.0f * scale);
+        // 외부 version.dll에 기재된 전기 분류명. 내부 이벤트 ID는 아직 검증되지 않음.
+        static const char *const tengiNames[kTengiListEventCount] = {
+          u8"결전", u8"이민족습격", u8"악적발호", u8"의심암귀", u8"민심혹란",
+          u8"붕벽", u8"여세", u8"피폐", u8"권위고양", u8"보장각성",
+          u8"기장각성", u8"궁장각성", u8"병격난무", u8"전승기", u8"중지성성"
+        };
+        static bool draftAllowed[kTengiListEventCount] = {};
+        static int draftMonths[kTengiListEventCount] = {};
 
-        if (ImGui::Button(u8"전기발생 즉시 취소", ImVec2(120, 26))) {
-          if (DX11Base::GetCapturedTengiAddr() != 0) {
-            DX11Base::CancelTengi();
-            DX11Base::AddLog(u8"[수동] 전기 취소 (플래그 적용)");
+        ImGui::Spacing();
+        if (ImGui::Button(u8"전기 목록 관리##tengiList", ImVec2(160.f * scale, 0.f))) {
+          for (int i = 0; i < kTengiListEventCount; ++i) {
+            draftAllowed[i] = g_tengiListAllowed[i];
+            draftMonths[i] = g_tengiListDurationMonths[i];
           }
+          ImGui::OpenPopup(u8"전기 목록 관리##popup");
         }
         if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"현재 발생된 전기를 즉시 취소합니다.");
-          ImGui::EndTooltip();
+          ImGui::SetTooltip(u8"전기별 허용 여부와 기간을 설정합니다. 현재는 설정 저장까지만 지원합니다.");
+        }
+
+        ImGui::SetNextWindowSize(ImVec2(520.f * scale, 510.f * scale), ImGuiCond_Appearing);
+        if (ImGui::BeginPopupModal(u8"전기 목록 관리##popup", nullptr,
+                                   ImGuiWindowFlags_NoSavedSettings)) {
+          ImGui::TextWrapped(u8"전기별 허용 여부와 기간 설정 (0개월 = 게임 기본값)");
+          ImGui::TextColored(ImVec4(1.f, 0.75f, 0.3f, 1.f),
+                             u8"※ 현재는 목록 설정의 저장/불러오기만 지원하며 게임 발생 제한·기간 적용은 아직 연결되지 않았습니다.");
+          ImGui::Spacing();
+
+          const ImGuiTableFlags listFlags =
+              ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg |
+              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY;
+          if (ImGui::BeginTable("##TengiListTable", 3, listFlags,
+                                ImVec2(0.f, 355.f * scale))) {
+            ImGui::TableSetupColumn(u8"전기 이름", ImGuiTableColumnFlags_WidthStretch, 1.8f);
+            ImGui::TableSetupColumn(u8"발생 허용", ImGuiTableColumnFlags_WidthStretch, 0.8f);
+            ImGui::TableSetupColumn(u8"기간(개월)", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            ImGui::TableHeadersRow();
+            for (int i = 0; i < kTengiListEventCount; ++i) {
+              ImGui::PushID(i);
+              ImGui::TableNextRow();
+              ImGui::TableSetColumnIndex(0);
+              ImGui::TextUnformatted(tengiNames[i]);
+              ImGui::TableSetColumnIndex(1);
+              ImGui::Checkbox("##allow", &draftAllowed[i]);
+              ImGui::TableSetColumnIndex(2);
+              ImGui::SetNextItemWidth(-1.f);
+              if (ImGui::InputInt("##months", &draftMonths[i], 0, 0)) {
+                if (draftMonths[i] < 0) draftMonths[i] = 0;
+                if (draftMonths[i] > 120) draftMonths[i] = 120;
+              }
+              ImGui::PopID();
+            }
+            ImGui::EndTable();
+          }
+
+          if (ImGui::Button(u8"설정 저장", ImVec2(115.f * scale, 0.f))) {
+            for (int i = 0; i < kTengiListEventCount; ++i) {
+              g_tengiListAllowed[i] = draftAllowed[i];
+              g_tengiListDurationMonths[i] = draftMonths[i];
+            }
+            SaveConfig();
+            DX11Base::AddLog(u8"[전기 목록] 허용 여부 및 기간 설정 저장 완료 (게임 적용은 미구현)");
+            ImGui::CloseCurrentPopup();
+          }
+          ImGui::SameLine(0.f, 10.f * scale);
+          if (ImGui::Button(u8"닫기##tengiList", ImVec2(90.f * scale, 0.f)))
+            ImGui::CloseCurrentPopup();
+          ImGui::EndPopup();
         }
 
         ImGui::Spacing();
