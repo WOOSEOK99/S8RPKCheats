@@ -467,20 +467,7 @@ namespace DX11Base {
     //   bSelectOfficerFirstInit = false;
     // }
 
-    if (bInfTengi) {
-      uint8_t sm = GetSystemMonthValue();
-      uint8_t rm = GetCurrentMonth();
-      static uint8_t s_lastTengiMonth = 0;
-
-      // 무한 전기 발생 (1, 4, 7, 10월)
-      if (sm == 1 || sm == 4 || sm == 7 || sm == 10) {
-        // 치트 엔진처럼 지속적으로 값을 고정시킵니다.
-        // SetTengi 에서는 포인터가 생성된 시점에 플래그를 1로 설정하여 크래시를 방지합니다.
-        if (DX11Base::GetCapturedTengiAddr() != 0) {
-          DX11Base::SetTengi(100);
-        }
-      }
-    }
+    DX11Base::TickTengiCycle(p1Ready ? p1 : 0);
 
     // 전쟁 자동화 (전쟁 관련 변수 중 하나라도 켜져 있으면 캡처 활성화)
     static bool s_autoCaptureStarted = false;

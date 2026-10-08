@@ -1,5 +1,6 @@
 #include "../../pch.h"
 #include "TengiCave.h"
+#include "MonthCapture.h"
 #include "../../Cheats.h"
 #include "../../MemoryUtils.h"
 #include "../../MenuState.h"
@@ -348,6 +349,206 @@ namespace DX11Base {
       return IsValidPtr(duration, sizeof(uint16_t)) ? duration : 0;
     }
   } // namespace
+
+  namespace {
+    // Layout from SAN8RPK.pdb B18A027E-19F4-4C35-8749-5B6F0FF814D8, age 1.
+    // DataCenter::m_worldData +0x72C8; WorldData::m_Momentum +0x1E4B18,
+    // m_activeTurningPoint +0x1E4B20. Root-relative gauge: +0x1EBDE0.
+    // MultiTypeBuffer<TurningPoint,16>::m_isConstructed is buffer +0x10;
+    // it describes object lifetime, not a pending-event flag.
+    // TurningPoint::m_pData +8; TurningPointData::m_ID +8,
+    // m_lastTriggeredDate +0x36; +0x12 is an effect definition value,
+    // not remaining time (also saved/restored by version.dll +0x5E260/510).
+    constexpr uintptr_t kCycleGaugeOffset = 0x1EBDE0;
+    constexpr GUID kCyclePdbGuid = {0xB18A027E, 0x19F4, 0x4C35,
+        {0x87, 0x49, 0x5B, 0x6F, 0x0F, 0xF8, 0x14, 0xD8}};
+
+    bool HasVerifiedCycleLayout() {
+      const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      if (!base || !IsValidPtr(base, sizeof(IMAGE_DOS_HEADER)))
+        return false;
+      __try {
+        const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
+          return false;
+        const uintptr_t ntAddress = base + dos->e_lfanew;
+        if (!IsValidPtr(ntAddress, sizeof(IMAGE_NT_HEADERS64)))
+          return false;
+        const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS64 *>(ntAddress);
+        if (nt->Signature != IMAGE_NT_SIGNATURE ||
+            nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
+            nt->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_DEBUG)
+          return false;
+        const auto &dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+        const DWORD size = nt->OptionalHeader.SizeOfImage;
+        if (!dir.VirtualAddress || dir.VirtualAddress >= size ||
+            dir.Size > size - dir.VirtualAddress ||
+            !IsValidPtr(base + dir.VirtualAddress, dir.Size))
+          return false;
+        const auto *entries = reinterpret_cast<const IMAGE_DEBUG_DIRECTORY *>(base + dir.VirtualAddress);
+        for (DWORD i = 0; i < dir.Size / sizeof(IMAGE_DEBUG_DIRECTORY); ++i) {
+          const auto &entry = entries[i];
+          if (entry.Type != IMAGE_DEBUG_TYPE_CODEVIEW || entry.SizeOfData < 24 ||
+              !entry.AddressOfRawData || entry.AddressOfRawData >= size ||
+              entry.SizeOfData > size - entry.AddressOfRawData ||
+              !IsValidPtr(base + entry.AddressOfRawData, 24))
+            continue;
+          const uint8_t *cv = reinterpret_cast<const uint8_t *>(base + entry.AddressOfRawData);
+          if (memcmp(cv, "RSDS", 4) == 0 &&
+              memcmp(cv + 4, &kCyclePdbGuid, sizeof(GUID)) == 0 &&
+              *reinterpret_cast<const DWORD *>(cv + 20) == 1)
+            return true;
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      return false;
+    }
+
+    struct TengiCycleSnapshot {
+      uintptr_t manager = 0, data = 0;
+      int month = -1, start = -1;
+      uint16_t id = 0, duration = 0;
+      bool constructed = false;
+    };
+
+    bool ReadCycleSnapshot(TengiCycleSnapshot *out) {
+      __try {
+        unsigned short year = 0;
+        uint8_t month = 0;
+        out->manager = GetScenarioDataCenterAddress();
+        if (!out->manager || !ReadScenarioDate(&year, &month) ||
+            !year || month < 1 || month > 12 ||
+            out->manager != GetScenarioDataCenterAddress())
+          return false;
+        out->month = static_cast<int>(year) * 12 + month - 1;
+        const uintptr_t buffer = out->manager + kCycleGaugeOffset + 8;
+        if (!IsValidPtr(buffer, 17))
+          return false;
+        const uint8_t constructed = *reinterpret_cast<const uint8_t *>(buffer + 16);
+        if (constructed > 1)
+          return false;
+        out->constructed = constructed != 0;
+        if (!out->constructed)
+          return true; // Destroyed storage: ignore stale buffer pointers.
+        if (!TryReadEventPointer(buffer + 8, &out->data) || !IsValidPtr(out->data, 0x3A))
+          return false;
+        out->id = *reinterpret_cast<const uint16_t *>(out->data + 8);
+        uintptr_t registered = 0;
+        if (out->id < 1 || out->id > 100 ||
+            !TryReadEventPointer(out->manager + 0x58A670 + out->id * 8, &registered) ||
+            registered != out->data)
+          return false; // Verify actual event ID against the game slot table.
+        const unsigned short startYear = *reinterpret_cast<const unsigned short *>(out->data + 0x36);
+        const uint8_t startMonth = *reinterpret_cast<const uint8_t *>(out->data + 0x38);
+        if (!startYear || startMonth < 1 || startMonth > 12)
+          return false;
+        out->start = static_cast<int>(startYear) * 12 + startMonth - 1;
+        return out->start <= out->month && TryReadEventDuration(out->data + 0x12, &out->duration);
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    struct TengiCycleState {
+      uintptr_t session = 0, manager = 0, data = 0;
+      int lastMonth = -1, handledCouncil = -1, start = -1, earliest = -1;
+      bool pending = false, needsEventObservation = false;
+    };
+    TengiCycleState s_cycle;
+
+    bool RequestCycleTengi(const TengiCycleSnapshot &snapshot) {
+      const uintptr_t gauge = snapshot.manager + kCycleGaugeOffset;
+      if (!IsValidPtr(gauge, 25))
+        return false;
+      __try {
+        if (*reinterpret_cast<const uint8_t *>(gauge + 24) != 0)
+          return false;
+        // SetTengi(100) also writes the construction flag. Raise only momentum
+        // here; the game must construct the event and process normal expiration.
+        *reinterpret_cast<uint8_t *>(gauge) = 100;
+        return *reinterpret_cast<const uint8_t *>(gauge) == 100;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+  } // namespace
+
+  void TickTengiCycle(uintptr_t sessionP1) {
+    static ULONGLONG lastPoll = 0;
+    static const bool verifiedLayout = HasVerifiedCycleLayout();
+    static bool unavailableLogged = false;
+    const ULONGLONG now = GetTickCount64();
+    if (s_cycle.session != sessionP1) {
+      s_cycle = {};
+      lastPoll = 0;
+    }
+    if (!verifiedLayout) {
+      if (bInfTengi && !unavailableLogged) {
+        AddLog(u8"[Tengi 주기] 검증된 게임 레이아웃 불일치: 강제 발생 차단");
+        unavailableLogged = true;
+      }
+      return;
+    }
+    if (!sessionP1) {
+      s_cycle = {};
+      return;
+    }
+    if (lastPoll && now - lastPoll < 200)
+      return;
+    lastPoll = now;
+    TengiCycleSnapshot snapshot;
+    if (!ReadCycleSnapshot(&snapshot)) {
+      s_cycle = {}; // Lost observations cannot establish an idle duration barrier.
+      s_cycle.session = sessionP1;
+      s_cycle.needsEventObservation = true;
+      if (bInfTengi && !unavailableLogged) {
+        AddLog(u8"[Tengi 주기] 날짜/전기 상태 확인 불가: 강제 발생 차단");
+        unavailableLogged = true;
+      }
+      return;
+    }
+    unavailableLogged = false;
+    if (s_cycle.session != sessionP1 || s_cycle.manager != snapshot.manager ||
+        snapshot.month < s_cycle.lastMonth) {
+      const bool uncertain = s_cycle.session == sessionP1 &&
+                             s_cycle.needsEventObservation;
+      s_cycle = {};
+      s_cycle.session = sessionP1;
+      s_cycle.manager = snapshot.manager;
+      s_cycle.needsEventObservation = uncertain;
+      s_cycle.handledCouncil = snapshot.month; // Never force during load/attach month.
+    }
+    s_cycle.lastMonth = snapshot.month;
+    if (snapshot.constructed &&
+        (s_cycle.data != snapshot.data || s_cycle.start != snapshot.start)) {
+      s_cycle.data = snapshot.data;
+      s_cycle.start = snapshot.start;
+      int duration = snapshot.duration; // Setting 0 uses the game definition.
+      for (int i = 0; i < kTengiListEventCount; ++i) {
+        if (kManagedEventSlots[i] == snapshot.id && g_tengiListAllowed[i] &&
+            g_tengiListDurationMonths[i] > 0 && g_tengiListDurationMonths[i] <= 120) {
+          duration = g_tengiListDurationMonths[i];
+          break;
+        }
+      }
+      s_cycle.earliest = snapshot.start + duration;
+      s_cycle.pending = false; // Only a real constructed event confirms occurrence.
+      s_cycle.needsEventObservation = false;
+      AddLog(u8"[Tengi 주기] 실제 전기 확인: ID %u, 시작 %d/%d, 기간 %d개월",
+             static_cast<unsigned int>(snapshot.id), snapshot.start / 12,
+             snapshot.start % 12 + 1, duration);
+    }
+    if (snapshot.month % 3 != 0 || s_cycle.handledCouncil == snapshot.month)
+      return;
+    s_cycle.handledCouncil = snapshot.month; // Also consume skipped/OFF councils.
+    if (!bInfTengi || snapshot.constructed || s_cycle.pending ||
+        s_cycle.needsEventObservation || snapshot.month < s_cycle.earliest)
+      return;
+    if (RequestCycleTengi(snapshot)) {
+      s_cycle.pending = true; // Request is not proof of actual occurrence.
+      AddLog(u8"[Tengi 주기] %d/%d 발생 요청 1회: 실제 객체 생성 대기",
+             snapshot.month / 12, snapshot.month % 12 + 1);
+    }
+  }
 
   // 별도 훅 없이 설정된 기간만 변경한다. 목록 허용/차단은 아직 구현되지 않았다.
   // 이 함수는 UI가 닫혀 있어도 렌더 유지보수 게이트(200ms)에서 호출된다.
