@@ -255,6 +255,11 @@ namespace DX11Base {
     UpsertBoolConfigValue("bMissionCpuHeroExclusion", bMissionCpuHeroExclusion);
     UpsertBoolConfigValue("bTechCityEditorVisible", bTechCityEditorVisible);
     UpsertBoolConfigValue("bTotalWarCycleShortening", bTotalWarCycleShortening);
+    for (int i = 0; i < kTengiListEventCount; ++i) {
+      const std::string suffix = std::to_string(i);
+      UpsertBoolConfigValue(("tengiListAllow" + suffix).c_str(), g_tengiListAllowed[i]);
+      UpsertIntConfigValue(("tengiListMonths" + suffix).c_str(), g_tengiListDurationMonths[i]);
+    }
     UpsertBoolConfigValue("bCouncilContinueAfterMove", bCouncilContinueAfterMove);
     UpsertBoolConfigValue("bCouncilExecuteFreeOfficers", bCouncilExecuteFreeOfficers);
     UpsertBoolConfigValue("bStratagemFiveEnabled", bStratagemFiveEnabled);
@@ -295,6 +300,18 @@ namespace DX11Base {
 
   void LoadConfig() {
     LoadConfigBase();
+    // 기존 '중지 성성 취소'는 별도 메뉴에서 제거했으므로 숨겨진 설정으로
+    // 자동 취소가 지속되지 않게 한다. 전기 목록 관리 실제 적용은 후속 구현이다.
+    bCancelCastleEvent = false;
+    for (int i = 0; i < kTengiListEventCount; ++i) {
+      const std::string suffix = std::to_string(i);
+      bool allowed = g_tengiListAllowed[i];
+      int months = g_tengiListDurationMonths[i];
+      if (LoadBoolConfigValue(("tengiListAllow" + suffix).c_str(), allowed))
+        g_tengiListAllowed[i] = allowed;
+      if (LoadIntConfigValue(("tengiListMonths" + suffix).c_str(), months))
+        g_tengiListDurationMonths[i] = months < 0 ? 0 : (months > 120 ? 120 : months);
+    }
 
     if (bUndiscoveredToRonin) {
       SetUndiscoveredToRonin(true);
