@@ -212,7 +212,11 @@ namespace DX11Base {
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 340.f * sc), true);
+      // 내용 높이를 매 프레임 측정해 상단 패널 아래의 여백을 제거한다.
+      static float s_cityTopContentHeight = 0.f;
+      ImGui::BeginChild("##CityTop",
+          ImVec2(0.f, s_cityTopContentHeight > 0.f
+                           ? s_cityTopContentHeight : 340.f * sc), true);
 
       const float fw = 95.f * sc;
 
@@ -409,6 +413,14 @@ namespace DX11Base {
         MaximizeAllCityTroops();
       }
 
+      // 자원/병력 최대화와 한도 최대화를 구분한다.
+      ImGui::PopStyleColor(2);
+      ImGui::Spacing();
+      ImGui::Separator();
+      ImGui::Spacing();
+      ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.19f, 0.38f, 0.55f, 1.f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.27f, 0.52f, 0.70f, 1.f));
+
       // 도시 유형 변경과 충돌하는 상한 버튼만 비활성화한다.
       if (cityTypeModifierActive)
         ImGui::BeginDisabled();
@@ -440,6 +452,12 @@ namespace DX11Base {
                                  : ImVec4(0.65f, 0.70f, 0.77f, 1.f));
       ImGui::TextWrapped(u8"※ 도시 유형 변경 기능이 하나라도 켜져 있으면 병사한도/개발한도/상업한도/방어한도/기술한도 최대화 버튼을 사용할 수 없습니다.");
       ImGui::PopStyleColor();
+      ImGui::TextWrapped(u8"※ 기술한도 최대화 값은 게임상에서 2000 으로 보이지만 최대화 값이 적용되어 있습니다.");
+
+      // 실제로 사용한 콘텐츠 높이와 아래쪽 패딩만 남겨 다음 프레임에 적용한다.
+      s_cityTopContentHeight = ImGui::GetCursorPosY() +
+                               ImGui::GetStyle().WindowPadding.y +
+                               ImGui::GetStyle().WindowBorderSize;
       ImGui::EndChild();
       ImGui::PopStyleColor();
     }
