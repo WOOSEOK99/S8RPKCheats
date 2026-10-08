@@ -106,6 +106,10 @@ namespace DX11Base {
   bool bInfTengi = false;            // 2026-04-05 무한 전기
   bool bTotalWarCycleShortening = true; // 결전 재발생 대기 주기 단축 (기본 ON)
   bool bCancelCastleEvent = false;   // 2026-04-05 중지 성성 취소
+  bool g_tengiListAllowed[kTengiListEventCount] = {
+      true, true, true, true, true, true, true, true,
+      true, true, true, true, true, true, true};
+  int g_tengiListDurationMonths[kTengiListEventCount] = {};
   bool bSkillCondition = false;      // 만병 습득 조건 해제
   bool bYumokCondition = false;      // 유목기병 습득 조건 해제
   bool bSangbyeongCondition = false; // 상병 습득 조건 해제
