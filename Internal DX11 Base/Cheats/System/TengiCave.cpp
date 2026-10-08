@@ -413,14 +413,19 @@ namespace DX11Base {
     // Values below are PE RVAs (.text section RVA 0x1000 + CodeView offsets).
     constexpr uintptr_t kCanTriggerByIdRva = 0x132E2F0;
     constexpr uintptr_t kCanTriggerByDataRva = 0x132E340;
+    constexpr uintptr_t kFinalTriggerRva = 0x132E920;
     using CanTriggerById = bool (__fastcall *)(int, bool);
     using CanTriggerByData = bool (__fastcall *)(void *, bool);
+    using FinalTrigger = bool (__fastcall *)(void *, bool);
     CanTriggerById s_originalCanTriggerById = nullptr;
     CanTriggerByData s_originalCanTriggerByData = nullptr;
+    FinalTrigger s_originalFinalTrigger = nullptr;
     bool s_allowedFilterInstalled = false;
     bool s_allowedFilterAttempted = false;
     std::atomic<uint32_t> s_allowedFilterMask{(1u << kTengiListEventCount) - 1u};
     std::atomic<uint32_t> s_rejectedCandidateCount{0};
+    std::atomic<uint32_t> s_rejectedFinalCount{0};
+    std::atomic<uint32_t> s_seenFinalCount{0};
 
     // All enabled is the legacy no-filter setting. With a restricted list,
     // unknown IDs are rejected rather than silently ignoring the allowlist.
@@ -463,6 +468,32 @@ namespace DX11Base {
       return s_originalCanTriggerByData ? s_originalCanTriggerByData(data, special) : false;
     }
 
+    // This is the actual effect-activation path. The PDB mangled symbol
+    // ?Trigger@TurningPointTrigger@turning_point@san8r@@SA_NQEAVTurningPointData@3@_N@Z
+    // confirms a static bool function, taking (TurningPointData*, bool).
+    bool __fastcall FinalTriggerDetour(void *data, bool special) {
+      s_seenFinalCount.fetch_add(1, std::memory_order_relaxed);
+      const uint32_t fullMask = (1u << kTengiListEventCount) - 1u;
+      if (s_allowedFilterMask.load(std::memory_order_relaxed) != fullMask) {
+        if (!data || !IsValidPtr(reinterpret_cast<uintptr_t>(data) + 8, sizeof(uint16_t))) {
+          s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+          return false;
+        }
+        uint16_t id = 0;
+        __try {
+          id = *reinterpret_cast<const uint16_t *>(reinterpret_cast<uintptr_t>(data) + 8);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+          s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+          return false;
+        }
+        if (!IsTengiIdAllowed(id)) {
+          s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+          return false;
+        }
+      }
+      return s_originalFinalTrigger ? s_originalFinalTrigger(data, special) : false;
+    }
+
     bool IsExecutableTengiHookTarget(uintptr_t address) {
       MEMORY_BASIC_INFORMATION mem{};
       if (!IsValidPtr(address, 16) ||
@@ -479,13 +510,15 @@ namespace DX11Base {
       const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
       const uintptr_t byId = base + kCanTriggerByIdRva;
       const uintptr_t byData = base + kCanTriggerByDataRva;
-      if (!IsExecutableTengiHookTarget(byId) || !IsExecutableTengiHookTarget(byData))
+      const uintptr_t finalTrigger = base + kFinalTriggerRva;
+      if (!IsExecutableTengiHookTarget(byId) || !IsExecutableTengiHookTarget(byData) ||
+          !IsExecutableTengiHookTarget(finalTrigger))
         return false;
       const MH_STATUS init = MH_Initialize();
       if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED)
         return false;
 
-      void *idOriginal = nullptr, *dataOriginal = nullptr;
+      void *idOriginal = nullptr, *dataOriginal = nullptr, *finalOriginal = nullptr;
       const MH_STATUS createdId = MH_CreateHook(
           reinterpret_cast<void *>(byId),
           reinterpret_cast<void *>(&CanTriggerByIdDetour), &idOriginal);
@@ -498,9 +531,20 @@ namespace DX11Base {
         MH_RemoveHook(reinterpret_cast<void *>(byId));
         return false;
       }
+      const MH_STATUS createdFinal = MH_CreateHook(
+          reinterpret_cast<void *>(finalTrigger),
+          reinterpret_cast<void *>(&FinalTriggerDetour), &finalOriginal);
+      if (createdFinal != MH_OK) {
+        MH_RemoveHook(reinterpret_cast<void *>(byData));
+        MH_RemoveHook(reinterpret_cast<void *>(byId));
+        AddLog(u8"[전기 허용 목록] 최종 Trigger 후크 생성 실패: %s", MH_StatusToString(createdFinal));
+        return false;
+      }
+      s_originalFinalTrigger = reinterpret_cast<FinalTrigger>(finalOriginal);
       s_originalCanTriggerById = reinterpret_cast<CanTriggerById>(idOriginal);
       s_originalCanTriggerByData = reinterpret_cast<CanTriggerByData>(dataOriginal);
       if (MH_EnableHook(reinterpret_cast<void *>(byId)) != MH_OK) {
+        MH_RemoveHook(reinterpret_cast<void *>(finalTrigger));
         MH_RemoveHook(reinterpret_cast<void *>(byData));
         MH_RemoveHook(reinterpret_cast<void *>(byId));
         s_originalCanTriggerById = nullptr;
@@ -509,10 +553,24 @@ namespace DX11Base {
       }
       if (MH_EnableHook(reinterpret_cast<void *>(byData)) != MH_OK) {
         MH_DisableHook(reinterpret_cast<void *>(byId));
+        MH_RemoveHook(reinterpret_cast<void *>(finalTrigger));
         MH_RemoveHook(reinterpret_cast<void *>(byData));
         MH_RemoveHook(reinterpret_cast<void *>(byId));
         s_originalCanTriggerById = nullptr;
         s_originalCanTriggerByData = nullptr;
+        return false;
+      }
+      const MH_STATUS finalStatus = MH_EnableHook(reinterpret_cast<void *>(finalTrigger));
+      if (finalStatus != MH_OK) {
+        MH_DisableHook(reinterpret_cast<void *>(byData));
+        MH_DisableHook(reinterpret_cast<void *>(byId));
+        MH_RemoveHook(reinterpret_cast<void *>(finalTrigger));
+        MH_RemoveHook(reinterpret_cast<void *>(byData));
+        MH_RemoveHook(reinterpret_cast<void *>(byId));
+        s_originalCanTriggerById = nullptr;
+        s_originalCanTriggerByData = nullptr;
+        s_originalFinalTrigger = nullptr;
+        AddLog(u8"[전기 허용 목록] 최종 Trigger 후크 활성화 실패: %s", MH_StatusToString(finalStatus));
         return false;
       }
       return true;
@@ -608,7 +666,7 @@ namespace DX11Base {
         return;
       s_allowedFilterAttempted = true;
       s_allowedFilterInstalled = InstallTengiAllowedFilter();
-      AddLog(u8"[전기 허용 목록] CanTrigger 두 함수 훅 %s (현재 허용 마스크=0x%04X)",
+      AddLog(u8"[전기 허용 목록] CanTrigger 두 함수 + 최종 Trigger 후크 %s (현재 허용 마스크=0x%04X)",
              s_allowedFilterInstalled ? u8"설치 성공" : u8"설치 실패, 원본 유지",
              static_cast<unsigned>(mask));
     }
@@ -618,9 +676,14 @@ namespace DX11Base {
       lastReportMs = now;
       const uint32_t count =
           s_rejectedCandidateCount.exchange(0, std::memory_order_relaxed);
-      if (count)
-        AddLog(u8"[전기 허용 목록] 원본 발생 판정 전에 비허용 후보 %u회 차단",
-               static_cast<unsigned>(count));
+      const uint32_t finalCount =
+          s_rejectedFinalCount.exchange(0, std::memory_order_relaxed);
+      const uint32_t seenCount =
+          s_seenFinalCount.exchange(0, std::memory_order_relaxed);
+      if (count || finalCount || seenCount)
+        AddLog(u8"[전기 허용 목록] 후보 차단 %u회, Trigger 진입 %u회, 최종 발동 차단 %u회",
+               static_cast<unsigned>(count), static_cast<unsigned>(seenCount),
+               static_cast<unsigned>(finalCount));
     }
   }
 
