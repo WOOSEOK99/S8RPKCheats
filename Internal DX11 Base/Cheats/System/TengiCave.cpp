@@ -695,6 +695,11 @@ namespace DX11Base {
     if (!bInfTengi || snapshot.constructed || s_cycle.pending ||
         s_cycle.needsEventObservation || snapshot.month < s_cycle.earliest)
       return;
+    bool anyAllowed = false;
+    for (int i = 0; i < kTengiListEventCount; ++i)
+      anyAllowed = anyAllowed || g_tengiListAllowed[i];
+    if (!anyAllowed)
+      return; // Nothing permitted: do not request momentum or mark a pending event.
     if (RequestCycleTengi(snapshot)) {
       s_cycle.pending = true; // Request is not proof of actual occurrence.
       AddLog(u8"[Tengi 주기] %d/%d 발생 요청 1회: 실제 객체 생성 대기",
