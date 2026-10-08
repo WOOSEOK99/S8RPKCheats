@@ -193,6 +193,34 @@ namespace DX11Base {
       return arr;
     }
 
+    // [실험] SAN8RPK-talkak1.5.CT의 도시분류별 내정 상한 포인터 체인.
+    // EXE+034C8630 -> [0] -> [8] -> [10] -> [0], 이후 0x8668부터
+    // 농경(1)/상업(2)/기술(3)/성채(4)/방목(5) 40바이트씩 배치.
+    static uintptr_t ResolveTechnologyTypeTableForTest() {
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+      if (!exe)
+        return 0;
+
+      uintptr_t p = 0;
+      if (!SafeReadPtr(exe + 0x034C8630, &p) ||
+          !SafeReadPtr(p + 0x0, &p) ||
+          !SafeReadPtr(p + 0x8, &p) ||
+          !SafeReadPtr(p + 0x10, &p) ||
+          !SafeReadPtr(p + 0x0, &p))
+        return 0;
+
+      // 예상 구조체 식별자가 다르면 다른 메모리 영역이므로 수정하지 않는다.
+      constexpr uintptr_t kFirstType = 0x8668;
+      constexpr uintptr_t kTypeStride = 0x28;
+      for (int type = 0; type < 5; ++type) {
+        uint16_t id = 0;
+        if (!SafeRead16(p + kFirstType + (uintptr_t)type * kTypeStride, &id) ||
+            id != (uint16_t)(type + 1))
+          return 0;
+      }
+      return p;
+    }
+
     // ── 선택된 도시 인덱스 & 편집 상태 ──────────────────────────────────────
     static int s_selIdx = 0;
 
@@ -8059,15 +8087,57 @@ namespace DX11Base {
   }
 
   void MaximizeAllCityTecMax() {
-    uintptr_t cityBase = GetCityArrBase();
-    if (cityBase <= 0x10000) return;
-    const uint16_t MAX_LIMIT = 30000;
-    for (int i = 0; i < g_CityCount; i++) {
-      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
-      SafeWrite16(ca + OFF_TEC_MAX, MAX_LIMIT);
+    // [실험] 도시별 기술 상한뿐 아니라 CT의 도시분류/규모별 기술 기본 상한도
+    // 함께 수정한다. 게임 화면의 2000 표시/기술서 제한은 별도 로직일 수 있다.
+    const uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000) {
+      AddLog(u8"[도시정보][기술한도 실험] 도시 배열 주소를 찾지 못했습니다.");
+      return;
     }
+
+    const uintptr_t typeBase = ResolveTechnologyTypeTableForTest();
+    if (!typeBase) {
+      AddLog(u8"[도시정보][기술한도 실험] 도시분류 테이블 포인터 또는 분류 ID 검증 실패: 수정하지 않았습니다.");
+      return;
+    }
+
+    const uint16_t MAX_LIMIT = 30000; // 기존 기술한도 최대화 값 유지
+    int typeVerified = 0;
+    int typeDefault2000 = 0;
+    constexpr uintptr_t kFirstTech = 0x8684;
+    constexpr uintptr_t kTypeStride = 0x28;
+
+    // CT: 농경/상업/기술/성채/방목 × 소/중/대 (총 15개 uint16).
+    // 각 도시가 공유하는 기본 상한값이므로 정확한 구조 검증 후에만 쓴다.
+    for (int type = 0; type < 5; ++type) {
+      for (int size = 0; size < 3; ++size) {
+        const uintptr_t addr = typeBase + kFirstTech +
+            (uintptr_t)type * kTypeStride + (uintptr_t)size * 2;
+        uint16_t before = 0, after = 0;
+        if (!SafeRead16(addr, &before))
+          continue;
+        if (before == 2000)
+          ++typeDefault2000;
+        if (SafeWrite16(addr, MAX_LIMIT) &&
+            SafeRead16(addr, &after) && after == MAX_LIMIT)
+          ++typeVerified;
+      }
+    }
+
+    int cityVerified = 0;
+    for (int i = 0; i < g_CityCount; i++) {
+      const uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      uint16_t after = 0;
+      const uintptr_t addr = ca + OFF_TEC_MAX; // 원본 CityData + 0xDC
+      if (SafeWrite16(addr, MAX_LIMIT) &&
+          SafeRead16(addr, &after) && after == MAX_LIMIT)
+        ++cityVerified;
+    }
+
     s_snapDirty = true;
-    AddLog(u8"[도시정보] 모든 도시의 기술한도를 최대치로 설정했습니다.");
+    AddLog(u8"[도시정보][기술한도 실험] 기본상한 검증 %d/15 (이전 2000: %d/15), 도시별 상한 검증 %d/%d, 목표값 %u",
+           typeVerified, typeDefault2000, cityVerified, g_CityCount,
+           (unsigned int)MAX_LIMIT);
   }
 
   void MaximizeAllCitySoldierMax() {
