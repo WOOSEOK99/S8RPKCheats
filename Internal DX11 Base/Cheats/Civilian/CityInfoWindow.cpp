@@ -14,6 +14,10 @@
 #include "../Officer/OfficerRosterResolve.h"
 #include "../System/MonthCapture.h"
 #include "CityData.h"
+#include "BangmokCity.h"
+#include "Bigcityconvert.h"
+#include "NonggyeongCity.h"
+#include "SangeopCity.h"
 #include <windows.h>
 #include <algorithm>
 #include <fstream>
@@ -208,7 +212,7 @@ namespace DX11Base {
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 168.f * sc), true);
+      ImGui::BeginChild("##CityTop", ImVec2(0.f, 300.f * sc), true);
 
       const float fw = 95.f * sc;
 
@@ -298,7 +302,85 @@ namespace DX11Base {
       ImGui::Spacing();
       ImGui::Separator();
 
-      // 3) 모든 도시 일괄 최대화
+      // 3) 도시 유형 변경
+      ImGui::TextColored(ImVec4(0.75f, 0.86f, 1.f, 1.f), u8"[ 도시 유형 변경 ]");
+
+      const bool bigCityBusy = g_bigCityThreadRunning.load();
+      if (bigCityBusy)
+        ImGui::BeginDisabled();
+      if (ImGui::Checkbox(u8"기술도시로 전환", &bBigCity)) {
+        SetBigCityConvert(bBigCity);
+        NotifyFeatureToggle(u8"기술도시로 전환", bBigCity);
+        SaveConfig();
+      }
+      if (bigCityBusy)
+        ImGui::EndDisabled();
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 낙양, 장안, 허창, 업, 양양, 건업, 성도");
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 기술도시로 변환 및 최대 수치 한도 보정");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(240.f * sc);
+      const bool bangmokBusy = g_bangmokThreadRunning.load();
+      if (bangmokBusy)
+        ImGui::BeginDisabled();
+      if (ImGui::Checkbox(u8"방목도시 황폐화", &bBangmokCity)) {
+        SetBangmokCity(bBangmokCity);
+        NotifyFeatureToggle(u8"방목도시 황폐화", bBangmokCity);
+        SaveConfig();
+      }
+      if (bangmokBusy)
+        ImGui::EndDisabled();
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 오환, 강, 선비, 저, 남만 등 방목도시");
+        ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), u8"내용 : 방목도시의 능력치를 저하시키고 최대 수치를 고정합니다.");
+        ImGui::EndTooltip();
+      }
+
+      const bool nongBusy = g_nongCityThreadRunning.load();
+      if (nongBusy)
+        ImGui::BeginDisabled();
+      if (ImGui::Checkbox(u8"농경도시 버프", &bNonggyeongCity)) {
+        SetNonggyeongCity(bNonggyeongCity);
+        NotifyFeatureToggle(u8"농경도시 버프", bNonggyeongCity);
+        SaveConfig();
+      }
+      if (nongBusy)
+        ImGui::EndDisabled();
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 남피, 평원, 북해, 제남, 하비, 소패, 계양 등");
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 농경도시로 변환 및 농촌/상가 수치 한도 상향");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::SameLine(240.f * sc);
+      const bool sangeopBusy = g_sagCityThreadRunning.load();
+      if (sangeopBusy)
+        ImGui::BeginDisabled();
+      if (ImGui::Checkbox(u8"상업도시 버프", &bSangeopCity)) {
+        SetSangeopCity(bSangeopCity);
+        NotifyFeatureToggle(u8"상업도시 버프", bSangeopCity);
+        SaveConfig();
+      }
+      if (sangeopBusy)
+        ImGui::EndDisabled();
+      if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 무희, 제남, 요동, 업, 성도, 건업 등 (기술도시 제외)");
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
+        ImGui::EndTooltip();
+      }
+
+      ImGui::Spacing();
+      ImGui::Separator();
+
+      // 4) 모든 도시 일괄 최대화
+      const bool cityTypeModifierActive =
+          bBigCity || bBangmokCity || bNonggyeongCity || bSangeopCity;
       ImGui::TextColored(ImVec4(1.f, 0.58f, 0.58f, 1.f), u8"[ 모든 도시 일괄 최대화 ]");
 
       const float gap = 10.f * sc;
@@ -312,6 +394,8 @@ namespace DX11Base {
         MaximizeAllCityResources();
       }
       ImGui::SameLine(0.f, gap);
+      if (cityTypeModifierActive)
+        ImGui::BeginDisabled();
       if (ImGui::Button(u8"병사 최대화##maxsol", ImVec2(btnW, 0.f))) {
         MaximizeAllCitySoldierMax();
       }
@@ -319,7 +403,11 @@ namespace DX11Base {
       if (ImGui::Button(u8"개발 최대화##maxdev", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDevMax();
       }
+      if (cityTypeModifierActive)
+        ImGui::EndDisabled();
 
+      if (cityTypeModifierActive)
+        ImGui::BeginDisabled();
       if (ImGui::Button(u8"상업 최대화##maxcom", ImVec2(btnW, 0.f))) {
         MaximizeAllCityComMax();
       }
@@ -331,8 +419,15 @@ namespace DX11Base {
       if (ImGui::Button(u8"기술 최대화##maxtec", ImVec2(btnW, 0.f))) {
         MaximizeAllCityTecMax();
       }
+      if (cityTypeModifierActive)
+        ImGui::EndDisabled();
 
       ImGui::PopStyleColor(2);
+      ImGui::PushStyleColor(ImGuiCol_Text,
+          cityTypeModifierActive ? ImVec4(1.f, 0.75f, 0.3f, 1.f)
+                                 : ImVec4(0.65f, 0.70f, 0.77f, 1.f));
+      ImGui::TextWrapped(u8"※ 도시 유형 변경 기능이 하나라도 켜져 있으면 병사/개발/상업/방어/기술 한도 최대화 버튼을 사용할 수 없습니다.");
+      ImGui::PopStyleColor();
       ImGui::EndChild();
       ImGui::PopStyleColor();
     }

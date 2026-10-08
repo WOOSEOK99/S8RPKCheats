@@ -2,8 +2,6 @@
 #include "MenuSectionsCommon.h"
 #include "Cheats.h"
 #include "debug.h"
-#include "Cheats/Civilian/BangmokCity.h"
-#include "Cheats/Civilian/Bigcityconvert.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/Civilian/JewelSettings.h"
 #include "Cheats/Civilian/MissionCpuHeroExclusion.h"
@@ -11,8 +9,6 @@
 #include "Cheats/Civilian/DomesticRewardCondition.h"
 #include "Cheats/Civilian/TechCityEditorVisibility.h"
 #include "Cheats/Civilian/DomesticsMult.h"
-#include "Cheats/Civilian/NonggyeongCity.h"
-#include "Cheats/Civilian/SangeopCity.h"
 #include "Cheats/Civilian/Techpointcave.h"
 #include "Cheats/Civilian/Techzero.h"
 #include "Cheats/Officer/OfficerRosterResolve.h"
@@ -271,85 +267,7 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing(); // 위아래 여백
 
-        // --- 대도시 전환 추가 ---
-        bool wasBigCityRunning = DX11Base::g_bigCityThreadRunning.load();
-        if (wasBigCityRunning)
-          ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"기술도시로 전환", &bBigCity)) {
-          DX11Base::SetBigCityConvert(bBigCity);
-          NotifyFeatureToggle(u8"기술도시로 전환", bBigCity);
-          SaveConfig();
-        }
-        if (wasBigCityRunning)
-          ImGui::EndDisabled();
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 낙양, 장안, 허창, 업, 양양, 건업, 성도");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 기술도시로 변환 및 최대 수치 한도 보정");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::SameLine(160.0f * scale);
-
-        bool wasBangmokRunning = DX11Base::g_bangmokThreadRunning.load();
-        if (wasBangmokRunning)
-          ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"방목도시 황폐화", &bBangmokCity)) {
-          DX11Base::SetBangmokCity(bBangmokCity);
-          NotifyFeatureToggle(u8"방목도시 황폐화", bBangmokCity);
-          SaveConfig();
-        }
-        if (wasBangmokRunning)
-          ImGui::EndDisabled();
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 오환, 강, 선비, 저, 남만 등 방목도시");
-          ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
-                             u8"내용 : 방목도시의 능력치를 저하시키고 최대 수치를 고정합니다.");
-          ImGui::EndTooltip();
-        }
-
         DX11Base::DrawTechCityEditorVisibilityUi();
-
-        bool wasNongRunning = DX11Base::g_nongCityThreadRunning.load();
-        if (wasNongRunning)
-          ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"농경도시 버프", &bNonggyeongCity)) {
-          DX11Base::SetNonggyeongCity(bNonggyeongCity);
-          NotifyFeatureToggle(u8"농경도시 버프", bNonggyeongCity);
-          SaveConfig();
-        }
-        if (wasNongRunning)
-          ImGui::EndDisabled();
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 남피, 평원, 북해, 제남, 하비, 소패, 계양 등");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 농경도시로 변환 및 농촌/상가 수치 한도 상향");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::SameLine(160.0f * scale);
-
-        bool wasSagRunning = DX11Base::g_sagCityThreadRunning.load();
-        if (wasSagRunning)
-          ImGui::BeginDisabled();
-        if (ImGui::Checkbox(u8"상업도시 버프", &bSangeopCity)) {
-          DX11Base::SetSangeopCity(bSangeopCity);
-          NotifyFeatureToggle(u8"상업도시 버프", bSangeopCity);
-          SaveConfig();
-        }
-        if (wasSagRunning)
-          ImGui::EndDisabled();
-
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"대상 도시 : 무희, 제남, 요동, 업, 성도, 건업 등 (기술도시 제외)");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), u8"내용 : 상업도시로 변환 및 농촌/상가 수치 한도 상향");
-          ImGui::EndTooltip();
-        }
 
         ImGui::Spacing();
         ImGui::Separator();
