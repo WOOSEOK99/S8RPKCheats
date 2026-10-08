@@ -212,7 +212,7 @@ namespace DX11Base {
     // ── 상단: 자동 환전 UI ───────────────────────────────────────────────────
     static void DrawAutoExchangePanel(uintptr_t p1, float sc) {
       ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.11f, 0.17f, 1.f));
-      ImGui::BeginChild("##CityTop", ImVec2(0.f, 300.f * sc), true);
+      ImGui::BeginChild("##CityTop", ImVec2(0.f, 340.f * sc), true);
 
       const float fw = 95.f * sc;
 
@@ -396,10 +396,20 @@ namespace DX11Base {
       ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.2f, 0.2f, 1.f));
       ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.3f, 0.3f, 1.f));
 
-      if (ImGui::Button(u8"군량 / 금 최대화##maxall", ImVec2(btnW, 0.f))) {
-        MaximizeAllCityResources();
+      // 금/군량/현재 병사 수는 도시 유형 변경 기능과 무관하게 최대화할 수 있다.
+      if (ImGui::Button(u8"금 최대화##maxgold", ImVec2(btnW, 0.f))) {
+        MaximizeAllCityGold();
       }
       ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"군량 최대화##maxgrain", ImVec2(btnW, 0.f))) {
+        MaximizeAllCityGrain();
+      }
+      ImGui::SameLine(0.f, gap);
+      if (ImGui::Button(u8"병사 최대화##maxtroops", ImVec2(btnW, 0.f))) {
+        MaximizeAllCityTroops();
+      }
+
+      // 도시 유형 변경과 충돌하는 상한 버튼만 비활성화한다.
       if (cityTypeModifierActive)
         ImGui::BeginDisabled();
       if (ImGui::Button(u8"병사한도 최대화##maxsol", ImVec2(btnW, 0.f))) {
@@ -409,15 +419,11 @@ namespace DX11Base {
       if (ImGui::Button(u8"개발한도 최대화##maxdev", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDevMax();
       }
-      if (cityTypeModifierActive)
-        ImGui::EndDisabled();
-
-      if (cityTypeModifierActive)
-        ImGui::BeginDisabled();
+      ImGui::SameLine(0.f, gap);
       if (ImGui::Button(u8"상업한도 최대화##maxcom", ImVec2(btnW, 0.f))) {
         MaximizeAllCityComMax();
       }
-      ImGui::SameLine(0.f, gap);
+
       if (ImGui::Button(u8"방어한도 최대화##maxdef", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDefMax();
       }
@@ -432,7 +438,7 @@ namespace DX11Base {
       ImGui::PushStyleColor(ImGuiCol_Text,
           cityTypeModifierActive ? ImVec4(1.f, 0.75f, 0.3f, 1.f)
                                  : ImVec4(0.65f, 0.70f, 0.77f, 1.f));
-      ImGui::TextWrapped(u8"※ 도시 유형 변경 기능이 하나라도 켜져 있으면 병사/개발/상업/방어/기술 한도 최대화 버튼을 사용할 수 없습니다.");
+      ImGui::TextWrapped(u8"※ 도시 유형 변경 기능이 하나라도 켜져 있으면 병사한도/개발한도/상업한도/방어한도/기술한도 최대화 버튼을 사용할 수 없습니다.");
       ImGui::PopStyleColor();
       ImGui::EndChild();
       ImGui::PopStyleColor();
@@ -7957,21 +7963,63 @@ namespace DX11Base {
     }
   }
 
-  void MaximizeAllCityResources() {
-    uintptr_t cityBase = GetCityArrBase();
+  void MaximizeAllCityGold() {
+    const uintptr_t cityBase = GetCityArrBase();
     if (cityBase <= 0x10000)
       return;
 
     const uint32_t MAX_VAL = 9999999;
     for (int i = 0; i < g_CityCount; i++) {
-      uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      const uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
       SafeWrite32(ca - 0x28 + OFF_GOLD, MAX_VAL);
+    }
+    s_snapDirty = true;
+    AddLog(u8"[도시정보] 모든 도시의 금을 최대치로 설정했습니다.");
+  }
+
+  void MaximizeAllCityGrain() {
+    const uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000)
+      return;
+
+    const uint32_t MAX_VAL = 9999999;
+    for (int i = 0; i < g_CityCount; i++) {
+      const uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
       SafeWrite32(ca - 0x28 + OFF_GRAIN, MAX_VAL);
     }
-
-    // Refresh snapshot so UI updates immediately
     s_snapDirty = true;
-    AddLog(u8"[도시정보] 모든 도시의 금과 군량을 최대치로 설정했습니다.");
+    AddLog(u8"[도시정보] 모든 도시의 군량을 최대치로 설정했습니다.");
+  }
+
+  void MaximizeAllCityTroops() {
+    const uintptr_t cityBase = GetCityArrBase();
+    if (cityBase <= 0x10000)
+      return;
+
+    const uint32_t MAX_VAL = 9999999;
+    int updated = 0;
+    for (int i = 0; i < g_CityCount; i++) {
+      const uintptr_t ca = cityBase + (uintptr_t)i * 0x2A0;
+      uint32_t soldierLimit = 0;
+      if (!SafeRead32(ca - 0x28 + OFF_SOL_MAX, &soldierLimit))
+        continue;
+
+      // 도시 리스트의 개별 병사 입력과 동일하게 병사한도를 초과하지 않는다.
+      const uint32_t troops = soldierLimit < MAX_VAL ? soldierLimit : MAX_VAL;
+      if (SafeWrite32(ca - 0x28 + OFF_TROOPS, troops))
+        ++updated;
+    }
+    s_snapDirty = true;
+    if (updated > 0)
+      s_frontierDirty = true;
+    AddLog(u8"[도시정보] 모든 도시의 병사를 현재 병사한도 이내에서 최대화했습니다. (%d/%d개)",
+           updated, g_CityCount);
+  }
+
+  // 기존 호출 호환용: UI에서는 금/군량을 독립 버튼으로 제공한다.
+  void MaximizeAllCityResources() {
+    MaximizeAllCityGold();
+    MaximizeAllCityGrain();
   }
 
   void MaximizeAllCityDevMax() {
