@@ -175,7 +175,7 @@ namespace DX11Base {
       ImGui::OpenPopup(u8"전기 목록 관리##popup");
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip(u8"전기별 기간 메모리 수정 실험. 발생 허용/차단은 아직 적용되지 않습니다.");
+      ImGui::SetTooltip(u8"허용한 전기는 게임의 기본 발생 조건을 따르고, 체크 해제한 전기는 발생 가능 판정에서 차단합니다. (실험 기능)");
     }
 
     ImGui::SetNextWindowSize(ImVec2(520.f * scale, 510.f * scale), ImGuiCond_Appearing);
@@ -183,7 +183,7 @@ namespace DX11Base {
                                ImGuiWindowFlags_NoSavedSettings)) {
       ImGui::TextWrapped(u8"전기별 허용 여부와 기간 설정 (0개월 = 게임 기본값)");
       ImGui::TextColored(ImVec4(1.f, 0.75f, 0.3f, 1.f),
-                         u8"※ 기간 변경은 게임 메모리에 실험 적용됩니다. 발생 허용 체크는 아직 게임 전기 선택에 연결되지 않았습니다.");
+                         u8"※ 발생 허용 목록은 CanTrigger 판정 후킹으로 적용됩니다. 게임 버전/후킹 상태에 따라 작동하지 않을 수 있습니다.");
       ImGui::Spacing();
 
       const ImGuiTableFlags listFlags =
@@ -220,7 +220,7 @@ namespace DX11Base {
         }
         SaveConfig();
         TickTengiListDurations(true);
-        DX11Base::AddLog(u8"[전기 목록] 설정 저장 완료. 기간 적용 실험 (발생 허용 필터 미구현)");
+        DX11Base::AddLog(u8"[전기 목록] 설정 저장 완료. 기간 설정과 발생 허용 목록 갱신 요청");
         ImGui::CloseCurrentPopup();
       }
       ImGui::SameLine(0.f, 10.f * scale);
