@@ -340,6 +340,7 @@ namespace DX11Base {
         ImGui::EndTooltip();
       }
 
+      ImGui::SameLine(240.f * sc);
       const bool nongBusy = g_nongCityThreadRunning.load();
       if (nongBusy)
         ImGui::BeginDisabled();
@@ -396,11 +397,11 @@ namespace DX11Base {
       ImGui::SameLine(0.f, gap);
       if (cityTypeModifierActive)
         ImGui::BeginDisabled();
-      if (ImGui::Button(u8"병사 최대화##maxsol", ImVec2(btnW, 0.f))) {
+      if (ImGui::Button(u8"병사한도 최대화##maxsol", ImVec2(btnW, 0.f))) {
         MaximizeAllCitySoldierMax();
       }
       ImGui::SameLine(0.f, gap);
-      if (ImGui::Button(u8"개발 최대화##maxdev", ImVec2(btnW, 0.f))) {
+      if (ImGui::Button(u8"개발한도 최대화##maxdev", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDevMax();
       }
       if (cityTypeModifierActive)
@@ -408,15 +409,15 @@ namespace DX11Base {
 
       if (cityTypeModifierActive)
         ImGui::BeginDisabled();
-      if (ImGui::Button(u8"상업 최대화##maxcom", ImVec2(btnW, 0.f))) {
+      if (ImGui::Button(u8"상업한도 최대화##maxcom", ImVec2(btnW, 0.f))) {
         MaximizeAllCityComMax();
       }
       ImGui::SameLine(0.f, gap);
-      if (ImGui::Button(u8"방어 최대화##maxdef", ImVec2(btnW, 0.f))) {
+      if (ImGui::Button(u8"방어한도 최대화##maxdef", ImVec2(btnW, 0.f))) {
         MaximizeAllCityDefMax();
       }
       ImGui::SameLine(0.f, gap);
-      if (ImGui::Button(u8"기술 최대화##maxtec", ImVec2(btnW, 0.f))) {
+      if (ImGui::Button(u8"기술한도 최대화##maxtec", ImVec2(btnW, 0.f))) {
         MaximizeAllCityTecMax();
       }
       if (cityTypeModifierActive)
