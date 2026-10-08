@@ -166,7 +166,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        // 외부 version.dll에 기재된 전기 분류명. 내부 이벤트 ID는 아직 검증되지 않음.
+        // 외부 version.dll의 이름 및 슬롯 매핑을 검증함. 기간만 실험 적용하며 허용 필터는 미구현.
         static const char *const tengiNames[kTengiListEventCount] = {
           u8"결전", u8"이민족습격", u8"악적발호", u8"의심암귀", u8"민심혹란",
           u8"붕벽", u8"여세", u8"피폐", u8"권위고양", u8"보장각성",
@@ -184,7 +184,7 @@ namespace DX11Base {
           ImGui::OpenPopup(u8"전기 목록 관리##popup");
         }
         if (ImGui::IsItemHovered()) {
-          ImGui::SetTooltip(u8"전기별 허용 여부와 기간을 설정합니다. 현재는 설정 저장까지만 지원합니다.");
+          ImGui::SetTooltip(u8"전기별 기간 메모리 수정 실험. 발생 허용/차단은 아직 적용되지 않습니다.");
         }
 
         ImGui::SetNextWindowSize(ImVec2(520.f * scale, 510.f * scale), ImGuiCond_Appearing);
@@ -192,7 +192,7 @@ namespace DX11Base {
                                    ImGuiWindowFlags_NoSavedSettings)) {
           ImGui::TextWrapped(u8"전기별 허용 여부와 기간 설정 (0개월 = 게임 기본값)");
           ImGui::TextColored(ImVec4(1.f, 0.75f, 0.3f, 1.f),
-                             u8"※ 현재는 목록 설정의 저장/불러오기만 지원하며 게임 발생 제한·기간 적용은 아직 연결되지 않았습니다.");
+                             u8"※ 기간 변경은 게임 메모리에 실험 적용됩니다. 발생 허용 체크는 아직 게임 전기 선택에 연결되지 않았습니다.");
           ImGui::Spacing();
 
           const ImGuiTableFlags listFlags =
@@ -228,7 +228,8 @@ namespace DX11Base {
               g_tengiListDurationMonths[i] = draftMonths[i];
             }
             SaveConfig();
-            DX11Base::AddLog(u8"[전기 목록] 허용 여부 및 기간 설정 저장 완료 (게임 적용은 미구현)");
+            TickTengiListDurations(true);
+            DX11Base::AddLog(u8"[전기 목록] 설정 저장 완료. 기간 적용 실험 (발생 허용 필터 미구현)");
             ImGui::CloseCurrentPopup();
           }
           ImGui::SameLine(0.f, 10.f * scale);

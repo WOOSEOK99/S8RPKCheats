@@ -2,6 +2,7 @@
 
 #include "Cheats.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
+#include "Cheats/System/TengiCave.h"
 #include "MenuState.h"
 #include <windows.h>
 
@@ -36,6 +37,8 @@ inline void RunT04RenderMaintenance() {
   }
 
   RunCityRevoltAlwaysZero();
+  // 기간을 사용자가 설정했을 때만 2초마다 이벤트 기간을 확인한다.
+  TickTengiListDurations();
 }
 
 } // namespace DX11Base

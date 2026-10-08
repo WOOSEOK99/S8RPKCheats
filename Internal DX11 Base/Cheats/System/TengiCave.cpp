@@ -273,4 +273,166 @@ namespace DX11Base {
       }
   }
 
+  namespace {
+    // version.dll 정적 분석: 이름 순서의 이벤트 슬롯 ID (연속 번호가 아님).
+    constexpr int kManagedEventSlots[kTengiListEventCount] = {
+        1, 2, 7, 8, 9, 10, 12, 14, 16, 18, 19, 20, 21, 22, 23};
+
+    struct TengiDurationOverride {
+      uintptr_t address = 0;
+      uint16_t original = 0;
+      uint16_t written = 0;
+      bool active = false;
+    };
+    TengiDurationOverride s_durationOverrides[kTengiListEventCount] = {};
+    ULONGLONG s_lastTengiDurationPollMs = 0;
+
+    bool TryReadEventPointer(uintptr_t address, uintptr_t *value) {
+      if (!value || !IsValidPtr(address, sizeof(uintptr_t)))
+        return false;
+      __try {
+        *value = *reinterpret_cast<const uintptr_t *>(address);
+        return *value > 0x10000;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *value = 0;
+        return false;
+      }
+    }
+
+    bool TryReadEventDuration(uintptr_t address, uint16_t *value) {
+      if (!value || !IsValidPtr(address, sizeof(uint16_t)))
+        return false;
+      __try {
+        *value = *reinterpret_cast<const uint16_t *>(address);
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    bool TryWriteEventDuration(uintptr_t address, uint16_t value) {
+      if (!IsValidPtr(address, sizeof(uint16_t)))
+        return false;
+      DWORD oldProtect = 0, ignored = 0;
+      if (!VirtualProtect(reinterpret_cast<LPVOID>(address),
+                          sizeof(uint16_t), PAGE_READWRITE, &oldProtect))
+        return false;
+      bool success = true;
+      __try {
+        *reinterpret_cast<uint16_t *>(address) = value;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        success = false;
+      }
+      VirtualProtect(reinterpret_cast<LPVOID>(address),
+                     sizeof(uint16_t), oldProtect, &ignored);
+      uint16_t actual = 0;
+      return success && TryReadEventDuration(address, &actual) &&
+             actual == value;
+    }
+
+    // 외부 version.dll 강제 발동 경로:
+    // [SAN8RPK.exe + 0x2E98BC8] => 이벤트 관리자,
+    // [관리자 + 0x58A670 + 슬롯 * 8] => 전기 객체, 객체 + 0x12 => 지속 개월(u16).
+    // 전기 발동·취소 플래그에는 접근하지 않는다.
+    uintptr_t ResolveEventDurationAddress(int slot) {
+      const uintptr_t exeBase =
+          reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
+      uintptr_t manager = 0;
+      uintptr_t eventObject = 0;
+      if (!exeBase ||
+          !TryReadEventPointer(exeBase + 0x2E98BC8, &manager) ||
+          !TryReadEventPointer(manager + 0x58A670 +
+                               static_cast<uintptr_t>(slot) * 8, &eventObject))
+        return 0;
+      const uintptr_t duration = eventObject + 0x12;
+      return IsValidPtr(duration, sizeof(uint16_t)) ? duration : 0;
+    }
+  } // namespace
+
+  // 별도 훅 없이 설정된 기간만 변경한다. 목록 허용/차단은 아직 구현되지 않았다.
+  // 이 함수는 UI가 닫혀 있어도 렌더 유지보수 게이트(200ms)에서 호출된다.
+  void TickTengiListDurations(bool immediate) {
+    bool requested = false;
+    for (int i = 0; i < kTengiListEventCount; ++i) {
+      if ((g_tengiListAllowed[i] && g_tengiListDurationMonths[i] > 0) ||
+          s_durationOverrides[i].active) {
+        requested = true;
+        break;
+      }
+    }
+    if (!requested)
+      return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (!immediate && s_lastTengiDurationPollMs != 0 &&
+        now - s_lastTengiDurationPollMs < 2000)
+      return;
+    s_lastTengiDurationPollMs = now;
+
+    int applied = 0, restored = 0, unavailable = 0, instant = 0, failed = 0;
+    for (int i = 0; i < kTengiListEventCount; ++i) {
+      TengiDurationOverride &saved = s_durationOverrides[i];
+      const int months = g_tengiListAllowed[i] ?
+                             g_tengiListDurationMonths[i] : 0;
+      const int slot = kManagedEventSlots[i];
+      const uintptr_t address = ResolveEventDurationAddress(slot);
+      if (!address) {
+        if (months > 0)
+          ++unavailable;
+        // 시나리오 로딩으로 메모리가 재할당되었으면 기존 주소를 재사용하지 않는다.
+        saved = {};
+        continue;
+      }
+      if (saved.address != address) {
+        saved = {};
+        saved.address = address;
+      }
+      uint16_t current = 0;
+      if (!TryReadEventDuration(address, &current)) {
+        ++failed;
+        continue;
+      }
+
+      if (months <= 0) {
+        if (saved.active && current == saved.written) {
+          if (TryWriteEventDuration(address, saved.original))
+            ++restored;
+          else
+            ++failed;
+        }
+        saved.active = false;
+        continue;
+      }
+
+      if (months > 120) {
+        ++failed;
+        continue;
+      }
+      // 원래 즉발(0개월)인 이벤트는 종류를 바꾸지 않도록 덮어쓰지 않는다.
+      if (!saved.active && current == 0) {
+        ++instant;
+        continue;
+      }
+
+      if (!saved.active) {
+        saved.original = current;
+        saved.active = true;
+      }
+      if (current == static_cast<uint16_t>(months)) {
+        saved.written = current;
+        continue;
+      }
+      if (TryWriteEventDuration(address, static_cast<uint16_t>(months))) {
+        saved.written = static_cast<uint16_t>(months);
+        ++applied;
+      } else {
+        ++failed;
+      }
+    }
+    if (applied || restored || (immediate && (failed || unavailable || instant))) {
+      AddLog(u8"[전기 목록][기간 실험] 적용 %d, 원복 %d, 미확보 %d, 즉발 제외 %d, 실패 %d (발생 허용 필터 미구현)",
+             applied, restored, unavailable, instant, failed);
+    }
+  }
+
 } // namespace DX11Base

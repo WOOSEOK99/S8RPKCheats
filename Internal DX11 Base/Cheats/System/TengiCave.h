@@ -10,4 +10,5 @@ namespace DX11Base {
     uintptr_t GetTengiHookOffset();
     uintptr_t GetCapturedTengiAddr();
     void TengiCave_Tick();
+    void TickTengiListDurations(bool immediate = false);
 }
