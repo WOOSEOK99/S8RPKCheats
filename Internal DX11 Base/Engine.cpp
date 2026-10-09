@@ -18,7 +18,6 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 // Forward declaration of RoninMonitor_Draw
 namespace DX11Base {
   extern void RoninMonitor_Draw();
-  extern void DrawBattleStateDiagnostic();
 }
 
 namespace DX11Base {
@@ -606,7 +605,6 @@ namespace DX11Base {
       Menu::Render();
     }
     RoninMonitor_Draw();
-    DrawBattleStateDiagnostic();
 
     ImGui::Render();
 

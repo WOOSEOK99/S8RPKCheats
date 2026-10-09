@@ -177,11 +177,11 @@ namespace DX11Base {
     ULONGLONG missingSince = 0;
     uint64_t generation = 0;
     uintptr_t gameBase = 0;
-    int stateId = -1, meetingMode = -1, gameState = -1, day = -1, units = -1;
+    int stateId = -1, meetingMode = -1, gameState = -1, units = -1;
     int monitoringState = -1; // -1: transition/unknown, 0: nonbattle, 1: battle
   };
 
-  // Share the bounded native probe between the overlay and both monitor paths.
+  // Share the bounded native probe between both monitor paths.
   // Save-generation changes invalidate the sample immediately, even within 200ms.
   static const BattleStateSnapshot &SampleBattleState() {
     static BattleStateSnapshot sample{};
@@ -195,8 +195,8 @@ namespace DX11Base {
     if (sample.lastSample == 0 || now - sample.lastSample >= 200) {
       sample.lastSample = now;
       int &stateId = sample.stateId, &meetingMode = sample.meetingMode;
-      int &gameState = sample.gameState, &day = sample.day, &units = sample.units;
-      stateId = meetingMode = gameState = day = units = -1;
+      int &gameState = sample.gameState, &units = sample.units;
+      stateId = meetingMode = gameState = units = -1;
       sample.monitoringState = -1;
       bool sessionReady = false;
       ResolveRegionCache regions{};
@@ -211,10 +211,6 @@ namespace DX11Base {
           const uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
           const uintptr_t list = ResolveChainCached(exeBase + 0x02E99460,
               {0x28, 0x250, 0x1D8, 0, 0x180, 0}, regions);
-          const uintptr_t date = ResolveChainCached(exeBase + 0x02E99460,
-              {0x28, 0x250, 0x218, 0, 0x3D8, 0x478, 0, 0}, regions);
-          if (date && IsValidPtrForResolve(date + 0x28, 1, regions))
-            day = *(uint8_t *)(date + 0x28);
           if (list && IsValidPtrForResolve(list - 8, 1, regions)) {
             units = *(uint8_t *)(list - 8);
             if (units > 0 && units <= 60) {
@@ -229,7 +225,7 @@ namespace DX11Base {
           }
         }
       } __except (EXCEPTION_EXECUTE_HANDLER) {
-        stateId = meetingMode = gameState = day = units = -1;
+        stateId = meetingMode = gameState = units = -1;
         sessionReady = false;
       }
       if (sessionReady && stateId >= 0) {
@@ -253,43 +249,6 @@ namespace DX11Base {
   }
 
   int GetBattleMonitoringState() { return SampleBattleState().monitoringState; }
-
-  // Render even with the cheat menu closed, using the same sample as the gate.
-  void DrawBattleStateDiagnostic() {
-    const auto &sample = SampleBattleState();
-    const int stateId = sample.stateId, meetingMode = sample.meetingMode;
-    const int gameState = sample.gameState, day = sample.day, units = sample.units;
-
-    static const char *const stateNames[] = {
-        "INVALID", "INITIALIZE", "LOAD", "ENTER", "TURN_BEGIN", "TURN_END",
-        "UNIT_ACT", "UNIT_ACT_BEGIN", "UNIT_COMMAND_USER", "UNIT_COMMAND_AUTO",
-        "UNIT_ATTACK", "UNIT_MOVE", "UNIT_TRICK", "SECRET_COMMUNICATION",
-        "INFILTRATION", "DUEL_REQUEST", "UNIT_ACT_END", "INSTANT_PROCESS",
-        "PAUSE", "RESULT", "EXIT"};
-    const bool nativeBattle = meetingMode == 0 && stateId >= 3 && stateId <= 18;
-    const bool dataBattle = (day >= 1 && day <= 30) || (units >= 1 && units <= 60);
-    const char *dataStatus = dataBattle ? u8"전투 중" :
-        gameState != 0 && day < 0 && units < 0 ? u8"확인 불가" : u8"전투 중 아님";
-    const char *nativeStatus = stateId < 0 ?
-        (sample.monitoringState == 0 ? u8"전투 중 아님" : u8"전환 중 / 확인 불가") :
-        meetingMode == 1 ? u8"전투 중 아님 (전투 준비)" :
-        nativeBattle ? u8"전투 중" :
-        stateId == 1 || stateId == 2 ? u8"전투 로딩 중" : u8"전투 중 아님";
-    ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f, 12.0f),
-                            ImGuiCond_Always, ImVec2(0.5f, 0.0f));
-    ImGui::SetNextWindowBgAlpha(0.80f);
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-        ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing;
-    if (ImGui::Begin("##BattleStateDiagnostic", nullptr, flags)) {
-      ImGui::TextColored(nativeBattle ? ImVec4(0.4f, 1.0f, 0.4f, 1.0f) :
-          ImVec4(1.0f, 0.85f, 0.4f, 1.0f), u8"전투 상태 후보: %s", nativeStatus);
-      ImGui::Text("WAR_STATE_ID: %d (%s) | Meeting: %d", stateId,
-                  stateId >= 0 ? stateNames[stateId] : "unavailable", meetingMode);
-      ImGui::Text(u8"날짜/부대 판정: %s | Day: %d Units: %d GameState: %d",
-                  dataStatus, day, units, gameState);
-    }
-    ImGui::End();
-  }
 
   // unitList/day는 같은 0x02E99460 루트와 첫 전투 데이터 포인터를 공유합니다.
   // 공통 포인터는 한 번만 읽고 같은 메모리 영역의 VirtualQuery 결과를 재사용합니다.
