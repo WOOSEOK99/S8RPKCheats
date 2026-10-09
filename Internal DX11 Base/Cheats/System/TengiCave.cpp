@@ -671,8 +671,8 @@ namespace DX11Base {
         if (*reinterpret_cast<const uint8_t *>(gauge) != 100 ||
             *reinterpret_cast<const uint8_t *>(gauge + 24) != 0)
           return false;
-        *reinterpret_cast<uint8_t *>(gauge) = 0;
-        return true;
+        // Never overwrite game's momentum after an eligibility rejection.
+        return false;
       } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
       }
