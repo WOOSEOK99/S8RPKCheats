@@ -36,10 +36,12 @@ namespace DX11Base {
   static uintptr_t s_cachedDefenderAddr = 0;
   static bool s_battleRuntimeReady = false;
   static bool s_battleSessionResetPending = false;
+  static uint64_t s_battleSessionGeneration = 0;
 
   bool IsBattleRuntimeReady() { return s_battleRuntimeReady; }
 
   void ResetBattleSessionRuntime(uintptr_t oldP1, uintptr_t newP1) {
+    ++s_battleSessionGeneration;
     // Abandon old addresses without restoring through memory owned by the old save.
     s_battleRuntimeReady = false;
     s_battleSessionResetPending = true;
@@ -138,6 +140,115 @@ namespace DX11Base {
     ResolveRegionCache cache{};
     return ResolveChainCached(base, offsets, cache);
   }
+
+  // PDB B18A027E-19F4-4C35-8749-5B6F0FF814D8 (PK 1.13).
+  // WarUnit::Impl +0x10 -> WarRoot +0 -> Impl +0x58 (WarStateMachine).
+  // StateMachine +8 holds a unique_ptr with a 0x28-byte stateful deleter:
+  // its actual StateBase pointer is at machine +0x30, and the ID is at state +8.
+  // Validate the native vtable and back references before interpreting the ID.
+  static bool ReadNativeBattleDiagnostic(uintptr_t unit, uintptr_t exeBase,
+                                        int &stateId, int &meetingMode,
+                                        ResolveRegionCache &regions) {
+    uintptr_t root = 0, impl = 0, owner = 0, vtable = 0, state = 0;
+    if (!ReadPtrForResolve(unit + 0x10, root, regions) ||
+        !ReadPtrForResolve(root, impl, regions) ||
+        !ReadPtrForResolve(impl, owner, regions) || owner != root)
+      return false;
+    const uintptr_t machine = impl + 0x58;
+    if (!ReadPtrForResolve(machine, vtable, regions) || vtable != exeBase + 0x02707A60 ||
+        !ReadPtrForResolve(machine + 0x48, owner, regions) || owner != root ||
+        !ReadPtrForResolve(machine + 0x30, state, regions) ||
+        !ReadPtrForResolve(state + 0x10, owner, regions) || owner != machine ||
+        !ReadPtrForResolve(state + 0x18, owner, regions) || owner != root ||
+        !IsValidPtrForResolve(state + 8, 1, regions) ||
+        !IsValidPtrForResolve(impl + 0x18038, 1, regions))
+      return false;
+    const int id = *(uint8_t *)(state + 8);
+    const int meeting = *(uint8_t *)(impl + 0x18038);
+    if (id > 20 || meeting > 1)
+      return false;
+    stateId = id;
+    meetingMode = meeting;
+    return true;
+  }
+
+  struct BattleStateSnapshot {
+    ULONGLONG lastSample = 0;
+    ULONGLONG missingSince = 0;
+    uint64_t generation = 0;
+    uintptr_t gameBase = 0;
+    int stateId = -1, meetingMode = -1, gameState = -1, units = -1;
+    int monitoringState = -1; // -1: transition/unknown, 0: nonbattle, 1: battle
+  };
+
+  // Share the bounded native probe between both monitor paths.
+  // Save-generation changes invalidate the sample immediately, even within 200ms.
+  static const BattleStateSnapshot &SampleBattleState() {
+    static BattleStateSnapshot sample{};
+    const ULONGLONG now = GetTickCount64();
+    const uintptr_t currentGameBase = GetGameBase();
+    if (sample.generation != s_battleSessionGeneration || sample.gameBase != currentGameBase) {
+      sample = BattleStateSnapshot{};
+      sample.generation = s_battleSessionGeneration;
+      sample.gameBase = currentGameBase;
+    }
+    if (sample.lastSample == 0 || now - sample.lastSample >= 200) {
+      sample.lastSample = now;
+      int &stateId = sample.stateId, &meetingMode = sample.meetingMode;
+      int &gameState = sample.gameState, &units = sample.units;
+      stateId = meetingMode = gameState = units = -1;
+      sample.monitoringState = -1;
+      bool sessionReady = false;
+      ResolveRegionCache regions{};
+      __try {
+        const uintptr_t gameBase = currentGameBase;
+        if (gameBase && IsValidPtrForResolve(gameBase + 0xD0, 1, regions))
+          gameState = *(uint8_t *)(gameBase + 0xD0);
+        uintptr_t p1 = 0;
+        sessionReady = gameBase && ReadPtrForResolve(gameBase + 0xE0, p1, regions) &&
+                       IsValidPtrForResolve(p1, 0x200, regions);
+        if (gameBase && gameState != 0) {
+          const uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+          const uintptr_t list = ResolveChainCached(exeBase + 0x02E99460,
+              {0x28, 0x250, 0x1D8, 0, 0x180, 0}, regions);
+          if (list && IsValidPtrForResolve(list - 8, 1, regions)) {
+            units = *(uint8_t *)(list - 8);
+            if (units > 0 && units <= 60) {
+              // At most four records, only to find a usable native owner.
+              for (int i = 0; i < units && i < 4; ++i) {
+                uintptr_t unit = 0;
+                if (ReadPtrForResolve(list + 8 + (uintptr_t)i * 0x10, unit, regions) &&
+                    ReadNativeBattleDiagnostic(unit, exeBase, stateId, meetingMode, regions))
+                  break;
+              }
+            }
+          }
+        }
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        stateId = meetingMode = gameState = units = -1;
+        sessionReady = false;
+      }
+      if (sessionReady && stateId >= 0) {
+        sample.missingSince = 0;
+        if (meetingMode == 1 || stateId >= 19)
+          sample.monitoringState = 0;
+        else if (stateId >= 3)
+          sample.monitoringState = 1;
+      } else if (sessionReady && (gameState == 5 || gameState == 7)) {
+        // A single failed read is not an exit. Council/domestic values alone
+        // cannot override a native battle; require 600ms of missing native state.
+        if (sample.missingSince == 0)
+          sample.missingSince = now;
+        if (now - sample.missingSince >= 600)
+          sample.monitoringState = 0;
+      } else {
+        sample.missingSince = 0;
+      }
+    }
+    return sample;
+  }
+
+  int GetBattleMonitoringState() { return SampleBattleState().monitoringState; }
 
   // unitList/day는 같은 0x02E99460 루트와 첫 전투 데이터 포인터를 공유합니다.
   // 공통 포인터는 한 번만 읽고 같은 메모리 영역의 VirtualQuery 결과를 재사용합니다.
@@ -284,6 +395,7 @@ namespace DX11Base {
   void MonitorBattleStatus() {
     static bool s_isWarModsApplied = false;
     static bool s_isCacheBuilt = false;
+    static bool s_nativeBattleSeen = false;
     static float s_lastSeenTime = 0.0f;
     static int s_lastAppliedDay = -1;
     static int s_lastNotifiedDay = -1;
@@ -299,6 +411,7 @@ namespace DX11Base {
       s_battleSessionResetPending = false;
       s_isWarModsApplied = false;
       s_isCacheBuilt = false;
+      s_nativeBattleSeen = false;
       s_lastSeenTime = 0;
       s_lastAppliedDay = -1;
       s_lastNotifiedDay = -1;
@@ -324,6 +437,7 @@ namespace DX11Base {
     // 0. 기반 주소 체크 (게임 로딩/메뉴 시 자동 초기화)
     uintptr_t gameBase = DX11Base::GetGameBase();
     if (gameBase == 0) {
+      s_nativeBattleSeen = false;
       s_battleRuntimeReady = false;
       s_stableSince = 0;
       s_cachedUnitListBase = 0;
@@ -342,6 +456,45 @@ namespace DX11Base {
       DX11Base::g_battleUnitAddr2 = 0;
       return;
     }
+
+    const auto &nativeState = SampleBattleState();
+    if (nativeState.monitoringState != 1) {
+      s_battleRuntimeReady = false;
+      s_stableSince = 0;
+      g_battleUnitAddr1 = g_battleUnitAddr2 = 0;
+      // During loading or an isolated failed read, suspend writes without
+      // restoring/clearing through objects that may belong to another save.
+      if (nativeState.monitoringState < 0)
+        return;
+
+      if (s_nativeBattleSeen || s_isWarModsApplied || s_isCacheBuilt) {
+        __try {
+          ClearBattleCache();
+          ClearBattleEnvCache();
+          ResetStratagemFiveBattleRuntime();
+          ResetSpell5HealProbeBattleRuntime();
+          UpdateSpecialAbilities(0, 0, (uintptr_t)GetModuleHandle(NULL));
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        AddLog(u8"[BattleState] 비전투 확인 -> 전투 감시/캐시 정리");
+      }
+      s_nativeBattleSeen = false;
+      s_isWarModsApplied = s_isCacheBuilt = false;
+      s_lastSeenTime = 0;
+      s_lastAppliedDay = s_lastNotifiedDay = -1;
+      s_readyUnitList = s_readyDayBase = 0;
+      s_readyUnitCount = 0;
+      s_readyUnitSignature = 0;
+      s_cachedUnitListBase = s_cachedDayBaseAddr = s_cachedDefenderAddr = 0;
+      // Only a stable missing native state in council/domestic may arm new
+      // stratagem requests. Result/meeting objects are still in use by the game.
+      if (nativeState.stateId < 0 && (nativeState.gameState == 5 || nativeState.gameState == 7)) {
+        __try {
+          UpdateStratagemFiveBattleLifecycle(false, true);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
+      return;
+    }
+    s_nativeBattleSeen = true;
 
     // 1. 현재 캡처된 주소 확인
     uintptr_t addr1 = DX11Base::g_battleUnitAddr1;

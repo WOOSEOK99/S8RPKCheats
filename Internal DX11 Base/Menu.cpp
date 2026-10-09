@@ -9,6 +9,8 @@
 #include "showlog.h"
 
 namespace DX11Base {
+  // Kept local to the two consumers instead of widening the common header.
+  extern int GetBattleMonitoringState();
   namespace {
     constexpr ULONGLONG kBattleMonitorNotReadyIntervalMs = 500;
     constexpr ULONGLONG kSpecialFallbackIntervalMs = 100;
@@ -60,6 +62,21 @@ namespace DX11Base {
       static int s_cachedUnitCount = 0;
       static ULONGLONG s_lastFallbackTick = 0;
       static ULONGLONG s_lastResolveTick = 0;
+
+      const int battleState = GetBattleMonitoringState();
+      if (battleState != 1) {
+        if (battleState == 0) {
+          if (s_fallbackActive) {
+            UpdateSpecialAbilities(0, 0, (uintptr_t)GetModuleHandle(nullptr));
+            ClearBattleCache();
+          }
+          s_fallbackActive = false;
+          s_cachedGameBase = s_cachedUnitList = s_cachedDayBase = 0;
+          s_cachedUnitCount = 0;
+          s_lastFallbackTick = s_lastResolveTick = 0;
+        }
+        return;
+      }
 
       if (IsBattleRuntimeReady()) {
         s_fallbackActive = false;
