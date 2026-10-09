@@ -427,6 +427,8 @@ namespace DX11Base {
     std::atomic<uint32_t> s_rejectedFinalCount{0};
     std::atomic<uint32_t> s_seenFinalCount{0};
     std::atomic<uint32_t> s_lastBlockedFinalId{0};
+    std::atomic<uint32_t> s_redirectedFinalCount{0};
+    std::atomic<uint32_t> s_lastRedirectId{0};
 
     // All enabled is the legacy no-filter setting. With a restricted list,
     // unknown IDs are rejected rather than silently ignoring the allowlist.
@@ -510,8 +512,11 @@ namespace DX11Base {
               if (candidateId != slot ||
                   !s_originalCanTriggerByData(reinterpret_cast<void *>(candidate), special))
                 continue;
-              if (s_originalFinalTrigger(reinterpret_cast<void *>(candidate), special))
+              if (s_originalFinalTrigger(reinterpret_cast<void *>(candidate), special)) {
+                s_redirectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+                s_lastRedirectId.store(static_cast<uint32_t>(slot), std::memory_order_relaxed);
                 return true;
+              }
             }
           }
           s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
