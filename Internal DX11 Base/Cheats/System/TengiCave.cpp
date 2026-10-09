@@ -426,6 +426,7 @@ namespace DX11Base {
     std::atomic<uint32_t> s_rejectedCandidateCount{0};
     std::atomic<uint32_t> s_rejectedFinalCount{0};
     std::atomic<uint32_t> s_seenFinalCount{0};
+    std::atomic<uint32_t> s_lastBlockedFinalId{0};
 
     // All enabled is the legacy no-filter setting. With a restricted list,
     // unknown IDs are rejected rather than silently ignoring the allowlist.
@@ -487,6 +488,7 @@ namespace DX11Base {
           return false;
         }
         if (!IsTengiIdAllowed(id)) {
+          s_lastBlockedFinalId.store(id, std::memory_order_relaxed);
           s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
           return false;
         }
@@ -681,9 +683,10 @@ namespace DX11Base {
       const uint32_t seenCount =
           s_seenFinalCount.exchange(0, std::memory_order_relaxed);
       if (count || finalCount || seenCount)
-        AddLog(u8"[전기 허용 목록] 후보 차단 %u회, Trigger 진입 %u회, 최종 발동 차단 %u회",
+        AddLog(u8"[전기 허용 목록] 후보 차단 %u회, Trigger 진입 %u회, 최종 발동 차단 %u회 (마지막 차단 ID %u)",
                static_cast<unsigned>(count), static_cast<unsigned>(seenCount),
-               static_cast<unsigned>(finalCount));
+               static_cast<unsigned>(finalCount),
+               static_cast<unsigned>(s_lastBlockedFinalId.load(std::memory_order_relaxed)));
     }
   }
 
