@@ -414,12 +414,15 @@ namespace DX11Base {
     constexpr uintptr_t kCanTriggerByIdRva = 0x132E2F0;
     constexpr uintptr_t kCanTriggerByDataRva = 0x132E340;
     constexpr uintptr_t kFinalTriggerRva = 0x132E920;
+    constexpr uintptr_t kTryTriggerRva = 0x132EC10;
     using CanTriggerById = bool (__fastcall *)(int, bool);
     using CanTriggerByData = bool (__fastcall *)(void *, bool);
     using FinalTrigger = bool (__fastcall *)(void *, bool);
+    using TryTrigger = bool (__fastcall *)();
     CanTriggerById s_originalCanTriggerById = nullptr;
     CanTriggerByData s_originalCanTriggerByData = nullptr;
     FinalTrigger s_originalFinalTrigger = nullptr;
+    TryTrigger s_originalTryTrigger = nullptr;
     bool s_allowedFilterInstalled = false;
     bool s_allowedFilterAttempted = false;
     std::atomic<uint32_t> s_allowedFilterMask{(1u << kTengiListEventCount) - 1u};
@@ -430,6 +433,10 @@ namespace DX11Base {
     std::atomic<uint32_t> s_redirectedFinalCount{0};
     std::atomic<uint32_t> s_lastRedirectId{0};
     std::atomic<bool> s_blockedRequestPending{false};
+    std::atomic<uint32_t> s_tryFallbackCalls{0};
+    std::atomic<uint32_t> s_tryFallbackEligible{0};
+    std::atomic<uint32_t> s_tryFallbackSuccess{0};
+    std::atomic<uint32_t> s_tryFallbackUnavailable{0};
 
     // All enabled is the legacy no-filter setting. With a restricted list,
     // unknown IDs are rejected rather than silently ignoring the allowlist.
