@@ -206,6 +206,9 @@
     <ClInclude Include="Cheats\War\ShortBattleCooldown.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\War\TotalWarCycleShortening.h">
+      <Filter>Cheats\War</Filter>
+    </ClInclude>
     <ClInclude Include="Cheats\War\TroopCountCombatScaling.h">
       <Filter>Cheats\War</Filter>
     </ClInclude>
@@ -491,6 +494,9 @@
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\ShortBattleCooldown.cpp">
+      <Filter>Cheats\War</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\War\TotalWarCycleShortening.cpp">
       <Filter>Cheats\War</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\War\TroopCountCombatScaling.cpp">
