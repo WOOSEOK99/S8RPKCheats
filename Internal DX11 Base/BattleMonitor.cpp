@@ -7,7 +7,6 @@
 #include "Cheats/System/MonthCapture.h"
 #include "Cheats/System/SkillCountManager.h"
 #include "Cheats/System/SystemMonth.h"
-#include "Cheats/System/TengiCave.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
 #include "Cheats/War/BattleEnvironment.h"
 #include "Cheats/War/BattleMapShuffle.h"
@@ -895,7 +894,6 @@ namespace DX11Base {
 
     const bool hasRelevantState = (s_lastRelevantGameState == 0x05 || s_lastRelevantGameState == 0x07);
     const bool isCouncil = (s_lastRelevantGameState == 0x05);
-    const bool councilToDomestic = isRelevantState && gameState == 0x07 && previousRelevantState == 0x05;
 
     // 평정 중 월 1회 실행. 중간 상태에서는 s_lastAppliedMonth를 리셋하지 않아
     // 전투 종료 후 0x04 -> 0x05 같은 복귀를 새 평정으로 오인하지 않습니다.
@@ -957,27 +955,6 @@ namespace DX11Base {
 
     // 방어건물강화는 여기서 미리 적용하지 않습니다.
     // 실제 전투가 Day 1~30 + Units 1~60으로 확정될 때 MonitorBattleStatus()에서 리프레시합니다.
-
-    // 실제 평정(0x05) -> 내정(0x07) 전환일 때만 평정 종료 처리합니다.
-    if (councilToDomestic && bCancelCastleEvent) {
-      uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
-      if (captAddr != 0) {
-        uintptr_t addr80 = captAddr - 0x10;
-        uintptr_t addr90 = captAddr;
-        uintptr_t addrA0 = captAddr + 0x10;
-
-        // 포인터 유효성 검사
-        if (DX11Base::IsValidPtr(addr80, 2) && DX11Base::IsValidPtr(addr90, 1) && DX11Base::IsValidPtr(addrA0, 2)) {
-          if (*(uint8_t *)(addr80) == 0x90 && *(uint8_t *)(addr80 + 1) == 0xE0 && *(uint8_t *)(addr90) == 0xE0 &&
-              *(uint8_t *)(addrA0) == 0x28 && *(uint8_t *)(addrA0 + 1) == 0xCB) {
-
-            // 조건 일치시 전기 취소와 동일하게 완전히 초기화
-            DX11Base::CancelTengi();
-            AddLog(u8"[자동화] 평정 종료: 중지 성성 전기를 취소했습니다.");
-          }
-        }
-      }
-    }
 
     if (hasRelevantState) {
       // 전투/화면 전환 중간값에서는 마지막 0x05/0x07 상태를 그대로 전달합니다.
