@@ -489,6 +489,31 @@ namespace DX11Base {
         }
         if (!IsTengiIdAllowed(id)) {
           s_lastBlockedFinalId.store(id, std::memory_order_relaxed);
+          const uintptr_t manager = GetScenarioDataCenterAddress();
+          if (manager && s_originalCanTriggerByData && s_originalFinalTrigger) {
+            const uint32_t mask = s_allowedFilterMask.load(std::memory_order_relaxed);
+            for (int i = 0; i < kTengiListEventCount; ++i) {
+              if ((mask & (1u << i)) == 0)
+                continue;
+              const int slot = kManagedEventSlots[i];
+              uintptr_t candidate = 0;
+              if (!TryReadEventPointer(manager + 0x58A670 +
+                         static_cast<uintptr_t>(slot) * 8, &candidate) ||
+                  !IsValidPtr(candidate, 0x10))
+                continue;
+              uint16_t candidateId = 0;
+              __try {
+                candidateId = *reinterpret_cast<const uint16_t *>(candidate + 8);
+              } __except (EXCEPTION_EXECUTE_HANDLER) {
+                continue;
+              }
+              if (candidateId != slot ||
+                  !s_originalCanTriggerByData(reinterpret_cast<void *>(candidate), special))
+                continue;
+              if (s_originalFinalTrigger(reinterpret_cast<void *>(candidate), special))
+                return true;
+            }
+          }
           s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
           return false;
         }
