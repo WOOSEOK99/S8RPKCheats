@@ -662,6 +662,22 @@ namespace DX11Base {
     };
     TengiCycleState s_cycle;
 
+    bool ClearRejectedCycleRequest(uintptr_t manager) {
+      const uintptr_t gauge = manager + kCycleGaugeOffset;
+      if (!IsValidPtr(gauge, 25))
+        return false;
+      __try {
+        // Only release a rejected request while the active-event storage is empty.
+        if (*reinterpret_cast<const uint8_t *>(gauge) != 100 ||
+            *reinterpret_cast<const uint8_t *>(gauge + 24) != 0)
+          return false;
+        *reinterpret_cast<uint8_t *>(gauge) = 0;
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
     bool RequestCycleTengi(const TengiCycleSnapshot &snapshot) {
       const uintptr_t gauge = snapshot.manager + kCycleGaugeOffset;
       if (!IsValidPtr(gauge, 25))
@@ -763,17 +779,9 @@ namespace DX11Base {
     unavailableLogged = false;
     if (s_blockedRequestPending.exchange(false, std::memory_order_acq_rel) &&
         !snapshot.constructed) {
-      const uintptr_t gauge = snapshot.manager + kCycleGaugeOffset;
-      if (IsValidPtr(gauge, 25)) {
-        __try {
-          // Only release a rejected request while the active-event storage is empty.
-          if (*reinterpret_cast<const uint8_t *>(gauge) == 100 &&
-              *reinterpret_cast<const uint8_t *>(gauge + 24) == 0) {
-            *reinterpret_cast<uint8_t *>(gauge) = 0;
-            s_cycle.pending = false;
-            AddLog(u8"[전기 허용 목록] 허용된 전기 후보 없음: 대기 중인 게이지 100 초기화");
-          }
-        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      if (ClearRejectedCycleRequest(snapshot.manager)) {
+        s_cycle.pending = false;
+        AddLog(u8"[전기 허용 목록] 허용된 전기 후보 없음: 대기 중인 게이지 100 초기화");
       }
     }
     if (s_cycle.session != sessionP1 || s_cycle.manager != snapshot.manager ||
