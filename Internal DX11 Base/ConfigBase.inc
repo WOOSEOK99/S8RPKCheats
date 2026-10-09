@@ -40,7 +40,6 @@
 #include "Cheats/System/SystemMonth.h"
 #include "Cheats/Civilian/Techzero.h"
 #include "Cheats/Civilian/Techpointcave.h"
-#include "Cheats/System/TengiCave.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Cheats/War/SiegeWarfare.h"
 #include "Cheats/Civilian/DomesticsMult.h"
@@ -157,11 +156,10 @@ namespace DX11Base {
        SetFactionLordBonus, false, true},
       {"bMonitorRonin", u8"재야장수 감시", &bMonitorRonin, nullptr, nullptr, false, true},
       {"bAutoStatUp99", u8"능력치 한계돌파", &bAutoStatUp99, nullptr, nullptr, false, true},
+      {"bInfTengi", u8"매 평정 새로운 전기 발생", &bInfTengi, nullptr, nullptr, false, true},
       {"bAutoLoadMenu", u8"시작 시 치트창 표시", &bAutoLoadMenu, nullptr, nullptr, false, true},
       {"bZeroInfamy", u8"매턴 악명 0", &bZeroInfamy, nullptr, nullptr, false, true},
       {"bSpeedHack", u8"배속 기능", &bSpeedHack, nullptr, nullptr, false, true},
-      {"bCancelCastleEvent", u8"중지 성성 취소", &bCancelCastleEvent, nullptr, nullptr, false, true},
-      {"bShowWidgetTengi", u8"위젯: 전기발생 취소", &bShowWidgetTengi, nullptr, nullptr, false, true},
       {"bShowWidgetNotif", u8"위젯: 알림확인", &bShowWidgetNotif, nullptr, nullptr, false, true},
       {"bShowWidgetHero", u8"위젯: 주인공", &bShowWidgetHero, nullptr, nullptr, false, true},
       {"bShowWidgetAllOfficers", u8"위젯: 모든무장", &bShowWidgetAllOfficers, nullptr, nullptr, false, true},
@@ -814,13 +812,6 @@ namespace DX11Base {
       SetMonthCapture(true);
       InstallSystemMonthHook(); // 신규 AOB 방식 시스템 월 후킹
       s_appMonthCapture = true;
-    }
-
-    // 전기 발생 캡처 (상시 활성화, 지연 로딩)
-    static bool s_appTengiCapture = false;
-    if (!s_appTengiCapture) {
-      SetTengiCapture(true);
-      s_appTengiCapture = true;
     }
 
     processEntries(false);
