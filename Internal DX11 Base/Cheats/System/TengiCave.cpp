@@ -714,11 +714,15 @@ namespace DX11Base {
           s_rejectedFinalCount.exchange(0, std::memory_order_relaxed);
       const uint32_t seenCount =
           s_seenFinalCount.exchange(0, std::memory_order_relaxed);
-      if (count || finalCount || seenCount)
-        AddLog(u8"[전기 허용 목록] 후보 차단 %u회, Trigger 진입 %u회, 최종 발동 차단 %u회 (마지막 차단 ID %u)",
+      const uint32_t redirected =
+          s_redirectedFinalCount.exchange(0, std::memory_order_relaxed);
+      if (count || finalCount || seenCount || redirected)
+        AddLog(u8"[전기 허용 목록] 후보 차단 %u, Trigger 진입 %u, 최종 차단 %u(ID %u), 허용 전기 대체 성공 %u(ID %u)",
                static_cast<unsigned>(count), static_cast<unsigned>(seenCount),
                static_cast<unsigned>(finalCount),
-               static_cast<unsigned>(s_lastBlockedFinalId.load(std::memory_order_relaxed)));
+               static_cast<unsigned>(s_lastBlockedFinalId.load(std::memory_order_relaxed)),
+               static_cast<unsigned>(redirected),
+               static_cast<unsigned>(s_lastRedirectId.load(std::memory_order_relaxed)));
     }
   }
 
