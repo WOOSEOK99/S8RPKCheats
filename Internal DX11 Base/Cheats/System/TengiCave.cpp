@@ -426,6 +426,10 @@ namespace DX11Base {
     std::atomic<uint32_t> s_rejectedCandidateCount{0};
     std::atomic<uint32_t> s_rejectedFinalCount{0};
     std::atomic<uint32_t> s_seenFinalCount{0};
+    std::atomic<uint32_t> s_lastBlockedFinalId{0};
+    std::atomic<uint32_t> s_redirectedFinalCount{0};
+    std::atomic<uint32_t> s_lastRedirectId{0};
+    std::atomic<bool> s_blockedRequestPending{false};
 
     // All enabled is the legacy no-filter setting. With a restricted list,
     // unknown IDs are rejected rather than silently ignoring the allowlist.
@@ -487,7 +491,37 @@ namespace DX11Base {
           return false;
         }
         if (!IsTengiIdAllowed(id)) {
+          s_lastBlockedFinalId.store(id, std::memory_order_relaxed);
+          const uintptr_t manager = GetScenarioDataCenterAddress();
+          if (manager && s_originalCanTriggerByData && s_originalFinalTrigger) {
+            const uint32_t mask = s_allowedFilterMask.load(std::memory_order_relaxed);
+            for (int i = 0; i < kTengiListEventCount; ++i) {
+              if ((mask & (1u << i)) == 0)
+                continue;
+              const int slot = kManagedEventSlots[i];
+              uintptr_t candidate = 0;
+              if (!TryReadEventPointer(manager + 0x58A670 +
+                         static_cast<uintptr_t>(slot) * 8, &candidate) ||
+                  !IsValidPtr(candidate, 0x10))
+                continue;
+              uint16_t candidateId = 0;
+              __try {
+                candidateId = *reinterpret_cast<const uint16_t *>(candidate + 8);
+              } __except (EXCEPTION_EXECUTE_HANDLER) {
+                continue;
+              }
+              if (candidateId != slot ||
+                  !s_originalCanTriggerByData(reinterpret_cast<void *>(candidate), special))
+                continue;
+              if (s_originalFinalTrigger(reinterpret_cast<void *>(candidate), special)) {
+                s_redirectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+                s_lastRedirectId.store(static_cast<uint32_t>(slot), std::memory_order_relaxed);
+                return true;
+              }
+            }
+          }
           s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+          s_blockedRequestPending.store(true, std::memory_order_release);
           return false;
         }
       }
@@ -680,10 +714,15 @@ namespace DX11Base {
           s_rejectedFinalCount.exchange(0, std::memory_order_relaxed);
       const uint32_t seenCount =
           s_seenFinalCount.exchange(0, std::memory_order_relaxed);
-      if (count || finalCount || seenCount)
-        AddLog(u8"[전기 허용 목록] 후보 차단 %u회, Trigger 진입 %u회, 최종 발동 차단 %u회",
+      const uint32_t redirected =
+          s_redirectedFinalCount.exchange(0, std::memory_order_relaxed);
+      if (count || finalCount || seenCount || redirected)
+        AddLog(u8"[전기 허용 목록] 후보 차단 %u, Trigger 진입 %u, 최종 차단 %u(ID %u), 허용 전기 대체 성공 %u(ID %u)",
                static_cast<unsigned>(count), static_cast<unsigned>(seenCount),
-               static_cast<unsigned>(finalCount));
+               static_cast<unsigned>(finalCount),
+               static_cast<unsigned>(s_lastBlockedFinalId.load(std::memory_order_relaxed)),
+               static_cast<unsigned>(redirected),
+               static_cast<unsigned>(s_lastRedirectId.load(std::memory_order_relaxed)));
     }
   }
 
@@ -722,6 +761,21 @@ namespace DX11Base {
       return;
     }
     unavailableLogged = false;
+    if (s_blockedRequestPending.exchange(false, std::memory_order_acq_rel) &&
+        !snapshot.constructed) {
+      const uintptr_t gauge = snapshot.manager + kCycleGaugeOffset;
+      if (IsValidPtr(gauge, 25)) {
+        __try {
+          // Only release a rejected request while the active-event storage is empty.
+          if (*reinterpret_cast<const uint8_t *>(gauge) == 100 &&
+              *reinterpret_cast<const uint8_t *>(gauge + 24) == 0) {
+            *reinterpret_cast<uint8_t *>(gauge) = 0;
+            s_cycle.pending = false;
+            AddLog(u8"[전기 허용 목록] 허용된 전기 후보 없음: 대기 중인 게이지 100 초기화");
+          }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
+    }
     if (s_cycle.session != sessionP1 || s_cycle.manager != snapshot.manager ||
         snapshot.month < s_cycle.lastMonth) {
       const bool uncertain = s_cycle.session == sessionP1 &&
