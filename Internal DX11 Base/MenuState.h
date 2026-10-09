@@ -148,7 +148,6 @@ namespace DX11Base {
   extern bool bForceCenterOfficerList;     // 창 강제 중앙 배치 요청 (리스트)
 
   extern bool bToggleMenuCollapseRequest; // 틸트 키로 접기/펴기 요청
-  extern bool bShowPasswordPopup;         // 디버그 비밀번호 창 표시 여부
   extern bool bShowNotificationLog;       // 알림 기록 창 표시 여부
   extern bool bShowTacticsEditWin;        // 전법 수정 창 표시 여부
   extern bool bShowBatchOfficerEditWin;   // 모든 무장 일괄 편집 창 표시 여부

@@ -143,7 +143,6 @@ namespace DX11Base {
   bool bSelectOfficerFirstInit = true;
 
   bool bToggleMenuCollapseRequest = false;
-  bool bShowPasswordPopup = false;
   // bool bShowNotificationLog = false; // Already defined in NotificationManager.cpp
   bool bShowTacticsEditWin = false;
   bool bShowBatchOfficerEditWin = false;
@@ -238,7 +237,6 @@ namespace DX11Base {
            bShowMemoryNotepadWin ||
            bShowNotificationLog ||
            bShowTacticsEditWin ||
-           bShowPasswordPopup ||
            bShowTerrainBonusWin ||
            bShowBattleEnvWin ||
            bShowChildManagerWin ||
