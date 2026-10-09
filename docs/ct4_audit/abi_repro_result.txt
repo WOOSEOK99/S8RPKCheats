@@ -1,4 +1,0 @@
-isolated_to_mainland raw_RAX=000000957439EC00 AL=0 test_EAX=1 expected=0 mismatch=1
-mainland_to_isolated raw_RAX=000000957439EC00 AL=0 test_EAX=1 expected=0 mismatch=1
-mainland_to_mainland2 raw_RAX=000000957439EC01 AL=1 test_EAX=1 expected=1 mismatch=0
-same_city raw_RAX=000000957439ED01 AL=1 test_EAX=1 expected=1 mismatch=0

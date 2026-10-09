@@ -1,8 +1,0 @@
-{
-  "installed_CE72_Lua53_syntax": "PASS",
-  "mock_lifecycle_checks": 56,
-  "graph_source_assignment_emulator_cases": 76,
-  "AI_callsite_ABI_emulator_cases": 63,
-  "DLL_entry_and_internals_preserved_in_mock": true,
-  "live_CE_activation": false
-}
