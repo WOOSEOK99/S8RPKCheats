@@ -259,6 +259,7 @@ namespace DX11Base {
       const std::string suffix = std::to_string(i);
       UpsertBoolConfigValue(("tengiListAllow" + suffix).c_str(), g_tengiListAllowed[i]);
       UpsertIntConfigValue(("tengiListMonths" + suffix).c_str(), g_tengiListDurationMonths[i]);
+      UpsertIntConfigValue(("tengiListCooldownYears" + suffix).c_str(), GetTengiListCooldownYears(i));
     }
     UpsertBoolConfigValue("bCouncilContinueAfterMove", bCouncilContinueAfterMove);
     UpsertBoolConfigValue("bCouncilExecuteFreeOfficers", bCouncilExecuteFreeOfficers);
@@ -311,6 +312,9 @@ namespace DX11Base {
         g_tengiListAllowed[i] = allowed;
       if (LoadIntConfigValue(("tengiListMonths" + suffix).c_str(), months))
         g_tengiListDurationMonths[i] = months < 0 ? 0 : (months > 120 ? 120 : months);
+      int cooldownYears = -1;
+      LoadIntConfigValue(("tengiListCooldownYears" + suffix).c_str(), cooldownYears);
+      SetTengiListCooldownYears(i, cooldownYears);
     }
 
     if (bUndiscoveredToRonin) {

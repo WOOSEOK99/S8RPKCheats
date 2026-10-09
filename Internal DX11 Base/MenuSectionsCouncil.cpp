@@ -166,7 +166,7 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        // 외부 version.dll의 이름 및 슬롯 매핑을 검증함. 기간만 실험 적용하며 허용 필터는 미구현.
+        // 검증된 전기 슬롯 순서. 기간과 재발동 쿨다운은 별도 설정이다.
         static const char *const tengiNames[kTengiListEventCount] = {
           u8"결전", u8"이민족습격", u8"악적발호", u8"의심암귀", u8"민심혹란",
           u8"붕벽", u8"여세", u8"피폐", u8"권위고양", u8"보장각성",
@@ -174,35 +174,39 @@ namespace DX11Base {
         };
         static bool draftAllowed[kTengiListEventCount] = {};
         static int draftMonths[kTengiListEventCount] = {};
+        static int draftCooldownYears[kTengiListEventCount] = {};
 
         ImGui::Spacing();
         if (ImGui::Button(u8"전기 목록 관리##tengiList", ImVec2(160.f * scale, 0.f))) {
           for (int i = 0; i < kTengiListEventCount; ++i) {
             draftAllowed[i] = g_tengiListAllowed[i];
             draftMonths[i] = g_tengiListDurationMonths[i];
+            draftCooldownYears[i] = GetTengiListCooldownYears(i);
           }
           ImGui::OpenPopup(u8"전기 목록 관리##popup");
         }
         if (ImGui::IsItemHovered()) {
-          ImGui::SetTooltip(u8"전기별 기간 메모리 수정 실험. 발생 허용/차단은 아직 적용되지 않습니다.");
+          ImGui::SetTooltip(u8"체크한 전기 중 발생 조건을 만족한 후보를 선택합니다. 후보가 없으면 조건 충족을 기다립니다. (실험 기능)");
         }
 
-        ImGui::SetNextWindowSize(ImVec2(520.f * scale, 510.f * scale), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2(660.f * scale, 550.f * scale), ImGuiCond_Appearing);
         if (ImGui::BeginPopupModal(u8"전기 목록 관리##popup", nullptr,
                                    ImGuiWindowFlags_NoSavedSettings)) {
-          ImGui::TextWrapped(u8"전기별 허용 여부와 기간 설정 (0개월 = 게임 기본값)");
+          ImGui::TextWrapped(u8"기간: 개월 단위, 0 = 기본값 / 쿨다운: 년 단위, -1 = 기본값, 0 = 대기 없음");
+          ImGui::TextWrapped(u8"쿨다운은 마지막 발동일부터 계산합니다. 동일 전기 연속 금지는 별도 규칙입니다.");
           ImGui::TextColored(ImVec4(1.f, 0.75f, 0.3f, 1.f),
-                             u8"※ 기간 변경은 게임 메모리에 실험 적용됩니다. 발생 허용 체크는 아직 게임 전기 선택에 연결되지 않았습니다.");
+                             u8"※ 실험 기능입니다. 결전 주기 단축이 켜져 있으면 결전 쿨다운은 1년이 우선 적용됩니다.");
           ImGui::Spacing();
 
           const ImGuiTableFlags listFlags =
               ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg |
               ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY;
-          if (ImGui::BeginTable("##TengiListTable", 3, listFlags,
+          if (ImGui::BeginTable("##TengiListTable", 4, listFlags,
                                 ImVec2(0.f, 355.f * scale))) {
             ImGui::TableSetupColumn(u8"전기 이름", ImGuiTableColumnFlags_WidthStretch, 1.8f);
             ImGui::TableSetupColumn(u8"발생 허용", ImGuiTableColumnFlags_WidthStretch, 0.8f);
             ImGui::TableSetupColumn(u8"기간(개월)", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            ImGui::TableSetupColumn(u8"쿨다운(년)", ImGuiTableColumnFlags_WidthStretch, 1.0f);
             ImGui::TableHeadersRow();
             for (int i = 0; i < kTengiListEventCount; ++i) {
               ImGui::PushID(i);
@@ -217,6 +221,12 @@ namespace DX11Base {
                 if (draftMonths[i] < 0) draftMonths[i] = 0;
                 if (draftMonths[i] > 120) draftMonths[i] = 120;
               }
+              ImGui::TableSetColumnIndex(3);
+              ImGui::SetNextItemWidth(-1.f);
+              if (ImGui::InputInt("##cooldownYears", &draftCooldownYears[i], 0, 0)) {
+                if (draftCooldownYears[i] < -1) draftCooldownYears[i] = -1;
+                if (draftCooldownYears[i] > 255) draftCooldownYears[i] = 255;
+              }
               ImGui::PopID();
             }
             ImGui::EndTable();
@@ -226,10 +236,11 @@ namespace DX11Base {
             for (int i = 0; i < kTengiListEventCount; ++i) {
               g_tengiListAllowed[i] = draftAllowed[i];
               g_tengiListDurationMonths[i] = draftMonths[i];
+              SetTengiListCooldownYears(i, draftCooldownYears[i]);
             }
             SaveConfig();
             TickTengiListDurations(true);
-            DX11Base::AddLog(u8"[전기 목록] 설정 저장 완료. 기간 적용 실험 (발생 허용 필터 미구현)");
+            DX11Base::AddLog(u8"[전기 목록] 허용 목록·기간·쿨다운 설정 저장 완료");
             ImGui::CloseCurrentPopup();
           }
           ImGui::SameLine(0.f, 10.f * scale);

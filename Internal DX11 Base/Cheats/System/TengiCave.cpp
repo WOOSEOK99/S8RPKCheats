@@ -408,124 +408,214 @@ namespace DX11Base {
     }
 
 
-    // PDB: TurningPointTrigger::CanTrigger(TURNINGPOINT_ID,bool) and
-    // TurningPointTrigger::CanTrigger(TurningPointData*,bool).
-    // Values below are PE RVAs (.text section RVA 0x1000 + CodeView offsets).
-    constexpr uintptr_t kCanTriggerByIdRva = 0x132E2F0;
+    // Verified against the matching PDB and live SAN8RPK code (2026-10-09).
+    // TryTrigger() +132EC10 keeps its probability/first-six-month gates, then
+    // uses PredictNext(nullptr), or ListTriggerableTurningPoints(list,false,true)
+    // and SelectTurningPoint(list,false/true), before calling Trigger(data,bool).
+    // PredictNext also rebuilds the list (true,false), invalidating stale picks.
+    // List +132E627 calls CanTrigger(data,bool); +132E6AC inserts ID 23 WITHOUT
+    // CanTrigger when empty. Filtering only CanTrigger therefore cannot work.
+    // Keep the game's list ownership, priority selection, expiration and Trigger.
     constexpr uintptr_t kCanTriggerByDataRva = 0x132E340;
+    constexpr uintptr_t kListTriggerableRva = 0x132E5A0;
     constexpr uintptr_t kFinalTriggerRva = 0x132E920;
-    using CanTriggerById = bool (__fastcall *)(int, bool);
+    constexpr uintptr_t kClearTengiListRva = 0x10A20; // ptr_list::clear, called by List
+    constexpr uint32_t kAllTengiMask = (1u << kTengiListEventCount) - 1u;
     using CanTriggerByData = bool (__fastcall *)(void *, bool);
+    using ListTriggerable = void (__fastcall *)(void *, bool, bool);
     using FinalTrigger = bool (__fastcall *)(void *, bool);
-    CanTriggerById s_originalCanTriggerById = nullptr;
+    using ClearTengiList = void (__fastcall *)(void *);
     CanTriggerByData s_originalCanTriggerByData = nullptr;
+    ListTriggerable s_originalListTriggerable = nullptr;
     FinalTrigger s_originalFinalTrigger = nullptr;
+    ClearTengiList s_clearTengiList = nullptr;
     bool s_allowedFilterInstalled = false;
     bool s_allowedFilterAttempted = false;
-    std::atomic<uint32_t> s_allowedFilterMask{(1u << kTengiListEventCount) - 1u};
+    std::atomic<bool> s_allowedFilterReady{false};
+    std::atomic<uint32_t> s_allowedFilterMask{kAllTengiMask};
+    std::atomic<bool> s_hasTengiCooldownOverride{false};
     std::atomic<uint32_t> s_rejectedCandidateCount{0};
     std::atomic<uint32_t> s_rejectedFinalCount{0};
-    std::atomic<uint32_t> s_seenFinalCount{0};
     std::atomic<uint32_t> s_lastBlockedFinalId{0};
-    std::atomic<uint32_t> s_redirectedFinalCount{0};
-    std::atomic<uint32_t> s_lastRedirectId{0};
-    std::atomic<bool> s_blockedRequestPending{false};
+    std::atomic<uint32_t> s_emptyAllowlistCount{0};
+    std::atomic<uint32_t> s_noEligibleCandidateCount{0};
+    std::atomic<uint32_t> s_conditionRejectedCount{0};
+    std::atomic<uint32_t> s_lastConditionRejectedId{0};
+    std::atomic<uint32_t> s_cooldownApplyFailureCount{0};
 
-    // All enabled is the legacy no-filter setting. With a restricted list,
-    // unknown IDs are rejected rather than silently ignoring the allowlist.
-    bool IsTengiIdAllowed(int id) {
-      const uint32_t all = (1u << kTengiListEventCount) - 1u;
-      const uint32_t mask = s_allowedFilterMask.load(std::memory_order_relaxed);
-      if (mask == all)
+    struct TengiListFilterContext {
+      uint32_t mask = kAllTengiMask;
+      uint32_t accepted = 0;
+    };
+    thread_local TengiListFilterContext *s_tengiListContext = nullptr;
+
+    // PDB: TurningPointData::m_cooldownYears is uint8 at +0x35, distinct
+    // from the duration. CanTrigger +132E518..52F divides elapsed MONTHS by 12.
+    // Keep preferences here to avoid adding declarations to shared MenuState.h.
+    std::atomic<int> s_tengiCooldownYears[kTengiListEventCount] = {
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    struct TengiCooldownOverride {
+      uintptr_t address = 0;
+      uint8_t original = 0, written = 0;
+      bool active = false;
+    };
+    TengiCooldownOverride s_cooldownOverrides[kTengiListEventCount] = {};
+    SRWLOCK s_cooldownLock = SRWLOCK_INIT;
+
+    bool ApplyTengiCooldown(uintptr_t data, int id, int years, TengiCooldownOverride *saved) {
+      if (!IsValidPtr(data, 0x36))
+        return false;
+      __try {
+        if (*reinterpret_cast<const uint8_t *>(data + 8) != id)
+          return false;
+        const uintptr_t address = data + 0x35;
+        auto *value = reinterpret_cast<uint8_t *>(address);
+        if (saved->address != address) {
+          *saved = {};
+          saved->address = address;
+        }
+        if (years < 0) {
+          if (saved->active && *value == saved->written)
+            *value = saved->original;
+          saved->active = false;
+        } else {
+          // A load into the same allocation may restore the game definition.
+          if (!saved->active || *value != saved->written)
+            saved->original = *value;
+          if (*value != static_cast<uint8_t>(years))
+            *value = static_cast<uint8_t>(years);
+          saved->written = static_cast<uint8_t>(years);
+          saved->active = true;
+        }
         return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    bool UpdateTengiCandidateCooldown(void *data, uint8_t id, uint32_t mask) {
       for (int i = 0; i < kTengiListEventCount; ++i) {
+        if (kManagedEventSlots[i] != id)
+          continue;
+        const int years = (mask & (1u << i)) ?
+            s_tengiCooldownYears[i].load(std::memory_order_relaxed) : -1;
+        AcquireSRWLockExclusive(&s_cooldownLock);
+        auto &saved = s_cooldownOverrides[i];
+        if (years < 0 && !saved.active) {
+          ReleaseSRWLockExclusive(&s_cooldownLock);
+          return true;
+        }
+        const uintptr_t address = reinterpret_cast<uintptr_t>(data);
+        const bool changed = saved.address != address + 0x35 ||
+            (years < 0 ? saved.active : !saved.active || saved.written != years);
+        // Apply on the game's candidate path, including after a load, before
+        // its cooldown check. Never write through a cached pointer from a UI tick.
+        const bool applied = ApplyTengiCooldown(address, id, years, &saved);
+        ReleaseSRWLockExclusive(&s_cooldownLock);
+        if (applied && changed) {
+          AddLog(u8"[전기 쿨다운] ID %d: %d년 (-1=게임 기본값 복원)",
+                 static_cast<int>(id), years);
+        }
+        return applied;
+      }
+      return true;
+    }
+
+    bool IsTengiIdAllowed(int id, uint32_t mask) {
+      if (mask == kAllTengiMask)
+        return true; // The all-enabled setting retains legacy game behavior.
+      for (int i = 0; i < kTengiListEventCount; ++i)
         if (kManagedEventSlots[i] == id)
           return (mask & (1u << i)) != 0;
-      }
       return false;
     }
 
-    bool __fastcall CanTriggerByIdDetour(int id, bool special) {
-      if (!IsTengiIdAllowed(id)) {
+    bool ReadTengiCandidateId(void *data, uint8_t *id) {
+      const uintptr_t address = reinterpret_cast<uintptr_t>(data);
+      if (!data || !IsValidPtr(address, 9))
+        return false;
+      __try {
+        // PDB: TURNINGPOINT_ID and TurningPointData::m_ID are ONE byte.
+        *id = *reinterpret_cast<const uint8_t *>(address + 8);
+        return true;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
+    bool __fastcall CanTriggerByDataDetour(void *data, bool ignoreMomentum) {
+      auto *context = s_tengiListContext;
+      uint8_t id = 0;
+      const bool readable = ReadTengiCandidateId(data, &id);
+      const uint32_t mask = context ? context->mask :
+          s_allowedFilterMask.load(std::memory_order_relaxed);
+      if (s_allowedFilterReady.load(std::memory_order_acquire) && readable &&
+          !UpdateTengiCandidateCooldown(data, id, mask)) {
+        s_cooldownApplyFailureCount.fetch_add(1, std::memory_order_relaxed);
+        return false;
+      }
+      if (!context)
+        return s_originalCanTriggerByData(data, ignoreMomentum);
+      if (!readable || !IsTengiIdAllowed(id, mask)) {
         s_rejectedCandidateCount.fetch_add(1, std::memory_order_relaxed);
         return false;
       }
-      return s_originalCanTriggerById ? s_originalCanTriggerById(id, special) : false;
-    }
-
-    bool __fastcall CanTriggerByDataDetour(void *data, bool special) {
-      // Never reinterpret a pointer that the original game has not validated.
-      // Null is handed to the original function rather than dereferenced.
-      if (data && IsValidPtr(reinterpret_cast<uintptr_t>(data) + 8, sizeof(uint16_t))) {
-        uint16_t id = 0;
-        bool readable = false;
-        __try {
-          id = *reinterpret_cast<const uint16_t *>(
-              reinterpret_cast<uintptr_t>(data) + 8);
-          readable = true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {}
-        if (readable && !IsTengiIdAllowed(id)) {
-          s_rejectedCandidateCount.fetch_add(1, std::memory_order_relaxed);
-          return false;
-        }
+      const bool eligible = s_originalCanTriggerByData(data, ignoreMomentum);
+      if (eligible) {
+        ++context->accepted;
+      } else {
+        s_conditionRejectedCount.fetch_add(1, std::memory_order_relaxed);
+        s_lastConditionRejectedId.store(id, std::memory_order_relaxed);
       }
-      return s_originalCanTriggerByData ? s_originalCanTriggerByData(data, special) : false;
+      return eligible;
     }
 
-    // This is the actual effect-activation path. The PDB mangled symbol
-    // ?Trigger@TurningPointTrigger@turning_point@san8r@@SA_NQEAVTurningPointData@3@_N@Z
-    // confirms a static bool function, taking (TurningPointData*, bool).
+    void __fastcall ListTriggerableDetour(void *list, bool ignoreMomentum, bool sort) {
+      const uint32_t mask = s_allowedFilterMask.load(std::memory_order_relaxed);
+      if (!s_allowedFilterReady.load(std::memory_order_acquire) ||
+          (mask == kAllTengiMask && !s_hasTengiCooldownOverride.load(std::memory_order_relaxed))) {
+        s_originalListTriggerable(list, ignoreMomentum, sort);
+        return;
+      }
+      TengiListFilterContext context;
+      context.mask = mask;
+      auto *previous = s_tengiListContext;
+      s_tengiListContext = &context;
+      __try {
+        s_originalListTriggerable(list, ignoreMomentum, sort);
+      } __finally {
+        s_tengiListContext = previous;
+      }
+      if (!context.accepted) {
+        // Only the game's unchecked ID-23 fallback can remain. Use its clear()
+        // so the shared linked-list allocator and the caller's destructor agree.
+        // Even an allowed ID 23 must not bypass its cooldown/last-event rejection.
+        s_clearTengiList(list);
+        auto &counter = mask ? s_noEligibleCandidateCount : s_emptyAllowlistCount;
+        counter.fetch_add(1, std::memory_order_relaxed);
+      }
+      // Empty is a normal false return from TryTrigger, not a pending event.
+      // Never reset momentum or construct/cancel an event to consume a request.
+      // Next native evaluation rebuilds candidates from current (also loaded) data.
+    }
+
     bool __fastcall FinalTriggerDetour(void *data, bool special) {
-      s_seenFinalCount.fetch_add(1, std::memory_order_relaxed);
-      const uint32_t fullMask = (1u << kTengiListEventCount) - 1u;
-      if (s_allowedFilterMask.load(std::memory_order_relaxed) != fullMask) {
-        if (!data || !IsValidPtr(reinterpret_cast<uintptr_t>(data) + 8, sizeof(uint16_t))) {
-          s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
-          return false;
-        }
-        uint16_t id = 0;
-        __try {
-          id = *reinterpret_cast<const uint16_t *>(reinterpret_cast<uintptr_t>(data) + 8);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-          s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
-          return false;
-        }
-        if (!IsTengiIdAllowed(id)) {
-          s_lastBlockedFinalId.store(id, std::memory_order_relaxed);
-          const uintptr_t manager = GetScenarioDataCenterAddress();
-          if (manager && s_originalCanTriggerByData && s_originalFinalTrigger) {
-            const uint32_t mask = s_allowedFilterMask.load(std::memory_order_relaxed);
-            for (int i = 0; i < kTengiListEventCount; ++i) {
-              if ((mask & (1u << i)) == 0)
-                continue;
-              const int slot = kManagedEventSlots[i];
-              uintptr_t candidate = 0;
-              if (!TryReadEventPointer(manager + 0x58A670 +
-                         static_cast<uintptr_t>(slot) * 8, &candidate) ||
-                  !IsValidPtr(candidate, 0x10))
-                continue;
-              uint16_t candidateId = 0;
-              __try {
-                candidateId = *reinterpret_cast<const uint16_t *>(candidate + 8);
-              } __except (EXCEPTION_EXECUTE_HANDLER) {
-                continue;
-              }
-              if (candidateId != slot ||
-                  !s_originalCanTriggerByData(reinterpret_cast<void *>(candidate), special))
-                continue;
-              if (s_originalFinalTrigger(reinterpret_cast<void *>(candidate), special)) {
-                s_redirectedFinalCount.fetch_add(1, std::memory_order_relaxed);
-                s_lastRedirectId.store(static_cast<uint32_t>(slot), std::memory_order_relaxed);
-                return true;
-              }
-            }
-          }
-          s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
-          s_blockedRequestPending.store(true, std::memory_order_release);
-          return false;
-        }
+      if (!s_allowedFilterReady.load(std::memory_order_acquire))
+        return s_originalFinalTrigger(data, special);
+      uint8_t id = 0;
+      const bool readable = ReadTengiCandidateId(data, &id);
+      const uint32_t mask = s_allowedFilterMask.load(std::memory_order_relaxed);
+      if (mask != kAllTengiMask && (!readable || !IsTengiIdAllowed(id, mask))) {
+        // Covers direct callers and a settings change after selection. No late
+        // substitution: Trigger itself applies effects without CanTrigger.
+        s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+        s_lastBlockedFinalId.store(id, std::memory_order_relaxed);
+        return false;
       }
-      return s_originalFinalTrigger ? s_originalFinalTrigger(data, special) : false;
+      const bool triggered = s_originalFinalTrigger(data, special);
+      AddLog(u8"[전기 허용 목록] 선택 ID %u, 발동 %s (원본 Trigger 반환값)",
+             static_cast<unsigned>(id), triggered ? u8"성공" : u8"실패");
+      return triggered;
     }
 
     bool IsExecutableTengiHookTarget(uintptr_t address) {
@@ -538,76 +628,79 @@ namespace DX11Base {
                   PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
     }
 
+    bool MatchesTengiCode(uintptr_t address, const uint8_t *bytes, size_t size) {
+      if (!IsExecutableTengiHookTarget(address) || !IsValidPtr(address, size))
+        return false;
+      __try {
+        return memcmp(reinterpret_cast<const void *>(address), bytes, size) == 0;
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+      }
+    }
+
     bool InstallTengiAllowedFilter() {
       if (!HasVerifiedCycleLayout())
         return false;
       const uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandle(nullptr));
-      const uintptr_t byId = base + kCanTriggerByIdRva;
-      const uintptr_t byData = base + kCanTriggerByDataRva;
-      const uintptr_t finalTrigger = base + kFinalTriggerRva;
-      if (!IsExecutableTengiHookTarget(byId) || !IsExecutableTengiHookTarget(byData) ||
-          !IsExecutableTengiHookTarget(finalTrigger))
+      // Entry bytes recovered from live code, including the old hooks' trampolines.
+      // Refuse incompatible/previously hooked entries instead of chaining filters.
+      const uint8_t dataEntry[] = {0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54};
+      const uint8_t listEntry[] = {0x48, 0x89, 0x5C, 0x24, 0x08};
+      const uint8_t finalEntry[] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x30};
+      const uint8_t clearEntry[] = {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20};
+      const uint8_t tryListCall[] = {0xE8, 0x4E, 0xF7, 0xFF, 0xFF};
+      if (!MatchesTengiCode(base + kCanTriggerByDataRva, dataEntry, sizeof(dataEntry)) ||
+          !MatchesTengiCode(base + kListTriggerableRva, listEntry, sizeof(listEntry)) ||
+          !MatchesTengiCode(base + kFinalTriggerRva, finalEntry, sizeof(finalEntry)) ||
+          !MatchesTengiCode(base + kClearTengiListRva, clearEntry, sizeof(clearEntry)) ||
+          !MatchesTengiCode(base + 0x132EE4D, tryListCall, sizeof(tryListCall))) {
+        AddLog(u8"[전기 허용 목록] 코드 검증 실패: 후크 설치 중단");
         return false;
+      }
       const MH_STATUS init = MH_Initialize();
       if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED)
         return false;
-
-      void *idOriginal = nullptr, *dataOriginal = nullptr, *finalOriginal = nullptr;
-      const MH_STATUS createdId = MH_CreateHook(
-          reinterpret_cast<void *>(byId),
-          reinterpret_cast<void *>(&CanTriggerByIdDetour), &idOriginal);
-      if (createdId != MH_OK)
-        return false;
-      const MH_STATUS createdData = MH_CreateHook(
-          reinterpret_cast<void *>(byData),
-          reinterpret_cast<void *>(&CanTriggerByDataDetour), &dataOriginal);
-      if (createdData != MH_OK) {
-        MH_RemoveHook(reinterpret_cast<void *>(byId));
-        return false;
+      struct Hook {
+        uintptr_t rva;
+        void *detour;
+        void *original;
+      } hooks[] = {
+          {kCanTriggerByDataRva, reinterpret_cast<void *>(&CanTriggerByDataDetour), nullptr},
+          {kListTriggerableRva, reinterpret_cast<void *>(&ListTriggerableDetour), nullptr},
+          {kFinalTriggerRva, reinterpret_cast<void *>(&FinalTriggerDetour), nullptr}};
+      int created = 0;
+      MH_STATUS status = MH_OK;
+      for (auto &hook : hooks) {
+        status = MH_CreateHook(reinterpret_cast<void *>(base + hook.rva),
+                               hook.detour, &hook.original);
+        if (status != MH_OK)
+          break;
+        ++created;
       }
-      const MH_STATUS createdFinal = MH_CreateHook(
-          reinterpret_cast<void *>(finalTrigger),
-          reinterpret_cast<void *>(&FinalTriggerDetour), &finalOriginal);
-      if (createdFinal != MH_OK) {
-        MH_RemoveHook(reinterpret_cast<void *>(byData));
-        MH_RemoveHook(reinterpret_cast<void *>(byId));
-        AddLog(u8"[전기 허용 목록] 최종 Trigger 후크 생성 실패: %s", MH_StatusToString(createdFinal));
-        return false;
+      if (created == 3) {
+        s_originalCanTriggerByData = reinterpret_cast<CanTriggerByData>(hooks[0].original);
+        s_originalListTriggerable = reinterpret_cast<ListTriggerable>(hooks[1].original);
+        s_originalFinalTrigger = reinterpret_cast<FinalTrigger>(hooks[2].original);
+        s_clearTengiList = reinterpret_cast<ClearTengiList>(base + kClearTengiListRva);
+        for (const auto &hook : hooks) {
+          status = MH_EnableHook(reinterpret_cast<void *>(base + hook.rva));
+          if (status != MH_OK)
+            break;
+        }
+        if (status == MH_OK) {
+          s_allowedFilterReady.store(true, std::memory_order_release);
+          return true;
+        }
       }
-      s_originalFinalTrigger = reinterpret_cast<FinalTrigger>(finalOriginal);
-      s_originalCanTriggerById = reinterpret_cast<CanTriggerById>(idOriginal);
-      s_originalCanTriggerByData = reinterpret_cast<CanTriggerByData>(dataOriginal);
-      if (MH_EnableHook(reinterpret_cast<void *>(byId)) != MH_OK) {
-        MH_RemoveHook(reinterpret_cast<void *>(finalTrigger));
-        MH_RemoveHook(reinterpret_cast<void *>(byData));
-        MH_RemoveHook(reinterpret_cast<void *>(byId));
-        s_originalCanTriggerById = nullptr;
-        s_originalCanTriggerByData = nullptr;
-        return false;
+      // Until every hook is ready, each detour simply delegates to the game.
+      for (int i = 0; i < created; ++i) {
+        void *target = reinterpret_cast<void *>(base + hooks[i].rva);
+        const MH_STATUS disabled = MH_DisableHook(target);
+        if (disabled == MH_OK || disabled == MH_ERROR_DISABLED)
+          MH_RemoveHook(target);
       }
-      if (MH_EnableHook(reinterpret_cast<void *>(byData)) != MH_OK) {
-        MH_DisableHook(reinterpret_cast<void *>(byId));
-        MH_RemoveHook(reinterpret_cast<void *>(finalTrigger));
-        MH_RemoveHook(reinterpret_cast<void *>(byData));
-        MH_RemoveHook(reinterpret_cast<void *>(byId));
-        s_originalCanTriggerById = nullptr;
-        s_originalCanTriggerByData = nullptr;
-        return false;
-      }
-      const MH_STATUS finalStatus = MH_EnableHook(reinterpret_cast<void *>(finalTrigger));
-      if (finalStatus != MH_OK) {
-        MH_DisableHook(reinterpret_cast<void *>(byData));
-        MH_DisableHook(reinterpret_cast<void *>(byId));
-        MH_RemoveHook(reinterpret_cast<void *>(finalTrigger));
-        MH_RemoveHook(reinterpret_cast<void *>(byData));
-        MH_RemoveHook(reinterpret_cast<void *>(byId));
-        s_originalCanTriggerById = nullptr;
-        s_originalCanTriggerByData = nullptr;
-        s_originalFinalTrigger = nullptr;
-        AddLog(u8"[전기 허용 목록] 최종 Trigger 후크 활성화 실패: %s", MH_StatusToString(finalStatus));
-        return false;
-      }
-      return true;
+      AddLog(u8"[전기 허용 목록] 후크 설치 실패: %s", MH_StatusToString(status));
+      return false;
     }
 
     struct TengiCycleSnapshot {
@@ -662,22 +755,6 @@ namespace DX11Base {
     };
     TengiCycleState s_cycle;
 
-    bool ClearRejectedCycleRequest(uintptr_t manager) {
-      const uintptr_t gauge = manager + kCycleGaugeOffset;
-      if (!IsValidPtr(gauge, 25))
-        return false;
-      __try {
-        // Only release a rejected request while the active-event storage is empty.
-        if (*reinterpret_cast<const uint8_t *>(gauge) != 100 ||
-            *reinterpret_cast<const uint8_t *>(gauge + 24) != 0)
-          return false;
-        // Never overwrite game's momentum after an eligibility rejection.
-        return false;
-      } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-      }
-    }
-
     bool RequestCycleTengi(const TengiCycleSnapshot &snapshot) {
       const uintptr_t gauge = snapshot.manager + kCycleGaugeOffset;
       if (!IsValidPtr(gauge, 25))
@@ -697,15 +774,21 @@ namespace DX11Base {
 
 
   // Install once after the game initializes its code. Updates to preferences
-  // only change an atomic mask; the game selection logic is never polled/patched.
+  // publish preferences; candidates/cooldowns are evaluated on the game path.
   void TickTengiAllowedFilter() {
     static ULONGLONG lastAttemptMs = 0;
     static ULONGLONG lastReportMs = 0;
     uint32_t mask = 0;
-    for (int i = 0; i < kTengiListEventCount; ++i)
-      if (g_tengiListAllowed[i])
+    bool customCooldown = false;
+    for (int i = 0; i < kTengiListEventCount; ++i) {
+      if (g_tengiListAllowed[i]) {
         mask |= 1u << i;
+        customCooldown = customCooldown ||
+            s_tengiCooldownYears[i].load(std::memory_order_relaxed) >= 0;
+      }
+    }
     s_allowedFilterMask.store(mask, std::memory_order_relaxed);
+    s_hasTengiCooldownOverride.store(customCooldown, std::memory_order_relaxed);
 
     if (!s_allowedFilterAttempted) {
       const ULONGLONG now = GetTickCount64();
@@ -716,7 +799,7 @@ namespace DX11Base {
         return;
       s_allowedFilterAttempted = true;
       s_allowedFilterInstalled = InstallTengiAllowedFilter();
-      AddLog(u8"[전기 허용 목록] CanTrigger 두 함수 + 최종 Trigger 후크 %s (현재 허용 마스크=0x%04X)",
+      AddLog(u8"[전기 허용 목록] 후보 목록 필터 + 최종 발동 보호 후크 %s (현재 허용 마스크=0x%04X)",
              s_allowedFilterInstalled ? u8"설치 성공" : u8"설치 실패, 원본 유지",
              static_cast<unsigned>(mask));
     }
@@ -728,18 +811,32 @@ namespace DX11Base {
           s_rejectedCandidateCount.exchange(0, std::memory_order_relaxed);
       const uint32_t finalCount =
           s_rejectedFinalCount.exchange(0, std::memory_order_relaxed);
-      const uint32_t seenCount =
-          s_seenFinalCount.exchange(0, std::memory_order_relaxed);
-      const uint32_t redirected =
-          s_redirectedFinalCount.exchange(0, std::memory_order_relaxed);
-      if (count || finalCount || seenCount || redirected)
-        AddLog(u8"[전기 허용 목록] 후보 차단 %u, Trigger 진입 %u, 최종 차단 %u(ID %u), 허용 전기 대체 성공 %u(ID %u)",
-               static_cast<unsigned>(count), static_cast<unsigned>(seenCount),
+      const uint32_t empty = s_emptyAllowlistCount.exchange(0, std::memory_order_relaxed);
+      const uint32_t noEligible = s_noEligibleCandidateCount.exchange(0, std::memory_order_relaxed);
+      const uint32_t conditions = s_conditionRejectedCount.exchange(0, std::memory_order_relaxed);
+      const uint32_t cooldownFailures = s_cooldownApplyFailureCount.exchange(0, std::memory_order_relaxed);
+      if (cooldownFailures)
+        AddLog(u8"[전기 쿨다운] 적용 실패 %u: 해당 후보 제외", static_cast<unsigned>(cooldownFailures));
+      if (count || finalCount || empty || noEligible || conditions)
+        AddLog(u8"[전기 허용 목록] 후보 제외 %u, 원본 조건 미충족 %u(ID %u), 후보 없음[선택 없음 %u/조건 미충족 %u], 최종 차단 %u(ID %u). 후보 부재 시 게이지 유지, 다음 게임 판정에서 재시도",
+               static_cast<unsigned>(count), static_cast<unsigned>(conditions),
+               static_cast<unsigned>(s_lastConditionRejectedId.load(std::memory_order_relaxed)),
+               static_cast<unsigned>(empty), static_cast<unsigned>(noEligible),
                static_cast<unsigned>(finalCount),
-               static_cast<unsigned>(s_lastBlockedFinalId.load(std::memory_order_relaxed)),
-               static_cast<unsigned>(redirected),
-               static_cast<unsigned>(s_lastRedirectId.load(std::memory_order_relaxed)));
+               static_cast<unsigned>(s_lastBlockedFinalId.load(std::memory_order_relaxed)));
     }
+  }
+
+  int GetTengiListCooldownYears(int index) {
+    return index >= 0 && index < kTengiListEventCount ?
+        s_tengiCooldownYears[index].load(std::memory_order_relaxed) : -1;
+  }
+
+  void SetTengiListCooldownYears(int index, int years) {
+    if (index < 0 || index >= kTengiListEventCount)
+      return;
+    s_tengiCooldownYears[index].store(years < -1 ? -1 : (years > 255 ? 255 : years),
+                                     std::memory_order_relaxed);
   }
 
   void TickTengiCycle(uintptr_t sessionP1) {
@@ -777,13 +874,6 @@ namespace DX11Base {
       return;
     }
     unavailableLogged = false;
-    if (s_blockedRequestPending.exchange(false, std::memory_order_acq_rel) &&
-        !snapshot.constructed) {
-      if (ClearRejectedCycleRequest(snapshot.manager)) {
-        s_cycle.pending = false;
-        AddLog(u8"[전기 허용 목록] 허용된 전기 후보 없음: 대기 중인 게이지 100 초기화");
-      }
-    }
     if (s_cycle.session != sessionP1 || s_cycle.manager != snapshot.manager ||
         snapshot.month < s_cycle.lastMonth) {
       const bool uncertain = s_cycle.session == sessionP1 &&
@@ -832,7 +922,7 @@ namespace DX11Base {
     }
   }
 
-  // 별도 훅 없이 설정된 기간만 변경한다. 목록 허용/차단은 아직 구현되지 않았다.
+  // 기간 변경은 후보 선택 필터와 별도로 유지한다.
   // 이 함수는 UI가 닫혀 있어도 렌더 유지보수 게이트(200ms)에서 호출된다.
   void TickTengiListDurations(bool immediate) {
     bool requested = false;
@@ -913,7 +1003,7 @@ namespace DX11Base {
       }
     }
     if (applied || restored || (immediate && (failed || unavailable || instant))) {
-      AddLog(u8"[전기 목록][기간 실험] 적용 %d, 원복 %d, 미확보 %d, 즉발 제외 %d, 실패 %d (발생 허용 필터 미구현)",
+      AddLog(u8"[전기 목록][기간 실험] 적용 %d, 원복 %d, 미확보 %d, 즉발 제외 %d, 실패 %d",
              applied, restored, unavailable, instant, failed);
     }
   }
