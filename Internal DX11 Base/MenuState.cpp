@@ -104,8 +104,6 @@ namespace DX11Base {
   bool bUndiscoveredToRonin = false;
   bool bAutoStatUp99 = false;
   bool bInfTengi = false;            // 2026-04-05 무한 전기
-  bool bTotalWarCycleShortening = true; // 결전 재발생 대기 주기 단축 (기본 ON)
-  bool bCancelCastleEvent = false;   // 2026-04-05 중지 성성 취소
   bool g_tengiListAllowed[kTengiListEventCount] = {
       true, true, true, true, true, true, true, true,
       true, true, true, true, true, true, true};
@@ -114,7 +112,6 @@ namespace DX11Base {
   bool bYumokCondition = false;      // 유목기병 습득 조건 해제
   bool bSangbyeongCondition = false; // 상병 습득 조건 해제
   bool bFactionLordBonus = false;    // 세력 군주 보너스 자동 배정
-  bool bCancelTengi = false;         // 2026-04-05 전기발생 취소
   bool bShowCityInfoWin = false;
   bool bShowSelectedOfficerWin = false;
   bool bShowOfficerListWin = false;
@@ -131,7 +128,6 @@ namespace DX11Base {
   bool bIsMenuCollapsed = false;
   bool bAutoLoadMenu = false;
 
-  bool bShowWidgetTengi = false;
   // bool bShowWidgetNotif = false; // Already defined in NotificationManager.cpp
   bool bShowWidgetHero = false;
   bool bShowWidgetAllOfficers = false;

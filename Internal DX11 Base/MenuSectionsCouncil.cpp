@@ -50,7 +50,6 @@
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/ShortBattleCooldown.h"
-#include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"
@@ -138,7 +137,6 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing();
 
-        // 기존 두 체크박스의 실행 코드는 변경하지 않고 배치만 정리한다.
         if (ImGui::Checkbox(u8"매 평정 새로운 전기 발생", &bInfTengi)) {
           NotifyFeatureToggle(u8"매 평정 새로운 전기 발생", bInfTengi);
           SaveConfig();
@@ -146,23 +144,6 @@ namespace DX11Base {
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"매 평정 마다 새로운 전기가 발생합니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::SameLine(0.f, 24.f * scale);
-        if (ImGui::Checkbox(u8"결전 발생 주기 단축", &bTotalWarCycleShortening)) {
-          const bool requested = bTotalWarCycleShortening;
-          if (!DX11Base::SetTotalWarCycleShortening(requested))
-            bTotalWarCycleShortening = DX11Base::IsTotalWarCycleShorteningApplied();
-          NotifyFeatureToggle(u8"결전 발생 주기 단축", bTotalWarCycleShortening);
-          SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"결전 발생 후 다음 결전의 재발생 대기 주기를 1년으로 단축합니다.");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
-                             u8"다른 결전 발생 조건은 그대로 유지됩니다.");
           ImGui::EndTooltip();
         }
 

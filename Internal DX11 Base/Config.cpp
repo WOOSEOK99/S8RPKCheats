@@ -13,7 +13,6 @@
 #include "Cheats/War/CouncilContinueAfterMove.h"
 #include "Cheats/War/CouncilExecuteFreeOfficers.h"
 #include "Cheats/War/ShortBattleCooldown.h"
-#include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/GovernorPrisonerDisposal.h"
 #include "Cheats/War/IsolatedTerritoryMovementFeature.h"
@@ -254,7 +253,6 @@ namespace DX11Base {
     UpsertBoolConfigValue("bAIWarImprove", bAIWarImprove);
     UpsertBoolConfigValue("bMissionCpuHeroExclusion", bMissionCpuHeroExclusion);
     UpsertBoolConfigValue("bTechCityEditorVisible", bTechCityEditorVisible);
-    UpsertBoolConfigValue("bTotalWarCycleShortening", bTotalWarCycleShortening);
     for (int i = 0; i < kTengiListEventCount; ++i) {
       const std::string suffix = std::to_string(i);
       UpsertBoolConfigValue(("tengiListAllow" + suffix).c_str(), g_tengiListAllowed[i]);
@@ -301,9 +299,6 @@ namespace DX11Base {
 
   void LoadConfig() {
     LoadConfigBase();
-    // 기존 '중지 성성 취소'는 별도 메뉴에서 제거했으므로 숨겨진 설정으로
-    // 자동 취소가 지속되지 않게 한다. 전기 목록 관리 실제 적용은 후속 구현이다.
-    bCancelCastleEvent = false;
     for (int i = 0; i < kTengiListEventCount; ++i) {
       const std::string suffix = std::to_string(i);
       bool allowed = g_tengiListAllowed[i];
@@ -346,16 +341,6 @@ namespace DX11Base {
       AddLog(u8"[Config] 게임 내 도시 편집기 기술도시 표시 설정 로드: %s",
              bTechCityEditorVisible ? "ON" : "OFF");
     }
-
-    bool savedTotalWarCycleShortening = bTotalWarCycleShortening;
-    if (LoadBoolConfigValue("bTotalWarCycleShortening", savedTotalWarCycleShortening))
-      bTotalWarCycleShortening = savedTotalWarCycleShortening;
-
-    if (!SetTotalWarCycleShortening(bTotalWarCycleShortening))
-      bTotalWarCycleShortening = IsTotalWarCycleShorteningApplied();
-
-    AddLog(u8"[Config] 결전 발생 주기 단축 설정 로드: %s",
-           bTotalWarCycleShortening ? "ON" : "OFF");
 
     bool savedCouncilContinueAfterMove = false;
     LoadBoolConfigValue("bCouncilContinueAfterMove", savedCouncilContinueAfterMove);

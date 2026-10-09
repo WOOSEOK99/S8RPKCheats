@@ -50,7 +50,6 @@
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/ShortBattleCooldown.h"
-#include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"

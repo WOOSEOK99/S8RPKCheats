@@ -4,7 +4,6 @@
 #include "../../Cheats.h"
 #include "../../MemoryUtils.h"
 #include "../../MenuState.h"
-#include "../../NotificationManager.h"
 #include "../../showlog.h"
 #include <psapi.h>
 #include <atomic>
@@ -110,9 +109,8 @@ namespace DX11Base {
     if (enable) {
       g_tengiInstallRequested = true;
 
-      // 전기 캡처는 무한 전기 또는 전기취소 위젯에서만 필요합니다.
       // 설정 로드가 상시 SetTengiCapture(true)를 호출하더라도 실제 사용 전에는 cave를 만들지 않습니다.
-      if (!bInfTengi && !bShowWidgetTengi) {
+      if (!bInfTengi) {
         if (!g_tengiDeferredLogged) {
           AddLog(u8"[Tengi] 기능 미사용 상태: 캡처 후크 설치 보류");
           g_tengiDeferredLogged = true;
@@ -233,46 +231,24 @@ namespace DX11Base {
     }
   }
 
-  // 전기 취소 (플래그 0 설정 및 할당된 이벤트 포인터 주소 초기화)
-  void CancelTengi() {
-    if (!g_tengiAddr || !IsValidPtr(g_tengiAddr + 0x18, 1))
-      return;
-
-    // 1. 발생 플래그(+0x18)를 0으로 초기화
-    uintptr_t flagAddr = g_tengiAddr + 0x18;
-    *(uint8_t*)flagAddr = 0;
-
-    // 2. 전기 이벤트 포인터 1 (+0x08): 유저 요청대로 포인터 0으로 초기화 (64비트 크기인 8바이트를 0으로 밀어 6바이트
-    // 모두 0 처리)
-    if (IsValidPtr(g_tengiAddr + 0x08, 8)) {
-      *(uint64_t *)(g_tengiAddr + 0x08) = 0;
-    }
-
-    // 3. 전기 이벤트 포인터 2 (+0x10): 유저 요청대로 포인터 0으로 초기화
-    if (IsValidPtr(g_tengiAddr + 0x10, 8)) {
-      *(uint64_t *)(g_tengiAddr + 0x10) = 0;
-    }
-  }
-
-  // --- [신규] 전기 주소 캡처 감시 및 알림 발생 ---
+  // 전기 주소 캡처 감시 및 로그
   void TengiCave_Tick() {
       TickTengiAllowedFilter();
       static bool s_notifiedForThisSession = false;
 
       // 시작 설정 로드에서는 캡처 요청만 기록하고, 실제 기능을 사용할 때 최초 설치합니다.
       if (g_tengiInstallRequested && !g_tengiApplied && !g_tengiRunning &&
-          (bInfTengi || bShowWidgetTengi)) {
+          bInfTengi) {
           SetTengiCapture(true);
       }
       
-      // 1. 주소가 캡처되었고 아직 알림을 주지 않았을 때
+      // 1. 주소가 캡처되었고 아직 로그를 남기지 않았을 때
       if (g_tengiAddr != 0 && !s_notifiedForThisSession) {
-          DX11Base::AddNotification(u8"전기 취소 활성화 됨");
           DX11Base::AddLog(u8"[Tengi] 전기 주소 캡처 완료: 0x%llX", (unsigned long long)g_tengiAddr);
           s_notifiedForThisSession = true;
       }
       
-      // 2. 주소가 0이 된 경우 (해제 등) 초기화하여 재캡처 시 다시 알림 발생 가능하게 함
+      // 2. 주소가 0이 된 경우 (해제 등) 초기화하여 재캡처 시 다시 로그를 남김
       if (g_tengiAddr == 0) {
           s_notifiedForThisSession = false;
       }
