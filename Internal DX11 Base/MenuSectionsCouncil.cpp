@@ -50,7 +50,6 @@
 #include "Cheats/War/StratagemGaugeMax.h"
 #include "Cheats/War/StratagemSlotProbe.h"
 #include "Cheats/War/ShortBattleCooldown.h"
-#include "Cheats/War/TotalWarCycleShortening.h"
 #include "Cheats/War/TroopCountCombatScaling.h"
 #include "Cheats/War/Terrainignore.h"
 #include "Config.h"
@@ -138,7 +137,7 @@ namespace DX11Base {
         ImGui::Separator();
         ImGui::Spacing();
 
-        // 기존 두 체크박스의 실행 코드는 변경하지 않고 배치만 정리한다.
+        // 매 평정 새로운 전기 발생 설정.
         if (ImGui::Checkbox(u8"매 평정 새로운 전기 발생", &bInfTengi)) {
           NotifyFeatureToggle(u8"매 평정 새로운 전기 발생", bInfTengi);
           SaveConfig();
@@ -146,23 +145,6 @@ namespace DX11Base {
         if (ImGui::IsItemHovered()) {
           ImGui::BeginTooltip();
           ImGui::TextColored(ImVec4(1, 1, 0, 1), u8"매 평정 마다 새로운 전기가 발생합니다.");
-          ImGui::EndTooltip();
-        }
-
-        ImGui::SameLine(0.f, 24.f * scale);
-        if (ImGui::Checkbox(u8"결전 발생 주기 단축", &bTotalWarCycleShortening)) {
-          const bool requested = bTotalWarCycleShortening;
-          if (!DX11Base::SetTotalWarCycleShortening(requested))
-            bTotalWarCycleShortening = DX11Base::IsTotalWarCycleShorteningApplied();
-          NotifyFeatureToggle(u8"결전 발생 주기 단축", bTotalWarCycleShortening);
-          SaveConfig();
-        }
-        if (ImGui::IsItemHovered()) {
-          ImGui::BeginTooltip();
-          ImGui::TextColored(ImVec4(1, 1, 0, 1),
-                             u8"결전 발생 후 다음 결전의 재발생 대기 주기를 1년으로 단축합니다.");
-          ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
-                             u8"다른 결전 발생 조건은 그대로 유지됩니다.");
           ImGui::EndTooltip();
         }
 
@@ -195,7 +177,7 @@ namespace DX11Base {
           ImGui::TextWrapped(u8"기간: 개월 단위, 0 = 기본값 / 쿨다운: 년 단위, -1 = 기본값, 0 = 대기 없음");
           ImGui::TextWrapped(u8"쿨다운은 마지막 발동일부터 계산합니다. 동일 전기 연속 금지는 별도 규칙입니다.");
           ImGui::TextColored(ImVec4(1.f, 0.75f, 0.3f, 1.f),
-                             u8"※ 실험 기능입니다. 결전 주기 단축이 켜져 있으면 결전 쿨다운은 1년이 우선 적용됩니다.");
+                             u8"※ 전기별 설정은 실험 기능이며 게임의 기본 발생 조건을 유지합니다.");
           ImGui::Spacing();
 
           const ImGuiTableFlags listFlags =
@@ -322,27 +304,6 @@ namespace DX11Base {
           ImGui::EndTooltip();
         }
 
-        {
-          static uintptr_t s_lastHookAddr = 0;
-          static uintptr_t s_lastCaptAddr = 0;
-          uintptr_t hookAddr = DX11Base::GetTengiHookAddr();
-          uintptr_t captAddr = DX11Base::GetCapturedTengiAddr();
-
-          if (hookAddr != s_lastHookAddr) {
-            if (hookAddr != 0) {
-              DX11Base::AddLog(u8"[전기] 훅 지점 발견: %p (+0x%llX)", (void *)hookAddr,
-                               (unsigned long long)DX11Base::GetTengiHookOffset());
-            }
-            s_lastHookAddr = hookAddr;
-          }
-
-          if (captAddr != s_lastCaptAddr) {
-            if (captAddr != 0) {
-              DX11Base::AddLog(u8"[전기] 캡처 주소 확보: %p", (void *)captAddr);
-            }
-            s_lastCaptAddr = captAddr;
-          }
-        }
         EndSection();
       }
     }

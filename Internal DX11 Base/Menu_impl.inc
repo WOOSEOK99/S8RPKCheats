@@ -525,7 +525,7 @@ namespace DX11Base {
     // 2026-04-04 배속 상태 동기화
     SpeedHack_Update(p1);
 
-    // [추가] 전기 주소 캡처 감시 (알림 발생용)
+    // 전기 허용 목록 필터 상태 갱신
     DX11Base::TengiCave_Tick();
 
     // 2026-04-04 월 값 감지 로그 (500ms 주기로 완화하여 안정성 확보)
@@ -767,11 +767,6 @@ namespace DX11Base {
         ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), u8"[ 위젯 ]");
         ImGui::SameLine(0.0f, 10.0f * scale);
 
-        if (ImGui::Checkbox(u8"전기취소##FOOTER_WIDGET", &DX11Base::bShowWidgetTengi)) {
-          NotifyFeatureToggle(u8"위젯: 전기취소", DX11Base::bShowWidgetTengi);
-          SaveConfig();
-        }
-        ImGui::SameLine();
         if (ImGui::Checkbox(u8"주인공##FOOTER_WIDGET", &DX11Base::bShowWidgetHero)) {
           NotifyFeatureToggle(u8"위젯: 주인공", DX11Base::bShowWidgetHero);
           SaveConfig();
@@ -1041,7 +1036,7 @@ namespace DX11Base {
         ImGui::PopStyleVar();
       };
 
-      // 사용자 요청 순서: 알림확인, 전기취소, 주인공, 모든무장 (오른쪽에서 왼쪽 방향으로 배치되므로 역순으로 체크)
+      // 위젯 순서: 알림확인, 주인공, 모든무장 (오른쪽에서 왼쪽 방향으로 배치되므로 역순으로 체크)
       if (DX11Base::bShowWidgetAllOfficers && p1 != 0) {
         DrawBadge(u8"모든무장", u8"모든무장###WIDGET_ALL", [&]() {
           DX11Base::bShowOfficerListWin = !DX11Base::bShowOfficerListWin;
@@ -1056,15 +1051,6 @@ namespace DX11Base {
             DX11Base::bForceCenterOfficerDetail = true;
         });
       }
-      if (DX11Base::bShowWidgetTengi && p1 != 0 && DX11Base::GetCapturedTengiAddr() != 0) {
-        DrawBadge(u8"전기취소", u8"전기취소###WIDGET_TENGI", [&]() {
-          if (DX11Base::GetCapturedTengiAddr() != 0) {
-            DX11Base::CancelTengi();
-            DX11Base::AddLog(u8"[위젯] 전기 취소 (플래그 적용)");
-          }
-        });
-      }
-
       // [신규] 알림확인 배지
       if (DX11Base::bShowWidgetNotif) {
         DrawBadge(u8"알림확인", u8"알림확인###WIDGET_NOTIF_HIST",
