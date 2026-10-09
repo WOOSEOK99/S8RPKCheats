@@ -429,6 +429,7 @@ namespace DX11Base {
     std::atomic<uint32_t> s_lastBlockedFinalId{0};
     std::atomic<uint32_t> s_redirectedFinalCount{0};
     std::atomic<uint32_t> s_lastRedirectId{0};
+    std::atomic<bool> s_blockedRequestPending{false};
 
     // All enabled is the legacy no-filter setting. With a restricted list,
     // unknown IDs are rejected rather than silently ignoring the allowlist.
@@ -520,6 +521,7 @@ namespace DX11Base {
             }
           }
           s_rejectedFinalCount.fetch_add(1, std::memory_order_relaxed);
+          s_blockedRequestPending.store(true, std::memory_order_release);
           return false;
         }
       }
@@ -755,6 +757,21 @@ namespace DX11Base {
       return;
     }
     unavailableLogged = false;
+    if (s_blockedRequestPending.exchange(false, std::memory_order_acq_rel) &&
+        !snapshot.constructed) {
+      const uintptr_t gauge = snapshot.manager + kCycleGaugeOffset;
+      if (IsValidPtr(gauge, 25)) {
+        __try {
+          // Only release a rejected request while the active-event storage is empty.
+          if (*reinterpret_cast<const uint8_t *>(gauge) == 100 &&
+              *reinterpret_cast<const uint8_t *>(gauge + 24) == 0) {
+            *reinterpret_cast<uint8_t *>(gauge) = 0;
+            s_cycle.pending = false;
+            AddLog(u8"[전기 허용 목록] 허용된 전기 후보 없음: 대기 중인 게이지 100 초기화");
+          }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
+    }
     if (s_cycle.session != sessionP1 || s_cycle.manager != snapshot.manager ||
         snapshot.month < s_cycle.lastMonth) {
       const bool uncertain = s_cycle.session == sessionP1 &&
