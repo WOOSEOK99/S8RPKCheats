@@ -125,25 +125,41 @@ namespace DX11Base {
     bool hasMusin = false;
   };
 
+  // Keep fault-prone reads in a separate SEH scope with no settings lock.
+  static bool ReadUnitOfficerIds(uintptr_t unitData, int (&ids)[3]) {
+    __try {
+      if (!IsValidPtr(unitData, 0x600))
+        return false;
+
+      const uintptr_t members = *reinterpret_cast<const uintptr_t *>(unitData + 0x18);
+      if (!IsValidPtr(members, 0x20))
+        return false;
+
+      for (int i = 0; i < 3; ++i) {
+        const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + 8 + i * 8);
+        if (officer && IsValidPtr(officer, 0x10))
+          ids[i] = *reinterpret_cast<const uint16_t *>(officer + 8);
+      }
+
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
+    }
+  }
+
   static UnitAbilities ReadUnitAbilities(uintptr_t unitData) {
     UnitAbilities result;
-
-    if (!IsValidPtr(unitData, 0x600))
+    int ids[3] = {-1, -1, -1};
+    if (!ReadUnitOfficerIds(unitData, ids))
       return result;
 
-    const uintptr_t members = *reinterpret_cast<const uintptr_t *>(unitData + 0x18);
-    if (!IsValidPtr(members, 0x20))
-      return result;
+    if (ids[0] >= 0)
+      result.leaderID = ids[0];
 
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
-    for (uintptr_t offset : {uintptr_t(8), uintptr_t(0x10), uintptr_t(0x18)}) {
-      const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + offset);
-      if (!officer || !IsValidPtr(officer, 0x10))
+    for (int id : ids) {
+      if (id < 0)
         continue;
-
-      const int id = *reinterpret_cast<const uint16_t *>(officer + 8);
-      if (offset == 8)
-        result.leaderID = id;
 
       const auto found = g_customSkillCounts.find(id);
       if (found == g_customSkillCounts.end())
@@ -174,40 +190,56 @@ namespace DX11Base {
   static SkillInitFn s_skillInit = nullptr;
   static SkillLoadFn s_skillLoad = nullptr;
 
-  static void ApplyUnitSkillCounts(uintptr_t container) {
+  // Keep RAII locking separate from SEH-protected game memory access.
+  static bool CopyUnitSkillCounts(int leader, int (&counts)[256]) {
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
-    if (g_customSkillCounts.empty())
-      return;
-
-    // REA: container = unitData+0x5D0, *container = WarUnit,
-    // WarUnit+8 = unitData; begin/end describe native 0x28-byte records.
-    const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
-    const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
-    const uintptr_t members = *reinterpret_cast<const uintptr_t *>(data + 0x18);
-    if (!members)
-      return;
-
-    int leader = 0;
-    for (uintptr_t offset : {uintptr_t(8), uintptr_t(0x10), uintptr_t(0x18)}) {
-      const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + offset);
-      if (officer) {
-        leader = *reinterpret_cast<const uint16_t *>(officer + 8);
-        break;
-      }
-    }
-
     const auto configured = g_customSkillCounts.find(leader);
     if (configured == g_customSkillCounts.end())
-      return;
+      return false;
 
-    const uintptr_t begin = *reinterpret_cast<const uintptr_t *>(container + 8);
-    const uintptr_t end = *reinterpret_cast<const uintptr_t *>(container + 0x10);
-    for (uintptr_t record = begin; record != end; record += 0x28) {
-      const uintptr_t skill = *reinterpret_cast<const uintptr_t *>(record);
-      const uintptr_t key = *reinterpret_cast<const uint8_t *>(skill + 8) + 0x138;
-      const auto count = configured->second.find(key);
-      if (count != configured->second.end() && count->second > 0)
-        *reinterpret_cast<uint8_t *>(record + 0x10) = static_cast<uint8_t>(count->second);
+    for (const auto &entry : configured->second) {
+      // Native skill IDs are bytes; other keys describe special abilities.
+      if (entry.first >= 0x138 && entry.first < 0x238)
+        counts[entry.first - 0x138] = entry.second;
+    }
+
+    return true;
+  }
+
+  static void ApplyUnitSkillCounts(uintptr_t container) {
+    __try {
+      // REA: container = unitData+0x5D0, *container = WarUnit,
+      // WarUnit+8 = unitData; begin/end describe native 0x28-byte records.
+      const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
+      const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
+      const uintptr_t members = *reinterpret_cast<const uintptr_t *>(data + 0x18);
+      if (!members)
+        return;
+
+      int leader = 0;
+      for (uintptr_t offset : {uintptr_t(8), uintptr_t(0x10), uintptr_t(0x18)}) {
+        const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + offset);
+        if (officer) {
+          leader = *reinterpret_cast<const uint16_t *>(officer + 8);
+          break;
+        }
+      }
+
+      int counts[256]{};
+      if (!CopyUnitSkillCounts(leader, counts))
+        return;
+
+      // The settings lock has been released before reading or writing game records.
+      const uintptr_t begin = *reinterpret_cast<const uintptr_t *>(container + 8);
+      const uintptr_t end = *reinterpret_cast<const uintptr_t *>(container + 0x10);
+      for (uintptr_t record = begin; record != end; record += 0x28) {
+        const uintptr_t skill = *reinterpret_cast<const uintptr_t *>(record);
+        const uint8_t id = *reinterpret_cast<const uint8_t *>(skill + 8);
+        if (counts[id] > 0)
+          *reinterpret_cast<uint8_t *>(record + 0x10) = static_cast<uint8_t>(counts[id]);
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return;
     }
   }
 
