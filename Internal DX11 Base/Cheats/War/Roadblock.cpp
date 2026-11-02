@@ -283,36 +283,29 @@ namespace DX11Base {
   static std::mutex g_roadWriteMutex;
 
   static uintptr_t ResolveRoadRoot() {
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    if (!exeBase)
+    static const uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
+    // 변경 가능한 링크는 매번 읽고 로드 중 끊어진 접근은 입구에서 처리합니다.
+    __try {
+      uintptr_t p = *(const uintptr_t *)(exeBase + 0x034C8630);
+      if (!p) return 0;
+      p = *(const uintptr_t *)p;
+      if (!p) return 0;
+      p = *(const uintptr_t *)(p + 8);
+      if (!p) return 0;
+      p = *(const uintptr_t *)(p + 0x10);
+      return p ? *(const uintptr_t *)p : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return 0;
-
-    uintptr_t p = *(uintptr_t *)(exeBase + 0x034C8630);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0x0);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0x8);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0x10);
-    if (!IsValidPtr(p, 8))
-      return 0;
-    p = *(uintptr_t *)(p + 0x0);
-    if (!IsValidPtr(p, 8))
-      return 0;
-
-    return p;
+    }
   }
 
   static void WriteZeroToAddr(uintptr_t addr) {
-    if (!IsValidPtr(addr, 8))
+    __try {
+      if (*(const uint64_t *)addr == 0)
+        return;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
       return;
-
-    // 이미 차단값이면 보호 변경과 쓰기를 모두 생략합니다.
-    if (*(uint64_t *)addr == 0)
-      return;
+    }
 
     DWORD old = 0, tmp = 0;
     if (!VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old))

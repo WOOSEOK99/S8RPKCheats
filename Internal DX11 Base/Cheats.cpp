@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Cheats/System/SkillCountManager.h"
+#include "Cheats/War/SpecialAbility.h"
 
 namespace DX11Base {
 
@@ -131,31 +132,18 @@ namespace DX11Base {
     }
 
     uintptr_t GetGameBase() {
-        if (!s_gameBasePtrAddr)
+        static thread_local uintptr_t validatedBase = 0;
+        const uintptr_t base = GetGameBaseFast();
+        if (!base) {
+            validatedBase = 0;
             return 0;
-
-        static uintptr_t s_cachedGameBase = 0;
-        static uint64_t s_lastGameBaseProbeMs = 0;
-
-        const uint64_t now = GetTickCount64();
-        uintptr_t base = *(uintptr_t *)s_gameBasePtrAddr;
-
-        // 포인터 값이 같고 최근에 검증했으면 VirtualQuery 생략 (Loops 등에서 매프레임 호출됨)
-        if (base != 0 && base == s_cachedGameBase && (now - s_lastGameBaseProbeMs) < 300ull)
+        }
+        if (base == validatedBase)
             return base;
-
-        s_lastGameBaseProbeMs = now;
-
-        if (!IsValidPtr(s_gameBasePtrAddr, 8)) {
-            s_cachedGameBase = 0;
+        validatedBase = 0;
+        if (!IsValidPtr(base, 8))
             return 0;
-        }
-        base = *(uintptr_t *)s_gameBasePtrAddr;
-        if (!base || !IsValidPtr(base, 8)) {
-            s_cachedGameBase = 0;
-            return 0;
-        }
-        s_cachedGameBase = base;
+        validatedBase = base;
         return base;
     }
 
@@ -174,6 +162,7 @@ namespace DX11Base {
 
         // 저장된 전법 횟수 설정 불러오기 (S8RPK_skill_counts.json)
         LoadSkillCounts();
+        InitializeBattleCache(0, 0, exeBase);
 
         return (s_gameBasePtrAddr != 0);
     }

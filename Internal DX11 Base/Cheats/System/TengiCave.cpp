@@ -691,8 +691,11 @@ namespace DX11Base {
         unsigned short year = 0;
         uint8_t month = 0;
         out->manager = GetScenarioDataCenterAddress();
-        if (!out->manager || !ReadScenarioDate(&year, &month) ||
-            !year || month < 1 || month > 12 ||
+        if (!out->manager)
+          return false;
+        year = *reinterpret_cast<const unsigned short *>(out->manager + 0x72D0);
+        month = *reinterpret_cast<const uint8_t *>(out->manager + 0x72D2);
+        if (!year || month < 1 || month > 12 ||
             out->manager != GetScenarioDataCenterAddress())
           return false;
         out->month = static_cast<int>(year) * 12 + month - 1;
@@ -817,6 +820,16 @@ namespace DX11Base {
 
   void TickTengiCycle(uintptr_t sessionP1) {
     static ULONGLONG lastPoll = 0;
+    bool anyAllowed = false;
+    if (bInfTengi) {
+      for (int i = 0; i < kTengiListEventCount; ++i)
+        anyAllowed = anyAllowed || g_tengiListAllowed[i];
+    }
+    if (!anyAllowed) {
+      s_cycle = {};
+      lastPoll = 0;
+      return;
+    }
     static const bool verifiedLayout = HasVerifiedCycleLayout();
     static bool unavailableLogged = false;
     const ULONGLONG now = GetTickCount64();
@@ -886,11 +899,6 @@ namespace DX11Base {
     if (!bInfTengi || snapshot.constructed || s_cycle.pending ||
         s_cycle.needsEventObservation || snapshot.month < s_cycle.earliest)
       return;
-    bool anyAllowed = false;
-    for (int i = 0; i < kTengiListEventCount; ++i)
-      anyAllowed = anyAllowed || g_tengiListAllowed[i];
-    if (!anyAllowed)
-      return; // Nothing permitted: do not request momentum or mark a pending event.
     if (RequestCycleTengi(snapshot)) {
       s_cycle.pending = true; // Request is not proof of actual occurrence.
       AddLog(u8"[Tengi 주기] %d/%d 발생 요청 1회: 실제 객체 생성 대기",

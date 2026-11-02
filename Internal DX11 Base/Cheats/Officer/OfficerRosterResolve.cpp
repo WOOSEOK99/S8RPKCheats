@@ -33,17 +33,32 @@ bool TryResolveOfficerRosterArrayBase(std::uintptr_t exeBase, std::uintptr_t *ou
     return false;
   *outRosterBase = 0;
 
+  static thread_local std::uintptr_t validatedRoster = 0;
   std::uintptr_t p = 0;
-  if (!ReadPointer(exeBase + kExeStaticPtrRva, &p))
+  // 로드 중 중간 링크만 바뀌는 경우도 감지하도록 현재 체인은 매번 읽습니다.
+  __try {
+    p = *reinterpret_cast<const std::uintptr_t *>(exeBase + kExeStaticPtrRva);
+    for (std::uintptr_t add : kChainAddends) {
+      if (p < 0x10000) {
+        validatedRoster = 0;
+        return false;
+      }
+      p = *reinterpret_cast<const std::uintptr_t *>(p + add);
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    validatedRoster = 0;
     return false;
-
-  for (std::uintptr_t add : kChainAddends) {
-    if (!ReadPointer(p + add, &p))
-      return false;
   }
-
-  if (!IsValidPtr(p, 0x3D0))
+  if (p < 0x10000) {
+    validatedRoster = 0;
     return false;
+  }
+  if (p != validatedRoster) {
+    validatedRoster = 0;
+    if (!IsValidPtr(p, 0x3D0))
+      return false;
+    validatedRoster = p;
+  }
 
   // 사용자님의 확언에 따라, 이 체인이 성공하면 항상 1번 무장을 가리키는 것으로 신뢰합니다.
   *outRosterBase = p;

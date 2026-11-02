@@ -12,31 +12,29 @@ namespace DX11Base {
         constexpr uintptr_t kScenarioYearOffset = 0x72D0;
         constexpr uintptr_t kScenarioMonthOffset = 0x72D2;
 
-        // 연·월 필드만 검사 (넓은 범위 IsValidPtr는 VirtualQuery 비용이 큼)
+        // 시나리오 포인터는 매번 읽고, 같은 주소의 필드 범위는 스레드별로 재사용합니다.
         uintptr_t ResolveScenarioDataCenter() {
-            const uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
-            if (!moduleBase)
-                return 0;
-
-            const uintptr_t ptrAddr = moduleBase + kScenarioInstanceStaticOffset;
-            if (!IsValidPtr(ptrAddr, sizeof(uintptr_t)))
-                return 0;
-
+            static const uintptr_t moduleBase = (uintptr_t)GetModuleHandle(NULL);
+            static thread_local uintptr_t validatedInstance = 0;
             uintptr_t inst = 0;
             __try {
-                inst = *(uintptr_t*)ptrAddr;
+                inst = *(const uintptr_t*)(moduleBase + kScenarioInstanceStaticOffset);
             } __except (EXCEPTION_EXECUTE_HANDLER) {
+                validatedInstance = 0;
                 return 0;
             }
-
-            if (!inst || inst < 0x10000)
+            if (inst < 0x10000) {
+                validatedInstance = 0;
                 return 0;
+            }
+            if (inst == validatedInstance)
+                return inst;
 
-            const uintptr_t yearAddr = inst + kScenarioYearOffset;
-            const uintptr_t monthAddr = inst + kScenarioMonthOffset;
-            if (!IsValidPtr(yearAddr, 2) || !IsValidPtr(monthAddr, 1))
+            // 연회/중개 플래그부터 연·월까지 한 번에 확인합니다.
+            validatedInstance = 0;
+            if (!IsValidPtr(inst + 0x71E4, kScenarioMonthOffset + 1 - 0x71E4))
                 return 0;
-
+            validatedInstance = inst;
             return inst;
         }
     } // namespace
@@ -52,9 +50,6 @@ namespace DX11Base {
 
         constexpr uintptr_t kBanquetUsedFlagOffset = 0x71E4;
         const uintptr_t addr = dataCenter + kBanquetUsedFlagOffset;
-        if (!IsValidPtr(addr, 1))
-            return false;
-
         const uint8_t before = *(const uint8_t*)addr;
         if ((before & 0x02u) == 0)
             return true;
@@ -79,9 +74,6 @@ namespace DX11Base {
         constexpr uint8_t kMediationUsedBit = 0x40u;
 
         const uintptr_t addr = dataCenter + kMediationUsedFlagOffset;
-        if (!IsValidPtr(addr, 1))
-            return false;
-
         const uint8_t before = *(const uint8_t*)addr;
         if ((before & kMediationUsedBit) == 0)
             return true;

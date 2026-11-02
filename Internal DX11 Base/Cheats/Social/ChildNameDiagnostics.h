@@ -109,6 +109,7 @@ static bool ResolveNativeTextUtf8(uintptr_t fnAddr,
 }
 
 struct State {
+  ULONGLONG lastContextCheckAt = 0;
   ULONGLONG lastFullSyncAt = 0;
   ULONGLONG lastChildSyncAt = 0;
   uintptr_t lastRosterBase = 0;
@@ -277,12 +278,17 @@ static void SyncGeneratedChildren(uintptr_t exeBase, uintptr_t rosterBase) {
 }
 
 static void Tick() {
+  const ULONGLONG now = GetTickCount64();
+  // Check the schedule before resolving the roster, including failed retries.
+  if (g_state.lastContextCheckAt != 0 &&
+      now - g_state.lastContextCheckAt < 2000)
+    return;
+  g_state.lastContextCheckAt = now;
+
   uintptr_t exeBase = 0;
   uintptr_t rosterBase = 0;
   if (!ResolveRuntimeContext(&exeBase, &rosterBase))
     return;
-
-  const ULONGLONG now = GetTickCount64();
 
   if (g_state.lastFullSyncAt == 0 ||
       g_state.lastRosterBase != rosterBase ||
