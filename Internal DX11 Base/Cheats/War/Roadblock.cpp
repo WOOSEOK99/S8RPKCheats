@@ -287,11 +287,17 @@ namespace DX11Base {
     // 변경 가능한 링크는 매번 읽고 로드 중 끊어진 접근은 입구에서 처리합니다.
     __try {
       uintptr_t p = *(const uintptr_t *)(exeBase + 0x034C8630);
-      if (!p) return 0;
+      if (!p)
+        return 0;
+
       p = *(const uintptr_t *)p;
-      if (!p) return 0;
+      if (!p)
+        return 0;
+
       p = *(const uintptr_t *)(p + 8);
-      if (!p) return 0;
+      if (!p)
+        return 0;
+
       p = *(const uintptr_t *)(p + 0x10);
       return p ? *(const uintptr_t *)p : 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -310,6 +316,7 @@ namespace DX11Base {
     DWORD old = 0, tmp = 0;
     if (!VirtualProtect((LPVOID)addr, 8, PAGE_READWRITE, &old))
       return;
+
     *(uint64_t *)addr = 0;
     VirtualProtect((LPVOID)addr, 8, old, &tmp);
   }

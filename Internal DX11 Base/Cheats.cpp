@@ -138,11 +138,14 @@ namespace DX11Base {
             validatedBase = 0;
             return 0;
         }
+
         if (base == validatedBase)
             return base;
+
         validatedBase = 0;
         if (!IsValidPtr(base, 8))
             return 0;
+
         validatedBase = base;
         return base;
     }

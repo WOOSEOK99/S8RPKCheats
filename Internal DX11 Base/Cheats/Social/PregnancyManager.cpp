@@ -186,14 +186,17 @@ static bool RefreshCurrentPregnancySpousesFast() {
 
   std::vector<PregnancySpouseOption> options;
   options.reserve(spousePointers.size());
+
   for (uintptr_t officerAddr : spousePointers) {
     PregnancySpouseOption option;
     if (!SafeRead16(officerAddr + 0x08, &option.id) ||
         option.id < 1 || option.id > 5102)
       continue;
+
     option.addr = officerAddr;
     options.push_back(option);
   }
+
   std::sort(options.begin(), options.end(),
       [](const PregnancySpouseOption& a, const PregnancySpouseOption& b) {
         return a.id < b.id;
@@ -817,6 +820,7 @@ void RefreshPregnancyChildIds(uintptr_t hero) {
   std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
   if (hero != g_pregnancySpouseHero)
     return;
+
   for (PregnancySpouseOption& option : g_pregnancyCurrentSpouses)
     GetFamilyChildIds(hero, option.addr, option.childIds);
 }
@@ -826,7 +830,9 @@ void RunPregnancyManagerUpdate() {
 }
 
 void RefreshPregnancyManagerOnWindowOpen(bool requestChildren) {
-  if (requestChildren) RequestFamilyChildScan();
+  if (requestChildren)
+    RequestFamilyChildScan();
+
   RefreshCurrentPregnancySpousesFast();
   if (!RefreshPregnancyTableDirect()) {
     AddLog(

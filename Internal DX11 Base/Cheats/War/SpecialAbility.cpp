@@ -114,28 +114,46 @@ namespace DX11Base {
   // Native callbacks handle one unit; no background roster is retained.
   struct UnitAbilities {
     int leaderID = 0;
-    bool hasGunakdae = false, hasMussang = false, hasFireCavalry = false;
-    bool hasArcher = false, hasDeunggab = false, hasCommander = false;
-    bool hasSneakAttack = false, hasTactician = false, hasMusin = false;
+    bool hasGunakdae = false;
+    bool hasMussang = false;
+    bool hasFireCavalry = false;
+    bool hasArcher = false;
+    bool hasDeunggab = false;
+    bool hasCommander = false;
+    bool hasSneakAttack = false;
+    bool hasTactician = false;
+    bool hasMusin = false;
   };
 
   static UnitAbilities ReadUnitAbilities(uintptr_t unitData) {
     UnitAbilities result;
-    if (!IsValidPtr(unitData, 0x600)) return result;
+
+    if (!IsValidPtr(unitData, 0x600))
+      return result;
+
     const uintptr_t members = *reinterpret_cast<const uintptr_t *>(unitData + 0x18);
-    if (!IsValidPtr(members, 0x20)) return result;
+    if (!IsValidPtr(members, 0x20))
+      return result;
+
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
     for (uintptr_t offset : {uintptr_t(8), uintptr_t(0x10), uintptr_t(0x18)}) {
       const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + offset);
-      if (!officer || !IsValidPtr(officer, 0x10)) continue;
+      if (!officer || !IsValidPtr(officer, 0x10))
+        continue;
+
       const int id = *reinterpret_cast<const uint16_t *>(officer + 8);
-      if (offset == 8) result.leaderID = id;
+      if (offset == 8)
+        result.leaderID = id;
+
       const auto found = g_customSkillCounts.find(id);
-      if (found == g_customSkillCounts.end()) continue;
+      if (found == g_customSkillCounts.end())
+        continue;
+
       const auto has = [&](uintptr_t key) {
         const auto skill = found->second.find(key);
         return skill != found->second.end() && skill->second > 0;
       };
+
       result.hasGunakdae |= has(0x1000);
       result.hasMussang |= has(0x1001);
       result.hasFireCavalry |= has(0x1002);
@@ -146,23 +164,29 @@ namespace DX11Base {
       result.hasTactician |= has(0x1007);
       result.hasMusin |= has(0x1008);
     }
+
     return result;
   }
 
   using SkillInitFn = uintptr_t (__fastcall *)(uintptr_t);
   using SkillLoadFn = bool (__fastcall *)(uintptr_t, uintptr_t);
+
   static SkillInitFn s_skillInit = nullptr;
   static SkillLoadFn s_skillLoad = nullptr;
 
   static void ApplyUnitSkillCounts(uintptr_t container) {
     std::lock_guard<std::mutex> lock(g_skillCountMutex);
-    if (g_customSkillCounts.empty()) return;
+    if (g_customSkillCounts.empty())
+      return;
+
     // REA: container = unitData+0x5D0, *container = WarUnit,
     // WarUnit+8 = unitData; begin/end describe native 0x28-byte records.
     const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
     const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
     const uintptr_t members = *reinterpret_cast<const uintptr_t *>(data + 0x18);
-    if (!members) return;
+    if (!members)
+      return;
+
     int leader = 0;
     for (uintptr_t offset : {uintptr_t(8), uintptr_t(0x10), uintptr_t(0x18)}) {
       const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + offset);
@@ -171,8 +195,11 @@ namespace DX11Base {
         break;
       }
     }
+
     const auto configured = g_customSkillCounts.find(leader);
-    if (configured == g_customSkillCounts.end()) return;
+    if (configured == g_customSkillCounts.end())
+      return;
+
     const uintptr_t begin = *reinterpret_cast<const uintptr_t *>(container + 8);
     const uintptr_t end = *reinterpret_cast<const uintptr_t *>(container + 0x10);
     for (uintptr_t record = begin; record != end; record += 0x28) {
@@ -193,29 +220,45 @@ namespace DX11Base {
   static bool __fastcall OnSkillLoad(uintptr_t container, uintptr_t archive) {
     const bool loading = *reinterpret_cast<const int *>(archive + 0x20) == 1;
     const bool result = s_skillLoad(container, archive);
-    if (loading && result) ApplyUnitSkillCounts(container);
+    if (loading && result)
+      ApplyUnitSkillCounts(container);
+
     return result;
   }
 
   void InitializeBattleCache(int, uintptr_t, uintptr_t exeBase) {
-    if (s_skillInit) return;
+    if (s_skillInit)
+      return;
+
     // Validate the two entry points once before installing the native hooks.
-    constexpr uint8_t initBytes[] = {0x48,0x89,0x4c,0x24,0x08,0x53,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
-    constexpr uint8_t loadBytes[] = {0x40,0x53,0x55,0x41,0x54,0x41,0x57,0x48,0x83,0xec,0x28,0x48,0x8b,0x01,0x48,0x8b};
+    constexpr uint8_t initBytes[] = {
+        0x48, 0x89, 0x4c, 0x24, 0x08, 0x53, 0x57, 0x41,
+        0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57};
+    constexpr uint8_t loadBytes[] = {
+        0x40, 0x53, 0x55, 0x41, 0x54, 0x41, 0x57, 0x48,
+        0x83, 0xec, 0x28, 0x48, 0x8b, 0x01, 0x48, 0x8b};
+
     void *init = reinterpret_cast<void *>(exeBase + 0x1E0E0B0);
     void *load = reinterpret_cast<void *>(exeBase + 0x1E0DE30);
     if (std::memcmp(init, initBytes, sizeof(initBytes)) != 0 ||
-        std::memcmp(load, loadBytes, sizeof(loadBytes)) != 0) return;
+        std::memcmp(load, loadBytes, sizeof(loadBytes)) != 0)
+      return;
+
     const MH_STATUS initialized = MH_Initialize();
-    if (initialized != MH_OK && initialized != MH_ERROR_ALREADY_INITIALIZED) return;
+    if (initialized != MH_OK && initialized != MH_ERROR_ALREADY_INITIALIZED)
+      return;
+
     if (MH_CreateHook(init, reinterpret_cast<void *>(&OnSkillInit),
-                      reinterpret_cast<void **>(&s_skillInit)) != MH_OK) return;
+                      reinterpret_cast<void **>(&s_skillInit)) != MH_OK)
+      return;
+
     if (MH_CreateHook(load, reinterpret_cast<void *>(&OnSkillLoad),
                       reinterpret_cast<void **>(&s_skillLoad)) != MH_OK) {
       MH_RemoveHook(init);
       s_skillInit = nullptr;
       return;
     }
+
     if (MH_EnableHook(init) != MH_OK || MH_EnableHook(load) != MH_OK) {
       MH_DisableHook(init);
       MH_RemoveHook(load);
@@ -224,6 +267,7 @@ namespace DX11Base {
       s_skillLoad = nullptr;
       return;
     }
+
     AddLog(u8"[전법] 부대 초기화/로드 시점에 설정 적용 연결 완료");
   }
 
@@ -237,7 +281,8 @@ namespace DX11Base {
                                            bool &hasTactician, UnitAbilities &abilities) {
     {
       std::lock_guard<std::mutex> lock(g_skillCountMutex);
-      if (g_customSkillCounts.empty()) return 0;
+      if (g_customSkillCounts.empty())
+        return 0;
     }
 
     // SAResolveChain은 매 스텝에서 *(current) + offset 순으로 연산.
@@ -245,7 +290,8 @@ namespace DX11Base {
     // activeUnitData 값 자체를 직접 반환함. 반드시 유지해야 함.
     uintptr_t activeUnitData = SAResolveChain(
       exeBase + 0x03510578, {0x100, 0x78, 0, 0x50, 0x108, 0x50, 0x8, 0});
-    if (!activeUnitData) return 0;
+    if (!activeUnitData)
+      return 0;
 
     abilities = ReadUnitAbilities(activeUnitData);
     hasGunakdae = abilities.hasGunakdae;
@@ -546,11 +592,15 @@ namespace DX11Base {
       do {
         const auto &cu = activeAbilities;
         uintptr_t unitData = activeUnitData;
-        if (!SAIsValidPtr(unitData, 0x600, regionCache)) break;
+        if (!SAIsValidPtr(unitData, 0x600, regionCache))
+          break;
 
-        if (!SAIsValidPtr(unitData + SKILL_PTR_OFF, 8, regionCache)) break;
+        if (!SAIsValidPtr(unitData + SKILL_PTR_OFF, 8, regionCache))
+          break;
+
         uintptr_t skillStart = *(uintptr_t *)(unitData + SKILL_PTR_OFF);
-        if (!SAIsValidPtr(skillStart, SKILL_REC_SIZE, regionCache)) break;
+        if (!SAIsValidPtr(skillStart, SKILL_REC_SIZE, regionCache))
+          break;
 
         int skillCount = 0;
         for (int j = 0; j < MAX_SKILLS; j++) {

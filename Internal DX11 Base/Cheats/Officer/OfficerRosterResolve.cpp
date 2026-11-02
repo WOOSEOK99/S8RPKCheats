@@ -31,6 +31,7 @@ inline bool ReadPointer(std::uintptr_t addr, std::uintptr_t *out) {
 bool TryResolveOfficerRosterArrayBase(std::uintptr_t exeBase, std::uintptr_t *outRosterBase) {
   if (!exeBase || !outRosterBase)
     return false;
+
   *outRosterBase = 0;
 
   static thread_local std::uintptr_t validatedRoster = 0;
@@ -49,14 +50,17 @@ bool TryResolveOfficerRosterArrayBase(std::uintptr_t exeBase, std::uintptr_t *ou
     validatedRoster = 0;
     return false;
   }
+
   if (p < 0x10000) {
     validatedRoster = 0;
     return false;
   }
+
   if (p != validatedRoster) {
     validatedRoster = 0;
     if (!IsValidPtr(p, 0x3D0))
       return false;
+
     validatedRoster = p;
   }
 

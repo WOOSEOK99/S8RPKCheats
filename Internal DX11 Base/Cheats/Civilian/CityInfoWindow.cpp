@@ -754,8 +754,11 @@ namespace DX11Base {
     }
 
     static uintptr_t GetCityForcePtr(uintptr_t rawCity, uintptr_t *outCorps = nullptr) {
-      if (outCorps) *outCorps = 0;
-      if (rawCity <= 0x10000) return 0;
+      if (outCorps)
+        *outCorps = 0;
+
+      if (rawCity <= 0x10000)
+        return 0;
 
       // Adjacent corps/governor links are admitted together at the city boundary.
       uintptr_t links[2]{};
@@ -764,7 +767,10 @@ namespace DX11Base {
       } __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;
       }
-      if (outCorps) *outCorps = links[0];
+
+      if (outCorps)
+        *outCorps = links[0];
+
       uintptr_t force = 0;
       if (links[1] > 0x10000 && SafeReadPtr(links[1] + 0x18, &force))
         return force;
@@ -2259,9 +2265,13 @@ namespace DX11Base {
           rows.clear();
           return false;
         }
+
         node = next;
+
         // Preserve the editor's ID filter; native registry IDs can exceed it.
-        if (row.id == 0 || row.id > 5102) continue;
+        if (row.id == 0 || row.id > 5102)
+          continue;
+
         if (seen[row.id]) {
           rows.clear();
           return false;
@@ -2269,10 +2279,12 @@ namespace DX11Base {
         seen[row.id] = true;
         rows.push_back(row);
       }
+
       if (node) {
         rows.clear();
         return false;
       }
+
       return true;
     }
 

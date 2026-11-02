@@ -23,10 +23,12 @@ namespace DX11Base {
                 validatedInstance = 0;
                 return 0;
             }
+
             if (inst < 0x10000) {
                 validatedInstance = 0;
                 return 0;
             }
+
             if (inst == validatedInstance)
                 return inst;
 
@@ -34,6 +36,7 @@ namespace DX11Base {
             validatedInstance = 0;
             if (!IsValidPtr(inst + 0x71E4, kScenarioMonthOffset + 1 - 0x71E4))
                 return 0;
+
             validatedInstance = inst;
             return inst;
         }

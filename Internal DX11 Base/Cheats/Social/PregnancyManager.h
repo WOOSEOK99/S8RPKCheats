@@ -3,7 +3,8 @@
 #include <vector>
 
 namespace DX11Base {
-  bool GetPregnancySpousePointers(uintptr_t rosterBase, uintptr_t hero, std::vector<uintptr_t>& spouses);
+  bool GetPregnancySpousePointers(
+      uintptr_t rosterBase, uintptr_t hero, std::vector<uintptr_t>& spouses);
   void RefreshPregnancyChildIds(uintptr_t hero);
   void RunPregnancyManagerUpdate();
   void RefreshPregnancyManagerOnWindowOpen(bool requestChildren = true);

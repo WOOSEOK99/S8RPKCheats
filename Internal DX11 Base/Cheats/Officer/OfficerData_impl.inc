@@ -909,6 +909,7 @@ namespace DX11Base {
                 spouses.clear();
                 return false;
             }
+
             if (relation != 2)
                 continue;
 
@@ -919,14 +920,17 @@ namespace DX11Base {
                     return false;
                 }
             }
+
             if (std::find(std::begin(members), std::end(members), hero) == std::end(members))
                 continue;
+
             for (uintptr_t member : members) {
                 if (member != hero && IsRosterOfficerPtr(member, rosterBase) &&
                     std::find(spouses.begin(), spouses.end(), member) == spouses.end())
                     spouses.push_back(member);
             }
         }
+
         return true;
     }
 
