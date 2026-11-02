@@ -624,13 +624,14 @@ void DrawChildManagerWindow(float scale) {
 
       if (ImGui::Checkbox("##select", &selected)) {
         if (selected) {
-          if (!e.hasOriginalSchedule) {
+          const bool scheduleReady = e.hasOriginalSchedule || RefreshChild(e);
+          if (scheduleReady && !e.hasOriginalSchedule) {
             e.originalAppearanceYear = e.appearanceYear;
             e.originalBirthYear = e.birthYear;
             e.hasOriginalSchedule = true;
           }
 
-          if (ApplyChildSchedule(e)) {
+          if (scheduleReady && ApplyChildSchedule(e)) {
             e.selected = true;
           } else {
             e.selected = false;

@@ -2720,7 +2720,7 @@ namespace DX11Base {
     }
 
     static void RunCorpsDeploymentPhaseMonitor(uintptr_t p1) {
-      if (s_corpsAutoDeploymentTargets.empty()) {
+      if (s_corpsAutoDeploymentTargets.empty() && !s_corpsDeploymentValid) {
         s_corpsDeploymentLastRelevantGameState = 0;
         return;
       }
