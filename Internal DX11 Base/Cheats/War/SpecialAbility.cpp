@@ -228,7 +228,7 @@ namespace DX11Base {
           }
         }
         if (skillCount > 0)
-          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 지속 해제", abilities.leaderID, skillCount);
+          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 해제", abilities.leaderID, skillCount);
       } while (false);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       return;
@@ -237,6 +237,8 @@ namespace DX11Base {
 
   static bool s_musinBattleInitialized = false;
   static uintptr_t s_lastMusinUnit = 0;
+  static uintptr_t s_cachedP = 0;
+  static uintptr_t s_cachedP2 = 0;
 
   using SkillInitFn = uintptr_t (__fastcall *)(uintptr_t);
   using SkillLoadFn = bool (__fastcall *)(uintptr_t, uintptr_t);
@@ -367,6 +369,44 @@ namespace DX11Base {
     return result;
   }
 
+  using SkillPageBuildFn = uintptr_t (__fastcall *)(uintptr_t);
+  static SkillPageBuildFn s_skillPageBuild = nullptr;
+
+  static uintptr_t __fastcall OnSkillPageBuild(uintptr_t ui) {
+    bool hasMusin = false;
+    uint8_t troop = 0;
+    __try {
+      // REA: battle popup UI -> list(+1F0) -> native skill container(+290).
+      const uintptr_t list = *reinterpret_cast<const uintptr_t *>(ui + 0x1F0);
+      if (list) {
+        const uintptr_t container = *reinterpret_cast<const uintptr_t *>(list + 0x290);
+        if (container) {
+          const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
+          if (unit) {
+            const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
+            hasMusin = data + 0x5D0 == container && ReadUnitAbilities(data).hasMusin;
+          }
+        }
+      }
+      troop = *reinterpret_cast<const uint8_t *>(ui + 0x238);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      hasMusin = false;
+    }
+
+    if (!hasMusin || troop == 0)
+      return s_skillPageBuild(ui);
+
+    uintptr_t result = 0;
+    // Zero disables only the first-page troop filter. Other availability tests stay native.
+    __try {
+      *reinterpret_cast<uint8_t *>(ui + 0x238) = 0;
+      result = s_skillPageBuild(ui);
+    } __finally {
+      *reinterpret_cast<uint8_t *>(ui + 0x238) = troop;
+    }
+    return result;
+  }
+
   void InitializeBattleCache(int, uintptr_t, uintptr_t exeBase) {
     if (s_skillInit || s_skillHookAttempted)
       return;
@@ -394,6 +434,30 @@ namespace DX11Base {
     if (initialized != MH_OK && initialized != MH_ERROR_ALREADY_INITIALIZED) {
       AddLog(u8"[전법] 훅 초기화 실패(%d): 전투 진입/행동 부대 전환 시 대체 적용", initialized);
       return;
+    }
+
+    if (!s_skillPageBuild) {
+      constexpr uint8_t pageBytes[] = {
+          0x41, 0x55, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x58,
+          0x48, 0x8B, 0x81, 0x50, 0x02, 0x00, 0x00};
+      void *page = reinterpret_cast<void *>(exeBase + 0x1DDECF0);
+      if (IsValidPtr((uintptr_t)page, sizeof(pageBytes)) &&
+          std::memcmp(page, pageBytes, sizeof(pageBytes)) == 0) {
+        MH_STATUS status = MH_CreateHook(page, reinterpret_cast<void *>(&OnSkillPageBuild),
+                                         reinterpret_cast<void **>(&s_skillPageBuild));
+        if (status == MH_OK) {
+          status = MH_EnableHook(page);
+          if (status != MH_OK) {
+            MH_RemoveHook(page);
+            s_skillPageBuild = nullptr;
+          }
+        } else {
+          s_skillPageBuild = nullptr;
+        }
+        AddLog(u8"[무신] 실행가능 목록 훅 설치 결과: %d", status);
+      } else {
+        AddLog(u8"[무신] 실행가능 목록 함수 바이트 불일치: 목록 훅 설치 생략");
+      }
     }
 
     const MH_STATUS initStatus = MH_CreateHook(init, reinterpret_cast<void *>(&OnSkillInit),
@@ -432,6 +496,8 @@ namespace DX11Base {
   void ClearBattleCache() {
     s_musinBattleInitialized = false;
     s_lastMusinUnit = 0;
+    s_cachedP = 0;
+    s_cachedP2 = 0;
     s_skillHookAttempted = false;
     s_lastFallbackUnit = 0;
     s_fallbackSkillApplications.clear();
@@ -514,6 +580,22 @@ namespace DX11Base {
       exeBase, hasGunakdae, hasMussang, hasFireCavalry, hasArcher, hasCommander,
       hasSneakAttack, hasTactician, activeAbilities) : 0;
 
+    if (activeUnitData && activeUnitData != s_lastMusinUnit) {
+      bool belongsToBattle = false;
+      for (int i = 0; i < unitCountTotal; ++i) {
+        if (*reinterpret_cast<const uintptr_t *>(unitListBase + 0x08 + (uintptr_t)i * 0x10) == activeUnitData) {
+          belongsToBattle = true;
+          break;
+        }
+      }
+      if (!belongsToBattle) {
+        activeUnitData = 0;
+        activeAbilities = {};
+        hasGunakdae = hasMussang = hasFireCavalry = hasArcher = false;
+        hasCommander = hasSneakAttack = hasTactician = false;
+      }
+    }
+
     static bool s_lastGunakdaeState = false;
     static bool s_lastMussangState = false;
     static bool s_lastFireCavalryState = false;
@@ -592,8 +674,6 @@ namespace DX11Base {
     // 2. 버프 메모리 주입 (기존 0x02ED7A10 체인 그룹)
     //    전투 진입 후 1회 해소 후 재사용 — 상태 변경 시마다 5단계 체인 해소 제거
     if (exeBase && injectBuffs) {
-      static uintptr_t s_cachedP  = 0;
-      static uintptr_t s_cachedP2 = 0;
       if (!s_cachedP)
         s_cachedP  = SAResolveChain(exeBase + 0x02ED7A10, {0x110, 0x120, 0x40, 0x168, 0});
       if (!s_cachedP2)

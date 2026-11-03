@@ -4,6 +4,7 @@
 namespace DX11Base {
   void MonitorBattleStatus();
   bool IsBattleRuntimeReady();
+  uint64_t GetBattleSessionGeneration();
   void ResetBattleSessionRuntime(uintptr_t oldP1, uintptr_t newP1);
   bool IsInBattle();
   void MonitorTechStatus();

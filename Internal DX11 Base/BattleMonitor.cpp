@@ -1,4 +1,5 @@
 #include "BattleMonitor.h"
+#include <atomic>
 #include "Cheats.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
@@ -35,7 +36,8 @@ namespace DX11Base {
   static uintptr_t s_cachedDefenderAddr = 0;
   static bool s_battleRuntimeReady = false;
   static bool s_battleSessionResetPending = false;
-  static uint64_t s_battleSessionGeneration = 0;
+  static std::atomic<uint64_t> s_battleSessionGeneration{0};
+  uint64_t GetBattleSessionGeneration() { return s_battleSessionGeneration.load(); }
 
   bool IsBattleRuntimeReady() { return s_battleRuntimeReady; }
 

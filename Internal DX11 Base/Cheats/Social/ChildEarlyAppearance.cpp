@@ -1,4 +1,5 @@
 #include "../../pch.h"
+#include "../../BattleMonitor.h"
 #include "../../Cheats.h"
 #include "ChildEarlyAppearance.h"
 #include "PregnancyManager.h"
@@ -482,6 +483,19 @@ void EnsureChildManagerCapture() {
 
 void RunChildManagerUpdate() {
   const ULONGLONG now = GetTickCount64();
+  static uint64_t observedGeneration = 0;
+  const uint64_t generation = GetBattleSessionGeneration();
+  if (generation != observedGeneration) {
+    observedGeneration = generation;
+    ResetChildScanState();
+    g_children.clear();
+    g_lastObservedRosterBase = 0;
+    g_lastObservedHeroMaster = 0;
+    g_lastObservedHeroId = 0;
+    g_childSessionReady = false;
+    g_childScanRequested = bShowChildManagerWin;
+    g_lastChildSessionProbeMs = 0;
+  }
 
   // Idle without a request or retained schedules needs no game-memory reads.
   const bool hasSchedules = std::any_of(g_children.begin(), g_children.end(),
@@ -743,7 +757,7 @@ void DrawChildManagerWindow(float scale) {
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 임관 예정년도에 도달하면 적용 체크는 자동으로 해제됩니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
-                     u8"※ 새 자녀는 창을 다시 열거나 목록 새로고침을 누르면 반영됩니다.");
+                     u8"※ 창이 열려 있을 때 출산을 감지하면 자녀 목록을 갱신합니다. 목록 새로고침으로도 조회할 수 있습니다.");
 
   ImGui::Separator();
   DrawPregnancyManagerSection(scale);

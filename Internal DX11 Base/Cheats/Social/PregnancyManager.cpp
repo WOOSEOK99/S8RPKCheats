@@ -826,7 +826,19 @@ void RefreshPregnancyChildIds(uintptr_t hero) {
 }
 
 void RunPregnancyManagerUpdate() {
-  RefreshCanonicalPregnancyTableCached();
+  const PregnancyCanonicalTable before = GetCanonicalPregnancySnapshot();
+  if (!RefreshCanonicalPregnancyTableCached())
+    return;
+  const PregnancyCanonicalTable after = GetCanonicalPregnancySnapshot();
+  if (!before.valid || !after.valid || before.base != after.base)
+    return;
+  for (size_t i = 0; i < 3; ++i) {
+    if (before.slots[i].pregnancyFlag != 0 && after.slots[i].pregnancyFlag == 0 &&
+        after.slots[i].remainingMonths == 0 && after.slots[i].childOfficerId != 0) {
+      RequestFamilyChildScan();
+      break;
+    }
+  }
 }
 
 void RefreshPregnancyManagerOnWindowOpen(bool requestChildren) {
