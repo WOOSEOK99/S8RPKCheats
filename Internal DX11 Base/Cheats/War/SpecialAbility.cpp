@@ -242,6 +242,8 @@ namespace DX11Base {
 
   static SkillInitFn s_skillInit = nullptr;
   static SkillLoadFn s_skillLoad = nullptr;
+  static bool s_skillHookAttempted = false;
+  static uintptr_t s_lastFallbackUnit = 0;
 
   // Keep RAII locking separate from SEH-protected game memory access.
   static bool CopyUnitSkillCounts(int leader, int (&counts)[256]) {
@@ -263,18 +265,35 @@ namespace DX11Base {
     __try {
       // REA: container = unitData+0x5D0, *container = WarUnit,
       // WarUnit+8 = unitData; begin/end describe native 0x28-byte records.
+      SARegionCache regionCache{};
+      if (!SAIsValidPtr(container, 0x18, regionCache))
+        return;
+
+      const uintptr_t begin = *reinterpret_cast<const uintptr_t *>(container + 8);
+      const uintptr_t end = *reinterpret_cast<const uintptr_t *>(container + 0x10);
+      if (end < begin || (end - begin) % 0x28 != 0 || (end - begin) / 0x28 > 45)
+        return;
+      if (begin != end && !SAIsValidPtr(begin, end - begin, regionCache))
+        return;
+
       const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
+      if (!SAIsValidPtr(unit, 0x10, regionCache))
+        return;
       const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
+      if (!SAIsValidPtr(data, 0x600, regionCache) || data + 0x5D0 != container)
+        return;
       ApplyMusin(data, ReadUnitAbilities(data));
 
       const uintptr_t members = *reinterpret_cast<const uintptr_t *>(data + 0x18);
-      if (!members)
+      if (!SAIsValidPtr(members, 0x20, regionCache))
         return;
 
       int leader = 0;
       for (uintptr_t offset : {uintptr_t(8), uintptr_t(0x10), uintptr_t(0x18)}) {
         const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + offset);
         if (officer) {
+          if (!SAIsValidPtr(officer, 0x10, regionCache))
+            return;
           leader = *reinterpret_cast<const uint16_t *>(officer + 8);
           break;
         }
@@ -285,10 +304,10 @@ namespace DX11Base {
         return;
 
       // The settings lock has been released before reading or writing game records.
-      const uintptr_t begin = *reinterpret_cast<const uintptr_t *>(container + 8);
-      const uintptr_t end = *reinterpret_cast<const uintptr_t *>(container + 0x10);
-      for (uintptr_t record = begin; record != end; record += 0x28) {
+      for (uintptr_t record = begin; record < end; record += 0x28) {
         const uintptr_t skill = *reinterpret_cast<const uintptr_t *>(record);
+        if (!SAIsValidPtr(skill, 9, regionCache))
+          continue;
         const uint8_t id = *reinterpret_cast<const uint8_t *>(skill + 8);
         if (counts[id] > 0)
           *reinterpret_cast<uint8_t *>(record + 0x10) = static_cast<uint8_t>(counts[id]);
@@ -305,7 +324,11 @@ namespace DX11Base {
   }
 
   static bool __fastcall OnSkillLoad(uintptr_t container, uintptr_t archive) {
-    const bool loading = *reinterpret_cast<const int *>(archive + 0x20) == 1;
+    bool loading = false;
+    __try {
+      loading = *reinterpret_cast<const int *>(archive + 0x20) == 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
     const bool result = s_skillLoad(container, archive);
     if (loading && result)
       ApplyUnitSkillCounts(container);
@@ -314,8 +337,9 @@ namespace DX11Base {
   }
 
   void InitializeBattleCache(int, uintptr_t, uintptr_t exeBase) {
-    if (s_skillInit)
+    if (s_skillInit || s_skillHookAttempted)
       return;
+    s_skillHookAttempted = true;
 
     // Validate the two entry points once before installing the native hooks.
     constexpr uint8_t initBytes[] = {
@@ -327,27 +351,42 @@ namespace DX11Base {
 
     void *init = reinterpret_cast<void *>(exeBase + 0x1E0E0B0);
     void *load = reinterpret_cast<void *>(exeBase + 0x1E0DE30);
-    if (std::memcmp(init, initBytes, sizeof(initBytes)) != 0 ||
-        std::memcmp(load, loadBytes, sizeof(loadBytes)) != 0)
+    if (!IsValidPtr((uintptr_t)init, sizeof(initBytes)) ||
+        !IsValidPtr((uintptr_t)load, sizeof(loadBytes)) ||
+        std::memcmp(init, initBytes, sizeof(initBytes)) != 0 ||
+        std::memcmp(load, loadBytes, sizeof(loadBytes)) != 0) {
+      AddLog(u8"[전법] 훅 함수 바이트 불일치: 전투 진입/행동 부대 전환 시 대체 적용");
       return;
+    }
 
     const MH_STATUS initialized = MH_Initialize();
-    if (initialized != MH_OK && initialized != MH_ERROR_ALREADY_INITIALIZED)
+    if (initialized != MH_OK && initialized != MH_ERROR_ALREADY_INITIALIZED) {
+      AddLog(u8"[전법] 훅 초기화 실패(%d): 전투 진입/행동 부대 전환 시 대체 적용", initialized);
       return;
+    }
 
-    if (MH_CreateHook(init, reinterpret_cast<void *>(&OnSkillInit),
-                      reinterpret_cast<void **>(&s_skillInit)) != MH_OK)
+    const MH_STATUS initStatus = MH_CreateHook(init, reinterpret_cast<void *>(&OnSkillInit),
+                                              reinterpret_cast<void **>(&s_skillInit));
+    if (initStatus != MH_OK) {
+      s_skillInit = nullptr;
+      AddLog(u8"[전법] 초기화 훅 생성 실패(%d): 전투 진입/행동 부대 전환 시 대체 적용", initStatus);
       return;
+    }
 
-    if (MH_CreateHook(load, reinterpret_cast<void *>(&OnSkillLoad),
-                      reinterpret_cast<void **>(&s_skillLoad)) != MH_OK) {
+    const MH_STATUS loadStatus = MH_CreateHook(load, reinterpret_cast<void *>(&OnSkillLoad),
+                                              reinterpret_cast<void **>(&s_skillLoad));
+    if (loadStatus != MH_OK) {
+      AddLog(u8"[전법] 로드 훅 생성 실패(%d): 전투 진입/행동 부대 전환 시 대체 적용", loadStatus);
+      s_skillLoad = nullptr;
       MH_RemoveHook(init);
       s_skillInit = nullptr;
       return;
     }
 
     if (MH_EnableHook(init) != MH_OK || MH_EnableHook(load) != MH_OK) {
+      AddLog(u8"[전법] 훅 활성화 실패: 전투 진입/행동 부대 전환 시 대체 적용");
       MH_DisableHook(init);
+      MH_DisableHook(load);
       MH_RemoveHook(load);
       MH_RemoveHook(init);
       s_skillInit = nullptr;
@@ -361,6 +400,8 @@ namespace DX11Base {
   // Kept for existing battle/session reset callers; there is no roster cache.
   void ClearBattleCache() {
     s_musinBattleInitialized = false;
+    s_skillHookAttempted = false;
+    s_lastFallbackUnit = 0;
   }
 
   static uintptr_t ScanActiveUnitAbilities(uintptr_t exeBase,
@@ -403,7 +444,7 @@ namespace DX11Base {
         __try {
           const uintptr_t unitData =
               *reinterpret_cast<const uintptr_t *>(unitListBase + 0x08 + (uintptr_t)i * 0x10);
-          ApplyMusin(unitData, ReadUnitAbilities(unitData));
+          ApplyUnitSkillCounts(unitData + 0x5D0);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
       s_musinBattleInitialized = true;
@@ -680,6 +721,13 @@ namespace DX11Base {
           AddLog(u8"[특수기능] 등갑군(무장 %d 부대) 화염 취약 패널티 발동! (병력 -1000, 전의 -10)", leaderID);
         }
       } while (false);
+    }
+
+    // 훅 실패 시 반복 덮어쓰기는 피하고 행동 부대가 바뀔 때만 대체 적용합니다.
+    if (!s_skillInit && activeUnitData != s_lastFallbackUnit) {
+      s_lastFallbackUnit = activeUnitData;
+      if (activeUnitData)
+        ApplyUnitSkillCounts(activeUnitData + 0x5D0);
     }
 
     // 행동 부대의 설정 변경은 기존 주기로 반영합니다.
