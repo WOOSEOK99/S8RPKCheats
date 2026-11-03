@@ -833,8 +833,12 @@ void RunPregnancyManagerUpdate() {
   if (!before.valid || !after.valid || before.base != after.base)
     return;
   for (size_t i = 0; i < 3; ++i) {
-    if (before.slots[i].pregnancyFlag != 0 && after.slots[i].pregnancyFlag == 0 &&
-        after.slots[i].remainingMonths == 0 && after.slots[i].childOfficerId != 0) {
+    const bool wasBirthComplete = before.slots[i].pregnancyFlag == 1 &&
+        before.slots[i].remainingMonths == 0 && before.slots[i].childOfficerId != 0;
+    const bool isBirthComplete = after.slots[i].pregnancyFlag == 1 &&
+        after.slots[i].remainingMonths == 0 && after.slots[i].childOfficerId != 0;
+    if (isBirthComplete && (!wasBirthComplete ||
+        before.slots[i].childOfficerId != after.slots[i].childOfficerId)) {
       RequestFamilyChildScan();
       break;
     }
