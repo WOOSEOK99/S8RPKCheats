@@ -184,6 +184,59 @@ namespace DX11Base {
     return result;
   }
 
+  // 부대 초기화/로드와 전투 진입 시 같은 무신 적용 경로를 사용합니다.
+  static void ApplyMusin(uintptr_t unitData, const UnitAbilities &abilities) {
+    if (!abilities.hasMusin)
+      return;
+
+    SARegionCache regionCache{};
+    __try {
+      const uintptr_t SKILL_PTR_OFF  = 0x5D8;
+      const uintptr_t SKILL_REC_SIZE = 0x28;
+      const uintptr_t SKILL_LIMIT_OFF = 0x14;
+      const uintptr_t INDEX_OFF       = 0x0C;
+      const int MAX_SKILLS = 45;
+
+      do {
+        if (!SAIsValidPtr(unitData, 0x600, regionCache))
+          break;
+
+        if (!SAIsValidPtr(unitData + SKILL_PTR_OFF, 8, regionCache))
+          break;
+
+        uintptr_t skillStart = *(uintptr_t *)(unitData + SKILL_PTR_OFF);
+        if (!SAIsValidPtr(skillStart, SKILL_REC_SIZE, regionCache))
+          break;
+
+        int skillCount = 0;
+        for (int j = 0; j < MAX_SKILLS; j++) {
+          uintptr_t skillRec = skillStart + j * SKILL_REC_SIZE;
+          if (!SAIsValidPtr(skillRec + INDEX_OFF, 4, regionCache)) break;
+          if ((int)*(uint32_t *)(skillRec + INDEX_OFF) != j) break;
+          uint8_t firstByte = *(uint8_t *)skillRec;
+          if (firstByte != 0x58 && firstByte != 0xD8) break;
+
+          uintptr_t limitAddr = skillRec + SKILL_LIMIT_OFF;
+          if (!SAIsValidPtr(limitAddr, 1, regionCache)) continue;
+          if (*(uint8_t *)limitAddr != 0) {
+            DWORD old;
+            if (VirtualProtect((LPVOID)limitAddr, 1, PAGE_EXECUTE_READWRITE, &old)) {
+              *(uint8_t *)limitAddr = 0;
+              VirtualProtect((LPVOID)limitAddr, 1, old, &old);
+              skillCount++;
+            }
+          }
+        }
+        if (skillCount > 0)
+          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 지속 해제", abilities.leaderID, skillCount);
+      } while (false);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return;
+    }
+  }
+
+  static bool s_musinBattleInitialized = false;
+
   using SkillInitFn = uintptr_t (__fastcall *)(uintptr_t);
   using SkillLoadFn = bool (__fastcall *)(uintptr_t, uintptr_t);
 
@@ -212,6 +265,8 @@ namespace DX11Base {
       // WarUnit+8 = unitData; begin/end describe native 0x28-byte records.
       const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
       const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
+      ApplyMusin(data, ReadUnitAbilities(data));
+
       const uintptr_t members = *reinterpret_cast<const uintptr_t *>(data + 0x18);
       if (!members)
         return;
@@ -304,7 +359,9 @@ namespace DX11Base {
   }
 
   // Kept for existing battle/session reset callers; there is no roster cache.
-  void ClearBattleCache() {}
+  void ClearBattleCache() {
+    s_musinBattleInitialized = false;
+  }
 
   static uintptr_t ScanActiveUnitAbilities(uintptr_t exeBase,
                                            bool &hasGunakdae, bool &hasMussang,
@@ -339,6 +396,18 @@ namespace DX11Base {
   void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase) {
     if (!exeBase)
       return;
+
+    // 훅 설치 전에 생성된 부대도 전투 진입 시 한 번 적용합니다.
+    if (!s_musinBattleInitialized && unitCountTotal > 0 && unitListBase) {
+      for (int i = 0; i < unitCountTotal; ++i) {
+        __try {
+          const uintptr_t unitData =
+              *reinterpret_cast<const uintptr_t *>(unitListBase + 0x08 + (uintptr_t)i * 0x10);
+          ApplyMusin(unitData, ReadUnitAbilities(unitData));
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
+      s_musinBattleInitialized = true;
+    }
 
     static DWORD lastUpdateTick = 0;
     static DWORD lastBuffVerifyTick = 0;
@@ -613,50 +682,9 @@ namespace DX11Base {
       } while (false);
     }
 
-    // 4. 무신 (부대 전용 — 전법 병종 제약 해제)
-    if (runActiveSkillUpdate && activeUnitData && activeAbilities.hasMusin) {
-      const uintptr_t SKILL_PTR_OFF  = 0x5D8;
-      const uintptr_t SKILL_REC_SIZE = 0x28;
-      const uintptr_t SKILL_LIMIT_OFF = 0x14;
-      const uintptr_t INDEX_OFF       = 0x0C;
-      const int MAX_SKILLS = 45;
-
-      do {
-        const auto &cu = activeAbilities;
-        uintptr_t unitData = activeUnitData;
-        if (!SAIsValidPtr(unitData, 0x600, regionCache))
-          break;
-
-        if (!SAIsValidPtr(unitData + SKILL_PTR_OFF, 8, regionCache))
-          break;
-
-        uintptr_t skillStart = *(uintptr_t *)(unitData + SKILL_PTR_OFF);
-        if (!SAIsValidPtr(skillStart, SKILL_REC_SIZE, regionCache))
-          break;
-
-        int skillCount = 0;
-        for (int j = 0; j < MAX_SKILLS; j++) {
-          uintptr_t skillRec = skillStart + j * SKILL_REC_SIZE;
-          if (!SAIsValidPtr(skillRec + INDEX_OFF, 4, regionCache)) break;
-          if ((int)*(uint32_t *)(skillRec + INDEX_OFF) != j) break;
-          uint8_t firstByte = *(uint8_t *)skillRec;
-          if (firstByte != 0x58 && firstByte != 0xD8) break;
-
-          uintptr_t limitAddr = skillRec + SKILL_LIMIT_OFF;
-          if (!SAIsValidPtr(limitAddr, 1, regionCache)) continue;
-          if (*(uint8_t *)limitAddr != 0) {
-            DWORD old;
-            if (VirtualProtect((LPVOID)limitAddr, 1, PAGE_EXECUTE_READWRITE, &old)) {
-              *(uint8_t *)limitAddr = 0;
-              VirtualProtect((LPVOID)limitAddr, 1, old, &old);
-              skillCount++;
-            }
-          }
-        }
-        if (skillCount > 0)
-          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 지속 해제", cu.leaderID, skillCount);
-      } while (false);
-    }
+    // 행동 부대의 설정 변경은 기존 주기로 반영합니다.
+    if (runActiveSkillUpdate && activeUnitData)
+      ApplyMusin(activeUnitData, activeAbilities);
 
     s_lastGunakdaeState = hasGunakdae;
     s_lastMussangState = hasMussang;
