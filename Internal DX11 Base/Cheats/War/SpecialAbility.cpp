@@ -228,7 +228,7 @@ namespace DX11Base {
           }
         }
         if (skillCount > 0)
-          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 해제", abilities.leaderID, skillCount);
+          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 지속 해제", abilities.leaderID, skillCount);
       } while (false);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       return;
