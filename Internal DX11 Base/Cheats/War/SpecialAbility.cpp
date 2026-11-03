@@ -243,6 +243,14 @@ namespace DX11Base {
   static SkillInitFn s_skillInit = nullptr;
   static SkillLoadFn s_skillLoad = nullptr;
   static bool s_skillHookAttempted = false;
+  struct FallbackSkillApplication {
+    uintptr_t container;
+    uintptr_t begin;
+    uintptr_t end;
+    int leader;
+    uint64_t appliedRecords = 0;
+  };
+  static std::vector<FallbackSkillApplication> s_fallbackSkillApplications;
   static uintptr_t s_lastFallbackUnit = 0;
 
   // Keep RAII locking separate from SEH-protected game memory access.
@@ -261,7 +269,7 @@ namespace DX11Base {
     return true;
   }
 
-  static void ApplyUnitSkillCounts(uintptr_t container) {
+  static void ApplyUnitSkillCounts(uintptr_t container, bool fallback = false) {
     __try {
       // REA: container = unitData+0x5D0, *container = WarUnit,
       // WarUnit+8 = unitData; begin/end describe native 0x28-byte records.
@@ -303,14 +311,36 @@ namespace DX11Base {
       if (!CopyUnitSkillCounts(leader, counts))
         return;
 
+      FallbackSkillApplication *application = nullptr;
+      if (fallback) {
+        for (auto &entry : s_fallbackSkillApplications) {
+          if (entry.container == container && entry.begin == begin &&
+              entry.end == end && entry.leader == leader) {
+            application = &entry;
+            break;
+          }
+        }
+        if (!application) {
+          s_fallbackSkillApplications.push_back({container, begin, end, leader});
+          application = &s_fallbackSkillApplications.back();
+        }
+      }
+
       // The settings lock has been released before reading or writing game records.
       for (uintptr_t record = begin; record < end; record += 0x28) {
+        const uint64_t recordBit = uint64_t(1) << ((record - begin) / 0x28);
+        if (application && (application->appliedRecords & recordBit))
+          continue;
+
         const uintptr_t skill = *reinterpret_cast<const uintptr_t *>(record);
         if (!SAIsValidPtr(skill, 9, regionCache))
           continue;
         const uint8_t id = *reinterpret_cast<const uint8_t *>(skill + 8);
-        if (counts[id] > 0)
+        if (counts[id] > 0) {
           *reinterpret_cast<uint8_t *>(record + 0x10) = static_cast<uint8_t>(counts[id]);
+          if (application)
+            application->appliedRecords |= recordBit;
+        }
       }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       return;
@@ -402,6 +432,7 @@ namespace DX11Base {
     s_musinBattleInitialized = false;
     s_skillHookAttempted = false;
     s_lastFallbackUnit = 0;
+    s_fallbackSkillApplications.clear();
   }
 
   static uintptr_t ScanActiveUnitAbilities(uintptr_t exeBase,
@@ -444,7 +475,7 @@ namespace DX11Base {
         __try {
           const uintptr_t unitData =
               *reinterpret_cast<const uintptr_t *>(unitListBase + 0x08 + (uintptr_t)i * 0x10);
-          ApplyUnitSkillCounts(unitData + 0x5D0);
+          ApplyUnitSkillCounts(unitData + 0x5D0, !s_skillInit);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
       }
       s_musinBattleInitialized = true;
@@ -723,11 +754,11 @@ namespace DX11Base {
       } while (false);
     }
 
-    // 훅 실패 시 반복 덮어쓰기는 피하고 행동 부대가 바뀔 때만 대체 적용합니다.
+    // 훅 실패 시 행동 부대 전환에 재시도하되, 이미 기록한 전법 횟수는 유지합니다.
     if (!s_skillInit && activeUnitData != s_lastFallbackUnit) {
       s_lastFallbackUnit = activeUnitData;
       if (activeUnitData)
-        ApplyUnitSkillCounts(activeUnitData + 0x5D0);
+        ApplyUnitSkillCounts(activeUnitData + 0x5D0, true);
     }
 
     // 행동 부대의 설정 변경은 기존 주기로 반영합니다.
