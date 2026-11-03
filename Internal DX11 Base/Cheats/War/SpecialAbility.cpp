@@ -236,6 +236,7 @@ namespace DX11Base {
   }
 
   static bool s_musinBattleInitialized = false;
+  static uintptr_t s_lastMusinUnit = 0;
 
   using SkillInitFn = uintptr_t (__fastcall *)(uintptr_t);
   using SkillLoadFn = bool (__fastcall *)(uintptr_t, uintptr_t);
@@ -430,6 +431,7 @@ namespace DX11Base {
   // Kept for existing battle/session reset callers; there is no roster cache.
   void ClearBattleCache() {
     s_musinBattleInitialized = false;
+    s_lastMusinUnit = 0;
     s_skillHookAttempted = false;
     s_lastFallbackUnit = 0;
     s_fallbackSkillApplications.clear();
@@ -761,9 +763,10 @@ namespace DX11Base {
         ApplyUnitSkillCounts(activeUnitData + 0x5D0, true);
     }
 
-    // 행동 부대의 설정 변경은 기존 주기로 반영합니다.
-    if (runActiveSkillUpdate && activeUnitData)
+    // 부대 전환을 감지한 틱에 즉시 적용하고, 같은 부대는 기존 주기로 유지 확인합니다.
+    if (activeUnitData && (activeUnitData != s_lastMusinUnit || runActiveSkillUpdate))
       ApplyMusin(activeUnitData, activeAbilities);
+    s_lastMusinUnit = activeUnitData;
 
     s_lastGunakdaeState = hasGunakdae;
     s_lastMussangState = hasMussang;
