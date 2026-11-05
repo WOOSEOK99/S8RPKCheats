@@ -23,6 +23,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace DX11Base {
 
@@ -752,31 +753,29 @@ namespace DX11Base {
       return (shiftedCityBase - 0x28) + (uintptr_t)cityIndex * CITY_STRIDE;
     }
 
-    static uintptr_t GetCityForcePtr(uintptr_t rawCity) {
+    static uintptr_t GetCityForcePtr(uintptr_t rawCity, uintptr_t *outCorps = nullptr) {
+      if (outCorps)
+        *outCorps = 0;
+
       if (rawCity <= 0x10000)
         return 0;
 
-      // 1순위: 현재 태수(City+0x98) -> Officer+0x18 세력
-      uintptr_t ownerLink = 0;
-      uintptr_t forcePtr = 0;
-      if (SafeReadPtrAllowZero(rawCity + OFF_CITY_FORCE_LINK_RAW, &ownerLink) &&
-          ownerLink > 0x10000 &&
-          SafeReadPtr(ownerLink + 0x18, &forcePtr) &&
-          forcePtr > 0x10000) {
-        return forcePtr;
+      // Adjacent corps/governor links are admitted together at the city boundary.
+      uintptr_t links[2]{};
+      __try {
+        memcpy(links, reinterpret_cast<const void *>(rawCity + OFF_CITY_CORPS_RAW), sizeof(links));
+      } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
       }
 
-      // 2순위: 태수/장수가 없는 도시도 군단 소속이 남아 있을 수 있음.
-      // City+0x90 -> DivisionData+0x10 세력을 fallback으로 사용한다.
-      uintptr_t corpsPtr = 0;
-      forcePtr = 0;
-      if (SafeReadPtrAllowZero(rawCity + OFF_CITY_CORPS_RAW, &corpsPtr) &&
-          corpsPtr > 0x10000 &&
-          SafeReadPtr(corpsPtr + 0x10, &forcePtr) &&
-          forcePtr > 0x10000) {
-        return forcePtr;
-      }
+      if (outCorps)
+        *outCorps = links[0];
 
+      uintptr_t force = 0;
+      if (links[1] > 0x10000 && SafeReadPtr(links[1] + 0x18, &force))
+        return force;
+      if (links[0] > 0x10000 && SafeReadPtr(links[0] + 0x10, &force))
+        return force;
       return 0;
     }
 
@@ -1773,6 +1772,8 @@ namespace DX11Base {
     // ── 도시별 무장 배치 ───────────────────────────────────────────────────
     struct CityOfficerRow {
       uintptr_t officerBase = 0;
+      uintptr_t forcePtr = 0;
+      uintptr_t cityPtr = 0;
       uint16_t id = 0;
       uint8_t status = 0;
       uint8_t loyalty = 0;
@@ -2240,8 +2241,69 @@ namespace DX11Base {
       }
     }
 
+    // Verified runtime registry layout: *(exe + 0x034C8630), slot 3 is the
+    // PersonData list. A node contains {person, next}; the head is not
+    // the master array base and must be resolved for each requested scan.
+    static bool CaptureCityOfficerRows(std::vector<CityOfficerRow> &rows) {
+      rows.clear();
+      const uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
+      uintptr_t rosterBase = 0, registry = 0, node = 0;
+      if (!exe || !TryResolveOfficerRosterArrayBase(exe, &rosterBase) ||
+          !SafeReadPtr(exe + 0x034C8630, &registry) ||
+          !SafeReadPtrAllowZero(registry + 3 * sizeof(uintptr_t), &node))
+        return false;
+
+      bool seen[5103] = {};
+      for (int visited = 0; node && visited < 5102; ++visited) {
+        uintptr_t officer = 0, next = 0;
+        CityOfficerRow row;
+        if (!SafeReadPtr(node, &officer) ||
+            !SafeReadPtrAllowZero(node + sizeof(uintptr_t), &next) ||
+            officer < rosterBase || (officer - rosterBase) % 0x3D0 != 0 ||
+            (officer - rosterBase) / 0x3D0 >= 5102 ||
+            !SafeReadOfficerRow(officer, &row, &row.forcePtr, &row.cityPtr)) {
+          rows.clear();
+          return false;
+        }
+
+        node = next;
+
+        // Preserve the editor's ID filter; native registry IDs can exceed it.
+        if (row.id == 0 || row.id > 5102)
+          continue;
+
+        if (seen[row.id]) {
+          rows.clear();
+          return false;
+        }
+        seen[row.id] = true;
+        rows.push_back(row);
+      }
+
+      if (node) {
+        rows.clear();
+        return false;
+      }
+
+      return true;
+    }
+
     static void RefreshCityOfficerRoster(uintptr_t p1,
-                                         uintptr_t shiftedCityBase) {
+                                         uintptr_t shiftedCityBase,
+                                         std::vector<CityOfficerRow> *snapshot = nullptr) {
+      // A snapshot belongs to one synchronous deployment request, never a
+      // background collector. Refresh only that request's affected corps.
+      if (snapshot) {
+        for (const auto &previous : s_corpsOfficerRows) {
+          auto found = std::find_if(snapshot->begin(), snapshot->end(),
+              [&](const CityOfficerRow &row) { return row.id == previous.id; });
+          if (found != snapshot->end() &&
+              (!SafeReadOfficerRow(found->officerBase, &*found,
+                                   &found->forcePtr, &found->cityPtr) ||
+               found->id != previous.id))
+            found->id = 0;
+        }
+      }
       s_officerPlayerCities.clear();
       s_cityOfficerRows.clear();
       s_corpsOfficerRows.clear();
@@ -2264,10 +2326,14 @@ namespace DX11Base {
         return;
       }
 
+      std::vector<std::pair<uintptr_t, uintptr_t>> playerCityCorps;
       for (int i = 0; i < g_CityCount; ++i) {
         const uintptr_t rawCity = GetRawCityBase(shiftedCityBase, i);
-        if (GetCityForcePtr(rawCity) == s_officerPlayerForce)
+        uintptr_t corps = 0;
+        if (GetCityForcePtr(rawCity, &corps) == s_officerPlayerForce) {
           s_officerPlayerCities.push_back(i);
+          playerCityCorps.emplace_back(rawCity, corps);
+        }
       }
 
       NormalizeOfficerCitySelections();
@@ -2276,45 +2342,36 @@ namespace DX11Base {
         return;
       }
 
-      uintptr_t rosterBase = 0;
-      const uintptr_t exe = (uintptr_t)GetModuleHandle(NULL);
-      if (!exe ||
-          !TryResolveOfficerRosterArrayBase(exe, &rosterBase) ||
-          rosterBase <= 0x10000) {
-        s_officerRosterDirty = false;
-        return;
+      std::vector<CityOfficerRow> requestedRows;
+      if (!snapshot) {
+        if (!CaptureCityOfficerRows(requestedRows)) {
+          s_officerRosterDirty = false;
+          AddLog(u8"[도시 무장] 활성 무장 목록을 읽지 못했습니다.");
+          return;
+        }
+        snapshot = &requestedRows;
       }
 
       LoadOfficerNames();
       const uintptr_t selectedCityRaw =
           GetRawCityBase(shiftedCityBase, s_officerCityIndex);
-      SafeReadPtrAllowZero(selectedCityRaw + OFF_CITY_CORPS_RAW,
-                           &s_officerSelectedCorpsPtr);
+      const auto selectedCity = std::find_if(playerCityCorps.begin(), playerCityCorps.end(),
+          [&](const std::pair<uintptr_t, uintptr_t> &entry) { return entry.first == selectedCityRaw; });
+      s_officerSelectedCorpsPtr = selectedCity != playerCityCorps.end() ? selectedCity->second : 0;
 
-      for (int i = 0; i < 5102; ++i) {
-        const uintptr_t officerBase =
-            rosterBase + (uintptr_t)i * 0x3D0;
-        CityOfficerRow row;
-        uintptr_t forcePtr = 0, cityPtr = 0;
-        if (!SafeReadOfficerRow(officerBase, &row, &forcePtr, &cityPtr))
+      for (const auto &row : *snapshot) {
+        if (row.id == 0 || !IsEmployedOfficerStatus(row.status) ||
+            row.forcePtr != s_officerPlayerForce)
           continue;
-        if (row.id == 0 || row.id > 5102)
-          continue;
-        if (!IsEmployedOfficerStatus(row.status))
-          continue;
-        if (forcePtr != s_officerPlayerForce)
-          continue;
-
-        if (cityPtr == selectedCityRaw)
+        if (row.cityPtr == selectedCityRaw)
           s_cityOfficerRows.push_back(row);
-
-        if (s_officerSelectedCorpsPtr > 0x10000 && cityPtr > 0x10000) {
-          uintptr_t officerCorps = 0;
-          if (SafeReadPtrAllowZero(cityPtr + OFF_CITY_CORPS_RAW,
-                                   &officerCorps) &&
-              officerCorps == s_officerSelectedCorpsPtr) {
+        if (s_officerSelectedCorpsPtr > 0x10000) {
+          const auto city = std::find_if(playerCityCorps.begin(), playerCityCorps.end(),
+              [&](const std::pair<uintptr_t, uintptr_t> &entry) {
+                return entry.first == row.cityPtr;
+              });
+          if (city != playerCityCorps.end() && city->second == s_officerSelectedCorpsPtr)
             s_corpsOfficerRows.push_back(row);
-          }
         }
       }
 
@@ -2582,9 +2639,11 @@ namespace DX11Base {
     static bool BuildCorpsDeploymentRecommendation(
         uintptr_t shiftedCityBase);
     static bool ApplyCorpsDeploymentMovements(
-        uintptr_t p1, uintptr_t shiftedCityBase);
+        uintptr_t p1, uintptr_t shiftedCityBase,
+        std::vector<CityOfficerRow> *snapshot = nullptr);
     static bool ApplyCorpsDeploymentGovernorStage(
-        uintptr_t p1, uintptr_t shiftedCityBase);
+        uintptr_t p1, uintptr_t shiftedCityBase,
+        std::vector<CityOfficerRow> *snapshot = nullptr);
 
     static int GetCorpsDeploymentBaselineTargetCount(int cityIndex) {
       for (const auto &base : s_corpsDeploymentTargetBaseline) {
@@ -2661,6 +2720,10 @@ namespace DX11Base {
     }
 
     static void RunCorpsDeploymentPhaseMonitor(uintptr_t p1) {
+      if (s_corpsAutoDeploymentTargets.empty() && !s_corpsDeploymentValid) {
+        s_corpsDeploymentLastRelevantGameState = 0;
+        return;
+      }
       const uint8_t state = ReadCorpsDeploymentRelevantGameState();
 
       // 같은 실행 중 다른 세이브를 불러오는 경우를 최대한 보수적으로 감지한다.
@@ -2742,8 +2805,13 @@ namespace DX11Base {
 
       const int previousCityIndex = s_officerCityIndex;
 
+      std::vector<CityOfficerRow> snapshot;
+      if (!CaptureCityOfficerRows(snapshot)) {
+        AddNotification(u8"군단 자동배치: 활성 무장 목록을 읽지 못했습니다.");
+        return;
+      }
       s_officerRosterDirty = true;
-      RefreshCityOfficerRoster(p1, cityBase);
+      RefreshCityOfficerRoster(p1, cityBase, &snapshot);
       PruneMissingCorpsAutoDeploymentTargets(cityBase);
 
       // 실행 중 벡터가 변하지 않도록 현재 대상 포인터만 복사한다.
@@ -2778,16 +2846,16 @@ namespace DX11Base {
         ResetCorpsDeploymentTargetBaseline();
         s_officerCityIndex = targetCityIndex;
         s_officerRosterDirty = true;
-        RefreshCityOfficerRoster(p1, cityBase);
+        RefreshCityOfficerRoster(p1, cityBase, &snapshot);
 
         bool ok =
             s_officerSelectedCorpsPtr == targetCorpsPtr &&
             BuildCorpsDeploymentRecommendation(cityBase);
 
         if (ok)
-          ok = ApplyCorpsDeploymentMovements(p1, cityBase);
+          ok = ApplyCorpsDeploymentMovements(p1, cityBase, &snapshot);
         if (ok)
-          ok = ApplyCorpsDeploymentGovernorStage(p1, cityBase);
+          ok = ApplyCorpsDeploymentGovernorStage(p1, cityBase, &snapshot);
 
         if (ok)
           ++successCount;
@@ -2803,7 +2871,7 @@ namespace DX11Base {
           previousCityIndex < g_CityCount)
         s_officerCityIndex = previousCityIndex;
       s_officerRosterDirty = true;
-      RefreshCityOfficerRoster(p1, cityBase);
+      RefreshCityOfficerRoster(p1, cityBase, &snapshot);
 
       char notice[192]{};
       sprintf_s(
@@ -3828,12 +3896,20 @@ namespace DX11Base {
     };
 
     static bool ApplyCorpsDeploymentMovements(
-        uintptr_t p1, uintptr_t shiftedCityBase) {
+        uintptr_t p1, uintptr_t shiftedCityBase,
+        std::vector<CityOfficerRow> *rosterSnapshot) {
       if (!s_corpsDeploymentValid ||
           s_corpsDeploymentCorpsPtr <= 0x10000 ||
           s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
         AddNotification(u8"군단 자동배치: 먼저 현재 군단의 추천을 계산해주세요.");
         return false;
+      }
+
+      std::vector<CityOfficerRow> requestedRows;
+      if (!rosterSnapshot) {
+        if (!CaptureCityOfficerRows(requestedRows))
+          return false;
+        rosterSnapshot = &requestedRows;
       }
 
       std::vector<CorpsDeploymentMoveWrite> writes;
@@ -3977,7 +4053,7 @@ namespace DX11Base {
 
       s_selectedOfficerId = -1;
       s_officerRosterDirty = true;
-      RefreshCityOfficerRoster(p1, shiftedCityBase);
+      RefreshCityOfficerRoster(p1, shiftedCityBase, rosterSnapshot);
 
       // 같은 평정에서는 최초 추천안을 유지하고 현재 위치만 갱신한다.
       RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
@@ -4582,7 +4658,8 @@ namespace DX11Base {
     }
 
     static bool ApplyCorpsDeploymentGovernorStage(
-        uintptr_t p1, uintptr_t shiftedCityBase) {
+        uintptr_t p1, uintptr_t shiftedCityBase,
+        std::vector<CityOfficerRow> *rosterSnapshot) {
       if (!s_corpsDeploymentValid ||
           s_corpsDeploymentCorpsPtr <= 0x10000 ||
           s_corpsDeploymentCorpsPtr != s_officerSelectedCorpsPtr) {
@@ -4590,8 +4667,15 @@ namespace DX11Base {
         return false;
       }
 
+      std::vector<CityOfficerRow> requestedRows;
+      if (!rosterSnapshot) {
+        if (!CaptureCityOfficerRows(requestedRows))
+          return false;
+        rosterSnapshot = &requestedRows;
+      }
+
       s_officerRosterDirty = true;
-      RefreshCityOfficerRoster(p1, shiftedCityBase);
+      RefreshCityOfficerRoster(p1, shiftedCityBase, rosterSnapshot);
       RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
 
       std::vector<int> deferredCities;
@@ -4659,7 +4743,7 @@ namespace DX11Base {
 
       for (int guard = 0; guard < 512; ++guard) {
         s_officerRosterDirty = true;
-        RefreshCityOfficerRoster(p1, shiftedCityBase);
+        RefreshCityOfficerRoster(p1, shiftedCityBase, rosterSnapshot);
         RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
 
         bool progress = false;
@@ -4898,7 +4982,7 @@ namespace DX11Base {
 
       if (!failed) {
         s_officerRosterDirty = true;
-        RefreshCityOfficerRoster(p1, shiftedCityBase);
+        RefreshCityOfficerRoster(p1, shiftedCityBase, rosterSnapshot);
         RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
 
         // 관계 그룹도 최종적으로 추천 도시에서 갈라지지 않았는지 검증한다.
@@ -4953,7 +5037,7 @@ namespace DX11Base {
       if (failed) {
         RestoreCorpsDeploymentStage2Snapshot(snapshot);
         s_officerRosterDirty = true;
-        RefreshCityOfficerRoster(p1, shiftedCityBase);
+        RefreshCityOfficerRoster(p1, shiftedCityBase, rosterSnapshot);
         RefreshCorpsDeploymentPlanCurrentState(shiftedCityBase);
 
         AddNotification(

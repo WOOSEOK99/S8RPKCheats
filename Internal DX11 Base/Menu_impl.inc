@@ -364,7 +364,7 @@ namespace DX11Base {
 
   static uintptr_t ReadLoopSessionP1(uintptr_t gameBase) {
     __try {
-      if (gameBase > 0x10000 && IsValidPtr(gameBase + 0xE0, sizeof(uintptr_t)))
+      if (gameBase > 0x10000)
         return *(uintptr_t *)(gameBase + 0xE0);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return 0;
@@ -374,18 +374,17 @@ namespace DX11Base {
     uintptr_t gameBase = GetGameBase();
     uintptr_t p1 = ReadLoopSessionP1(gameBase);
 
-    // IsValidPtr → VirtualQuery 비용 큼: 주소/시간 기준으로만 재검증
+    // 같은 세션의 gameBase/p1 범위는 재사용하고 주소 변경 시만 검증합니다.
     static uintptr_t s_loopProbeGameBase = 0;
     static uintptr_t s_loopProbeP1 = 0;
-    static uint64_t s_loopProbeTick = 0;
     static bool s_loopP1Ready = false;
     static bool s_loopGameBaseReady = false;
 
     uint64_t nowTick = GetTickCount64();
     const bool needProbe =
-        (gameBase != s_loopProbeGameBase) || (p1 != s_loopProbeP1) || (nowTick - s_loopProbeTick >= 200ull);
+        (gameBase != s_loopProbeGameBase) || (p1 != s_loopProbeP1) ||
+        (p1 > 0x10000 && !s_loopP1Ready) || (gameBase > 0x10000 && !s_loopGameBaseReady);
     if (needProbe) {
-      s_loopProbeTick = nowTick;
       s_loopProbeGameBase = gameBase;
       s_loopProbeP1 = p1;
       s_loopP1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
@@ -504,14 +503,9 @@ namespace DX11Base {
     // 주의: 아래 로직도 동일 프레임의 gameBase/p1을 재사용
 
     // --- [주인공 주소 감지 및 로그] ---
-    if (p1 > 0x10000 && p1 != g_savedHeroAddr) {
-      // 주인공 주소가 처음 잡히거나, 다른 주소로 변경된 경우에만 백업 갱신 및 로그 출력
-      if (IsValidPtr(p1, 0x100)) {
-        g_savedHeroAddr = p1;
-        AddLog(u8"[System] 주인공 주소 감지: %p", (void *)g_savedHeroAddr);
-        s_loopProbeP1 = p1;
-        s_loopP1Ready = (p1 > 0x10000) && IsValidPtr(p1, 0x200);
-      }
+    if (p1Ready && p1 != g_savedHeroAddr) {
+      g_savedHeroAddr = p1;
+      AddLog(u8"[System] 주인공 주소 감지: %p", (void *)g_savedHeroAddr);
     }
 
     ApplyStoredConfigs(p1, gameBase);

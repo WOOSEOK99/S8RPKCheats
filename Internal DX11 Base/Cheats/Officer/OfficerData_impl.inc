@@ -1,4 +1,5 @@
 #include "OfficerData.h"
+#include "../Social/PregnancyManager.h"
 #include "OfficerRosterResolve.h"
 #include "../System/MonthCapture.h"
 #include "../../Cheats.h"
@@ -891,6 +892,46 @@ namespace DX11Base {
         g_affinityWriteCaptured = 0;
         g_affinityCapturedWriteAddr = 0;
         g_affinityCapturedWriteValue = 0;
+    }
+
+    bool GetPregnancySpousePointers(
+        uintptr_t rosterBase, uintptr_t hero, std::vector<uintptr_t>& spouses) {
+        spouses.clear();
+        uintptr_t relationBase = 0;
+        if (!TryResolveRelationshipTable(GetGameBase(), rosterBase, &relationBase))
+            return false;
+
+        // 배우자 슬롯만 읽습니다. 숙명 테이블 탐색과 다른 관계 수집은 하지 않습니다.
+        for (int i = 0; i < 3000; ++i) {
+            const uintptr_t slot = relationBase + (uintptr_t)i * 0x40;
+            uint8_t relation = 0;
+            if (!SafeRelRead8(slot + 0x08, &relation)) {
+                spouses.clear();
+                return false;
+            }
+
+            if (relation != 2)
+                continue;
+
+            uintptr_t members[5]{};
+            for (int j = 0; j < 5; ++j) {
+                if (!SafeRelReadPtr(slot + 0x10 + (uintptr_t)j * 8, &members[j])) {
+                    spouses.clear();
+                    return false;
+                }
+            }
+
+            if (std::find(std::begin(members), std::end(members), hero) == std::end(members))
+                continue;
+
+            for (uintptr_t member : members) {
+                if (member != hero && IsRosterOfficerPtr(member, rosterBase) &&
+                    std::find(spouses.begin(), spouses.end(), member) == spouses.end())
+                    spouses.push_back(member);
+            }
+        }
+
+        return true;
     }
 
     bool GetOfficerRelationshipInfoBatch(

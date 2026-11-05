@@ -8,6 +8,7 @@
 #include "../../showlog.h"
 
 #include <array>
+#include <cstring>
 #include <vector>
 
 #include "../System/SkillCountManager.h"
@@ -110,143 +111,452 @@ namespace DX11Base {
     uint8_t active;
   };
 
-  // ══════════════════════════════════════════════════════
-  //  [캐싱 아키텍처]
-  //  전투 진입 시 1회 스캔 → g_BattleUnits 벡터에 부대별 특기 플래그 저장
-  //  실시간 루프에서는 현재 활성 부대 주소만 읽어 O(n) 매칭 → 초경량 실행
-  // ══════════════════════════════════════════════════════
-
-  // 부대 1개의 고유 주소 + 특기 플래그 묶음
-  struct CachedUnit {
-    uintptr_t unitAddress;  // unitListBase에서 읽은 unitData 포인터 (키)
-    int       leaderID;     // 부대장 무장 ID (로깅/등갑군용)
-    bool hasGunakdae;       // 군악대   0x1000
-    bool hasMussang;        // 무쌍보병 0x1001
-    bool hasFireCavalry;    // 불꽃기병 0x1002
-    bool hasArcher;         // 원격궁병 0x1003
-    bool hasDeunggab;       // 등갑군   0x1004
-    bool hasCommander;      // 총사령관 0x1005
-    bool hasSneakAttack;    // 기습부대 0x1006
-    bool hasTactician;      // 대군사   0x1007
-    bool hasMusin;          // 무신     0x1008
+  // Native callbacks handle one unit; no background roster is retained.
+  struct UnitAbilities {
+    int leaderID = 0;
+    bool hasGunakdae = false;
+    bool hasMussang = false;
+    bool hasFireCavalry = false;
+    bool hasArcher = false;
+    bool hasDeunggab = false;
+    bool hasCommander = false;
+    bool hasSneakAttack = false;
+    bool hasTactician = false;
+    bool hasMusin = false;
   };
 
-  static std::vector<CachedUnit> g_BattleUnits;
-  static bool g_CacheReady = false;
+  // Keep fault-prone reads in a separate SEH scope with no settings lock.
+  static bool ReadUnitOfficerIds(uintptr_t unitData, int (&ids)[3]) {
+    __try {
+      if (!IsValidPtr(unitData, 0x600))
+        return false;
 
-  // ──────────────────────────────────────────────────────
-  // InitializeBattleCache — 전투 진입 시 1회 호출
-  // ──────────────────────────────────────────────────────
-  void InitializeBattleCache(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase) {
-    g_BattleUnits.clear();
-    g_CacheReady = false;
-    if (!exeBase || unitCountTotal <= 0 || !unitListBase) return;
-    g_BattleUnits.reserve(unitCountTotal);
+      const uintptr_t members = *reinterpret_cast<const uintptr_t *>(unitData + 0x18);
+      if (!IsValidPtr(members, 0x20))
+        return false;
 
-    // 전투 캐시 생성 중에는 같은 설정 map을 수십~수백 번 조회하므로,
-    // mutex를 매 능력마다 잡지 않고 시작 시 한 번 스냅샷으로 복사합니다.
-    std::unordered_map<int, std::unordered_map<uintptr_t, int>> skillSnapshot;
-    {
-      std::lock_guard<std::mutex> lock(g_skillCountMutex);
-      skillSnapshot = g_customSkillCounts;
-    }
-
-    auto hasSkill = [&](int officerID, uintptr_t skillId) -> bool {
-      auto officerIt = skillSnapshot.find(officerID);
-      if (officerIt == skillSnapshot.end()) return false;
-      auto skillIt = officerIt->second.find(skillId);
-      return skillIt != officerIt->second.end() && skillIt->second > 0;
-    };
-
-    for (int i = 0; i < unitCountTotal; i++) {
-      if (!IsValidPtr(unitListBase + 0x08 + (uintptr_t)i * 0x10, 8)) continue;
-      uintptr_t unitData = *(uintptr_t *)(unitListBase + 0x08 + (uintptr_t)i * 0x10);
-      if (!IsValidPtr(unitData, 0x600)) continue;
-      if (!IsValidPtr(unitData + 0x18, 8)) continue;
-      uintptr_t memberPtr = *(uintptr_t *)(unitData + 0x18);
-      if (!IsValidPtr(memberPtr, 0x100)) continue;
-
-      CachedUnit cu = {};
-      cu.unitAddress = unitData;
-
-      for (uintptr_t moff : {(uintptr_t)0x08, (uintptr_t)0x10, (uintptr_t)0x18}) {
-        if (!IsValidPtr(memberPtr + moff, 8)) continue;
-        uintptr_t offPtr = *(uintptr_t *)(memberPtr + moff);
-        if (!IsValidPtr(offPtr, 0x10)) continue;
-        int id = (int)(*(unsigned short *)(offPtr + 0x08));
-        if (id <= 0) continue;
-        if (moff == 0x08) cu.leaderID = id;
-        if (hasSkill(id, 0x1000)) cu.hasGunakdae    = true;
-        if (hasSkill(id, 0x1001)) cu.hasMussang     = true;
-        if (hasSkill(id, 0x1002)) cu.hasFireCavalry = true;
-        if (hasSkill(id, 0x1003)) cu.hasArcher      = true;
-        if (hasSkill(id, 0x1004)) cu.hasDeunggab    = true;
-        if (hasSkill(id, 0x1005)) cu.hasCommander   = true;
-        if (hasSkill(id, 0x1006)) cu.hasSneakAttack = true;
-        if (hasSkill(id, 0x1007)) cu.hasTactician   = true;
-        if (hasSkill(id, 0x1008)) cu.hasMusin       = true;
+      for (int i = 0; i < 3; ++i) {
+        const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + 8 + i * 8);
+        if (officer && IsValidPtr(officer, 0x10))
+          ids[i] = *reinterpret_cast<const uint16_t *>(officer + 8);
       }
-      g_BattleUnits.push_back(cu);
+
+      return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return false;
     }
-    g_CacheReady = true;
-    AddLog(u8"[캐시] 전투 부대 캐시 빌드 완료: %d개", (int)g_BattleUnits.size());
   }
 
-  // ──────────────────────────────────────────────────────
-  // ClearBattleCache — 전투 종료 시 호출
-  // ──────────────────────────────────────────────────────
+  static UnitAbilities ReadUnitAbilities(uintptr_t unitData) {
+    UnitAbilities result;
+    int ids[3] = {-1, -1, -1};
+    if (!ReadUnitOfficerIds(unitData, ids))
+      return result;
+
+    if (ids[0] >= 0)
+      result.leaderID = ids[0];
+
+    std::lock_guard<std::mutex> lock(g_skillCountMutex);
+    for (int id : ids) {
+      if (id < 0)
+        continue;
+
+      const auto found = g_customSkillCounts.find(id);
+      if (found == g_customSkillCounts.end())
+        continue;
+
+      const auto has = [&](uintptr_t key) {
+        const auto skill = found->second.find(key);
+        return skill != found->second.end() && skill->second > 0;
+      };
+
+      result.hasGunakdae |= has(0x1000);
+      result.hasMussang |= has(0x1001);
+      result.hasFireCavalry |= has(0x1002);
+      result.hasArcher |= has(0x1003);
+      result.hasDeunggab |= has(0x1004);
+      result.hasCommander |= has(0x1005);
+      result.hasSneakAttack |= has(0x1006);
+      result.hasTactician |= has(0x1007);
+      result.hasMusin |= has(0x1008);
+    }
+
+    return result;
+  }
+
+  // 부대 초기화/로드와 전투 진입 시 같은 무신 적용 경로를 사용합니다.
+  static void ApplyMusin(uintptr_t unitData, const UnitAbilities &abilities) {
+    if (!abilities.hasMusin)
+      return;
+
+    SARegionCache regionCache{};
+    __try {
+      const uintptr_t SKILL_PTR_OFF  = 0x5D8;
+      const uintptr_t SKILL_REC_SIZE = 0x28;
+      const uintptr_t SKILL_LIMIT_OFF = 0x14;
+      const uintptr_t INDEX_OFF       = 0x0C;
+      const int MAX_SKILLS = 45;
+
+      do {
+        if (!SAIsValidPtr(unitData, 0x600, regionCache))
+          break;
+
+        if (!SAIsValidPtr(unitData + SKILL_PTR_OFF, 8, regionCache))
+          break;
+
+        uintptr_t skillStart = *(uintptr_t *)(unitData + SKILL_PTR_OFF);
+        if (!SAIsValidPtr(skillStart, SKILL_REC_SIZE, regionCache))
+          break;
+
+        int skillCount = 0;
+        for (int j = 0; j < MAX_SKILLS; j++) {
+          uintptr_t skillRec = skillStart + j * SKILL_REC_SIZE;
+          if (!SAIsValidPtr(skillRec + INDEX_OFF, 4, regionCache)) break;
+          if ((int)*(uint32_t *)(skillRec + INDEX_OFF) != j) break;
+          uint8_t firstByte = *(uint8_t *)skillRec;
+          if (firstByte != 0x58 && firstByte != 0xD8) break;
+
+          uintptr_t limitAddr = skillRec + SKILL_LIMIT_OFF;
+          if (!SAIsValidPtr(limitAddr, 1, regionCache)) continue;
+          if (*(uint8_t *)limitAddr != 0) {
+            DWORD old;
+            if (VirtualProtect((LPVOID)limitAddr, 1, PAGE_EXECUTE_READWRITE, &old)) {
+              *(uint8_t *)limitAddr = 0;
+              VirtualProtect((LPVOID)limitAddr, 1, old, &old);
+              skillCount++;
+            }
+          }
+        }
+        if (skillCount > 0)
+          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 지속 해제", abilities.leaderID, skillCount);
+      } while (false);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return;
+    }
+  }
+
+  static bool s_musinBattleInitialized = false;
+  static uintptr_t s_lastMusinUnit = 0;
+  static uintptr_t s_cachedP = 0;
+  static uintptr_t s_cachedP2 = 0;
+
+  using SkillInitFn = uintptr_t (__fastcall *)(uintptr_t);
+  using SkillLoadFn = bool (__fastcall *)(uintptr_t, uintptr_t);
+
+  static SkillInitFn s_skillInit = nullptr;
+  static SkillLoadFn s_skillLoad = nullptr;
+  static bool s_skillHookAttempted = false;
+  struct FallbackSkillApplication {
+    uintptr_t container;
+    uintptr_t begin;
+    uintptr_t end;
+    int leader;
+    uint64_t appliedRecords = 0;
+  };
+  static std::vector<FallbackSkillApplication> s_fallbackSkillApplications;
+  static uintptr_t s_lastFallbackUnit = 0;
+
+  // Keep RAII locking separate from SEH-protected game memory access.
+  static bool CopyUnitSkillCounts(int leader, int (&counts)[256]) {
+    std::lock_guard<std::mutex> lock(g_skillCountMutex);
+    const auto configured = g_customSkillCounts.find(leader);
+    if (configured == g_customSkillCounts.end())
+      return false;
+
+    for (const auto &entry : configured->second) {
+      // Native skill IDs are bytes; other keys describe special abilities.
+      if (entry.first >= 0x138 && entry.first < 0x238)
+        counts[entry.first - 0x138] = entry.second;
+    }
+
+    return true;
+  }
+
+  static void ApplyUnitSkillCounts(uintptr_t container, bool fallback = false) {
+    __try {
+      // REA: container = unitData+0x5D0, *container = WarUnit,
+      // WarUnit+8 = unitData; begin/end describe native 0x28-byte records.
+      SARegionCache regionCache{};
+      if (!SAIsValidPtr(container, 0x18, regionCache))
+        return;
+
+      const uintptr_t begin = *reinterpret_cast<const uintptr_t *>(container + 8);
+      const uintptr_t end = *reinterpret_cast<const uintptr_t *>(container + 0x10);
+      if (end < begin || (end - begin) % 0x28 != 0 || (end - begin) / 0x28 > 45)
+        return;
+      if (begin != end && !SAIsValidPtr(begin, end - begin, regionCache))
+        return;
+
+      const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
+      if (!SAIsValidPtr(unit, 0x10, regionCache))
+        return;
+      const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
+      if (!SAIsValidPtr(data, 0x600, regionCache) || data + 0x5D0 != container)
+        return;
+      ApplyMusin(data, ReadUnitAbilities(data));
+
+      const uintptr_t members = *reinterpret_cast<const uintptr_t *>(data + 0x18);
+      if (!SAIsValidPtr(members, 0x20, regionCache))
+        return;
+
+      int leader = 0;
+      for (uintptr_t offset : {uintptr_t(8), uintptr_t(0x10), uintptr_t(0x18)}) {
+        const uintptr_t officer = *reinterpret_cast<const uintptr_t *>(members + offset);
+        if (officer) {
+          if (!SAIsValidPtr(officer, 0x10, regionCache))
+            return;
+          leader = *reinterpret_cast<const uint16_t *>(officer + 8);
+          break;
+        }
+      }
+
+      int counts[256]{};
+      if (!CopyUnitSkillCounts(leader, counts))
+        return;
+
+      FallbackSkillApplication *application = nullptr;
+      if (fallback) {
+        for (auto &entry : s_fallbackSkillApplications) {
+          if (entry.container == container && entry.begin == begin &&
+              entry.end == end && entry.leader == leader) {
+            application = &entry;
+            break;
+          }
+        }
+        if (!application) {
+          s_fallbackSkillApplications.push_back({container, begin, end, leader});
+          application = &s_fallbackSkillApplications.back();
+        }
+      }
+
+      // The settings lock has been released before reading or writing game records.
+      for (uintptr_t record = begin; record < end; record += 0x28) {
+        const uint64_t recordBit = uint64_t(1) << ((record - begin) / 0x28);
+        if (application && (application->appliedRecords & recordBit))
+          continue;
+
+        const uintptr_t skill = *reinterpret_cast<const uintptr_t *>(record);
+        if (!SAIsValidPtr(skill, 9, regionCache))
+          continue;
+        const uint8_t id = *reinterpret_cast<const uint8_t *>(skill + 8);
+        if (counts[id] > 0) {
+          *reinterpret_cast<uint8_t *>(record + 0x10) = static_cast<uint8_t>(counts[id]);
+          if (application)
+            application->appliedRecords |= recordBit;
+        }
+      }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      return;
+    }
+  }
+
+  static uintptr_t __fastcall OnSkillInit(uintptr_t container) {
+    const uintptr_t result = s_skillInit(container);
+    ApplyUnitSkillCounts(container);
+    return result;
+  }
+
+  static bool __fastcall OnSkillLoad(uintptr_t container, uintptr_t archive) {
+    bool loading = false;
+    __try {
+      loading = *reinterpret_cast<const int *>(archive + 0x20) == 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    const bool result = s_skillLoad(container, archive);
+    if (loading && result)
+      ApplyUnitSkillCounts(container);
+
+    return result;
+  }
+
+  using SkillPageBuildFn = uintptr_t (__fastcall *)(uintptr_t);
+  static SkillPageBuildFn s_skillPageBuild = nullptr;
+
+  static uintptr_t __fastcall OnSkillPageBuild(uintptr_t ui) {
+    bool hasMusin = false;
+    uint8_t troop = 0;
+    __try {
+      // REA: battle popup UI -> list(+1F0) -> native skill container(+290).
+      const uintptr_t list = *reinterpret_cast<const uintptr_t *>(ui + 0x1F0);
+      if (list) {
+        const uintptr_t container = *reinterpret_cast<const uintptr_t *>(list + 0x290);
+        if (container) {
+          const uintptr_t unit = *reinterpret_cast<const uintptr_t *>(container);
+          if (unit) {
+            const uintptr_t data = *reinterpret_cast<const uintptr_t *>(unit + 8);
+            hasMusin = data + 0x5D0 == container && ReadUnitAbilities(data).hasMusin;
+          }
+        }
+      }
+      troop = *reinterpret_cast<const uint8_t *>(ui + 0x238);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+      hasMusin = false;
+    }
+
+    if (!hasMusin || troop == 0)
+      return s_skillPageBuild(ui);
+
+    uintptr_t result = 0;
+    // Zero disables only the first-page troop filter. Other availability tests stay native.
+    __try {
+      *reinterpret_cast<uint8_t *>(ui + 0x238) = 0;
+      result = s_skillPageBuild(ui);
+    } __finally {
+      *reinterpret_cast<uint8_t *>(ui + 0x238) = troop;
+    }
+    return result;
+  }
+
+  void InitializeBattleCache(int, uintptr_t, uintptr_t exeBase) {
+    if (s_skillInit || s_skillHookAttempted)
+      return;
+    s_skillHookAttempted = true;
+
+    // Validate the two entry points once before installing the native hooks.
+    constexpr uint8_t initBytes[] = {
+        0x48, 0x89, 0x4c, 0x24, 0x08, 0x53, 0x57, 0x41,
+        0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57};
+    constexpr uint8_t loadBytes[] = {
+        0x40, 0x53, 0x55, 0x41, 0x54, 0x41, 0x57, 0x48,
+        0x83, 0xec, 0x28, 0x48, 0x8b, 0x01, 0x48, 0x8b};
+
+    void *init = reinterpret_cast<void *>(exeBase + 0x1E0E0B0);
+    void *load = reinterpret_cast<void *>(exeBase + 0x1E0DE30);
+    if (!IsValidPtr((uintptr_t)init, sizeof(initBytes)) ||
+        !IsValidPtr((uintptr_t)load, sizeof(loadBytes)) ||
+        std::memcmp(init, initBytes, sizeof(initBytes)) != 0 ||
+        std::memcmp(load, loadBytes, sizeof(loadBytes)) != 0) {
+      AddLog(u8"[전법] 훅 함수 바이트 불일치: 전투 진입/행동 부대 전환 시 대체 적용");
+      return;
+    }
+
+    const MH_STATUS initialized = MH_Initialize();
+    if (initialized != MH_OK && initialized != MH_ERROR_ALREADY_INITIALIZED) {
+      AddLog(u8"[전법] 훅 초기화 실패(%d): 전투 진입/행동 부대 전환 시 대체 적용", initialized);
+      return;
+    }
+
+    if (!s_skillPageBuild) {
+      constexpr uint8_t pageBytes[] = {
+          0x41, 0x55, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x58,
+          0x48, 0x8B, 0x81, 0x50, 0x02, 0x00, 0x00};
+      void *page = reinterpret_cast<void *>(exeBase + 0x1DDECF0);
+      if (IsValidPtr((uintptr_t)page, sizeof(pageBytes)) &&
+          std::memcmp(page, pageBytes, sizeof(pageBytes)) == 0) {
+        MH_STATUS status = MH_CreateHook(page, reinterpret_cast<void *>(&OnSkillPageBuild),
+                                         reinterpret_cast<void **>(&s_skillPageBuild));
+        if (status == MH_OK) {
+          status = MH_EnableHook(page);
+          if (status != MH_OK) {
+            MH_RemoveHook(page);
+            s_skillPageBuild = nullptr;
+          }
+        } else {
+          s_skillPageBuild = nullptr;
+        }
+        AddLog(u8"[무신] 실행가능 목록 훅 설치 결과: %d", status);
+      } else {
+        AddLog(u8"[무신] 실행가능 목록 함수 바이트 불일치: 목록 훅 설치 생략");
+      }
+    }
+
+    const MH_STATUS initStatus = MH_CreateHook(init, reinterpret_cast<void *>(&OnSkillInit),
+                                              reinterpret_cast<void **>(&s_skillInit));
+    if (initStatus != MH_OK) {
+      s_skillInit = nullptr;
+      AddLog(u8"[전법] 초기화 훅 생성 실패(%d): 전투 진입/행동 부대 전환 시 대체 적용", initStatus);
+      return;
+    }
+
+    const MH_STATUS loadStatus = MH_CreateHook(load, reinterpret_cast<void *>(&OnSkillLoad),
+                                              reinterpret_cast<void **>(&s_skillLoad));
+    if (loadStatus != MH_OK) {
+      AddLog(u8"[전법] 로드 훅 생성 실패(%d): 전투 진입/행동 부대 전환 시 대체 적용", loadStatus);
+      s_skillLoad = nullptr;
+      MH_RemoveHook(init);
+      s_skillInit = nullptr;
+      return;
+    }
+
+    if (MH_EnableHook(init) != MH_OK || MH_EnableHook(load) != MH_OK) {
+      AddLog(u8"[전법] 훅 활성화 실패: 전투 진입/행동 부대 전환 시 대체 적용");
+      MH_DisableHook(init);
+      MH_DisableHook(load);
+      MH_RemoveHook(load);
+      MH_RemoveHook(init);
+      s_skillInit = nullptr;
+      s_skillLoad = nullptr;
+      return;
+    }
+
+    AddLog(u8"[전법] 부대 초기화/로드 시점에 설정 적용 연결 완료");
+  }
+
+  // Kept for existing battle/session reset callers; there is no roster cache.
   void ClearBattleCache() {
-    g_BattleUnits.clear();
-    g_CacheReady = false;
-    AddLog(u8"[캐시] 전투 부대 캐시 해제");
+    s_musinBattleInitialized = false;
+    s_lastMusinUnit = 0;
+    s_cachedP = 0;
+    s_cachedP2 = 0;
+    s_skillHookAttempted = false;
+    s_lastFallbackUnit = 0;
+    s_fallbackSkillApplications.clear();
   }
 
-  // ──────────────────────────────────────────────────────
-  // ScanActiveUnitAbilities — 캐시 매칭 버전 (초경량)
-  //  체인 7단계로 ptrToUnitData 획득 → *(uintptr_t*)ptrToUnitData = activeUnitData
-  //  g_BattleUnits에서 주소 매칭 → 플래그 즉시 대입, GetTargetSkillCount 호출 없음
-  // ──────────────────────────────────────────────────────
   static uintptr_t ScanActiveUnitAbilities(uintptr_t exeBase,
                                            bool &hasGunakdae, bool &hasMussang,
                                            bool &hasFireCavalry, bool &hasArcher,
                                            bool &hasCommander, bool &hasSneakAttack,
-                                           bool &hasTactician) {
-    if (!g_CacheReady || g_BattleUnits.empty()) return 0;
+                                           bool &hasTactician, UnitAbilities &abilities) {
+    {
+      std::lock_guard<std::mutex> lock(g_skillCountMutex);
+      if (g_customSkillCounts.empty())
+        return 0;
+    }
 
     // SAResolveChain은 매 스텝에서 *(current) + offset 순으로 연산.
     // 마지막 오프셋 0은 "역참조 후 +0" → 최종 역참조를 수행하여
     // activeUnitData 값 자체를 직접 반환함. 반드시 유지해야 함.
     uintptr_t activeUnitData = SAResolveChain(
       exeBase + 0x03510578, {0x100, 0x78, 0, 0x50, 0x108, 0x50, 0x8, 0});
-    if (!activeUnitData) return 0;
+    if (!activeUnitData)
+      return 0;
 
-    for (const auto &cu : g_BattleUnits) {
-      if (cu.unitAddress == activeUnitData) {
-        hasGunakdae    = cu.hasGunakdae;
-        hasMussang     = cu.hasMussang;
-        hasFireCavalry = cu.hasFireCavalry;
-        hasArcher      = cu.hasArcher;
-        hasCommander   = cu.hasCommander;
-        hasSneakAttack = cu.hasSneakAttack;
-        hasTactician   = cu.hasTactician;
-        return activeUnitData; // 등갑군 섹션에서 재사용
-      }
-    }
-    return 0;
+    abilities = ReadUnitAbilities(activeUnitData);
+    hasGunakdae = abilities.hasGunakdae;
+    hasMussang = abilities.hasMussang;
+    hasFireCavalry = abilities.hasFireCavalry;
+    hasArcher = abilities.hasArcher;
+    hasCommander = abilities.hasCommander;
+    hasSneakAttack = abilities.hasSneakAttack;
+    hasTactician = abilities.hasTactician;
+    return activeUnitData;
   }
 
   void UpdateSpecialAbilities(int unitCountTotal, uintptr_t unitListBase, uintptr_t exeBase) {
     if (!exeBase)
       return;
 
+    // 훅 설치 전에 생성된 부대도 전투 진입 시 한 번 적용합니다.
+    if (!s_musinBattleInitialized && unitCountTotal > 0 && unitListBase) {
+      for (int i = 0; i < unitCountTotal; ++i) {
+        __try {
+          const uintptr_t unitData =
+              *reinterpret_cast<const uintptr_t *>(unitListBase + 0x08 + (uintptr_t)i * 0x10);
+          ApplyUnitSkillCounts(unitData + 0x5D0, !s_skillInit);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+      }
+      s_musinBattleInitialized = true;
+    }
+
     static DWORD lastUpdateTick = 0;
     static DWORD lastBuffVerifyTick = 0;
     DWORD currentTick = GetTickCount();
     SARegionCache regionCache{};
 
-    // 무신 등 개별 부대 데이터는 기존과 동일하게 500ms마다 유지 확인합니다.
-    bool runGlobalScan = (unitCountTotal > 0 && currentTick - lastUpdateTick >= 500);
-    if (runGlobalScan)
+    // 무신 설정이 있는 현재 행동 부대만 유지 확인합니다.
+    bool runActiveSkillUpdate = (unitCountTotal > 0 && currentTick - lastUpdateTick >= 500);
+    if (runActiveSkillUpdate)
       lastUpdateTick = currentTick;
 
     // 공유 마스터 데이터 버프는 부대 전환 시 즉시 적용하고,
@@ -263,11 +573,28 @@ namespace DX11Base {
     bool hasSneakAttack = false;
     bool hasTactician = false;
 
-    // 1. 현재 선택/행동 중인 부대 스캔 (캐시 매칭, GetTargetSkillCount 호출 없음)
+    // 1. 현재 선택/행동 부대의 무장 ID로 설정을 직접 조회
     //    반환값: 현재 활성 unitData 주소 (등갑군 섹션에서 재사용)
-    uintptr_t activeUnitData = ScanActiveUnitAbilities(
+    UnitAbilities activeAbilities;
+    uintptr_t activeUnitData = unitCountTotal > 0 ? ScanActiveUnitAbilities(
       exeBase, hasGunakdae, hasMussang, hasFireCavalry, hasArcher, hasCommander,
-      hasSneakAttack, hasTactician);
+      hasSneakAttack, hasTactician, activeAbilities) : 0;
+
+    if (activeUnitData && activeUnitData != s_lastMusinUnit) {
+      bool belongsToBattle = false;
+      for (int i = 0; i < unitCountTotal; ++i) {
+        if (*reinterpret_cast<const uintptr_t *>(unitListBase + 0x08 + (uintptr_t)i * 0x10) == activeUnitData) {
+          belongsToBattle = true;
+          break;
+        }
+      }
+      if (!belongsToBattle) {
+        activeUnitData = 0;
+        activeAbilities = {};
+        hasGunakdae = hasMussang = hasFireCavalry = hasArcher = false;
+        hasCommander = hasSneakAttack = hasTactician = false;
+      }
+    }
 
     static bool s_lastGunakdaeState = false;
     static bool s_lastMussangState = false;
@@ -347,8 +674,6 @@ namespace DX11Base {
     // 2. 버프 메모리 주입 (기존 0x02ED7A10 체인 그룹)
     //    전투 진입 후 1회 해소 후 재사용 — 상태 변경 시마다 5단계 체인 해소 제거
     if (exeBase && injectBuffs) {
-      static uintptr_t s_cachedP  = 0;
-      static uintptr_t s_cachedP2 = 0;
       if (!s_cachedP)
         s_cachedP  = SAResolveChain(exeBase + 0x02ED7A10, {0x110, 0x120, 0x40, 0x168, 0});
       if (!s_cachedP2)
@@ -476,11 +801,11 @@ namespace DX11Base {
 
     if (unitCountTotal == 0) {
       s_prevBurnLeader = -1;
-    } else if (g_CacheReady && activeUnitData && currentTick - lastBurnTick >= 300) {
+    } else if (activeUnitData && currentTick - lastBurnTick >= 300) {
       lastBurnTick = currentTick;
 
-      for (const auto &cu : g_BattleUnits) {
-        if (cu.unitAddress != activeUnitData) continue;
+      do {
+        const auto &cu = activeAbilities;
 
         int leaderID = cu.leaderID;
         if (leaderID <= 0 || leaderID == s_prevBurnLeader) break;
@@ -508,51 +833,20 @@ namespace DX11Base {
           *(uint8_t  *)(activeUnitData + 0x80) = (uint8_t )newMorale;
           AddLog(u8"[특수기능] 등갑군(무장 %d 부대) 화염 취약 패널티 발동! (병력 -1000, 전의 -10)", leaderID);
         }
-        break;
-      }
+      } while (false);
     }
 
-    // 4. 무신 (부대 전용 — 전법 병종 제약 해제)
-    if (runGlobalScan && g_CacheReady) {
-      const uintptr_t SKILL_PTR_OFF  = 0x5D8;
-      const uintptr_t SKILL_REC_SIZE = 0x28;
-      const uintptr_t SKILL_LIMIT_OFF = 0x14;
-      const uintptr_t INDEX_OFF       = 0x0C;
-      const int MAX_SKILLS = 45;
-
-      for (const auto &cu : g_BattleUnits) {
-        if (!cu.hasMusin) continue;
-
-        uintptr_t unitData = cu.unitAddress;
-        if (!SAIsValidPtr(unitData, 0x600, regionCache)) continue;
-
-        if (!SAIsValidPtr(unitData + SKILL_PTR_OFF, 8, regionCache)) continue;
-        uintptr_t skillStart = *(uintptr_t *)(unitData + SKILL_PTR_OFF);
-        if (!SAIsValidPtr(skillStart, SKILL_REC_SIZE, regionCache)) continue;
-
-        int skillCount = 0;
-        for (int j = 0; j < MAX_SKILLS; j++) {
-          uintptr_t skillRec = skillStart + j * SKILL_REC_SIZE;
-          if (!SAIsValidPtr(skillRec + INDEX_OFF, 4, regionCache)) break;
-          if ((int)*(uint32_t *)(skillRec + INDEX_OFF) != j) break;
-          uint8_t firstByte = *(uint8_t *)skillRec;
-          if (firstByte != 0x58 && firstByte != 0xD8) break;
-
-          uintptr_t limitAddr = skillRec + SKILL_LIMIT_OFF;
-          if (!SAIsValidPtr(limitAddr, 1, regionCache)) continue;
-          if (*(uint8_t *)limitAddr != 0) {
-            DWORD old;
-            if (VirtualProtect((LPVOID)limitAddr, 1, PAGE_EXECUTE_READWRITE, &old)) {
-              *(uint8_t *)limitAddr = 0;
-              VirtualProtect((LPVOID)limitAddr, 1, old, &old);
-              skillCount++;
-            }
-          }
-        }
-        if (skillCount > 0)
-          AddLog(u8"[특수기능] 무신: 부대장 %d 전법 %d개 병종 제약 지속 해제", cu.leaderID, skillCount);
-      }
+    // 훅 실패 시 행동 부대 전환에 재시도하되, 이미 기록한 전법 횟수는 유지합니다.
+    if (!s_skillInit && activeUnitData != s_lastFallbackUnit) {
+      s_lastFallbackUnit = activeUnitData;
+      if (activeUnitData)
+        ApplyUnitSkillCounts(activeUnitData + 0x5D0, true);
     }
+
+    // 부대 전환을 감지한 틱에 즉시 적용하고, 같은 부대는 기존 주기로 유지 확인합니다.
+    if (activeUnitData && (activeUnitData != s_lastMusinUnit || runActiveSkillUpdate))
+      ApplyMusin(activeUnitData, activeAbilities);
+    s_lastMusinUnit = activeUnitData;
 
     s_lastGunakdaeState = hasGunakdae;
     s_lastMussangState = hasMussang;

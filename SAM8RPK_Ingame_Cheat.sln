@@ -7,12 +7,30 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Internal DX11 Base", "Inter
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug-hid|x64 = Debug-hid|x64
+		Debug-dxgi|x64 = Debug-dxgi|x64
+		Debug-dinput8|x64 = Debug-dinput8|x64
+		Release-hid|x64 = Release-hid|x64
+		Release-dxgi|x64 = Release-dxgi|x64
+		Release-dinput8|x64 = Release-dinput8|x64
 		Debug|x64 = Debug|x64
 		Debug|x86 = Debug|x86
 		Release|x64 = Release|x64
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug-hid|x64.ActiveCfg = Debug-hid|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug-hid|x64.Build.0 = Debug-hid|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug-dxgi|x64.ActiveCfg = Debug-dxgi|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug-dxgi|x64.Build.0 = Debug-dxgi|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug-dinput8|x64.ActiveCfg = Debug-dinput8|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug-dinput8|x64.Build.0 = Debug-dinput8|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Release-hid|x64.ActiveCfg = Release-hid|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Release-hid|x64.Build.0 = Release-hid|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Release-dxgi|x64.ActiveCfg = Release-dxgi|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Release-dxgi|x64.Build.0 = Release-dxgi|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Release-dinput8|x64.ActiveCfg = Release-dinput8|x64
+		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Release-dinput8|x64.Build.0 = Release-dinput8|x64
 		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug|x64.ActiveCfg = Debug|x64
 		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug|x64.Build.0 = Debug|x64
 		{D08E3AB2-8E59-43BE-AB5B-2128F9DDB8EB}.Debug|x86.ActiveCfg = Debug|Win32

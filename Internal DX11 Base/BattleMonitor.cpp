@@ -1,11 +1,11 @@
 #include "BattleMonitor.h"
+#include <atomic>
 #include "Cheats.h"
 #include "Cheats/Officer/SelectOfficercapture.h"
 #include "Cheats/Officer/StatMonitor.h"
 #include "Cheats/Officer/SpecialAbilityAutoAssign.h"
 #include "Cheats/Officer/AIOfficerGrowth.h"
 #include "Cheats/System/MonthCapture.h"
-#include "Cheats/System/SkillCountManager.h"
 #include "Cheats/System/SystemMonth.h"
 #include "Cheats/System/TengiCave.h"
 #include "Cheats/Civilian/CityInfoWindow.h"
@@ -36,7 +36,8 @@ namespace DX11Base {
   static uintptr_t s_cachedDefenderAddr = 0;
   static bool s_battleRuntimeReady = false;
   static bool s_battleSessionResetPending = false;
-  static uint64_t s_battleSessionGeneration = 0;
+  static std::atomic<uint64_t> s_battleSessionGeneration{0};
+  uint64_t GetBattleSessionGeneration() { return s_battleSessionGeneration.load(); }
 
   bool IsBattleRuntimeReady() { return s_battleRuntimeReady; }
 
@@ -273,118 +274,6 @@ namespace DX11Base {
     }
   }
 
-  // 전투 유닛들의 전법 횟수를 커스텀 설정값으로 덮어씁니다.
-  void UpdateBattleUnitSkills(bool silent = false, uintptr_t cachedUnitListBase = 0) {
-    uintptr_t exeBase = (uintptr_t)GetModuleHandle(NULL);
-    if (!exeBase)
-      return;
-
-    // MonitorBattleStatus에서 이미 해석한 주소가 있으면 재사용하고, 없을 때만 폴백 해석합니다.
-    uintptr_t unitListBase = cachedUnitListBase;
-    if (!unitListBase)
-      unitListBase = ResolveChain(exeBase + 0x02E99460, {0x28, 0x250, 0x1D8, 0, 0x180, 0});
-
-    if (!unitListBase) {
-      if (!silent)
-        AddLog(u8"[DEBUG] ApplySkill: unitBase를 찾을 수 없음");
-      return;
-    }
-
-    uintptr_t countAddr = unitListBase - 0x08;
-    if (!IsValidPtr(countAddr, 1))
-      return;
-    int unitCountTotal = *(unsigned char *)countAddr;
-    if (unitCountTotal <= 0 || unitCountTotal > 60) {
-      return;
-    }
-
-    if (!silent)
-      AddLog(u8"[DEBUG] ApplySkill: 유닛 총 %d개 감지됨", unitCountTotal);
-
-    for (int i = 0; i < unitCountTotal; i++) {
-      uintptr_t unitData = *(uintptr_t *)(unitListBase + 0x08 + i * 0x10);
-      if (!IsValidPtr(unitData, 0x600))
-        continue;
-
-      uintptr_t memberPtr = *(uintptr_t *)(unitData + 0x18);
-      if (!IsValidPtr(memberPtr, 0x100))
-        continue;
-
-      // 무장 ID 읽기 (Lua: readOfficerId, readSmallInteger(ptr+0x08))
-      int officerID = -1;
-      uintptr_t moffs[] = {0x08, 0x10, 0x18};
-      for (int k = 0; k < 3; k++) {
-        uintptr_t offPtr = *(uintptr_t *)(memberPtr + moffs[k]);
-        if (IsValidPtr(offPtr, 0x10)) {
-          officerID = (int)(*(unsigned short *)(offPtr + 0x08));
-          break;
-        }
-      }
-      if (officerID <= 0)
-        continue;
-
-      // 이 무장에 커스텀 설정이 있는지 확인
-      {
-        std::lock_guard<std::mutex> lock(g_skillCountMutex);
-        if (!g_customSkillCounts.count(officerID))
-          continue;
-      }
-
-      // skillStart 읽기 (Lua: readPointer(unitData + SKILL_PTR_OFF), SKILL_PTR_OFF=0x5D8)
-      uintptr_t skillStart = *(uintptr_t *)(unitData + 0x5D8);
-      if (!IsValidPtr(skillStart, 0x28))
-        continue;
-
-      // 스킬 레코드 순회 (Lua: for j=0,MAX_SKILLS-1)
-      for (int j = 0; j < 45; j++) {
-        uintptr_t rec = skillStart + j * 0x28;
-        if (!IsValidPtr(rec, 0x20))
-          break;
-
-        // 유효성 검증 (Lua: isValidSkillRec - idx 순차 확인 + 첫 바이트 0x58/0xD8)
-        int idx = *(int *)(rec + 0x0C);
-        if (idx != j)
-          break;
-        unsigned char b = *(unsigned char *)rec;
-        if (b != 0x58 && b != 0xD8)
-          break;
-
-        // 스킬 ID 읽기 (Lua: skillCore=readPointer(rec+0x00), readBytes(skillCore+0x08,1))
-        uintptr_t skillCore = *(uintptr_t *)rec;
-        if (!IsValidPtr(skillCore, 0x10))
-          continue;
-        int skillId = (int)(*(unsigned char *)(skillCore + 0x08));
-        if (skillId <= 0)
-          continue;
-
-        // UI 오프셋 계산: skillId + 0x138 (예: 분기=26 -> 26+0x138=0x152 ✓)
-        uintptr_t targetOffset = (uintptr_t)skillId + 0x138;
-
-        std::lock_guard<std::mutex> lock(g_skillCountMutex);
-        if (!g_customSkillCounts.count(officerID))
-          break;
-        if (!g_customSkillCounts[officerID].count(targetOffset))
-          continue;
-
-        int targetVal = g_customSkillCounts[officerID][targetOffset];
-        if (targetVal <= 0)
-          continue;
-
-        // 횟수 쓰기 (Lua: writeBytes(rec + SKILL_COUNT_OFF, SET_COUNT), SKILL_COUNT_OFF=0x10)
-        unsigned char oldVal = *(unsigned char *)(rec + 0x10);
-        DWORD oldP;
-        if (VirtualProtect((LPVOID)(rec + 0x10), 1, PAGE_EXECUTE_READWRITE, &oldP)) {
-          *(unsigned char *)(rec + 0x10) = (unsigned char)targetVal;
-          VirtualProtect((LPVOID)(rec + 0x10), 1, oldP, &oldP);
-          unsigned char newVal = *(unsigned char *)(rec + 0x10);
-          if (!silent)
-            AddLog(u8"[DEBUG] 무장[%d] 스킬ID:%d (Offset:0x%llX) 적용:%d (기존:%d 확인:%d)", officerID, skillId,
-                   targetOffset, targetVal, (int)oldVal, (int)newVal);
-        }
-      }
-    }
-  }
-
   // [C2712 오류 해결용 헬퍼] __try가 있는 함수에서 std::string 객체 생성을 피하기 위해 분리
   static void NotifyBattleDay(int remain) {
       char nbuf[128];
@@ -394,14 +283,11 @@ namespace DX11Base {
 
   void MonitorBattleStatus() {
     static bool s_isWarModsApplied = false;
-    static bool s_isCacheBuilt = false;
     static bool s_nativeBattleSeen = false;
     static float s_lastSeenTime = 0.0f;
-    static int s_lastAppliedDay = -1;
     static int s_lastNotifiedDay = -1;
     static uintptr_t s_readyUnitList = 0;
     static uintptr_t s_readyDayBase = 0;
-    static uint64_t s_readyUnitSignature = 0;
     static uint64_t s_stableSince = 0;
     static int s_readyUnitCount = 0;
     static uint64_t s_lastReadinessLog = 0;
@@ -410,10 +296,8 @@ namespace DX11Base {
     if (s_battleSessionResetPending) {
       s_battleSessionResetPending = false;
       s_isWarModsApplied = false;
-      s_isCacheBuilt = false;
       s_nativeBattleSeen = false;
       s_lastSeenTime = 0;
-      s_lastAppliedDay = -1;
       s_lastNotifiedDay = -1;
       s_readyUnitList = 0;
       s_readyDayBase = 0;
@@ -443,13 +327,11 @@ namespace DX11Base {
       s_cachedUnitListBase = 0;
       s_cachedDayBaseAddr = 0;
       s_cachedDefenderAddr = 0;
-      if (s_isWarModsApplied || s_isCacheBuilt) {
+      if (s_isWarModsApplied) {
         ClearBattleCache();
         ClearBattleEnvCache();
         s_isWarModsApplied = false;
-        s_isCacheBuilt = false;
         s_lastSeenTime = 0;
-        s_lastAppliedDay = -1;
         s_lastNotifiedDay = -1;
       }
       DX11Base::g_battleUnitAddr1 = 0;
@@ -467,7 +349,7 @@ namespace DX11Base {
       if (nativeState.monitoringState < 0)
         return;
 
-      if (s_nativeBattleSeen || s_isWarModsApplied || s_isCacheBuilt) {
+      if (s_nativeBattleSeen || s_isWarModsApplied) {
         __try {
           ClearBattleCache();
           ClearBattleEnvCache();
@@ -478,12 +360,11 @@ namespace DX11Base {
         AddLog(u8"[BattleState] 비전투 확인 -> 전투 감시/캐시 정리");
       }
       s_nativeBattleSeen = false;
-      s_isWarModsApplied = s_isCacheBuilt = false;
+      s_isWarModsApplied = false;
       s_lastSeenTime = 0;
-      s_lastAppliedDay = s_lastNotifiedDay = -1;
+      s_lastNotifiedDay = -1;
       s_readyUnitList = s_readyDayBase = 0;
       s_readyUnitCount = 0;
-      s_readyUnitSignature = 0;
       s_cachedUnitListBase = s_cachedDayBaseAddr = s_cachedDefenderAddr = 0;
       // Only a stable missing native state in council/domestic may arm new
       // stratagem requests. Result/meeting objects are still in use by the game.
@@ -595,9 +476,13 @@ namespace DX11Base {
     const char *readinessReason = !isDateValid ? "day" :
                                   !isUnitListValid ? "unit-list" :
                                   !stateReady ? "game-state" : "stabilizing";
+    // Readiness needs one usable unit on entry or a list/count change.
+    // Skill initialization/load callbacks own per-unit configuration updates.
+    const bool inspectRoster = !s_battleRuntimeReady ||
+        unitListBase != s_readyUnitList || dayBaseAddr != s_readyDayBase ||
+        unitCountTotal != s_readyUnitCount;
     bool sessionReady = false;
-    uint64_t unitSignature = 14695981039346656037ull;
-    int validUnitCount = 0;
+    int validUnitCount = inspectRoster ? 0 : 1;
     ResolveRegionCache readinessRegions{};
     __try {
       sessionReady = IsValidPtr(gameBase + 0xE0, sizeof(uintptr_t)) &&
@@ -607,7 +492,7 @@ namespace DX11Base {
           readinessReason = "session-p1";
         recordsReady = false;
       }
-      for (int i = 0; recordsReady && i < unitCountTotal; ++i) {
+      for (int i = 0; inspectRoster && recordsReady && i < unitCountTotal; ++i) {
         const uintptr_t slot = unitListBase + 0x08 + (uintptr_t)i * 0x10;
         if (!IsValidPtrForResolve(slot, sizeof(uintptr_t), readinessRegions)) {
           readinessReason = "unit-slot";
@@ -621,8 +506,7 @@ namespace DX11Base {
         if (!IsValidPtrForResolve(member, 0x100, readinessRegions))
           continue;
         ++validUnitCount;
-        unitSignature = (unitSignature ^ unit) * 1099511628211ull;
-        unitSignature = (unitSignature ^ member) * 1099511628211ull;
+        break;
       }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
       readinessReason = "read-exception";
@@ -634,23 +518,16 @@ namespace DX11Base {
 
     const bool battleIdentityChanged = unitListBase != s_readyUnitList ||
                                        dayBaseAddr != s_readyDayBase;
-    const bool rosterChanged = unitCountTotal != s_readyUnitCount ||
-                               unitSignature != s_readyUnitSignature;
     const bool wasRuntimeReady = s_battleRuntimeReady;
     if (!recordsReady || battleIdentityChanged) {
       s_battleRuntimeReady = false;
       s_stableSince = recordsReady ? nowMs : 0;
       s_readyUnitList = unitListBase;
       s_readyDayBase = dayBaseAddr;
-      if (battleActive && (s_isWarModsApplied || s_isCacheBuilt)) {
-        ClearBattleCache();
-        s_isCacheBuilt = false;
-        if (!recordsReady || battleIdentityChanged) {
-          ClearBattleEnvCache();
-          s_isWarModsApplied = false;
-          s_lastAppliedDay = -1;
-          s_lastNotifiedDay = -1;
-        }
+      if (battleActive && s_isWarModsApplied) {
+        ClearBattleEnvCache();
+        s_isWarModsApplied = false;
+        s_lastNotifiedDay = -1;
       }
     } else if (s_stableSince == 0) {
       s_stableSince = nowMs;
@@ -658,13 +535,7 @@ namespace DX11Base {
       s_battleRuntimeReady = nowMs - s_stableSince >= 1000;
     }
 
-    if (recordsReady && rosterChanged && s_isCacheBuilt) {
-      // Reinforcements change the roster without restarting entry/day effects.
-      ClearBattleCache();
-      s_isCacheBuilt = false;
-    }
     s_readyUnitCount = unitCountTotal;
-    s_readyUnitSignature = unitSignature;
 
     if (battleActive && !s_battleRuntimeReady) {
       if (s_lastReadinessLog == 0 || nowMs - s_lastReadinessLog >= 5000) {
@@ -737,27 +608,9 @@ namespace DX11Base {
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         s_isWarModsApplied = true;
-        s_lastAppliedDay = currentDay;
       }
 
-      // 부대가 스폰된 시점에 1회 한정으로 캐시 빌드 및 커스텀 전법 횟수 주입
-      if (!s_isCacheBuilt && unitCountTotal > 0) {
-          __try {
-            DX11Base::InitializeBattleCache((int)unitCountTotal, unitListBase, exeBase);
-            UpdateBattleUnitSkills(false, unitListBase);
-            s_isCacheBuilt = true;
-          } __except (EXCEPTION_EXECUTE_HANDLER) {}
-      }
-
-      // 1일차가 시작될 때 한 번 더 적용 (포진 등이 끝나고 실제 전투 시작 시 초기화 대응)
-      if (currentDay == 1 && s_lastAppliedDay != 1) {
-        AddLog(u8"[자동화] 1일차 감지 -> 전법 횟수 재주입");
-        UpdateBattleUnitSkills(true, unitListBase);
-        s_lastAppliedDay = 1;
-      }
-      if (currentDay != -1) {
-        s_lastAppliedDay = currentDay;
-      }
+      InitializeBattleCache(0, 0, exeBase);
 
       // [특수 기능 실시간 체크] 매 틱(100ms) 실행
       if (unitListBase > 0x10000) {
@@ -846,9 +699,7 @@ namespace DX11Base {
       if (s_isWarModsApplied && (currentTime - s_lastSeenTime > 3.0f)) {
         AddLog(u8"[자동화] 상태 초기화 (다음 전투 대기)");
         s_isWarModsApplied = false;
-        s_isCacheBuilt = false;
         s_lastSeenTime = 0;
-        s_lastAppliedDay = -1;
         s_lastNotifiedDay = -1;
 
         // 캐시 해제

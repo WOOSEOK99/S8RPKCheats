@@ -63,6 +63,7 @@ struct PregnancySpouseOption {
 };
 
 static std::vector<PregnancySpouseOption> g_pregnancyCurrentSpouses;
+static uintptr_t g_pregnancySpouseHero = 0;
 static int g_pregnancySwapSlot = -1;
 static uint16_t g_pregnancySwapSpouseId = 0;
 
@@ -137,68 +138,12 @@ static void PopulateSpouseFamilyData(
   if (rosterBase <= 0x10000 || heroMaster <= 0x10000 || options.empty())
     return;
 
-  const uintptr_t heroNorm = NormalizeOfficerPtr(heroMaster);
-  std::unordered_map<uintptr_t, size_t> spouseByPtr;
-  spouseByPtr.reserve(options.size());
-
-  for (size_t i = 0; i < options.size(); ++i) {
-    PregnancySpouseOption& option = options[i];
-    option.childIds.clear();
+  // The child manager publishes one completed family snapshot for both views.
+  for (PregnancySpouseOption& option : options) {
     option.birthYear = 0;
     SafeRead16(option.addr + 0x34, &option.birthYear);
-    spouseByPtr[NormalizeOfficerPtr(option.addr)] = i;
+    GetFamilyChildIds(heroMaster, option.addr, option.childIds);
   }
-
-  // 자녀 관리와 같은 혈연 포인터(+0x48/+0x50)를 사용합니다.
-  // 주인공과 해당 배우자를 동시에 부모로 가진 실제 자녀만 표시합니다.
-  std::unordered_set<uint16_t> seenChildIds;
-  for (int i = 0; i < 5102; ++i) {
-    const uintptr_t childAddr = rosterBase + (uintptr_t)i * 0x3D0;
-
-    uint16_t childId = 0;
-    if (!SafeRead16(childAddr + 0x08, &childId) ||
-        childId < 1 || childId > 5102) {
-      continue;
-    }
-
-    uint16_t appearance = 0;
-    uint16_t birth = 0;
-    uint16_t death = 0;
-    if (!SafeRead16(childAddr + 0x32, &appearance) ||
-        !SafeRead16(childAddr + 0x34, &birth) ||
-        !SafeRead16(childAddr + 0x36, &death) ||
-        birth == 0 || appearance == 0 || death == 0 ||
-        appearance < birth || death < birth) {
-      continue;
-    }
-
-    uintptr_t dadPtr = 0;
-    uintptr_t momPtr = 0;
-    SafeReadPtr(childAddr + 0x48, &dadPtr);
-    SafeReadPtr(childAddr + 0x50, &momPtr);
-    const uintptr_t dadNorm = NormalizeOfficerPtr(dadPtr);
-    const uintptr_t momNorm = NormalizeOfficerPtr(momPtr);
-
-    uintptr_t otherParent = 0;
-    if (dadNorm == heroNorm)
-      otherParent = momNorm;
-    else if (momNorm == heroNorm)
-      otherParent = dadNorm;
-    else
-      continue;
-
-    const auto spouseIt = spouseByPtr.find(otherParent);
-    if (spouseIt == spouseByPtr.end())
-      continue;
-
-    if (!seenChildIds.insert(childId).second)
-      continue;
-
-    options[spouseIt->second].childIds.push_back(childId);
-  }
-
-  for (PregnancySpouseOption& option : options)
-    std::sort(option.childIds.begin(), option.childIds.end());
 }
 
 static std::string BuildSpouseChildrenText(
@@ -230,66 +175,44 @@ static bool RefreshCurrentPregnancySpousesFast() {
   uintptr_t rosterBase = 0;
   uintptr_t heroMaster = 0;
   uint16_t heroId = 0;
-  if (!ResolveHeroAndRoster(rosterBase, heroMaster, heroId))
-    return false;
-
-  OfficerRelationshipInfo relInfo;
-  if (!GetOfficerRelationshipInfo(heroMaster, relInfo) ||
-      !relInfo.valid) {
+  std::vector<uintptr_t> spousePointers;
+  if (!ResolveHeroAndRoster(rosterBase, heroMaster, heroId) ||
+      !GetPregnancySpousePointers(rosterBase, heroMaster, spousePointers)) {
+    std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+    g_pregnancyCurrentSpouses.clear();
+    g_pregnancySpouseHero = 0;
     return false;
   }
-
-  std::vector<uint16_t> spouseIds = relInfo.spouses;
-  std::sort(spouseIds.begin(), spouseIds.end());
-  spouseIds.erase(
-      std::unique(spouseIds.begin(), spouseIds.end()),
-      spouseIds.end());
 
   std::vector<PregnancySpouseOption> options;
-  options.reserve(spouseIds.size());
+  options.reserve(spousePointers.size());
 
-  for (uint16_t id : spouseIds) {
-    if (id < 1 || id > 5102)
-      continue;
-
-    // 일반적으로 ID와 roster 인덱스가 대응하므로 먼저 O(1)로 확인합니다.
-    uintptr_t officerAddr =
-        rosterBase + (uintptr_t)(id - 1) * 0x3D0;
-    uint16_t verifyId = 0;
-    if (!SafeRead16(officerAddr + 0x08, &verifyId) ||
-        verifyId != id) {
-      // 예외적인 배열 배치만 전체 roster에서 한 번 찾아봅니다.
-      officerAddr = 0;
-      for (int i = 0; i < 5102; ++i) {
-        const uintptr_t candidate =
-            rosterBase + (uintptr_t)i * 0x3D0;
-        if (SafeRead16(candidate + 0x08, &verifyId) &&
-            verifyId == id) {
-          officerAddr = candidate;
-          break;
-        }
-      }
-    }
-
-    if (officerAddr <= 0x10000)
-      continue;
-
+  for (uintptr_t officerAddr : spousePointers) {
     PregnancySpouseOption option;
-    option.id = id;
-    option.addr = NormalizeOfficerPtr(officerAddr);
+    if (!SafeRead16(officerAddr + 0x08, &option.id) ||
+        option.id < 1 || option.id > 5102)
+      continue;
+
+    option.addr = officerAddr;
     options.push_back(option);
   }
+
+  std::sort(options.begin(), options.end(),
+      [](const PregnancySpouseOption& a, const PregnancySpouseOption& b) {
+        return a.id < b.id;
+      });
 
   PopulateSpouseFamilyData(rosterBase, heroMaster, options);
 
   {
     std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
     g_pregnancyCurrentSpouses = std::move(options);
+    g_pregnancySpouseHero = heroMaster;
   }
 
   AddLog(
       u8"[임신슬롯] 배우자 목록 즉시 갱신: Hero ID %u / %zu명",
-      heroId, spouseIds.size());
+      heroId, spousePointers.size());
   return true;
 }
 
@@ -893,11 +816,39 @@ static const char* GetPregnancySlotState(
 
 } // namespace
 
-void RunPregnancyManagerUpdate() {
-  RefreshCanonicalPregnancyTableCached();
+void RefreshPregnancyChildIds(uintptr_t hero) {
+  std::lock_guard<std::mutex> lock(g_pregnancySpouseMutex);
+  if (hero != g_pregnancySpouseHero)
+    return;
+
+  for (PregnancySpouseOption& option : g_pregnancyCurrentSpouses)
+    GetFamilyChildIds(hero, option.addr, option.childIds);
 }
 
-void RefreshPregnancyManagerOnWindowOpen() {
+void RunPregnancyManagerUpdate() {
+  const PregnancyCanonicalTable before = GetCanonicalPregnancySnapshot();
+  if (!RefreshCanonicalPregnancyTableCached())
+    return;
+  const PregnancyCanonicalTable after = GetCanonicalPregnancySnapshot();
+  if (!before.valid || !after.valid || before.base != after.base)
+    return;
+  for (size_t i = 0; i < 3; ++i) {
+    const bool wasBirthComplete = before.slots[i].pregnancyFlag == 1 &&
+        before.slots[i].remainingMonths == 0 && before.slots[i].childOfficerId != 0;
+    const bool isBirthComplete = after.slots[i].pregnancyFlag == 1 &&
+        after.slots[i].remainingMonths == 0 && after.slots[i].childOfficerId != 0;
+    if (isBirthComplete && (!wasBirthComplete ||
+        before.slots[i].childOfficerId != after.slots[i].childOfficerId)) {
+      RequestFamilyChildScan();
+      break;
+    }
+  }
+}
+
+void RefreshPregnancyManagerOnWindowOpen(bool requestChildren) {
+  if (requestChildren)
+    RequestFamilyChildScan();
+
   RefreshCurrentPregnancySpousesFast();
   if (!RefreshPregnancyTableDirect()) {
     AddLog(

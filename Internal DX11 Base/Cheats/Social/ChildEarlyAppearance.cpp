@@ -1,4 +1,5 @@
 #include "../../pch.h"
+#include "../../BattleMonitor.h"
 #include "../../Cheats.h"
 #include "ChildEarlyAppearance.h"
 #include "PregnancyManager.h"
@@ -121,6 +122,7 @@ namespace {
 struct ChildEntry {
   uint16_t id = 0;
   uintptr_t addr = 0;
+  uintptr_t otherParent = 0;
   bool selected = false;
   int yearsLater = 3;
   uint16_t appearanceYear = 0;
@@ -135,7 +137,6 @@ struct ChildEntry {
 };
 
 static std::unordered_map<uint16_t, ChildEntry> g_children;
-static ULONGLONG g_lastChildScanMs = 0;
 static ULONGLONG g_lastChildMaintenanceMs = 0;
 static ULONGLONG g_lastChildSessionProbeMs = 0;
 static uint16_t g_lastHeroId = 0;
@@ -146,6 +147,8 @@ static uint16_t g_lastObservedHeroId = 0;
 // T04: 5,102슬롯 전체 검색을 한 렌더 호출에 몰지 않고 분할합니다.
 // 검색 중 결과는 이 임시 상태에만 보관하고 완료 시점에 g_children으로 한 번만 게시합니다.
 static bool g_childScanInProgress = false;
+static bool g_childScanRequested = false;
+static bool g_childSessionReady = false;
 static bool g_childScanForceLog = false;
 static uintptr_t g_childScanRosterBase = 0;
 static uintptr_t g_childScanHeroMaster = 0;
@@ -159,7 +162,6 @@ static constexpr int kChildRosterSlots = 5102;
 static constexpr ULONGLONG kChildScanStepIntervalMs = 25;
 static constexpr ULONGLONG kChildMaintenanceIntervalMs = 1000;
 static constexpr ULONGLONG kChildSessionProbeIntervalMs = 1000;
-static constexpr ULONGLONG kChildFullScanFallbackIntervalMs = 30000;
 
 using ChildManagerDetail::NormalizeOfficerPtr;
 using ChildManagerDetail::ResolveHeroAndRoster;
@@ -178,6 +180,16 @@ static bool RefreshChild(ChildEntry& e) {
     e.appearanceYear = *(uint16_t*)(e.addr + 0x32);
     e.birthYear = *(uint16_t*)(e.addr + 0x34);
     e.deathYear = *(uint16_t*)(e.addr + 0x36);
+    if (e.hasOriginalSchedule &&
+        (e.appearanceYear != e.appliedTargetYear ||
+         e.birthYear != e.appliedTargetYear - 15)) {
+      // 게임에서 일정이 바뀌었다면 이전 백업으로 덮어쓰지 않습니다.
+      e.selected = false;
+      e.hasOriginalSchedule = false;
+      e.appliedTargetYear = 0;
+      e.originalAppearanceYear = 0;
+      e.originalBirthYear = 0;
+    }
     return true;
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return false;
@@ -246,8 +258,10 @@ static void FinalizeCompletedChildSchedule(ChildEntry& e, uint16_t currentYear) 
 }
 
 static bool RestoreChildSchedule(ChildEntry& e) {
-  if (!e.hasOriginalSchedule || !e.addr || !IsValidPtr(e.addr, 0x38))
+  if (!RefreshChild(e))
     return false;
+  if (!e.hasOriginalSchedule)
+    return true;
 
   unsigned short currentYear = 0;
   if (!ReadScenarioYear(&currentYear) || currentYear < 171 || currentYear >= 270)
@@ -311,7 +325,8 @@ static bool BeginChildScan(bool forceLog) {
     return false;
 
   // 주인공이 교체되면 이전 주인공 기준 목록은 즉시 폐기.
-  if (g_lastHeroId != 0 && g_lastHeroId != heroId) {
+  if (g_lastObservedRosterBase != rosterBase ||
+      g_lastObservedHeroMaster != heroMaster || g_lastObservedHeroId != heroId) {
     g_children.clear();
     AddLog(u8"[ChildManager] 주인공 변경 감지: %u -> %u, 자녀 목록 초기화",
            g_lastHeroId, heroId);
@@ -321,6 +336,8 @@ static bool BeginChildScan(bool forceLog) {
   g_lastObservedHeroMaster = heroMaster;
   g_lastObservedHeroId = heroId;
 
+  g_childSessionReady = true;
+  g_childScanRequested = false;
   g_childScanInProgress = true;
   g_childScanForceLog = forceLog;
   g_childScanRosterBase = rosterBase;
@@ -388,7 +405,10 @@ static bool ProcessChildScanStep() {
 
     e.id = id;
     e.addr = officerBase;
-    RefreshChild(e);
+    e.otherParent = NormalizeOfficerPtr(dadPtr) == g_childScanHeroNorm
+        ? NormalizeOfficerPtr(momPtr) : NormalizeOfficerPtr(dadPtr);
+    if (!RefreshChild(e))
+      continue;
     g_childScanFound[id] = e;
   }
 
@@ -406,6 +426,8 @@ static bool ProcessChildScanStep() {
       currentHeroId != g_childScanHeroId) {
     AddLog(u8"[ChildManager] 스캔 중 세션 변경 감지 - 이전 결과 폐기 후 재검색");
     ResetChildScanState();
+    g_childSessionReady = false;
+    g_childScanRequested = true;
     return false;
   }
 
@@ -421,20 +443,38 @@ static bool ProcessChildScanStep() {
 
   g_children.swap(g_childScanFound);
   g_lastHeroId = g_childScanHeroId;
-  g_lastChildScanMs = now;
   ResetChildScanState();
+  RefreshPregnancyChildIds(currentHeroMaster);
   return true;
 }
 
 static void RequestChildScan(bool forceLog) {
   if (!g_childScanInProgress) {
-    BeginChildScan(forceLog);
+    g_childScanRequested = true;
+    if (!BeginChildScan(forceLog))
+      g_childSessionReady = false;
   } else if (forceLog) {
     g_childScanForceLog = true;
   }
 }
 
 } // namespace
+
+void RequestFamilyChildScan() {
+  RequestChildScan(false);
+}
+
+void GetFamilyChildIds(uintptr_t hero, uintptr_t spouse, std::vector<uint16_t>& ids) {
+  ids.clear();
+  if (NormalizeOfficerPtr(hero) != NormalizeOfficerPtr(g_lastObservedHeroMaster))
+    return;
+  const uintptr_t parent = NormalizeOfficerPtr(spouse);
+  for (const auto& entry : g_children) {
+    if (entry.second.otherParent == parent)
+      ids.push_back(entry.first);
+  }
+  std::sort(ids.begin(), ids.end());
+}
 
 void EnsureChildManagerCapture() {
   // 더 이상 정보 > 자녀 화면 훅을 사용하지 않습니다.
@@ -443,9 +483,30 @@ void EnsureChildManagerCapture() {
 
 void RunChildManagerUpdate() {
   const ULONGLONG now = GetTickCount64();
+  static uint64_t observedGeneration = 0;
+  const uint64_t generation = GetBattleSessionGeneration();
+  if (generation != observedGeneration) {
+    observedGeneration = generation;
+    ResetChildScanState();
+    g_children.clear();
+    g_lastObservedRosterBase = 0;
+    g_lastObservedHeroMaster = 0;
+    g_lastObservedHeroId = 0;
+    g_childSessionReady = false;
+    g_childScanRequested = bShowChildManagerWin;
+    g_lastChildSessionProbeMs = 0;
+  }
 
-  // 주인공/roster 세대는 1초마다 가볍게 확인합니다.
-  // 세대가 바뀌면 30초 fallback을 기다리지 않고 즉시 새 분할 스캔을 시작합니다.
+  // Idle without a request or retained schedules needs no game-memory reads.
+  const bool hasSchedules = std::any_of(g_children.begin(), g_children.end(),
+      [](const auto& item) {
+        return item.second.selected && item.second.hasOriginalSchedule &&
+               item.second.appliedTargetYear != 0;
+      });
+  if (!g_childScanInProgress && !g_childScanRequested && !hasSchedules && !bShowChildManagerWin)
+    return;
+
+  // 열린 화면과 보류된 요청만 세션 변경 뒤 다시 검색합니다.
   if (!g_childScanInProgress &&
       (g_lastChildSessionProbeMs == 0 ||
        (now - g_lastChildSessionProbeMs) >= kChildSessionProbeIntervalMs)) {
@@ -455,6 +516,7 @@ void RunChildManagerUpdate() {
     uintptr_t heroMaster = 0;
     uint16_t heroId = 0;
     if (ResolveHeroAndRoster(rosterBase, heroMaster, heroId)) {
+      g_childSessionReady = true;
       const bool firstObservation =
           g_lastObservedRosterBase == 0 || g_lastObservedHeroMaster == 0 ||
           g_lastObservedHeroId == 0;
@@ -468,19 +530,26 @@ void RunChildManagerUpdate() {
         g_lastObservedRosterBase = rosterBase;
         g_lastObservedHeroMaster = heroMaster;
         g_lastObservedHeroId = heroId;
-        RequestChildScan(false);
+        g_children.clear();
+        // 다른 세션의 원본 연도 백업은 새 세션으로 가져가지 않습니다.
+        if (bShowChildManagerWin)
+          RefreshPregnancyManagerOnWindowOpen();
       }
+      if (g_childScanRequested)
+        RequestChildScan(false);
+    } else {
+      // 일시적인 로딩/조회 실패에는 목록과 예약 백업을 보존합니다.
+      g_childSessionReady = false;
+      return;
     }
   }
 
-  // 평상시에는 30초마다 한 번만 전체 검색을 재확인합니다.
-  // 실제 검색은 한 step에 256슬롯, 최소 25ms 간격으로 분할 처리합니다.
-  if (!g_childScanInProgress &&
-      (g_lastChildScanMs == 0 ||
-       (now - g_lastChildScanMs) >= kChildFullScanFallbackIntervalMs)) {
-    RequestChildScan(false);
-  }
+  if (!g_childSessionReady)
+    return;
+
   ProcessChildScanStep();
+  if (!g_childSessionReady)
+    return;
 
   // 기존 동작처럼 자녀 예약 완료 판정과 임신 관리 갱신은 1초 주기를 유지합니다.
   if (g_lastChildMaintenanceMs != 0 &&
@@ -495,7 +564,10 @@ void RunChildManagerUpdate() {
 
   for (auto& kv : g_children) {
     ChildEntry& e = kv.second;
-    RefreshChild(e);
+    if (!e.selected || !e.hasOriginalSchedule || e.appliedTargetYear == 0)
+      continue;
+    if (!RefreshChild(e))
+      continue;
 
     // 예정년도에 도달하면 조기 임관 작업은 끝난 것이므로 체크를 자동 해제한다.
     // 이때 조정된 출생/등장년도는 그대로 유지한다.
@@ -503,7 +575,7 @@ void RunChildManagerUpdate() {
       FinalizeCompletedChildSchedule(e, currentYear);
   }
 
-  RunPregnancyManagerUpdate();
+  if (bShowChildManagerWin) RunPregnancyManagerUpdate();
 }
 
 void DrawChildManagerWindow(float scale) {
@@ -518,7 +590,6 @@ void DrawChildManagerWindow(float scale) {
   if (!s_childManagerWasOpen) {
     s_childManagerWasOpen = true;
     RefreshPregnancyManagerOnWindowOpen();
-    RequestChildScan(false);
   }
 
   RunChildManagerUpdate();
@@ -533,6 +604,8 @@ void DrawChildManagerWindow(float scale) {
                      u8"현재 주인공의 자녀를 확인하고 자녀별 임관 시점을 설정합니다.");
   ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.85f, 1),
                      u8"자녀를 체크한 뒤 '몇 년 후'를 변경하면 해당 시점으로 임관 연도가 적용됩니다.");
+
+  ImGui::BeginDisabled(!g_childSessionReady);
 
   if (ImGui::Button(u8"목록 새로고침", ImVec2(110.0f * scale, 0))) {
     RequestChildScan(true);
@@ -598,13 +671,14 @@ void DrawChildManagerWindow(float scale) {
 
       if (ImGui::Checkbox("##select", &selected)) {
         if (selected) {
-          if (!e.hasOriginalSchedule) {
+          const bool scheduleReady = e.hasOriginalSchedule || RefreshChild(e);
+          if (scheduleReady && !e.hasOriginalSchedule) {
             e.originalAppearanceYear = e.appearanceYear;
             e.originalBirthYear = e.birthYear;
             e.hasOriginalSchedule = true;
           }
 
-          if (ApplyChildSchedule(e)) {
+          if (scheduleReady && ApplyChildSchedule(e)) {
             e.selected = true;
           } else {
             e.selected = false;
@@ -683,10 +757,11 @@ void DrawChildManagerWindow(float scale) {
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
                      u8"※ 임관 예정년도에 도달하면 적용 체크는 자동으로 해제됩니다.");
   ImGui::TextColored(ImVec4(1.0f, 0.4f, 1.0f, 1.0f),
-                     u8"※ 자녀 출생/임관/주인공 변경은 혈연 데이터를 다시 읽어 목록에 자동 반영합니다.");
+                     u8"※ 창이 열려 있을 때 출산을 감지하면 자녀 목록을 갱신합니다. 목록 새로고침으로도 조회할 수 있습니다.");
 
   ImGui::Separator();
   DrawPregnancyManagerSection(scale);
+  ImGui::EndDisabled();
 
   ImGui::End();
 }
